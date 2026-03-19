@@ -21,6 +21,11 @@ defmodule BrokenOathsWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+
+    live_session :worlds, layout: {BrokenOathsWeb.Layouts, :app_full} do
+      live "/worlds", WorldLive.Index, :index
+      live "/worlds/:id", WorldLive.Show, :show
+    end
   end
 
   # Other scopes may use custom stacks.

@@ -72,6 +72,36 @@ defmodule BrokenOathsWeb.Layouts do
     """
   end
 
+  @doc "Full-width layout for world views and other wide content."
+  attr :flash, :map, required: true
+  attr :current_scope, :map, default: nil
+  slot :inner_block, required: true
+
+  def app_full(assigns) do
+    ~H"""
+    <header class="navbar px-4 sm:px-6 lg:px-8 bg-base-100 border-b border-base-300">
+      <div class="flex-1">
+        <a href="/" class="flex items-center gap-2">
+          <img src={~p"/images/logo.svg"} width="28" />
+          <span class="text-sm font-semibold">Broken Oaths</span>
+        </a>
+        <.link navigate={~p"/worlds"} class="btn btn-ghost btn-sm ml-4">
+          <.icon name="hero-globe-americas" class="w-4 h-4" /> Worlds
+        </.link>
+      </div>
+      <div class="flex-none">
+        <.theme_toggle />
+      </div>
+    </header>
+
+    <main>
+      {render_slot(@inner_block)}
+    </main>
+
+    <.flash_group flash={@flash} />
+    """
+  end
+
   @doc """
   Shows the flash group with standard titles and content.
 
