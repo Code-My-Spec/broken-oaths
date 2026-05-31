@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+relevance_cache.json
+scored_board.json
+board_*.json
