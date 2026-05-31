@@ -144,6 +144,18 @@ def _parse_relevance(text: str):
         return 0.0, f"bad JSON from LLM: {text[:60]}"
 
 
+def relevance_manual(rec: dict, judgments: dict):
+    """Relevance from a committed file of human/agent judgments, keyed by
+    external_id: {"score": float, "reason": str}. Lets an agent that IS the model
+    (e.g. Claude Code reading the postings directly) supply intent+adjacency
+    scores without an API round-trip, while staying deterministic and reviewable."""
+    j = judgments.get(rec["external_id"])
+    if not j:
+        return 0.0, f"no manual judgment for id {rec['external_id']}"
+    score = max(0.0, min(1.0, float(j.get("score", 0.0))))
+    return score, str(j.get("reason", "")).strip()
+
+
 def relevance_llm(rec: dict, query: str, model: str, cache: dict):
     ckey = f"{rec['external_id']}|{query}|{model}"
     if ckey in cache:
@@ -189,9 +201,12 @@ def main():
     ap.add_argument("path", help="bake-off raw JSON")
     ap.add_argument("--query", default="erp reporting", help="problem terms, space-separated")
     ap.add_argument("--actor-key", default="upwork-vibe~upwork-job-scraper")
-    ap.add_argument("--relevance", choices=["keyword", "llm"], default="keyword",
-                    help="relevance axis: keyword heuristic (no key) or LLM (needs ANTHROPIC_API_KEY)")
+    ap.add_argument("--relevance", choices=["keyword", "llm", "manual"], default="keyword",
+                    help="relevance axis: keyword heuristic (no key), LLM (needs ANTHROPIC_API_KEY), "
+                         "or manual (read judgments from --judgments file)")
     ap.add_argument("--model", default=ANTHROPIC_MODEL, help="Anthropic model for --relevance llm")
+    ap.add_argument("--judgments", default="relevance_manual.json",
+                    help="for --relevance manual: file of {external_id: {score, reason}}")
     ap.add_argument("--workers", type=int, default=8, help="concurrent LLM calls")
     ap.add_argument("--out", default="scored_board.json")
     args = ap.parse_args()
@@ -212,6 +227,11 @@ def main():
         with ThreadPoolExecutor(max_workers=args.workers) as ex:
             rels = list(ex.map(score_one, recs))
         json.dump(cache, open(CACHE_PATH, "w"), indent=2)
+    elif args.relevance == "manual":
+        if not os.path.exists(args.judgments):
+            sys.exit(f"--relevance manual needs {args.judgments!r} (a {{id: {{score, reason}}}} file).")
+        judgments = json.load(open(args.judgments))
+        rels = [relevance_manual(rec, judgments) for rec in recs]
     else:
         rels = [relevance_keyword(rec, terms) for rec in recs]
 
