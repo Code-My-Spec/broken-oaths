@@ -718,7 +718,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
       <%!-- Main content --%>
       <div class="flex flex-1 min-h-0 relative">
         <%!-- Globe viewport --%>
-        <div class="flex-1 overflow-hidden bg-base-300 relative">
+        <div class="flex-1 overflow-hidden space-bg relative">
           <div
             :if={@render_mode == :classic}
             id="globe-viewport"

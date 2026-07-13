@@ -106,6 +106,32 @@
 
 /* ===== Hex Globe Rendering ===== */
 
+/* Deep-space backdrop: a faint nebula wash over several tiled star layers.
+   Prime-ish tile sizes keep the repetition invisible; pure CSS, rasterized
+   once, no animation cost. */
+.space-bg {
+  background-color: #04060d;
+  background-image:
+    radial-gradient(ellipse 80% 60% at 28% 18%, rgba(64, 86, 168, 0.14), transparent 65%),
+    radial-gradient(ellipse 70% 55% at 78% 82%, rgba(120, 60, 140, 0.1), transparent 60%),
+    radial-gradient(1.3px 1.3px at 18px 26px, rgba(255, 255, 255, 0.95) 50%, transparent 51%),
+    radial-gradient(1px 1px at 111px 74px, rgba(255, 255, 255, 0.7) 50%, transparent 51%),
+    radial-gradient(0.9px 0.9px at 61px 133px, rgba(198, 214, 255, 0.65) 50%, transparent 51%),
+    radial-gradient(1px 1px at 157px 41px, rgba(255, 238, 214, 0.6) 50%, transparent 51%),
+    radial-gradient(0.8px 0.8px at 41px 181px, rgba(255, 255, 255, 0.45) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 201px 117px, rgba(255, 255, 255, 0.85) 50%, transparent 51%);
+  background-size:
+    100% 100%,
+    100% 100%,
+    231px 231px,
+    199px 199px,
+    173px 173px,
+    251px 251px,
+    149px 149px,
+    293px 293px;
+  background-repeat: no-repeat, no-repeat, repeat, repeat, repeat, repeat, repeat, repeat;
+}
+
 /* Each tile carries its own projected clip-path polygon inline. */
 .hex-cell {
   position: absolute;
