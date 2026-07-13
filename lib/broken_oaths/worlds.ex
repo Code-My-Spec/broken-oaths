@@ -13,7 +13,7 @@ defmodule BrokenOaths.Worlds do
             Expanse Wastes Depths Frontier Dominion Haven Reaches Steppes Tundra Isles)
 
   def list_worlds do
-    Repo.all(from w in World, order_by: [desc: w.inserted_at])
+    Repo.all(from w in World, order_by: [desc: w.inserted_at, desc: w.id])
   end
 
   def get_world!(id), do: Repo.get!(World, id)

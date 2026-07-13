@@ -72,11 +72,12 @@ defmodule BrokenOathsWeb.Layouts do
     """
   end
 
-  @doc "Full-width layout for world views and other wide content."
-  attr :flash, :map, required: true
-  attr :current_scope, :map, default: nil
-  slot :inner_block, required: true
+  @doc """
+  Full-width layout for world views and other wide content.
 
+  Used as a LiveView layout via the router (`layout: {Layouts, :app_full}`),
+  so it renders `@inner_content` rather than an inner_block slot.
+  """
   def app_full(assigns) do
     ~H"""
     <header class="navbar px-4 sm:px-6 lg:px-8 bg-base-100 border-b border-base-300">
@@ -95,7 +96,7 @@ defmodule BrokenOathsWeb.Layouts do
     </header>
 
     <main>
-      {render_slot(@inner_block)}
+      {@inner_content}
     </main>
 
     <.flash_group flash={@flash} />

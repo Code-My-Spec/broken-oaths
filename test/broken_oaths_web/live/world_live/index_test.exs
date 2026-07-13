@@ -24,7 +24,8 @@ defmodule BrokenOathsWeb.WorldLive.IndexTest do
       view |> element("button", "New World") |> render_click()
 
       # Should redirect to show page
-      assert_redirect(view, ~r"/worlds/\d+")
+      {path, _flash} = assert_redirect(view)
+      assert path =~ ~r"/worlds/\d+"
     end
 
     test "deletes a world", %{conn: conn} do

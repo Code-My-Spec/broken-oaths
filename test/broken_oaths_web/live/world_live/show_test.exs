@@ -91,7 +91,7 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
 
       view
-      |> form("form", %{name: "New Name"})
+      |> form("form[phx-change='update_name']", %{name: "New Name"})
       |> render_change()
 
       # Verify the world was updated
@@ -104,7 +104,7 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
 
       view
-      |> form("form", %{world_id: other.id})
+      |> form("form[phx-change='switch_world']", %{world_id: other.id})
       |> render_change()
 
       assert_redirect(view, ~p"/worlds/#{other.id}")
