@@ -284,6 +284,22 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       refute_push_event(view, "globe3d:window", %{html: _})
     end
 
+    test "coarse-pointer devices get a budgeted LOD threshold", %{conn: conn, world: world} do
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}?mode=3d")
+
+      html =
+        view
+        |> element("#globe3d-stage")
+        |> render_hook("viewport_resize", %{w: 390, h: 750, coarse: true})
+
+      # f=8 test worlds are under every budget, so k stays at the edge
+      # threshold — the attribute contract is what matters here (the
+      # full-size math is unit-tested in ProjectionTest)
+      assert html =~ ~s(data-lod-k="1.02")
+      # And a fresh window was pushed for the new device class
+      assert_push_event(view, "globe3d:window", %{html: _})
+    end
+
     test "3D mode has the canvas impostor and texture URL", %{conn: conn, world: world} do
       {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
       html = view |> element("button", "3D β") |> render_click()

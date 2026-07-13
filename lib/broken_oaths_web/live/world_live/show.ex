@@ -15,6 +15,14 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   @default_container_w 960
   @default_container_h 700
 
+  # 3D tile-window budgets: coarse-pointer (touch) devices composite far
+  # fewer preserve-3d quads before framerate collapses, so they get a
+  # smaller window, less drag margin, and a later canvas→hexes switchover.
+  @tile_budget_touch 1500
+  @tile_budget_desktop 7500
+  @window_margin_touch 0.2
+  @window_margin_desktop 0.35
+
   # Rotation step ≈ this many pixels of screen travel at the view center.
   @pan_px 150
   # Pitch clamp (±85.9°) keeps the up-vector sane; pole tiles are still
@@ -60,6 +68,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         render_mode: :classic,
         facets: [],
         view_bucket: nil,
+        device_coarse: false,
+        lod_k: 1.02,
         sidebar_open: false,
         selected_tile: nil,
         selected_terrain: nil,
@@ -185,12 +195,21 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   end
 
   # In 3D mode a viewport change also re-windows (dims are in the bucket).
-  def handle_event("viewport_resize", %{"w" => w, "h" => h}, socket)
+  # The hook reports whether this is a coarse-pointer (touch) device, which
+  # sets the tile budget and LOD switchover.
+  def handle_event("viewport_resize", %{"w" => w, "h" => h} = params, socket)
       when is_number(w) and is_number(h) do
     w = w |> round() |> max(200) |> min(4000)
     h = h |> round() |> max(200) |> min(4000)
+    coarse = params["coarse"] == true
 
-    socket = assign(socket, container_w: w, container_h: h)
+    socket =
+      assign(socket,
+        container_w: w,
+        container_h: h,
+        device_coarse: coarse,
+        lod_k: lod_k(socket, coarse)
+      )
 
     socket =
       case socket.assigns.render_mode do
@@ -368,6 +387,19 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
   defp clamp_pitch(pitch), do: max(-@max_pitch, min(pitch, @max_pitch))
 
+  defp tile_budget(true), do: @tile_budget_touch
+  defp tile_budget(false), do: @tile_budget_desktop
+
+  defp window_margin(true), do: @window_margin_touch
+  defp window_margin(false), do: @window_margin_desktop
+
+  defp lod_k(socket, coarse) do
+    socket.assigns.world.frequency
+    |> Globe.tile_count()
+    |> Projection.lod_k(tile_budget(coarse), window_margin(coarse))
+    |> Float.round(2)
+  end
+
   defp nearest_zoom_index(socket, scale) do
     %{container_w: w, container_h: h} = socket.assigns
     fit = min(w, h) / 2
@@ -421,10 +453,23 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     if bucket == socket.assigns.view_bucket do
       socket
     else
+      coarse = socket.assigns.device_coarse
       corner = :math.sqrt(w * w / 4 + h * h / 4)
-      # Angular radius of the viewport plus a drag margin, capped: past the
-      # cap the canvas impostor is (or is about to be) showing anyway.
-      theta = min(:math.asin(min(corner / scale, 1.0)) + 0.35, 1.0)
+
+      # Angular radius of the viewport plus a drag margin, capped both
+      # generically (past ~1 rad the canvas impostor shows anyway) and by
+      # the device's tile budget.
+      theta_budget =
+        Projection.budget_theta(
+          Globe.tile_count(socket.assigns.world.frequency),
+          tile_budget(coarse)
+        )
+
+      theta =
+        (:math.asin(min(corner / scale, 1.0)) + window_margin(coarse))
+        |> min(1.0)
+        |> min(theta_budget)
+
       min_dot = :math.cos(theta)
       {vx, vy, vz} = v
       terrain_map = socket.assigns.terrain_map
@@ -443,13 +488,13 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     end
   end
 
-  # Seed and container dims are part of the bucket so Regenerate and
-  # viewport changes force a fresh window push.
+  # Seed, container dims and device class are part of the bucket so
+  # Regenerate, viewport changes and budget changes force a fresh push.
   defp view_bucket({vx, vy, vz}, scale, socket) do
-    %{container_w: w, container_h: h, world: world} = socket.assigns
+    %{container_w: w, container_h: h, world: world, device_coarse: coarse} = socket.assigns
 
     {round(vx * 8), round(vy * 8), round(vz * 8), round(:math.log2(scale / 50) * 2), world.seed,
-     div(w, 200), div(h, 200)}
+     div(w, 200), div(h, 200), coarse}
   end
 
   # Server-built tile markup (no user data involved); phx-click works via
@@ -629,6 +674,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             data-pitch={@pitch}
             data-scale={@scale}
             data-r0={Facets.r0()}
+            data-lod-k={@lod_k}
             data-texture={~p"/worlds/#{@world.id}/texture.png?seed=#{@world.seed}"}
           >
             <%!-- EVERYTHING the hook mutates lives inside this single
@@ -900,14 +946,19 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               this.pitch = parseFloat(d.pitch) || 0
               this.S = parseFloat(d.scale) || 700
               this.r0 = parseFloat(d.r0) || 700
+              this.lodK = parseFloat(d.lodK) || 1.02
               this.maxPitch = 1.50
               this.raf = null
               this.lastSync = 0
               this.syncTimer = null
 
-              // Impostor renders at half resolution and upscales — the
-              // intentional "fuzzy at a distance" look, and 4x fewer pixels.
-              this.q = 0.5
+              // Touch devices: smaller tile budget upstream, deeper zoom so
+              // the budgeted hex window is still reachable, cheaper canvas.
+              this.coarse = window.matchMedia("(pointer: coarse)").matches
+
+              // Impostor renders below full resolution and upscales — the
+              // intentional "fuzzy at a distance" look, and far fewer pixels.
+              this.q = this.coarse ? 0.4 : 0.5
 
               const measure = () => {
                 const r = this.el.getBoundingClientRect()
@@ -923,10 +974,17 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 this.ctx = this.canvas.getContext("2d")
                 this.frame = this.ctx.createImageData(cw, ch)
                 this.frame32 = new Uint32Array(this.frame.data.buffer)
-                if (r.width > 0) this.pushEvent("viewport_resize", {w: Math.round(r.width), h: Math.round(r.height)})
+                if (r.width > 0) {
+                  this.pushEvent("viewport_resize", {
+                    w: Math.round(r.width),
+                    h: Math.round(r.height),
+                    coarse: this.coarse
+                  })
+                }
               }
               measure()
-              this.clampS = () => { this.S = Math.max(this.fit, Math.min(this.S, this.fit * 8)) }
+              this.maxZoom = this.coarse ? 14 : 8
+              this.clampS = () => { this.S = Math.max(this.fit, Math.min(this.S, this.fit * this.maxZoom)) }
               this.clampS()
 
               this.resizeTimer = null
@@ -936,18 +994,17 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               })
               this.ro.observe(this.el)
 
-              // LOD: real hex divs while the disc edge is off-screen; the
-              // baked-texture canvas impostor once the edge shows (tiles are
-              // no longer usable game hexes out there anyway). Hysteresis
-              // avoids flapping at the line.
-              // Force display state every apply (cheap; the browser dedups
+              // LOD: real hex divs only when the viewport fits inside the
+              // device's budgeted tile window (data-lod-k, server-computed);
+              // the baked-texture canvas impostor otherwise. Display state
+              // is force-written every apply (cheap; browsers dedup
               // same-value writes) so freshly swapped-in layers can never be
               // left in the wrong state. Hysteresis lives in farMode.
               this.updateLod = () => {
                 const corner = Math.hypot(this.cx, this.cy)
                 this.farMode = this.farMode
-                  ? this.S < corner * 1.12
-                  : this.S < corner * 1.02
+                  ? this.S < corner * this.lodK * 1.1
+                  : this.S < corner * this.lodK
                 this.canvas.style.display = this.farMode ? "" : "none"
                 this.fine.style.display = this.farMode ? "none" : ""
               }
@@ -1195,8 +1252,11 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
             updated() {
               // Regenerate swaps the ignored subtree (new id) and changes
-              // the texture URL — re-grab refs and reload the bake.
+              // the texture URL — re-grab refs and reload the bake. The LOD
+              // threshold can also change (server recomputes it from the
+              // device class).
               this.grab()
+              this.lodK = parseFloat(this.el.dataset.lodK) || this.lodK
               this.loadTexture()
               this.apply()
             },

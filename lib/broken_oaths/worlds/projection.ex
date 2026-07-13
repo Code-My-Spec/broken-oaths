@@ -134,6 +134,34 @@ defmodule BrokenOaths.Worlds.Projection do
   end
 
   @doc """
+  Angular radius (radians) allowed for a tile window of at most `budget`
+  tiles out of `tile_count`: a spherical cap of angle θ holds
+  `tile_count · (1 − cos θ) / 2` tiles.
+  """
+  def budget_theta(tile_count, budget) when 2 * budget >= tile_count, do: :math.pi()
+
+  def budget_theta(tile_count, budget) do
+    :math.acos(1.0 - 2.0 * budget / tile_count)
+  end
+
+  @doc """
+  The near/far LOD multiplier `k`: the client shows real tile DOM only when
+  scale > corner_distance · k, i.e. when the viewport (plus `margin` of
+  drag slack) fits inside the budgeted window. 1.02 (edge barely hidden)
+  when the budget doesn't bind.
+  """
+  def lod_k(tile_count, budget, margin) do
+    theta_max = budget_theta(tile_count, budget)
+
+    if theta_max >= 1.0 do
+      1.02
+    else
+      usable = max(theta_max - margin, 0.05)
+      max(1.02, 1.0 / :math.sin(min(usable, :math.pi() / 2)))
+    end
+  end
+
+  @doc """
   Approximate great-circle distance (radians) between two unit vectors.
   Useful as an A* heuristic and for range checks.
   """

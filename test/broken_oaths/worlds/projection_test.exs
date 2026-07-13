@@ -156,6 +156,36 @@ defmodule BrokenOaths.Worlds.ProjectionTest do
     end
   end
 
+  describe "budget_theta/2 and lod_k/3" do
+    test "unbinding budget allows the whole sphere" do
+      assert Projection.budget_theta(642, 1500) == :math.pi()
+    end
+
+    test "budget caps the cap angle: tiles within theta ≈ budget" do
+      n = 29_162
+      budget = 1500
+      theta = Projection.budget_theta(n, budget)
+      tiles_in_cap = n * (1 - :math.cos(theta)) / 2
+      assert_in_delta tiles_in_cap, budget, 1.0
+    end
+
+    test "lod_k is the edge threshold when the budget doesn't bind" do
+      # Small test worlds and desktop budgets never bind
+      assert Projection.lod_k(642, 1500, 0.2) == 1.02
+      assert Projection.lod_k(29_162, 7500, 0.35) == 1.02
+    end
+
+    test "lod_k grows for touch budgets on the full-size world" do
+      k = Projection.lod_k(29_162, 1500, 0.2)
+      assert k > 3.5 and k < 4.5
+
+      # At the threshold scale, the viewport+margin window fits the budget
+      theta_max = Projection.budget_theta(29_162, 1500)
+      viewport_half_angle = :math.asin(1 / k)
+      assert viewport_half_angle + 0.2 <= theta_max + 1.0e-9
+    end
+  end
+
   describe "arc/2" do
     test "zero for identical points" do
       assert_in_delta Projection.arc({1.0, 0.0, 0.0}, {1.0, 0.0, 0.0}), 0.0, 1.0e-12
