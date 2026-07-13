@@ -717,13 +717,26 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         <script :type={Phoenix.LiveView.ColocatedHook} name=".Globe3D">
           export default {
             mounted() {
+              this.farMode = false
+
               this.grab = () => {
                 this.fine = this.el.querySelector(".globe3d-fine")
                 this.disc = this.el.querySelector(".globe-disc3d")
                 this.canvas = this.el.querySelector(".globe-canvas")
-                this.farMode = false
               }
               this.grab()
+
+              // Settled-view windowing replaces the anchor SUBTREE, which
+              // does not fire the hook's updated() — watch the DOM itself
+              // and re-bind + re-transform whenever a new tile layer lands.
+              this.mo = new MutationObserver(() => {
+                const fine = this.el.querySelector(".globe3d-fine")
+                if (fine && fine !== this.fine) {
+                  this.grab()
+                  this.apply()
+                }
+              })
+              this.mo.observe(this.el, {childList: true, subtree: true})
 
               // --- baked world texture for the far-zoom impostor ---
               this.tex = null
@@ -792,16 +805,16 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               // baked-texture canvas impostor once the edge shows (tiles are
               // no longer usable game hexes out there anyway). Hysteresis
               // avoids flapping at the line.
+              // Force display state every apply (cheap; the browser dedups
+              // same-value writes) so freshly swapped-in layers can never be
+              // left in the wrong state. Hysteresis lives in farMode.
               this.updateLod = () => {
                 const corner = Math.hypot(this.cx, this.cy)
-                const wantFar = this.farMode
+                this.farMode = this.farMode
                   ? this.S < corner * 1.12
                   : this.S < corner * 1.02
-                if (wantFar !== this.farMode) {
-                  this.farMode = wantFar
-                  this.canvas.style.display = wantFar ? "" : "none"
-                  this.fine.style.display = wantFar ? "none" : ""
-                }
+                this.canvas.style.display = this.farMode ? "" : "none"
+                this.fine.style.display = this.farMode ? "none" : ""
               }
 
               // World vector for a screen point (inverse view rotation).
@@ -869,6 +882,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                     `${cy * s},${sp * sy * s},${cp * sy * s},0,` +
                     `0,${-cp * s},${sp * s},0,` +
                     `${this.cx},${this.cy},0,1)`
+                  // Layers start hidden (CSS) until their first transform
+                  this.fine.style.visibility = "visible"
                 }
                 const S = this.S
                 this.disc.style.left = (this.cx - S) + "px"
@@ -1012,6 +1027,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             destroyed() {
               window.removeEventListener("keydown", this.onKey)
               if (this.ro) this.ro.disconnect()
+              if (this.mo) this.mo.disconnect()
               if (this.raf) cancelAnimationFrame(this.raf)
               if (this.syncTimer) clearTimeout(this.syncTimer)
               if (this.settleTimer) clearTimeout(this.settleTimer)

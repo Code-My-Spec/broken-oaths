@@ -177,6 +177,9 @@
   height: 0;
   transform-style: preserve-3d;
   will-change: transform;
+  /* Hidden until the hook applies the first view transform, so freshly
+     swapped-in tile windows never flash untransformed at the origin. */
+  visibility: hidden;
 }
 
 .hex-cell3d {
