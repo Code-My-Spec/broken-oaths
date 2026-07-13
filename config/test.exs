@@ -26,6 +26,9 @@ config :broken_oaths, BrokenOathsWeb.Endpoint,
 # In test we don't send emails
 config :broken_oaths, BrokenOaths.Mailer, adapter: Swoosh.Adapters.Test
 
+# Don't pre-build the full-size globe mesh; tests use small frequencies
+config :broken_oaths, :globe_warmup, false
+
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
 

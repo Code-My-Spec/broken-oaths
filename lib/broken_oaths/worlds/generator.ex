@@ -3,15 +3,12 @@ defmodule BrokenOaths.Worlds.Generator do
   Procedural world generation using layered Perlin noise.
   Generates elevation and moisture maps to classify terrain types.
 
-  Globe worlds sample 3D noise at each tile's unit-sphere center, which is
+  Terrain samples 3D noise at each tile's unit-sphere center, which is
   seamless by construction. The 12 pentagons are forced to :mountains here
   (single source of truth), making them non-traversable.
   """
   alias BrokenOaths.Worlds.Globe
   alias BrokenOaths.Worlds.Noise
-
-  @elevation_scale 0.035
-  @moisture_scale 0.045
 
   # Noise-space units across the unit sphere; tuned to match the feature
   # density of the old 200-wide flat map (200 * 0.035 ≈ 7 units per wrap).
@@ -28,24 +25,6 @@ defmodule BrokenOaths.Worlds.Generator do
     {0.92, :hills},
     {1.01, :mountains}
   ]
-
-  @doc """
-  Generate the full terrain map for a world.
-  Returns %{{q, r} => terrain_atom} for all hexes.
-  """
-  def generate_terrain_map(seed, width, height) do
-    elevation_perm = Noise.init(seed)
-    moisture_perm = Noise.init(seed + 12345)
-
-    for q <- 0..(width - 1),
-        r <- 0..(height - 1),
-        into: %{} do
-      elevation = Noise.fbm(elevation_perm, q * @elevation_scale, r * @elevation_scale, 6)
-      moisture = Noise.fbm(moisture_perm, q * @moisture_scale, r * @moisture_scale, 4)
-      terrain = classify_terrain(elevation, moisture)
-      {{q, r}, terrain}
-    end
-  end
 
   @doc """
   Generate the terrain map for a globe world.
@@ -71,15 +50,6 @@ defmodule BrokenOaths.Worlds.Generator do
     classify_terrain(elevation, moisture)
   end
 
-  @doc "Generate terrain for a single hex."
-  def generate_hex_terrain(seed, q, r) do
-    elevation_perm = Noise.init(seed)
-    moisture_perm = Noise.init(seed + 12345)
-    elevation = Noise.fbm(elevation_perm, q * @elevation_scale, r * @elevation_scale, 6)
-    moisture = Noise.fbm(moisture_perm, q * @moisture_scale, r * @moisture_scale, 4)
-    classify_terrain(elevation, moisture)
-  end
-
   @doc "Compute terrain type statistics from a terrain map."
   def terrain_stats(terrain_map) do
     total = map_size(terrain_map)
@@ -96,13 +66,9 @@ defmodule BrokenOaths.Worlds.Generator do
 
   @doc """
   Find suitable spawn points on grassland tiles, spread apart.
-
-  Globe form: `find_spawn_points(terrain_map, mesh, count)` — distance is
-  chord distance between unit-sphere tile centers.
-  Flat form: `find_spawn_points(terrain_map, count, world_width)` — wrap-aware
-  axial distance.
+  Distance is chord distance between unit-sphere tile centers.
   """
-  def find_spawn_points(terrain_map, %{tiles: _} = mesh, count) do
+  def find_spawn_points(terrain_map, mesh, count) do
     candidates =
       terrain_map
       |> Enum.filter(fn {_id, terrain} -> terrain == :grassland end)
@@ -110,15 +76,6 @@ defmodule BrokenOaths.Worlds.Generator do
       |> Enum.sort()
 
     select_spread_tiles(candidates, mesh, count)
-  end
-
-  def find_spawn_points(terrain_map, count, world_width) do
-    candidates =
-      terrain_map
-      |> Enum.filter(fn {_coord, terrain} -> terrain == :grassland end)
-      |> Enum.map(fn {coord, _} -> coord end)
-
-    select_spread_points(candidates, count, world_width)
   end
 
   defp select_spread_tiles([], _mesh, _count), do: []
@@ -150,32 +107,6 @@ defmodule BrokenOaths.Worlds.Generator do
     dy = ay - by
     dz = az - bz
     dx * dx + dy * dy + dz * dz
-  end
-
-  defp select_spread_points([], _count, _w), do: []
-  defp select_spread_points(_candidates, 0, _w), do: []
-
-  defp select_spread_points(candidates, count, w) do
-    mid = div(length(candidates), 2)
-    first = Enum.at(candidates, mid)
-    do_select([first], List.delete(candidates, first), count - 1, w)
-  end
-
-  defp do_select(selected, _candidates, 0, _w), do: selected
-  defp do_select(selected, [], _remaining, _w), do: selected
-
-  defp do_select(selected, candidates, remaining, w) do
-    best =
-      Enum.max_by(candidates, fn {q, r} ->
-        Enum.map(selected, fn {sq, sr} ->
-          dq = abs(q - sq)
-          dq = min(dq, w - dq)
-          dq + abs(r - sr)
-        end)
-        |> Enum.min()
-      end)
-
-    do_select([best | selected], List.delete(candidates, best), remaining - 1, w)
   end
 
   defp classify_terrain(elevation, moisture) do

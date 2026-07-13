@@ -7,21 +7,38 @@ defmodule BrokenOaths.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      BrokenOathsWeb.Telemetry,
-      BrokenOaths.Repo,
-      {DNSCluster, query: Application.get_env(:broken_oaths, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: BrokenOaths.PubSub},
-      # Start a worker by calling: BrokenOaths.Worker.start_link(arg)
-      # {BrokenOaths.Worker, arg},
-      # Start to serve requests, typically the last entry
-      BrokenOathsWeb.Endpoint
-    ]
+    children =
+      [
+        BrokenOathsWeb.Telemetry,
+        BrokenOaths.Repo,
+        {DNSCluster, query: Application.get_env(:broken_oaths, :dns_cluster_query) || :ignore},
+        {Phoenix.PubSub, name: BrokenOaths.PubSub},
+        # Start a worker by calling: BrokenOaths.Worker.start_link(arg)
+        # {BrokenOaths.Worker, arg},
+        # Start to serve requests, typically the last entry
+        BrokenOathsWeb.Endpoint
+      ] ++ globe_warmup()
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: BrokenOaths.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  # Pre-build the default globe mesh so the first world mount doesn't pay
+  # the ~250ms build. Disabled in test (tests use small frequencies).
+  defp globe_warmup do
+    if Application.get_env(:broken_oaths, :globe_warmup, true) do
+      [
+        Supervisor.child_spec(
+          {Task, fn -> BrokenOaths.Worlds.Globe.get(54) end},
+          id: :globe_warmup,
+          restart: :temporary
+        )
+      ]
+    else
+      []
+    end
   end
 
   # Tell Phoenix to update the endpoint configuration
