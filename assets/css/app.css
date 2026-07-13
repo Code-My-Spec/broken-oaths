@@ -150,14 +150,18 @@
   user-select: none;
 }
 
+/* NOTE: no descendant selectors keyed on .dragging — toggling a class
+   that changes computed style for thousands of 3D-transformed tiles
+   costs seconds of native style/compositing work per drag. Pointer
+   capture makes the stage's own cursor the one that shows mid-drag. */
 .globe3d-stage.dragging {
   cursor: grabbing;
 }
 
-.globe3d-anchor {
+/* Hook-owned subtree (phx-update="ignore"): disc, canvas, tile layer. */
+.globe3d-own {
   position: absolute;
-  left: 0;
-  top: 0;
+  inset: 0;
 }
 
 /* Far-zoom impostor: baked world texture warped to an orthographic disc.
@@ -189,13 +193,6 @@
   transform-origin: 0 0;
   backface-visibility: hidden;
   cursor: pointer;
-}
-
-.globe3d-stage.dragging .hex-cell3d {
-  /* No hover hit-testing against thousands of 3D-transformed clipped
-     elements while spinning — it's pure per-frame CPU overhead. */
-  pointer-events: none;
-  cursor: grabbing;
 }
 
 .hex-cell3d.hex-selected {

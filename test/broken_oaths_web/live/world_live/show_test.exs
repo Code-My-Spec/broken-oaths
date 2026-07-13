@@ -207,23 +207,31 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       refute html =~ "0.0° / 0.0°"
     end
 
-    test "3D mode renders windowed fine tiles and back to classic", %{conn: conn, world: world} do
+    test "3D mode pushes a windowed tile payload and toggles back to classic", %{
+      conn: conn,
+      world: world
+    } do
       {:ok, view, html} = live(conn, ~p"/worlds/#{world.id}")
       refute html =~ "globe3d-stage"
 
       html = view |> element("button", "3D β") |> render_click()
       assert html =~ "globe3d-stage"
-      assert html =~ "matrix3d("
+      assert html =~ "globe3d-own-#{world.id}"
 
-      # Fine layer is windowed around the view center — never the whole mesh
+      # Tiles arrive via push_event, never through the rendered DOM
+      assert_push_event(view, "globe3d:window", %{html: window_html})
+      assert window_html =~ "hex-cell3d"
+      assert window_html =~ "matrix3d("
+      refute html =~ "hex-cell3d"
+
       tile_count = BrokenOaths.Worlds.Globe.tile_count(@frequency)
-      facet_divs = html |> String.split("hex-cell3d") |> length() |> Kernel.-(1)
+      facet_divs = window_html |> String.split("hex-cell3d") |> length() |> Kernel.-(1)
       assert facet_divs > 0
-      assert facet_divs < tile_count + BrokenOaths.Worlds.Globe.tile_count(12)
+      assert facet_divs <= tile_count
 
+      # Regenerate pushes a recolored window (seed is in the bucket)
       view |> element("button", "Regenerate") |> render_click()
-      html = render(view)
-      assert html =~ "globe3d-stage"
+      assert_push_event(view, "globe3d:window", %{html: _})
 
       # Toggle back restores the classic renderer
       html = view |> element("button", "Classic") |> render_click()
@@ -232,42 +240,38 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       assert html =~ "clip-path:polygon("
     end
 
-    test "3D fine window follows a settled view and shrinks when zoomed in", %{
+    test "3D tile window follows a settled view and shrinks when zoomed in", %{
       conn: conn,
       world: world
     } do
       {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
-      html = view |> element("button", "3D β") |> render_click()
-      initial = html |> String.split("hex-cell3d") |> length() |> Kernel.-(1)
+      view |> element("button", "3D β") |> render_click()
+      assert_push_event(view, "globe3d:window", %{html: initial_html})
+      initial = initial_html |> String.split("hex-cell3d") |> length() |> Kernel.-(1)
 
       # Deep zoom, settled: window should be much smaller than the mesh
-      html =
-        view
-        |> element("#globe3d-stage")
-        |> render_hook("view_sync", %{yaw: 0.0, pitch: 0.0, scale: 5000, settled: true})
+      view
+      |> element("#globe3d-stage")
+      |> render_hook("view_sync", %{yaw: 0.0, pitch: 0.0, scale: 5000, settled: true})
 
-      zoomed = html |> String.split("hex-cell3d") |> length() |> Kernel.-(1)
+      assert_push_event(view, "globe3d:window", %{html: zoomed_html})
+      zoomed = zoomed_html |> String.split("hex-cell3d") |> length() |> Kernel.-(1)
       assert zoomed < initial
 
-      # Rotating to the far side swaps in a different window
-      html =
-        view
-        |> element("#globe3d-stage")
-        |> render_hook("view_sync", %{yaw: 3.14, pitch: 0.0, scale: 5000, settled: true})
+      # Rotating to the far side pushes a different window
+      view
+      |> element("#globe3d-stage")
+      |> render_hook("view_sync", %{yaw: 3.14, pitch: 0.0, scale: 5000, settled: true})
 
-      far_ids =
-        Regex.scan(~r/phx-value-id="(\d+)"(?! phx-value-lod)/, html)
-        |> MapSet.new(fn [_, id] -> id end)
-
-      assert MapSet.size(far_ids) > 0
+      assert_push_event(view, "globe3d:window", %{html: far_html})
+      refute far_html == zoomed_html
 
       # Unsettled syncs do not re-window (no DOM churn mid-drag)
-      html2 =
-        view
-        |> element("#globe3d-stage")
-        |> render_hook("view_sync", %{yaw: 0.0, pitch: 0.0, scale: 5000, settled: false})
+      view
+      |> element("#globe3d-stage")
+      |> render_hook("view_sync", %{yaw: 0.0, pitch: 0.0, scale: 5000, settled: false})
 
-      assert html2 =~ ~s(yaw="0.0")
+      refute_push_event(view, "globe3d:window", %{html: _})
     end
 
     test "3D mode has the canvas impostor and texture URL", %{conn: conn, world: world} do

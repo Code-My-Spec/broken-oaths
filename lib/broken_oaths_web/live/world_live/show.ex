@@ -59,7 +59,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         container_h: @default_container_h,
         render_mode: :classic,
         facets: [],
-        fine_window: [],
         view_bucket: nil,
         selected_tile: nil,
         selected_terrain: nil,
@@ -123,6 +122,23 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     {:noreply, socket}
   end
 
+  # In 3D mode a viewport change also re-windows (dims are in the bucket).
+  def handle_event("viewport_resize", %{"w" => w, "h" => h}, socket)
+      when is_number(w) and is_number(h) do
+    w = w |> round() |> max(200) |> min(4000)
+    h = h |> round() |> max(200) |> min(4000)
+
+    socket = assign(socket, container_w: w, container_h: h)
+
+    socket =
+      case socket.assigns.render_mode do
+        :three_d -> rewindow(socket)
+        :classic -> compute_view(socket)
+      end
+
+    {:noreply, socket}
+  end
+
   # Far-zoom clicks land on the canvas impostor; the hook inverse-projects
   # them to a unit-sphere point and the nearest real tile gets selected.
   def handle_event("select_at", %{"x" => x, "y" => y, "z" => z}, socket)
@@ -170,6 +186,10 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             page_title: world.name
           )
           |> maybe_compute_view()
+
+        # New seed = new bucket: pushes a recolored tile window in 3D mode
+        socket =
+          if socket.assigns.render_mode == :three_d, do: rewindow(socket), else: socket
 
         {:noreply, socket}
 
@@ -247,20 +267,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     {:noreply, push_navigate(socket, to: to)}
   end
 
-  # Both hooks report the viewport's real size on mount and resize.
-  def handle_event("viewport_resize", %{"w" => w, "h" => h}, socket)
-      when is_number(w) and is_number(h) do
-    w = w |> round() |> max(200) |> min(4000)
-    h = h |> round() |> max(200) |> min(4000)
-
-    socket =
-      socket
-      |> assign(container_w: w, container_h: h)
-      |> maybe_compute_view()
-
-    {:noreply, socket}
-  end
-
   # -------------------------------------------------------------------
   # Helpers
   # -------------------------------------------------------------------
@@ -325,46 +331,85 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     |> assign(
       render_mode: :classic,
       facets: [],
-      fine_window: [],
       view_bucket: nil,
       zoom_index: zoom_index
     )
     |> compute_view()
   end
 
-  # Only fine tiles near the view center live in the DOM — keeping all 29k
-  # 3D-transformed divs mounted makes the browser re-rasterize and depth-sort
-  # the world on every zoom change. The window swaps only when the view has
-  # settled AND moved to a new bucket (the anchor id keys the ignore-swap).
+  # Only fine tiles near the view center exist client-side — keeping all
+  # 29k 3D-transformed divs mounted makes the browser re-rasterize and
+  # depth-sort the world on every zoom change. The window is pushed as a
+  # rendered HTML string and injected via innerHTML into a permanently
+  # phx-update="ignore" container: LiveView never diffs tile DOM, so big
+  # swaps can't stall morphdom or race the hook mid-drag.
   defp rewindow(socket) do
     %{yaw: yaw, pitch: pitch, scale: scale} = socket.assigns
     %{container_w: w, container_h: h, facets: facets} = socket.assigns
 
     v = {:math.cos(pitch) * :math.cos(yaw), :math.cos(pitch) * :math.sin(yaw), :math.sin(pitch)}
-
-    bucket = view_bucket(v, scale)
+    bucket = view_bucket(v, scale, socket)
 
     if bucket == socket.assigns.view_bucket do
       socket
     else
       corner = :math.sqrt(w * w / 4 + h * h / 4)
       # Angular radius of the viewport plus a drag margin, capped: past the
-      # cap the coarse LOD is (or is about to be) showing anyway.
+      # cap the canvas impostor is (or is about to be) showing anyway.
       theta = min(:math.asin(min(corner / scale, 1.0)) + 0.35, 1.0)
       min_dot = :math.cos(theta)
       {vx, vy, vz} = v
+      terrain_map = socket.assigns.terrain_map
 
-      window =
-        Enum.filter(facets, fn %{center: {cx, cy, cz}} ->
+      html =
+        facets
+        |> Enum.filter(fn %{center: {cx, cy, cz}} ->
           cx * vx + cy * vy + cz * vz > min_dot
         end)
+        |> Enum.map(&facet_div(&1, terrain_map))
+        |> IO.iodata_to_binary()
 
-      assign(socket, fine_window: window, view_bucket: bucket)
+      socket
+      |> assign(view_bucket: bucket)
+      |> push_event("globe3d:window", %{html: html})
     end
   end
 
-  defp view_bucket({vx, vy, vz}, scale) do
-    {round(vx * 8), round(vy * 8), round(vz * 8), round(:math.log2(scale / 50) * 2)}
+  # Seed and container dims are part of the bucket so Regenerate and
+  # viewport changes force a fresh window push.
+  defp view_bucket({vx, vy, vz}, scale, socket) do
+    %{container_w: w, container_h: h, world: world} = socket.assigns
+
+    {round(vx * 8), round(vy * 8), round(vz * 8), round(:math.log2(scale / 50) * 2), world.seed,
+     div(w, 200), div(h, 200)}
+  end
+
+  # Server-built tile markup (no user data involved); phx-click works via
+  # LiveView's delegated event handling even inside ignored DOM.
+  defp facet_div(facet, terrain_map) do
+    terrain = Map.get(terrain_map, facet.id, :ocean)
+    id = Integer.to_string(facet.id)
+    terrain_s = Atom.to_string(terrain)
+
+    [
+      ~s(<div class="hex-cell3d hex-),
+      terrain_s,
+      ~s(" phx-click="select_tile" phx-value-id="),
+      id,
+      ~s(" style="width:),
+      Integer.to_string(facet.w),
+      "px;height:",
+      Integer.to_string(facet.h),
+      "px;clip-path:",
+      facet.clip,
+      ";transform:",
+      facet.matrix,
+      ~s(;" title="#),
+      id,
+      " ",
+      terrain_s,
+      ~s("></div>)
+    ]
   end
 
   # 3D mode never re-projects server-side; the tile DOM is static.
@@ -518,32 +563,17 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             data-r0={Facets.r0()}
             data-texture={~p"/worlds/#{@world.id}/texture.png?seed=#{@world.seed}"}
           >
-            <div class="globe-disc globe-disc3d"></div>
-
-            <%!-- Far-zoom impostor: the baked world texture warped into an
-                 orthographic disc. Real hex divs only exist up close. --%>
-            <canvas class="globe-canvas" style="display:none;"></canvas>
-
-            <%!-- Keyed by world+seed+view bucket so Regenerate AND settled
-                 view changes swap the ignored DOM. Real game hexes, windowed
-                 around the view center; hidden at far zoom in favor of the
-                 canvas impostor. --%>
-            <div
-              id={"globe3d-#{@world.id}-#{@world.seed}-#{:erlang.phash2(@view_bucket)}"}
-              phx-update="ignore"
-              class="globe3d-anchor"
-            >
-              <div class="globe3d globe3d-fine">
-                <div
-                  :for={facet <- @fine_window}
-                  class={["hex-cell3d", terrain_class(Map.get(@terrain_map, facet.id, :ocean))]}
-                  phx-click="select_tile"
-                  phx-value-id={facet.id}
-                  style={"width:#{facet.w}px;height:#{facet.h}px;clip-path:#{facet.clip};transform:#{facet.matrix};"}
-                  title={"##{facet.id} #{Map.get(@terrain_map, facet.id, :ocean)}"}
-                >
-                </div>
-              </div>
+            <%!-- EVERYTHING the hook mutates lives inside this single
+                 phx-update="ignore" wrapper. The hook styles the disc,
+                 resizes/paints the canvas, and fills the fine layer via
+                 innerHTML from pushed "globe3d:window" events — if any of
+                 it were LiveView-rendered, every patch would reset it to
+                 template state and fight the hook (canvas back to 300x150,
+                 styles stripped), which is exactly the bug this fixes. --%>
+            <div id={"globe3d-own-#{@world.id}"} phx-update="ignore" class="globe3d-own">
+              <div class="globe-disc globe-disc3d"></div>
+              <canvas class="globe-canvas" style="display:none;"></canvas>
+              <div class="globe3d globe3d-fine"></div>
             </div>
           </div>
 
@@ -726,17 +756,14 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               }
               this.grab()
 
-              // Settled-view windowing replaces the anchor SUBTREE, which
-              // does not fire the hook's updated() — watch the DOM itself
-              // and re-bind + re-transform whenever a new tile layer lands.
-              this.mo = new MutationObserver(() => {
-                const fine = this.el.querySelector(".globe3d-fine")
-                if (fine && fine !== this.fine) {
-                  this.grab()
-                  this.apply()
-                }
+              // Tile windows arrive as pre-rendered HTML and bypass
+              // LiveView's DOM diffing entirely — the .globe3d-fine node is
+              // stable for the life of the view, so no re-binding races.
+              this.handleEvent("globe3d:window", ({html}) => {
+                if (!this.fine) return
+                this.fine.innerHTML = html
+                this.schedule()
               })
-              this.mo.observe(this.el, {childList: true, subtree: true})
 
               // --- baked world texture for the far-zoom impostor ---
               this.tex = null
@@ -1027,7 +1054,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             destroyed() {
               window.removeEventListener("keydown", this.onKey)
               if (this.ro) this.ro.disconnect()
-              if (this.mo) this.mo.disconnect()
               if (this.raf) cancelAnimationFrame(this.raf)
               if (this.syncTimer) clearTimeout(this.syncTimer)
               if (this.settleTimer) clearTimeout(this.settleTimer)
