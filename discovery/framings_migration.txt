@@ -1,8 +1,0 @@
-data migration
-data cleansing
-ERP migration
-ERP implementation
-master data
-NetSuite
-data import
-legacy migration
