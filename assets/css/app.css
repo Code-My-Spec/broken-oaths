@@ -180,6 +180,9 @@
 }
 
 .globe3d-stage.dragging .hex-cell3d {
+  /* No hover hit-testing against thousands of 3D-transformed clipped
+     elements while spinning — it's pure per-frame CPU overhead. */
+  pointer-events: none;
   cursor: grabbing;
 }
 

@@ -17,10 +17,11 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
   # Coarse LOD frequency for 3D mode. When the disc edge is visible the
   # whole front hemisphere is on screen (~half of 10f²+2 tiles), which
-  # overwhelms the compositor at f=54; the coarse globe keeps that under
-  # ~1.6k quads. Terrain comes from the same seeded noise field, so the
-  # continents match the full-detail globe.
-  @lod_frequency 18
+  # overwhelms the compositor at f=54; the coarse globe keeps that around
+  # ~700 quads (smooth compositing lives in the hundreds). Terrain comes
+  # from the same seeded noise field, so the continents match the
+  # full-detail globe.
+  @lod_frequency 12
 
   # Rotation step ≈ this many pixels of screen travel at the view center.
   @pan_px 150
