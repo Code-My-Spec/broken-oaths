@@ -2,10 +2,98 @@ defmodule BrokenOaths.Worlds.GeneratorTest do
   use ExUnit.Case, async: true
 
   alias BrokenOaths.Worlds.Generator
+  alias BrokenOaths.Worlds.Globe
 
   @test_seed 42
   @small_width 20
   @small_height 15
+
+  describe "generate_terrain_map/2 (globe)" do
+    setup do
+      %{mesh: Globe.build(8)}
+    end
+
+    test "returns an entry for every tile id", %{mesh: mesh} do
+      terrain_map = Generator.generate_terrain_map(@test_seed, mesh)
+      assert map_size(terrain_map) == Globe.tile_count(8)
+      assert Enum.sort(Map.keys(terrain_map)) == Enum.sort(Map.keys(mesh.tiles))
+    end
+
+    test "all values are valid terrain atoms", %{mesh: mesh} do
+      valid = ~w(ocean shallow_water beach grassland plains forest hills mountains)a
+      terrain_map = Generator.generate_terrain_map(@test_seed, mesh)
+
+      for {_id, terrain} <- terrain_map do
+        assert terrain in valid, "Invalid terrain: #{inspect(terrain)}"
+      end
+    end
+
+    test "all 12 pentagons are mountains", %{mesh: mesh} do
+      terrain_map = Generator.generate_terrain_map(@test_seed, mesh)
+
+      pentagons = Enum.filter(Map.values(mesh.tiles), & &1.pentagon?)
+      assert length(pentagons) == 12
+
+      for tile <- pentagons do
+        assert terrain_map[tile.id] == :mountains
+      end
+    end
+
+    test "is deterministic - same seed produces same map", %{mesh: mesh} do
+      assert Generator.generate_terrain_map(@test_seed, mesh) ==
+               Generator.generate_terrain_map(@test_seed, mesh)
+    end
+
+    test "different seeds produce different maps", %{mesh: mesh} do
+      refute Generator.generate_terrain_map(@test_seed, mesh) ==
+               Generator.generate_terrain_map(@test_seed + 1, mesh)
+    end
+
+    test "produces terrain variety", %{mesh: mesh} do
+      terrain_map = Generator.generate_terrain_map(@test_seed, mesh)
+      types = terrain_map |> Map.values() |> Enum.uniq()
+      assert length(types) >= 3, "Expected at least 3 terrain types, got #{inspect(types)}"
+    end
+  end
+
+  describe "find_spawn_points/3 (globe)" do
+    setup do
+      mesh = Globe.build(8)
+      %{mesh: mesh, terrain_map: Generator.generate_terrain_map(@test_seed, mesh)}
+    end
+
+    test "returns requested number of grassland tiles", %{mesh: mesh, terrain_map: tm} do
+      points = Generator.find_spawn_points(tm, mesh, 3)
+      assert length(points) == 3
+
+      for id <- points do
+        assert tm[id] == :grassland
+      end
+    end
+
+    test "spawn points are spread apart", %{mesh: mesh, terrain_map: tm} do
+      points = Generator.find_spawn_points(tm, mesh, 4)
+
+      for a <- points, b <- points, a != b do
+        ca = Globe.tile(mesh, a).center
+        cb = Globe.tile(mesh, b).center
+        {ax, ay, az} = ca
+        {bx, by, bz} = cb
+        dx = ax - bx
+        dy = ay - by
+        dz = az - bz
+        chord = :math.sqrt(dx * dx + dy * dy + dz * dz)
+
+        # At least a few tiles apart (tile spacing at f=8 ≈ 0.138 chord)
+        assert chord > 0.2, "spawn points #{a} and #{b} too close (chord #{chord})"
+      end
+    end
+
+    test "is deterministic", %{mesh: mesh, terrain_map: tm} do
+      assert Generator.find_spawn_points(tm, mesh, 3) ==
+               Generator.find_spawn_points(tm, mesh, 3)
+    end
+  end
 
   describe "generate_terrain_map/3" do
     test "returns a map with entries for every hex" do
@@ -46,7 +134,9 @@ defmodule BrokenOaths.Worlds.GeneratorTest do
     test "produces terrain variety (not all one type)" do
       terrain_map = Generator.generate_terrain_map(@test_seed, 50, 50)
       terrain_types = terrain_map |> Map.values() |> Enum.uniq()
-      assert length(terrain_types) >= 3, "Expected at least 3 terrain types, got: #{inspect(terrain_types)}"
+
+      assert length(terrain_types) >= 3,
+             "Expected at least 3 terrain types, got: #{inspect(terrain_types)}"
     end
 
     test "generates full-size world without error" do
