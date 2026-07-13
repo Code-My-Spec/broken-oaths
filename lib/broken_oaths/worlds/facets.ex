@@ -20,14 +20,20 @@ defmodule BrokenOaths.Worlds.Facets do
   # texture memory (tiles rasterize at their r0 size).
   @r0 700
 
+  # Bump whenever the facet map shape changes: persistent_term survives
+  # code reloads, so stale-shaped entries would otherwise leak into new code.
+  @cache_version 2
+
   def r0, do: @r0
 
   @doc "Facets for a frequency, building and caching on first use."
   def get(frequency) do
-    case :persistent_term.get({__MODULE__, frequency}, nil) do
+    key = {__MODULE__, @cache_version, frequency}
+
+    case :persistent_term.get(key, nil) do
       nil ->
         facets = build(frequency)
-        :persistent_term.put({__MODULE__, frequency}, facets)
+        :persistent_term.put(key, facets)
         facets
 
       facets ->

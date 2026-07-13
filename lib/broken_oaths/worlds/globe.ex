@@ -32,6 +32,10 @@ defmodule BrokenOaths.Worlds.Globe do
 
   @type mesh :: %{frequency: pos_integer(), tiles: %{non_neg_integer() => Tile.t()}}
 
+  # Bump whenever the mesh/tile shape changes: persistent_term survives
+  # code reloads, so stale-shaped entries would otherwise leak into new code.
+  @cache_version 1
+
   @doc "Number of tiles in a GP(f,0) globe: 10f² + 2."
   def tile_count(frequency), do: 10 * frequency * frequency + 2
 
@@ -40,10 +44,12 @@ defmodule BrokenOaths.Worlds.Globe do
   Cached in :persistent_term (reads don't copy the ~10MB mesh per process).
   """
   def get(frequency) do
-    case :persistent_term.get({__MODULE__, frequency}, nil) do
+    key = {__MODULE__, @cache_version, frequency}
+
+    case :persistent_term.get(key, nil) do
       nil ->
         mesh = build(frequency)
-        :persistent_term.put({__MODULE__, frequency}, mesh)
+        :persistent_term.put(key, mesh)
         mesh
 
       mesh ->
