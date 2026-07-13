@@ -207,6 +207,44 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       refute html =~ "0.0° / 0.0°"
     end
 
+    test "3D mode renders every tile once and back to classic", %{conn: conn, world: world} do
+      {:ok, view, html} = live(conn, ~p"/worlds/#{world.id}")
+      refute html =~ "globe3d-stage"
+
+      html = view |> element("button", "3D β") |> render_click()
+      assert html =~ "globe3d-stage"
+      assert html =~ "matrix3d("
+
+      tile_count = BrokenOaths.Worlds.Globe.tile_count(@frequency)
+      facet_divs = html |> String.split("hex-cell3d") |> length() |> Kernel.-(1)
+      assert facet_divs >= tile_count
+
+      # Server-side rotation events are inert in 3D mode
+      view |> element("button", "Regenerate") |> render_click()
+      html = render(view)
+      assert html =~ "globe3d-stage"
+
+      # Toggle back restores the classic renderer
+      html = view |> element("button", "Classic") |> render_click()
+      refute html =~ "globe3d-stage"
+      assert html =~ "hex-cell"
+      assert html =~ "clip-path:polygon("
+    end
+
+    test "3D mode view_sync updates the sidebar", %{conn: conn, world: world} do
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+      view |> element("button", "3D β") |> render_click()
+
+      html =
+        view
+        |> element("#globe3d-stage")
+        |> render_hook("view_sync", %{yaw: 0.5, pitch: -0.25, scale: 1234.6})
+
+      # 0.5 rad = 28.6°, -0.25 rad = -14.3°
+      assert html =~ "28.6° / -14.3°"
+      assert html =~ "1235px"
+    end
+
     test "name can be updated", %{conn: conn, world: world} do
       {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
 

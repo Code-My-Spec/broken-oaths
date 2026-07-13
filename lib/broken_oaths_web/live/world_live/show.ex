@@ -2,7 +2,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   use BrokenOathsWeb, :live_view
 
   alias BrokenOaths.Worlds
-  alias BrokenOaths.Worlds.{Generator, Globe, Projection}
+  alias BrokenOaths.Worlds.{Facets, Generator, Globe, Projection}
 
   # Zoom levels as multiples of the "whole globe fits" scale (min(w,h)/2
   # pixels per sphere radius). Relative zoom keeps the on-screen TILE count
@@ -57,6 +57,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         zoom_index: @default_zoom_index,
         container_w: @default_container_w,
         container_h: @default_container_h,
+        render_mode: :classic,
+        facets: [],
         selected_tile: nil,
         selected_terrain: nil,
         page_title: world.name,
@@ -70,6 +72,52 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   # -------------------------------------------------------------------
   # Events
   # -------------------------------------------------------------------
+
+  # In 3D mode the Globe3D hook owns the view client-side; server-side
+  # rotation/zoom events are inert (the tile DOM is phx-update="ignore").
+  def handle_event(event, _params, %{assigns: %{render_mode: :three_d}} = socket)
+      when event in ["pan", "zoom_in", "zoom_out", "drag_rotate", "keydown"] do
+    {:noreply, socket}
+  end
+
+  def handle_event("toggle_mode", _params, socket) do
+    case socket.assigns.render_mode do
+      :classic ->
+        facets = Facets.get(socket.assigns.world.frequency)
+        {:noreply, assign(socket, render_mode: :three_d, facets: facets, visible_tiles: [])}
+
+      :three_d ->
+        # Snap the continuous 3D scale back to the nearest zoom level
+        %{container_w: w, container_h: h, scale: scale} = socket.assigns
+        fit = min(w, h) / 2
+
+        zoom_index =
+          @zoom_factors
+          |> Enum.with_index()
+          |> Enum.min_by(fn {factor, _} -> abs(factor * fit - scale) end)
+          |> elem(1)
+
+        socket =
+          socket
+          |> assign(render_mode: :classic, facets: [], zoom_index: zoom_index)
+          |> compute_view()
+
+        {:noreply, socket}
+    end
+  end
+
+  # The Globe3D hook reports its settled view so the sidebar and any later
+  # mode switch stay consistent.
+  def handle_event("view_sync", %{"yaw" => yaw, "pitch" => pitch, "scale" => scale}, socket)
+      when is_number(yaw) and is_number(pitch) and is_number(scale) do
+    two_pi = 2 * :math.pi()
+    yaw = yaw * 1.0
+    yaw = yaw - two_pi * Float.floor(yaw / two_pi)
+    pitch = min(max(pitch * 1.0, -@max_pitch), @max_pitch)
+    scale = scale |> max(50) |> min(10_000) |> round()
+
+    {:noreply, assign(socket, yaw: yaw, pitch: pitch, scale: scale)}
+  end
 
   def handle_event("select_tile", %{"id" => id}, socket) do
     id = String.to_integer(id)
@@ -104,7 +152,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             selected_terrain: nil,
             page_title: world.name
           )
-          |> compute_view()
+          |> maybe_compute_view()
 
         {:noreply, socket}
 
@@ -177,7 +225,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     {:noreply, push_navigate(socket, to: ~p"/worlds/#{id}")}
   end
 
-  # The GlobeDrag hook reports the viewport's real size on mount and resize.
+  # Both hooks report the viewport's real size on mount and resize.
   def handle_event("viewport_resize", %{"w" => w, "h" => h}, socket)
       when is_number(w) and is_number(h) do
     w = w |> round() |> max(200) |> min(4000)
@@ -186,7 +234,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     socket =
       socket
       |> assign(container_w: w, container_h: h)
-      |> compute_view()
+      |> maybe_compute_view()
 
     {:noreply, socket}
   end
@@ -224,6 +272,10 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     |> assign(yaw: yaw, pitch: pitch)
     |> compute_view()
   end
+
+  # 3D mode never re-projects server-side; the tile DOM is static.
+  defp maybe_compute_view(%{assigns: %{render_mode: :three_d}} = socket), do: socket
+  defp maybe_compute_view(socket), do: compute_view(socket)
 
   defp compute_view(socket) do
     %{mesh: mesh, terrain_map: tm, yaw: yaw, pitch: pitch, zoom_index: zi} = socket.assigns
@@ -301,7 +353,11 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
         <div class="flex-1"></div>
 
-        <div class="flex items-center gap-1">
+        <button phx-click="toggle_mode" class="btn btn-sm btn-ghost">
+          {if @render_mode == :classic, do: "3D β", else: "Classic"}
+        </button>
+
+        <div :if={@render_mode == :classic} class="flex items-center gap-1">
           <button phx-click="zoom_out" class="btn btn-xs btn-square btn-ghost text-lg">−</button>
           <span class="text-xs font-mono w-10 text-center">{@scale}</span>
           <button phx-click="zoom_in" class="btn btn-xs btn-square btn-ghost text-lg">+</button>
@@ -325,6 +381,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         <%!-- Globe viewport --%>
         <div class="flex-1 overflow-hidden bg-base-300 relative">
           <div
+            :if={@render_mode == :classic}
             id="globe-viewport"
             class="globe-viewport"
             phx-hook=".GlobeDrag"
@@ -352,8 +409,43 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             </div>
           </div>
 
+          <%!-- Experimental CSS-3D mode: every tile rendered once with a
+               static matrix3d; the Globe3D hook rotates/zooms the parent
+               container client-side at 60fps. No perspective = orthographic,
+               matching the classic projection exactly. --%>
+          <div
+            :if={@render_mode == :three_d}
+            id="globe3d-stage"
+            class="globe3d-stage"
+            phx-hook=".Globe3D"
+            data-yaw={@yaw}
+            data-pitch={@pitch}
+            data-scale={@scale}
+            data-r0={Facets.r0()}
+          >
+            <div class="globe-disc globe-disc3d"></div>
+
+            <%!-- Keyed by world+seed so Regenerate swaps the ignored DOM --%>
+            <div id={"globe3d-#{@world.id}-#{@world.seed}"} phx-update="ignore" class="globe3d-anchor">
+              <div class="globe3d">
+                <div
+                  :for={facet <- @facets}
+                  class={["hex-cell3d", terrain_class(Map.get(@terrain_map, facet.id, :ocean))]}
+                  phx-click="select_tile"
+                  phx-value-id={facet.id}
+                  style={"width:#{facet.w}px;height:#{facet.h}px;clip-path:#{facet.clip};transform:#{facet.matrix};"}
+                  title={"##{facet.id} #{Map.get(@terrain_map, facet.id, :ocean)}"}
+                >
+                </div>
+              </div>
+            </div>
+          </div>
+
           <%!-- Rotate controls overlay --%>
-          <div class="absolute bottom-4 left-4 grid grid-cols-3 gap-0.5 opacity-60 hover:opacity-100 transition-opacity">
+          <div
+            :if={@render_mode == :classic}
+            class="absolute bottom-4 left-4 grid grid-cols-3 gap-0.5 opacity-60 hover:opacity-100 transition-opacity"
+          >
             <div></div>
             <button
               phx-click="pan"
@@ -391,7 +483,9 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
           <%!-- Keyboard hint --%>
           <div class="absolute bottom-4 right-4 text-xs opacity-40">
-            Drag or WASD / Arrows to rotate · Wheel or +/− to zoom
+            {if @render_mode == :classic,
+              do: "Drag or WASD / Arrows to rotate · Wheel or +/− to zoom",
+              else: "3D β — drag to spin · wheel to zoom · WASD to rotate"}
           </div>
         </div>
 
@@ -507,6 +601,174 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               if (this.timer) clearTimeout(this.timer)
               if (this.resizeTimer) clearTimeout(this.resizeTimer)
               if (this.ro) this.ro.disconnect()
+            }
+          }
+        </script>
+
+        <%!-- 3D mode: the hook owns yaw/pitch/scale and rotates the whole
+             globe with ONE matrix3d update per frame. The server only hears
+             about the settled view (view_sync) and tile clicks. --%>
+        <script :type={Phoenix.LiveView.ColocatedHook} name=".Globe3D">
+          export default {
+            mounted() {
+              this.grab = () => {
+                this.container = this.el.querySelector(".globe3d")
+                this.disc = this.el.querySelector(".globe-disc3d")
+              }
+              this.grab()
+
+              const d = this.el.dataset
+              this.yaw = parseFloat(d.yaw) || 0
+              this.pitch = parseFloat(d.pitch) || 0
+              this.S = parseFloat(d.scale) || 700
+              this.r0 = parseFloat(d.r0) || 700
+              this.maxPitch = 1.50
+              this.raf = null
+              this.lastSync = 0
+              this.syncTimer = null
+
+              const measure = () => {
+                const r = this.el.getBoundingClientRect()
+                this.cx = r.width / 2
+                this.cy = r.height / 2
+                this.fit = Math.max(Math.min(r.width, r.height) / 2, 25)
+                if (r.width > 0) this.pushEvent("viewport_resize", {w: Math.round(r.width), h: Math.round(r.height)})
+              }
+              measure()
+              this.clampS = () => { this.S = Math.max(this.fit, Math.min(this.S, this.fit * 8)) }
+              this.clampS()
+
+              this.resizeTimer = null
+              this.ro = new ResizeObserver(() => {
+                clearTimeout(this.resizeTimer)
+                this.resizeTimer = setTimeout(() => { measure(); this.clampS(); this.schedule() }, 150)
+              })
+              this.ro.observe(this.el)
+
+              this.apply = () => {
+                const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw)
+                const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
+                const s = this.S / this.r0
+                // Columns of diag(1,-1,1)·R_view — orthographic (no perspective),
+                // identical to the server projection.
+                this.container.style.transform =
+                  `matrix3d(${-sy * s},${sp * cy * s},${cp * cy * s},0,` +
+                  `${cy * s},${sp * sy * s},${cp * sy * s},0,` +
+                  `0,${-cp * s},${sp * s},0,` +
+                  `${this.cx},${this.cy},0,1)`
+                const S = this.S
+                this.disc.style.left = (this.cx - S) + "px"
+                this.disc.style.top = (this.cy - S) + "px"
+                this.disc.style.width = (2 * S) + "px"
+                this.disc.style.height = (2 * S) + "px"
+              }
+
+              this.schedule = () => {
+                if (this.raf) return
+                this.raf = requestAnimationFrame(() => { this.raf = null; this.apply() })
+              }
+
+              this.rotateBy = (dxPx, dyPx) => {
+                this.yaw -= dxPx / this.S / Math.max(Math.cos(this.pitch), 0.25)
+                const twoPi = 2 * Math.PI
+                this.yaw -= twoPi * Math.floor(this.yaw / twoPi)
+                this.pitch = Math.max(-this.maxPitch, Math.min(this.pitch + dyPx / this.S, this.maxPitch))
+                this.schedule()
+                this.sync(false)
+              }
+
+              this.sync = (force) => {
+                const now = Date.now()
+                if (!force && now - this.lastSync < 250) {
+                  if (!this.syncTimer) {
+                    this.syncTimer = setTimeout(() => { this.syncTimer = null; this.sync(true) }, 250)
+                  }
+                  return
+                }
+                if (this.syncTimer) { clearTimeout(this.syncTimer); this.syncTimer = null }
+                this.lastSync = now
+                this.pushEvent("view_sync", {yaw: this.yaw, pitch: this.pitch, scale: this.S})
+              }
+
+              // --- drag ---
+              this.pointer = null
+              this.moved = false
+              this.el.addEventListener("pointerdown", (e) => {
+                if (e.button !== 0) return
+                this.pointer = e.pointerId
+                this.last = {x: e.clientX, y: e.clientY}
+                this.moved = false
+              })
+              this.el.addEventListener("pointermove", (e) => {
+                if (this.pointer === null || e.pointerId !== this.pointer) return
+                const dx = e.clientX - this.last.x
+                const dy = e.clientY - this.last.y
+                if (!this.moved) {
+                  if (Math.abs(dx) + Math.abs(dy) < 4) return
+                  this.moved = true
+                  this.el.setPointerCapture(this.pointer)
+                  this.el.classList.add("dragging")
+                }
+                this.last = {x: e.clientX, y: e.clientY}
+                this.rotateBy(dx, dy)
+              })
+              const end = (e) => {
+                if (this.pointer === null || e.pointerId !== this.pointer) return
+                if (this.moved) this.sync(true)
+                this.pointer = null
+                this.moved = false
+                this.el.classList.remove("dragging")
+              }
+              this.el.addEventListener("pointerup", end)
+              this.el.addEventListener("pointercancel", end)
+
+              // --- continuous wheel zoom ---
+              this.el.addEventListener("wheel", (e) => {
+                e.preventDefault()
+                this.S *= Math.exp(-e.deltaY * 0.0015)
+                this.clampS()
+                this.schedule()
+                this.sync(false)
+              }, {passive: false})
+
+              // --- keys (client-side in 3D mode) ---
+              this.onKey = (e) => {
+                switch (e.key) {
+                  case "ArrowLeft": case "a": this.rotateBy(150, 0); break
+                  case "ArrowRight": case "d": this.rotateBy(-150, 0); break
+                  case "ArrowUp": case "w": this.rotateBy(0, 150); break
+                  case "ArrowDown": case "s": this.rotateBy(0, -150); break
+                  case "+": case "=": this.S *= 1.4; this.clampS(); this.schedule(); this.sync(false); break
+                  case "-": case "_": this.S /= 1.4; this.clampS(); this.schedule(); this.sync(false); break
+                }
+              }
+              window.addEventListener("keydown", this.onKey)
+
+              // --- client-side selection highlight (tile DOM is ignored) ---
+              this.el.addEventListener("click", (e) => {
+                const t = e.target
+                if (t.classList && t.classList.contains("hex-cell3d")) {
+                  this.el.querySelectorAll(".hex-cell3d.hex-selected")
+                    .forEach((el) => el.classList.remove("hex-selected"))
+                  t.classList.add("hex-selected")
+                }
+              })
+
+              this.apply()
+            },
+
+            updated() {
+              // Regenerate swaps the ignored subtree (new id) — re-grab refs
+              this.grab()
+              this.apply()
+            },
+
+            destroyed() {
+              window.removeEventListener("keydown", this.onKey)
+              if (this.ro) this.ro.disconnect()
+              if (this.raf) cancelAnimationFrame(this.raf)
+              if (this.syncTimer) clearTimeout(this.syncTimer)
+              if (this.resizeTimer) clearTimeout(this.resizeTimer)
             }
           }
         </script>

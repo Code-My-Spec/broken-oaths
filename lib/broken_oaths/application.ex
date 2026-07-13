@@ -31,7 +31,11 @@ defmodule BrokenOaths.Application do
     if Application.get_env(:broken_oaths, :globe_warmup, true) do
       [
         Supervisor.child_spec(
-          {Task, fn -> BrokenOaths.Worlds.Globe.get(54) end},
+          {Task,
+           fn ->
+             BrokenOaths.Worlds.Globe.get(54)
+             BrokenOaths.Worlds.Facets.get(54)
+           end},
           id: :globe_warmup,
           restart: :temporary
         )
