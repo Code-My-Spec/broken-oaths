@@ -88,6 +88,7 @@ defmodule BrokenOaths.Worlds.Facets do
 
     %{
       id: tile.id,
+      center: tile.center,
       w: trunc(bw),
       h: trunc(bh),
       clip: clip,

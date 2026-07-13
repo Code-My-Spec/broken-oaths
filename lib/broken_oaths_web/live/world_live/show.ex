@@ -69,6 +69,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         facets: [],
         coarse_facets: [],
         coarse_terrain: %{},
+        fine_window: [],
+        view_bucket: nil,
         selected_tile: nil,
         selected_terrain: nil,
         page_title: world.name,
@@ -107,9 +109,13 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     {:noreply, push_patch(socket, to: to)}
   end
 
-  # The Globe3D hook reports its settled view so the sidebar and any later
-  # mode switch stay consistent.
-  def handle_event("view_sync", %{"yaw" => yaw, "pitch" => pitch, "scale" => scale}, socket)
+  # The Globe3D hook reports its view for the sidebar; when the view has
+  # settled (drag end / wheel pause) the fine-tile window follows it.
+  def handle_event(
+        "view_sync",
+        %{"yaw" => yaw, "pitch" => pitch, "scale" => scale} = params,
+        socket
+      )
       when is_number(yaw) and is_number(pitch) and is_number(scale) do
     two_pi = 2 * :math.pi()
     yaw = yaw * 1.0
@@ -117,7 +123,14 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     pitch = min(max(pitch * 1.0, -@max_pitch), @max_pitch)
     scale = scale |> max(50) |> min(10_000) |> round()
 
-    {:noreply, assign(socket, yaw: yaw, pitch: pitch, scale: scale)}
+    socket = assign(socket, yaw: yaw, pitch: pitch, scale: scale)
+
+    socket =
+      if params["settled"] && socket.assigns.render_mode == :three_d,
+        do: rewindow(socket),
+        else: socket
+
+    {:noreply, socket}
   end
 
   # A coarse-LOD tile lives in a different mesh; select the nearest tile of
@@ -304,13 +317,16 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   defp set_mode(socket, :three_d) do
     world = socket.assigns.world
 
-    assign(socket,
+    socket
+    |> assign(
       render_mode: :three_d,
       facets: Facets.get(world.frequency),
       coarse_facets: Facets.get(@lod_frequency),
       coarse_terrain: coarse_terrain(world.seed),
-      visible_tiles: []
+      visible_tiles: [],
+      view_bucket: nil
     )
+    |> rewindow()
   end
 
   defp set_mode(socket, :classic) do
@@ -330,9 +346,46 @@ defmodule BrokenOathsWeb.WorldLive.Show do
       facets: [],
       coarse_facets: [],
       coarse_terrain: %{},
+      fine_window: [],
+      view_bucket: nil,
       zoom_index: zoom_index
     )
     |> compute_view()
+  end
+
+  # Only fine tiles near the view center live in the DOM — keeping all 29k
+  # 3D-transformed divs mounted makes the browser re-rasterize and depth-sort
+  # the world on every zoom change. The window swaps only when the view has
+  # settled AND moved to a new bucket (the anchor id keys the ignore-swap).
+  defp rewindow(socket) do
+    %{yaw: yaw, pitch: pitch, scale: scale} = socket.assigns
+    %{container_w: w, container_h: h, facets: facets} = socket.assigns
+
+    v = {:math.cos(pitch) * :math.cos(yaw), :math.cos(pitch) * :math.sin(yaw), :math.sin(pitch)}
+
+    bucket = view_bucket(v, scale)
+
+    if bucket == socket.assigns.view_bucket do
+      socket
+    else
+      corner = :math.sqrt(w * w / 4 + h * h / 4)
+      # Angular radius of the viewport plus a drag margin, capped: past the
+      # cap the coarse LOD is (or is about to be) showing anyway.
+      theta = min(:math.asin(min(corner / scale, 1.0)) + 0.35, 1.0)
+      min_dot = :math.cos(theta)
+      {vx, vy, vz} = v
+
+      window =
+        Enum.filter(facets, fn %{center: {cx, cy, cz}} ->
+          cx * vx + cy * vy + cz * vz > min_dot
+        end)
+
+      assign(socket, fine_window: window, view_bucket: bucket)
+    end
+  end
+
+  defp view_bucket({vx, vy, vz}, scale) do
+    {round(vx * 8), round(vy * 8), round(vz * 8), round(:math.log2(scale / 50) * 2)}
   end
 
   # 3D mode never re-projects server-side; the tile DOM is static.
@@ -491,14 +544,20 @@ defmodule BrokenOathsWeb.WorldLive.Show do
           >
             <div class="globe-disc globe-disc3d"></div>
 
-            <%!-- Keyed by world+seed so Regenerate swaps the ignored DOM.
-                 Two detail levels; the hook shows exactly one: full detail
-                 while the disc edge is off-screen, coarse when the edge is
-                 visible (the whole hemisphere would otherwise composite). --%>
-            <div id={"globe3d-#{@world.id}-#{@world.seed}"} phx-update="ignore" class="globe3d-anchor">
+            <%!-- Keyed by world+seed+view bucket so Regenerate AND settled
+                 view changes swap the ignored DOM. Two detail levels; the
+                 hook shows exactly one: fine (windowed around the view
+                 center) while the disc edge is off-screen, coarse when the
+                 edge is visible (the whole hemisphere would otherwise
+                 composite). --%>
+            <div
+              id={"globe3d-#{@world.id}-#{@world.seed}-#{:erlang.phash2(@view_bucket)}"}
+              phx-update="ignore"
+              class="globe3d-anchor"
+            >
               <div class="globe3d globe3d-fine">
                 <div
-                  :for={facet <- @facets}
+                  :for={facet <- @fine_window}
                   class={["hex-cell3d", terrain_class(Map.get(@terrain_map, facet.id, :ocean))]}
                   phx-click="select_tile"
                   phx-value-id={facet.id}
@@ -777,17 +836,29 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 this.sync(false)
               }
 
-              this.sync = (force) => {
+              // Mid-motion syncs keep the sidebar fresh; a "settled" sync
+              // (drag end / motion pause) lets the server re-window the
+              // fine tile DOM around the new view.
+              this.sync = (force, settled) => {
                 const now = Date.now()
                 if (!force && now - this.lastSync < 250) {
                   if (!this.syncTimer) {
-                    this.syncTimer = setTimeout(() => { this.syncTimer = null; this.sync(true) }, 250)
+                    this.syncTimer = setTimeout(() => { this.syncTimer = null; this.sync(true, false) }, 250)
                   }
+                  this.scheduleSettle()
                   return
                 }
                 if (this.syncTimer) { clearTimeout(this.syncTimer); this.syncTimer = null }
                 this.lastSync = now
-                this.pushEvent("view_sync", {yaw: this.yaw, pitch: this.pitch, scale: this.S})
+                this.pushEvent("view_sync", {yaw: this.yaw, pitch: this.pitch, scale: this.S, settled: !!settled})
+                if (!settled) this.scheduleSettle()
+              }
+
+              // Settle fires 300ms after the last motion.
+              this.settleTimer = null
+              this.scheduleSettle = () => {
+                clearTimeout(this.settleTimer)
+                this.settleTimer = setTimeout(() => this.sync(true, true), 300)
               }
 
               // --- drag ---
@@ -814,7 +885,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               })
               const end = (e) => {
                 if (this.pointer === null || e.pointerId !== this.pointer) return
-                if (this.moved) this.sync(true)
+                if (this.moved) this.sync(true, true)
                 this.pointer = null
                 this.moved = false
                 this.el.classList.remove("dragging")
@@ -825,7 +896,9 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               // --- continuous wheel zoom ---
               this.el.addEventListener("wheel", (e) => {
                 e.preventDefault()
-                this.S *= Math.exp(-e.deltaY * 0.0015)
+                // deltaMode 1 = lines (Firefox wheels); normalize to ~pixels
+                const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY
+                this.S *= Math.exp(-dy * 0.0015)
                 this.clampS()
                 this.schedule()
                 this.sync(false)
@@ -868,6 +941,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               if (this.ro) this.ro.disconnect()
               if (this.raf) cancelAnimationFrame(this.raf)
               if (this.syncTimer) clearTimeout(this.syncTimer)
+              if (this.settleTimer) clearTimeout(this.settleTimer)
               if (this.resizeTimer) clearTimeout(this.resizeTimer)
             }
           }

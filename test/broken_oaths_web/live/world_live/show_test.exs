@@ -207,7 +207,7 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       refute html =~ "0.0° / 0.0°"
     end
 
-    test "3D mode renders every tile once and back to classic", %{conn: conn, world: world} do
+    test "3D mode renders windowed fine tiles and back to classic", %{conn: conn, world: world} do
       {:ok, view, html} = live(conn, ~p"/worlds/#{world.id}")
       refute html =~ "globe3d-stage"
 
@@ -215,11 +215,12 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       assert html =~ "globe3d-stage"
       assert html =~ "matrix3d("
 
+      # Fine layer is windowed around the view center — never the whole mesh
       tile_count = BrokenOaths.Worlds.Globe.tile_count(@frequency)
       facet_divs = html |> String.split("hex-cell3d") |> length() |> Kernel.-(1)
-      assert facet_divs >= tile_count
+      assert facet_divs > 0
+      assert facet_divs < tile_count + BrokenOaths.Worlds.Globe.tile_count(12)
 
-      # Server-side rotation events are inert in 3D mode
       view |> element("button", "Regenerate") |> render_click()
       html = render(view)
       assert html =~ "globe3d-stage"
@@ -229,6 +230,44 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       refute html =~ "globe3d-stage"
       assert html =~ "hex-cell"
       assert html =~ "clip-path:polygon("
+    end
+
+    test "3D fine window follows a settled view and shrinks when zoomed in", %{
+      conn: conn,
+      world: world
+    } do
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+      html = view |> element("button", "3D β") |> render_click()
+      initial = html |> String.split("hex-cell3d") |> length() |> Kernel.-(1)
+
+      # Deep zoom, settled: window should be much smaller than the mesh
+      html =
+        view
+        |> element("#globe3d-stage")
+        |> render_hook("view_sync", %{yaw: 0.0, pitch: 0.0, scale: 5000, settled: true})
+
+      zoomed = html |> String.split("hex-cell3d") |> length() |> Kernel.-(1)
+      assert zoomed < initial
+
+      # Rotating to the far side swaps in a different window
+      html =
+        view
+        |> element("#globe3d-stage")
+        |> render_hook("view_sync", %{yaw: 3.14, pitch: 0.0, scale: 5000, settled: true})
+
+      far_ids =
+        Regex.scan(~r/phx-value-id="(\d+)"(?! phx-value-lod)/, html)
+        |> MapSet.new(fn [_, id] -> id end)
+
+      assert MapSet.size(far_ids) > 0
+
+      # Unsettled syncs do not re-window (no DOM churn mid-drag)
+      html2 =
+        view
+        |> element("#globe3d-stage")
+        |> render_hook("view_sync", %{yaw: 0.0, pitch: 0.0, scale: 5000, settled: false})
+
+      assert html2 =~ ~s(yaw="0.0")
     end
 
     test "3D mode renders a coarse LOD layer and maps its clicks to real tiles", %{
