@@ -228,17 +228,21 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     {:noreply, socket}
   end
 
-  # Far-zoom clicks land on the canvas impostor; the hook inverse-projects
-  # them to a unit-sphere point and the nearest real tile gets selected.
+  # Canvas clicks at ANY zoom: the hook inverse-projects to a unit-sphere
+  # point and the nearest real tile gets selected.
   def handle_event("select_at", %{"x" => x, "y" => y, "z" => z}, socket)
       when is_number(x) and is_number(y) and is_number(z) do
     tile = Globe.nearest_tile(socket.assigns.mesh, {x * 1.0, y * 1.0, z * 1.0})
 
-    {:noreply,
-     assign(socket,
-       selected_tile: tile,
-       selected_terrain: Map.get(socket.assigns.terrain_map, tile.id)
-     )}
+    socket =
+      socket
+      |> assign(
+        selected_tile: tile,
+        selected_terrain: Map.get(socket.assigns.terrain_map, tile.id)
+      )
+      |> push_selection()
+
+    {:noreply, socket}
   end
 
   def handle_event("select_tile", %{"id" => id}, socket) do
@@ -246,11 +250,12 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     tile = Globe.tile(socket.assigns.mesh, id)
     terrain = Map.get(socket.assigns.terrain_map, id)
 
-    {:noreply,
-     assign(socket,
-       selected_tile: tile,
-       selected_terrain: terrain
-     )}
+    socket =
+      socket
+      |> assign(selected_tile: tile, selected_terrain: terrain)
+      |> push_selection()
+
+    {:noreply, socket}
   end
 
   def handle_event("regenerate", _params, socket) do
@@ -278,7 +283,9 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
         # New seed = new bucket: pushes a recolored tile window in 3D mode
         socket =
-          if socket.assigns.render_mode == :three_d, do: rewindow(socket), else: socket
+          if socket.assigns.render_mode == :three_d,
+            do: socket |> rewindow() |> push_selection(),
+            else: socket
 
         {:noreply, socket}
 
@@ -395,6 +402,31 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
   defp clamp_pitch(pitch), do: max(-@max_pitch, min(pitch, @max_pitch))
 
+  # Selection as pushed geometry: both canvas render paths (texture far,
+  # polygons near) draw the ring from it, so clicks are visible at any zoom.
+  defp push_selection(%{assigns: %{render_mode: :three_d}} = socket) do
+    case socket.assigns.selected_tile do
+      %Globe.Tile{} = tile ->
+        {cx, cy, cz} = tile.center
+
+        corners =
+          Enum.flat_map(tile.corners, fn {x, y, z} ->
+            [Float.round(x, 4), Float.round(y, 4), Float.round(z, 4)]
+          end)
+
+        push_event(socket, "globe3d:selected", %{
+          id: tile.id,
+          center: [Float.round(cx, 4), Float.round(cy, 4), Float.round(cz, 4)],
+          corners: corners
+        })
+
+      nil ->
+        push_event(socket, "globe3d:selected", %{id: nil})
+    end
+  end
+
+  defp push_selection(socket), do: socket
+
   defp tile_budget(true), do: @tile_budget_touch
   defp tile_budget(false), do: @tile_budget_desktop
 
@@ -435,6 +467,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
       view_bucket: nil
     )
     |> rewindow()
+    |> push_selection()
   end
 
   defp set_mode(socket, :classic) do
@@ -981,6 +1014,14 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 }
               })
 
+              // Selection geometry — drawable at any zoom, in both render
+              // paths, independent of the current tile window.
+              this.selected = null
+              this.handleEvent("globe3d:selected", (sel) => {
+                this.selected = sel.id === null ? null : sel
+                this.schedule()
+              })
+
               // --- baked world texture for the far-zoom impostor ---
               // Two-stage: the tiny level-0 bake paints almost instantly,
               // then the full-resolution level 1 replaces it.
@@ -1145,7 +1186,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
                 // View-space z of a world point (backface test)
                 const vz = (x, y, z) => cp * cyw * x + cp * syw * y + sp * z
-                let selected = null
 
                 for (const row of tiles) {
                   if (vz(row[2], row[3], row[4]) <= 0.02) continue
@@ -1165,22 +1205,36 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                   ctx.strokeStyle = color
                   ctx.lineWidth = 1
                   ctx.stroke()
-                  if (row[0] === this.selectedId) selected = row
                 }
 
-                if (selected) {
-                  ctx.beginPath()
-                  for (let i = 5; i < selected.length; i += 3) {
-                    const x = selected[i], y = selected[i + 1], z = selected[i + 2]
-                    const px = ccx + S * (-syw * x + cyw * y)
-                    const py = ccy - S * (-sp * cyw * x - sp * syw * y + cp * z)
-                    if (i === 5) ctx.moveTo(px, py); else ctx.lineTo(px, py)
-                  }
-                  ctx.closePath()
-                  ctx.strokeStyle = "#ffffff"
-                  ctx.lineWidth = Math.max(2 * k, 2)
-                  ctx.stroke()
+                this.drawSelection()
+              }
+
+              // Selection ring, drawn over either render path at any zoom.
+              this.drawSelection = () => {
+                const sel = this.selected
+                if (!sel) return
+                const ctx = this.ctx
+                const k = this.pxScale
+                const S = this.S * k, ccx = this.cx * k, ccy = this.cy * k
+                const cyw = Math.cos(this.yaw), syw = Math.sin(this.yaw)
+                const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
+
+                const [cx0, cy0, cz0] = sel.center
+                if (cp * cyw * cx0 + cp * syw * cy0 + sp * cz0 <= 0.02) return
+
+                const cs = sel.corners
+                ctx.beginPath()
+                for (let i = 0; i < cs.length; i += 3) {
+                  const x = cs[i], y = cs[i + 1], z = cs[i + 2]
+                  const px = ccx + S * (-syw * x + cyw * y)
+                  const py = ccy - S * (-sp * cyw * x - sp * syw * y + cp * z)
+                  if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
                 }
+                ctx.closePath()
+                ctx.strokeStyle = "#ffffff"
+                ctx.lineWidth = Math.max(2 * k, 2)
+                ctx.stroke()
               }
 
               this.renderCanvas = () => {
@@ -1215,6 +1269,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                   }
                 }
                 this.ctx.putImageData(this.frame, 0, 0)
+                this.drawSelection()
               }
 
               this.apply = () => {

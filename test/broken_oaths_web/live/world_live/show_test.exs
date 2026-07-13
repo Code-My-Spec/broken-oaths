@@ -342,6 +342,23 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       assert html =~ "#300"
       # Selection round-trips to the hook for the canvas highlight ring
       assert html =~ ~s(data-selected-id="300")
+
+      # ...as pushed geometry, drawable at ANY zoom (far texture included)
+      assert_push_event(view, "globe3d:selected", %{id: 300, center: center, corners: corners})
+      assert length(center) == 3
+      assert length(corners) in [15, 18]
+
+      # Selecting works identically when fully zoomed out (far mode)
+      view
+      |> element("#globe3d-stage")
+      |> render_hook("view_sync", %{yaw: 0.0, pitch: 0.0, scale: 100, settled: true})
+
+      BrokenOathsWeb.GlobeHelpers.select_tile_at(view, world, 7)
+      assert_push_event(view, "globe3d:selected", %{id: 7})
+
+      # Regenerate clears the selection ring
+      view |> element("button", "Regenerate") |> render_click()
+      assert_push_event(view, "globe3d:selected", %{id: nil})
     end
 
     test "3D mode has the canvas impostor and texture URL", %{conn: conn, world: world} do
