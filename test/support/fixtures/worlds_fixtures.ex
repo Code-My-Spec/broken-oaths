@@ -10,15 +10,11 @@ defmodule BrokenOaths.WorldsFixtures do
       |> Enum.into(%{
         name: "Test World #{System.unique_integer([:positive])}",
         seed: unique_world_seed(),
-        width: 200,
-        height: 150
+        # Small globe (642 tiles) keeps LiveView tests fast
+        frequency: 8
       })
       |> Worlds.create_world()
 
     world
-  end
-
-  def small_world_fixture(attrs \\ %{}) do
-    world_fixture(Map.merge(%{width: 20, height: 15}, attrs))
   end
 end

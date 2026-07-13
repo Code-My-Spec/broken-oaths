@@ -46,21 +46,26 @@ defmodule BrokenOaths.WorldsTest do
       assert {:ok, %World{} = world} = Worlds.create_world(attrs)
       assert world.name == "My World"
       assert world.seed == 12345
-      assert world.width == 200
-      assert world.height == 150
+      assert world.frequency == 54
       assert world.status == "active"
     end
 
-    test "uses default dimensions" do
+    test "uses default frequency" do
       {:ok, world} = Worlds.create_world(%{name: "Default", seed: 99})
-      assert world.width == 200
-      assert world.height == 150
+      assert world.frequency == 54
     end
 
-    test "allows custom dimensions" do
-      {:ok, world} = Worlds.create_world(%{name: "Custom", seed: 100, width: 50, height: 30})
-      assert world.width == 50
-      assert world.height == 30
+    test "allows custom frequency" do
+      {:ok, world} = Worlds.create_world(%{name: "Custom", seed: 100, frequency: 8})
+      assert world.frequency == 8
+    end
+
+    test "rejects out-of-range frequency" do
+      assert {:error, changeset} = Worlds.create_world(%{name: "Huge", seed: 101, frequency: 999})
+      assert errors_on(changeset).frequency
+
+      assert {:error, changeset} = Worlds.create_world(%{name: "Zero", seed: 102, frequency: 0})
+      assert errors_on(changeset).frequency
     end
 
     test "fails without name" do

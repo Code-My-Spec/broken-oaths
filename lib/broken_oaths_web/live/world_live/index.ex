@@ -1,6 +1,7 @@
 defmodule BrokenOathsWeb.WorldLive.Index do
   use BrokenOathsWeb, :live_view
   alias BrokenOaths.Worlds
+  alias BrokenOaths.Worlds.Globe
 
   def mount(_params, _session, socket) do
     worlds = Worlds.list_worlds()
@@ -18,7 +19,10 @@ defmodule BrokenOathsWeb.WorldLive.Index do
       {:error, _changeset} ->
         # Seed collision (extremely rare), retry with different seed
         new_seed = :rand.uniform(999_999_999)
-        {:ok, world} = Worlds.create_world(%{name: Worlds.random_world_name(new_seed), seed: new_seed})
+
+        {:ok, world} =
+          Worlds.create_world(%{name: Worlds.random_world_name(new_seed), seed: new_seed})
+
         {:noreply, push_navigate(socket, to: ~p"/worlds/#{world.id}")}
     end
   end
@@ -45,12 +49,15 @@ defmodule BrokenOathsWeb.WorldLive.Index do
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <div :for={world <- @worlds} class="card bg-base-200 shadow-md hover:shadow-lg transition-shadow">
+        <div
+          :for={world <- @worlds}
+          class="card bg-base-200 shadow-md hover:shadow-lg transition-shadow"
+        >
           <div class="card-body">
             <h2 class="card-title">{world.name}</h2>
             <div class="space-y-1 text-sm opacity-70">
               <p>Seed: {world.seed}</p>
-              <p>{world.width} × {world.height} hexes</p>
+              <p>GP({world.frequency}) · {Globe.tile_count(world.frequency)} tiles</p>
             </div>
             <div class="card-actions justify-end mt-2">
               <.link navigate={~p"/worlds/#{world.id}"} class="btn btn-sm btn-primary">

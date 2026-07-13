@@ -6,7 +6,7 @@ defmodule BrokenOathsWeb.WorldLive.IndexTest do
 
   describe "Index" do
     test "renders empty state when no worlds", %{conn: conn} do
-      {:ok, view, html} = live(conn, ~p"/worlds")
+      {:ok, _view, html} = live(conn, ~p"/worlds")
       assert html =~ "Hex Worlds"
       assert html =~ "No worlds yet"
     end

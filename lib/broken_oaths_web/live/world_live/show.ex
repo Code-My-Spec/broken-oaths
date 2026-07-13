@@ -2,13 +2,20 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   use BrokenOathsWeb, :live_view
 
   alias BrokenOaths.Worlds
-  alias BrokenOaths.Worlds.Generator
+  alias BrokenOaths.Worlds.{Generator, Globe, Projection}
 
-  @zoom_levels [3, 5, 8, 12, 18, 25]
+  # Zoom = pixels per sphere radius. 350 fits the whole hemisphere disc
+  # into the 960x700 viewport; higher values zoom into the surface.
+  @zoom_scales [350, 500, 700, 1000, 1400, 2000]
   @default_zoom_index 2
-  @pan_step 10
   @container_w 960
   @container_h 700
+
+  # Rotation step ≈ this many pixels of screen travel at the view center.
+  @pan_px 150
+  # Pitch clamp (±85.9°) keeps the up-vector sane; pole tiles are still
+  # dead-center visible well before the clamp.
+  @max_pitch 1.50
 
   @terrain_legend [
     {:ocean, "#1e3a8a", "Ocean"},
@@ -29,7 +36,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     world = Worlds.get_world!(id)
     worlds = Worlds.list_worlds()
 
-    terrain_map = Generator.generate_terrain_map(world.seed, world.width, world.height)
+    mesh = Globe.get(world.frequency)
+    terrain_map = Generator.generate_terrain_map(world.seed, mesh)
     stats = Generator.terrain_stats(terrain_map)
 
     socket =
@@ -37,12 +45,13 @@ defmodule BrokenOathsWeb.WorldLive.Show do
       |> assign(
         world: world,
         worlds: worlds,
+        mesh: mesh,
         terrain_map: terrain_map,
         stats: stats,
-        viewport: %{x: 0, y: 0},
+        yaw: 0.0,
+        pitch: 0.0,
         zoom_index: @default_zoom_index,
-        hex_size: Enum.at(@zoom_levels, @default_zoom_index),
-        selected_hex: nil,
+        selected_tile: nil,
         selected_terrain: nil,
         page_title: world.name,
         terrain_legend: @terrain_legend
@@ -56,14 +65,14 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   # Events
   # -------------------------------------------------------------------
 
-  def handle_event("select_hex", %{"q" => q, "r" => r}, socket) do
-    q = String.to_integer(q)
-    r = String.to_integer(r)
-    terrain = Map.get(socket.assigns.terrain_map, {q, r})
+  def handle_event("select_tile", %{"id" => id}, socket) do
+    id = String.to_integer(id)
+    tile = Globe.tile(socket.assigns.mesh, id)
+    terrain = Map.get(socket.assigns.terrain_map, id)
 
     {:noreply,
      assign(socket,
-       selected_hex: {q, r},
+       selected_tile: tile,
        selected_terrain: terrain
      )}
   end
@@ -73,7 +82,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
     case Worlds.update_world(socket.assigns.world, %{seed: new_seed}) do
       {:ok, world} ->
-        terrain_map = Generator.generate_terrain_map(world.seed, world.width, world.height)
+        # The mesh depends only on frequency; only terrain regenerates.
+        terrain_map = Generator.generate_terrain_map(world.seed, socket.assigns.mesh)
         stats = Generator.terrain_stats(terrain_map)
         worlds = Worlds.list_worlds()
 
@@ -84,9 +94,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             worlds: worlds,
             terrain_map: terrain_map,
             stats: stats,
-            selected_hex: nil,
+            selected_tile: nil,
             selected_terrain: nil,
-            viewport: %{x: 0, y: 0},
             page_title: world.name
           )
           |> compute_view()
@@ -109,11 +118,11 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   end
 
   def handle_event("zoom_in", _params, socket) do
-    new_index = min(socket.assigns.zoom_index + 1, length(@zoom_levels) - 1)
+    new_index = min(socket.assigns.zoom_index + 1, length(@zoom_scales) - 1)
 
     socket =
       socket
-      |> assign(zoom_index: new_index, hex_size: Enum.at(@zoom_levels, new_index))
+      |> assign(zoom_index: new_index)
       |> compute_view()
 
     {:noreply, socket}
@@ -124,22 +133,22 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
     socket =
       socket
-      |> assign(zoom_index: new_index, hex_size: Enum.at(@zoom_levels, new_index))
+      |> assign(zoom_index: new_index)
       |> compute_view()
 
     {:noreply, socket}
   end
 
   def handle_event("pan", %{"dir" => dir}, socket) do
-    do_pan(socket, dir)
+    do_rotate(socket, dir)
   end
 
   def handle_event("keydown", %{"key" => key}, socket) do
     case key do
-      k when k in ["ArrowLeft", "a"] -> do_pan(socket, "left")
-      k when k in ["ArrowRight", "d"] -> do_pan(socket, "right")
-      k when k in ["ArrowUp", "w"] -> do_pan(socket, "up")
-      k when k in ["ArrowDown", "s"] -> do_pan(socket, "down")
+      k when k in ["ArrowLeft", "a"] -> do_rotate(socket, "left")
+      k when k in ["ArrowRight", "d"] -> do_rotate(socket, "right")
+      k when k in ["ArrowUp", "w"] -> do_rotate(socket, "up")
+      k when k in ["ArrowDown", "s"] -> do_rotate(socket, "down")
       k when k in ["+", "="] -> handle_event("zoom_in", %{}, socket)
       k when k in ["-", "_"] -> handle_event("zoom_out", %{}, socket)
       _ -> {:noreply, socket}
@@ -154,68 +163,67 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   # Helpers
   # -------------------------------------------------------------------
 
-  defp do_pan(socket, dir) do
-    %{viewport: vp, world: w} = socket.assigns
+  defp do_rotate(socket, dir) do
+    %{yaw: yaw, pitch: pitch} = socket.assigns
+    scale = Enum.at(@zoom_scales, socket.assigns.zoom_index)
 
-    {dx, dy} =
+    step = @pan_px / scale
+    # East-west steps cover similar screen distance near the poles
+    yaw_step = step / max(:math.cos(pitch), 0.25)
+
+    {yaw, pitch} =
       case dir do
-        "left" -> {-@pan_step, 0}
-        "right" -> {@pan_step, 0}
-        "up" -> {0, -@pan_step}
-        "down" -> {0, @pan_step}
-        _ -> {0, 0}
+        "left" -> {yaw - yaw_step, pitch}
+        "right" -> {yaw + yaw_step, pitch}
+        "up" -> {yaw, pitch + step}
+        "down" -> {yaw, pitch - step}
+        _ -> {yaw, pitch}
       end
 
-    new_x = rem(rem(vp.x + dx, w.width) + w.width, w.width)
-    new_y = max(0, min(vp.y + dy, w.height - 1))
+    two_pi = 2 * :math.pi()
+    yaw = yaw - two_pi * Float.floor(yaw / two_pi)
+    pitch = max(-@max_pitch, min(pitch, @max_pitch))
 
     socket =
       socket
-      |> assign(viewport: %{x: new_x, y: new_y})
+      |> assign(yaw: yaw, pitch: pitch)
       |> compute_view()
 
     {:noreply, socket}
   end
 
   defp compute_view(socket) do
-    %{terrain_map: tm, viewport: vp, hex_size: hs, world: w} = socket.assigns
+    %{mesh: mesh, terrain_map: tm, yaw: yaw, pitch: pitch, zoom_index: zi} = socket.assigns
+    scale = Enum.at(@zoom_scales, zi)
 
-    sqrt3 = :math.sqrt(3)
-    hex_w = round(hs * 2)
-    hex_h = max(round(hs * sqrt3), 1)
-
-    cols = min(div(@container_w, max(round(hs * 1.5), 1)) + 2, w.width)
-    rows = min(div(@container_h, max(round(hs * sqrt3), 1)) + 2, w.height - vp.y)
-    rows = max(rows, 1)
-
-    hexes =
-      for dq <- 0..(cols - 1),
-          dr <- 0..(rows - 1) do
-        q = rem(vp.x + dq, w.width)
-        r = vp.y + dr
-
-        if r >= 0 and r < w.height do
-          px = Float.round(hs * 1.5 * dq, 1)
-          py = Float.round(hs * (sqrt3 / 2 * dq + sqrt3 * dr), 1)
-          terrain = Map.get(tm, {q, r}, :ocean)
-          %{q: q, r: r, x: px, y: py, terrain: terrain}
-        end
-      end
-      |> Enum.reject(&is_nil/1)
-
-    grid_w = round(hs * 1.5 * (cols + 1))
-    grid_h = round(hs * sqrt3 * (rows + 1))
+    view = %{
+      yaw: yaw,
+      pitch: pitch,
+      scale: scale,
+      cx: @container_w / 2,
+      cy: @container_h / 2,
+      w: @container_w,
+      h: @container_h
+    }
 
     assign(socket,
-      visible_hexes: hexes,
-      hex_w: hex_w,
-      hex_h: hex_h,
-      grid_w: grid_w,
-      grid_h: grid_h
+      visible_tiles: Projection.visible_tiles(mesh, tm, view),
+      scale: scale,
+      container_w: @container_w,
+      container_h: @container_h
     )
   end
 
   defp terrain_class(terrain), do: "hex-#{terrain}"
+
+  defp deg(radians), do: Float.round(radians * 180.0 / :math.pi(), 1)
+
+  defp format_latlon(center) do
+    {lat, lon} = Globe.latlon(center)
+    ns = if lat >= 0, do: "N", else: "S"
+    ew = if lon >= 0, do: "E", else: "W"
+    "#{Float.round(abs(lat), 1)}°#{ns} #{Float.round(abs(lon), 1)}°#{ew}"
+  end
 
   defp terrain_label(nil), do: "—"
 
@@ -261,7 +269,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
         <div class="flex items-center gap-1">
           <button phx-click="zoom_out" class="btn btn-xs btn-square btn-ghost text-lg">−</button>
-          <span class="text-xs font-mono w-6 text-center">{@hex_size}</span>
+          <span class="text-xs font-mono w-10 text-center">{@scale}</span>
           <button phx-click="zoom_in" class="btn btn-xs btn-square btn-ghost text-lg">+</button>
         </div>
 
@@ -280,44 +288,66 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
       <%!-- Main content --%>
       <div class="flex flex-1 min-h-0">
-        <%!-- Hex grid viewport --%>
+        <%!-- Globe viewport --%>
         <div class="flex-1 overflow-hidden bg-base-300 relative">
           <div
-            class="hex-grid-viewport"
-            style={"position:relative;width:#{@grid_w}px;height:#{@grid_h}px;"}
+            class="globe-viewport"
+            style={"position:relative;width:#{@container_w}px;height:#{@container_h}px;"}
           >
+            <%!-- Sphere disc behind the tiles: fills hairline seams dark --%>
             <div
-              :for={hex <- @visible_hexes}
+              class="globe-disc"
+              style={"left:#{@container_w / 2 - @scale}px;top:#{@container_h / 2 - @scale}px;width:#{@scale * 2}px;height:#{@scale * 2}px;"}
+            >
+            </div>
+
+            <div
+              :for={tile <- @visible_tiles}
               class={[
                 "hex-cell",
-                terrain_class(hex.terrain),
-                @selected_hex == {hex.q, hex.r} && "hex-selected"
+                terrain_class(tile.terrain),
+                @selected_tile && @selected_tile.id == tile.id && "hex-selected"
               ]}
-              phx-click="select_hex"
-              phx-value-q={hex.q}
-              phx-value-r={hex.r}
-              style={"left:#{hex.x}px;top:#{hex.y}px;width:#{@hex_w}px;height:#{@hex_h}px;"}
-              title={"(#{hex.q}, #{hex.r}) #{hex.terrain}"}
+              phx-click="select_tile"
+              phx-value-id={tile.id}
+              style={"left:#{tile.left}px;top:#{tile.top}px;width:#{tile.width}px;height:#{tile.height}px;clip-path:#{tile.clip_path};"}
+              title={"##{tile.id} #{tile.terrain}"}
             >
             </div>
           </div>
 
-          <%!-- Pan controls overlay --%>
+          <%!-- Rotate controls overlay --%>
           <div class="absolute bottom-4 left-4 grid grid-cols-3 gap-0.5 opacity-60 hover:opacity-100 transition-opacity">
             <div></div>
-            <button phx-click="pan" phx-value-dir="up" class="btn btn-xs btn-circle btn-ghost bg-base-100/70">
+            <button
+              phx-click="pan"
+              phx-value-dir="up"
+              class="btn btn-xs btn-circle btn-ghost bg-base-100/70"
+            >
               <.icon name="hero-chevron-up" class="w-3 h-3" />
             </button>
             <div></div>
-            <button phx-click="pan" phx-value-dir="left" class="btn btn-xs btn-circle btn-ghost bg-base-100/70">
+            <button
+              phx-click="pan"
+              phx-value-dir="left"
+              class="btn btn-xs btn-circle btn-ghost bg-base-100/70"
+            >
               <.icon name="hero-chevron-left" class="w-3 h-3" />
             </button>
             <div></div>
-            <button phx-click="pan" phx-value-dir="right" class="btn btn-xs btn-circle btn-ghost bg-base-100/70">
+            <button
+              phx-click="pan"
+              phx-value-dir="right"
+              class="btn btn-xs btn-circle btn-ghost bg-base-100/70"
+            >
               <.icon name="hero-chevron-right" class="w-3 h-3" />
             </button>
             <div></div>
-            <button phx-click="pan" phx-value-dir="down" class="btn btn-xs btn-circle btn-ghost bg-base-100/70">
+            <button
+              phx-click="pan"
+              phx-value-dir="down"
+              class="btn btn-xs btn-circle btn-ghost bg-base-100/70"
+            >
               <.icon name="hero-chevron-down" class="w-3 h-3" />
             </button>
             <div></div>
@@ -325,7 +355,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
           <%!-- Keyboard hint --%>
           <div class="absolute bottom-4 right-4 text-xs opacity-40">
-            WASD / Arrows to pan · +/− to zoom
+            WASD / Arrows to rotate · +/− to zoom
           </div>
         </div>
 
@@ -341,38 +371,50 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               </div>
               <div class="flex justify-between">
                 <dt class="opacity-60">Size</dt>
-                <dd>{@world.width} × {@world.height}</dd>
+                <dd>GP({@world.frequency}) · {Globe.tile_count(@world.frequency)} tiles</dd>
               </div>
               <div class="flex justify-between">
-                <dt class="opacity-60">Viewport</dt>
-                <dd>({@viewport.x}, {@viewport.y})</dd>
+                <dt class="opacity-60">View</dt>
+                <dd>{deg(@yaw)}° / {deg(@pitch)}°</dd>
               </div>
               <div class="flex justify-between">
                 <dt class="opacity-60">Zoom</dt>
-                <dd>{@hex_size}px</dd>
+                <dd>{@scale}px</dd>
               </div>
             </dl>
           </div>
 
           <div class="divider my-0"></div>
 
-          <%!-- Selected hex --%>
+          <%!-- Selected tile --%>
           <div>
-            <h3 class="font-bold text-sm uppercase tracking-wide opacity-60 mb-2">Selected Hex</h3>
-            <div :if={@selected_hex == nil} class="text-sm opacity-40">
-              Click a hex to inspect it
+            <h3 class="font-bold text-sm uppercase tracking-wide opacity-60 mb-2">Selected Tile</h3>
+            <div :if={@selected_tile == nil} class="text-sm opacity-40">
+              Click a tile to inspect it
             </div>
-            <dl :if={@selected_hex} class="text-sm space-y-1">
+            <dl :if={@selected_tile} class="text-sm space-y-1">
+              <div class="flex justify-between">
+                <dt class="opacity-60">Tile</dt>
+                <dd>#{@selected_tile.id}</dd>
+              </div>
               <div class="flex justify-between">
                 <dt class="opacity-60">Position</dt>
-                <dd>({elem(@selected_hex, 0)}, {elem(@selected_hex, 1)})</dd>
+                <dd>{format_latlon(@selected_tile.center)}</dd>
               </div>
               <div class="flex items-center justify-between">
                 <dt class="opacity-60">Terrain</dt>
                 <dd class="flex items-center gap-1.5">
-                  <span class={["inline-block w-3 h-3 rounded-sm", terrain_class(@selected_terrain)]}></span>
+                  <span class={["inline-block w-3 h-3 rounded-sm", terrain_class(@selected_terrain)]}>
+                  </span>
                   {terrain_label(@selected_terrain)}
                 </dd>
+              </div>
+              <div class="flex justify-between">
+                <dt class="opacity-60">Neighbors</dt>
+                <dd>{length(@selected_tile.neighbors)}</dd>
+              </div>
+              <div :if={@selected_tile.pentagon?} class="mt-1">
+                <span class="badge badge-warning badge-sm">Pentagon (impassable)</span>
               </div>
             </dl>
           </div>
@@ -384,7 +426,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             <h3 class="font-bold text-sm uppercase tracking-wide opacity-60 mb-2">Terrain Stats</h3>
             <div class="space-y-1">
               <div :for={{terrain, _count, pct} <- @stats} class="flex items-center gap-2 text-sm">
-                <span class={["inline-block w-3 h-3 rounded-sm flex-none", terrain_class(terrain)]}></span>
+                <span class={["inline-block w-3 h-3 rounded-sm flex-none", terrain_class(terrain)]}>
+                </span>
                 <span class="flex-1">{terrain_label(terrain)}</span>
                 <span class="opacity-60 font-mono text-xs">{pct}%</span>
               </div>
@@ -397,8 +440,12 @@ defmodule BrokenOathsWeb.WorldLive.Show do
           <div>
             <h3 class="font-bold text-sm uppercase tracking-wide opacity-60 mb-2">Legend</h3>
             <div class="space-y-1">
-              <div :for={{_terrain, color, label} <- @terrain_legend} class="flex items-center gap-2 text-sm">
-                <span class="inline-block w-4 h-3 rounded-sm flex-none" style={"background:#{color}"}></span>
+              <div
+                :for={{_terrain, color, label} <- @terrain_legend}
+                class="flex items-center gap-2 text-sm"
+              >
+                <span class="inline-block w-4 h-3 rounded-sm flex-none" style={"background:#{color}"}>
+                </span>
                 <span>{label}</span>
               </div>
             </div>

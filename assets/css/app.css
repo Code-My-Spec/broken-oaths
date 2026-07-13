@@ -104,13 +104,21 @@
 
 /* This file is for your main application CSS */
 
-/* ===== Hex Grid Rendering ===== */
+/* ===== Hex Globe Rendering ===== */
 
+/* Each tile carries its own projected clip-path polygon inline. */
 .hex-cell {
   position: absolute;
-  clip-path: polygon(75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%, 25% 0%);
   cursor: pointer;
   transition: filter 0.1s ease;
+}
+
+/* Sphere silhouette behind the tiles; fills hairline seams dark. */
+.globe-disc {
+  position: absolute;
+  border-radius: 50%;
+  background-color: #0b1220;
+  pointer-events: none;
 }
 
 .hex-cell:hover {

@@ -4,17 +4,30 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
   import Phoenix.LiveViewTest
   import BrokenOaths.WorldsFixtures
 
+  alias BrokenOaths.Worlds.{Globe, Projection}
+
+  # Fixture worlds use frequency 8 (642 tiles) to keep tests fast.
+  @frequency 8
+
   describe "Show" do
     setup do
       %{world: world_fixture(%{name: "Emerald Shores", seed: 12345})}
     end
 
-    test "renders world with hex grid", %{conn: conn, world: world} do
+    test "renders world with globe tiles", %{conn: conn, world: world} do
       {:ok, _view, html} = live(conn, ~p"/worlds/#{world.id}")
       assert html =~ "Emerald Shores"
       assert html =~ "12345"
-      # Should render hex cells
+      # Should render tile cells with per-tile clip paths
       assert html =~ "hex-cell"
+      assert html =~ "clip-path:polygon("
+      assert html =~ "globe-disc"
+    end
+
+    test "shows world size as tile count", %{conn: conn, world: world} do
+      {:ok, _view, html} = live(conn, ~p"/worlds/#{world.id}")
+      assert html =~ "GP(#{@frequency})"
+      assert html =~ "#{Globe.tile_count(@frequency)} tiles"
     end
 
     test "shows terrain legend", %{conn: conn, world: world} do
@@ -30,15 +43,44 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       assert html =~ "%"
     end
 
-    test "selecting a hex shows details", %{conn: conn, world: world} do
+    test "selecting a tile shows details", %{conn: conn, world: world} do
       {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+
+      # Pick a tile that is definitely rendered under the default view
+      tile_id = a_visible_tile_id()
 
       html =
         view
-        |> element("[phx-value-q='5'][phx-value-r='5']")
+        |> element("[phx-value-id='#{tile_id}']")
         |> render_click()
 
-      assert html =~ "(5, 5)"
+      assert html =~ "##{tile_id}"
+      # Lat/lon position line
+      assert html =~ ~r/\d+\.\d°[NS] \d+\.\d°[EW]/
+      assert html =~ "Neighbors"
+    end
+
+    test "selecting the north-pole pentagon shows the impassable badge", %{
+      conn: conn,
+      world: world
+    } do
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+
+      # Rotate up until the pole (tile 0) is in view
+      for _ <- 1..8 do
+        view |> element("[phx-value-dir='up']") |> render_click()
+      end
+
+      html =
+        view
+        |> element("[phx-value-id='0']")
+        |> render_click()
+
+      assert html =~ "#0"
+      assert html =~ "Pentagon (impassable)"
+      assert html =~ "Mountains"
+      # Pentagons have 5 neighbors
+      assert html =~ ">5<"
     end
 
     test "regenerate changes the seed", %{conn: conn, world: world} do
@@ -49,42 +91,69 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
 
       html = render(view)
       # Seed should have changed (extremely unlikely to be 12345 again)
-      refute html =~ "12345"
+      refute html =~ "Seed: 12345"
     end
 
-    test "zoom in increases hex size", %{conn: conn, world: world} do
+    test "zoom in increases scale", %{conn: conn, world: world} do
       {:ok, view, html} = live(conn, ~p"/worlds/#{world.id}")
-      # Default zoom is index 2 = 8px
-      assert html =~ ">8<"
+      # Default zoom scale
+      assert html =~ ">700<"
 
       view |> element("button", "+") |> render_click()
       html = render(view)
-      assert html =~ ">12<"
+      assert html =~ ">1000<"
     end
 
-    test "zoom out decreases hex size", %{conn: conn, world: world} do
-      {:ok, view, html} = live(conn, ~p"/worlds/#{world.id}")
+    test "zoom out decreases scale", %{conn: conn, world: world} do
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
 
       view |> element("button", "−") |> render_click()
       html = render(view)
-      assert html =~ ">5<"
+      assert html =~ ">500<"
     end
 
-    test "pan changes viewport coordinates", %{conn: conn, world: world} do
-      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+    test "rotating changes the view yaw", %{conn: conn, world: world} do
+      {:ok, view, html} = live(conn, ~p"/worlds/#{world.id}")
+      assert html =~ "0.0° / 0.0°"
 
       view |> element("[phx-value-dir='right']") |> render_click()
       html = render(view)
-      # Viewport should have moved from (0,0)
-      assert html =~ "(10, 0)"
+      refute html =~ "0.0° / 0.0°"
+    end
+
+    test "rotation wraps around the full globe", %{conn: conn, world: world} do
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+
+      # Default zoom: yaw step = (150/700)/1 ≈ 12.28°. 30 steps > 360°,
+      # so yaw must wrap back below 360 rather than growing without bound.
+      for _ <- 1..30 do
+        view |> element("[phx-value-dir='right']") |> render_click()
+      end
+
+      html = render(view)
+      assert [_, yaw] = Regex.run(~r/(\d+\.\d)° \/ /, html)
+      assert String.to_float(yaw) < 360.0
+    end
+
+    test "pitch clamps at the pole", %{conn: conn, world: world} do
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+
+      for _ <- 1..20 do
+        view |> element("[phx-value-dir='up']") |> render_click()
+      end
+
+      html = render(view)
+      # Clamp is 1.50 rad = 85.9°
+      assert html =~ "/ 85.9°"
     end
 
     test "keyboard navigation works", %{conn: conn, world: world} do
-      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+      {:ok, view, html} = live(conn, ~p"/worlds/#{world.id}")
+      assert html =~ "0.0° / 0.0°"
 
       render_keydown(view, "keydown", %{"key" => "ArrowRight"})
       html = render(view)
-      assert html =~ "(10, 0)"
+      refute html =~ "0.0° / 0.0°"
     end
 
     test "name can be updated", %{conn: conn, world: world} do
@@ -109,5 +178,17 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
 
       assert_redirect(view, ~p"/worlds/#{other.id}")
     end
+  end
+
+  # A tile id guaranteed visible under the initial view (yaw 0, pitch 0,
+  # default zoom) — derived from the same projection the LiveView uses.
+  defp a_visible_tile_id do
+    mesh = Globe.get(@frequency)
+
+    view = %{yaw: 0.0, pitch: 0.0, scale: 700, cx: 480, cy: 350, w: 960, h: 700}
+
+    Projection.visible_tiles(mesh, %{}, view)
+    |> hd()
+    |> Map.fetch!(:id)
   end
 end
