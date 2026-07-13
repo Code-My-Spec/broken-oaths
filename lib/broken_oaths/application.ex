@@ -35,6 +35,7 @@ defmodule BrokenOaths.Application do
            fn ->
              BrokenOaths.Worlds.Globe.get(54)
              BrokenOaths.Worlds.Facets.get(54)
+             BrokenOaths.Worlds.Texture.warm(54)
            end},
           id: :globe_warmup,
           restart: :temporary

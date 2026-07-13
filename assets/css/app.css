@@ -160,6 +160,15 @@
   top: 0;
 }
 
+/* Far-zoom impostor: baked world texture warped to an orthographic disc.
+   Rendered at half resolution and browser-upscaled (soft by design). */
+.globe-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
 .globe3d {
   position: absolute;
   left: 0;

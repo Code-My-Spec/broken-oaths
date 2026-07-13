@@ -15,14 +15,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   @default_container_w 960
   @default_container_h 700
 
-  # Coarse LOD frequency for 3D mode. When the disc edge is visible the
-  # whole front hemisphere is on screen (~half of 10f²+2 tiles), which
-  # overwhelms the compositor at f=54; the coarse globe keeps that around
-  # ~700 quads (smooth compositing lives in the hundreds). Terrain comes
-  # from the same seeded noise field, so the continents match the
-  # full-detail globe.
-  @lod_frequency 12
-
   # Rotation step ≈ this many pixels of screen travel at the view center.
   @pan_px 150
   # Pitch clamp (±85.9°) keeps the up-vector sane; pole tiles are still
@@ -67,8 +59,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         container_h: @default_container_h,
         render_mode: :classic,
         facets: [],
-        coarse_facets: [],
-        coarse_terrain: %{},
         fine_window: [],
         view_bucket: nil,
         selected_tile: nil,
@@ -133,11 +123,11 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     {:noreply, socket}
   end
 
-  # A coarse-LOD tile lives in a different mesh; select the nearest tile of
-  # the real world mesh instead.
-  def handle_event("select_tile", %{"id" => id, "lod" => "coarse"}, socket) do
-    coarse = Globe.tile(Globe.get(@lod_frequency), String.to_integer(id))
-    tile = Globe.nearest_tile(socket.assigns.mesh, coarse.center)
+  # Far-zoom clicks land on the canvas impostor; the hook inverse-projects
+  # them to a unit-sphere point and the nearest real tile gets selected.
+  def handle_event("select_at", %{"x" => x, "y" => y, "z" => z}, socket)
+      when is_number(x) and is_number(y) and is_number(z) do
+    tile = Globe.nearest_tile(socket.assigns.mesh, {x * 1.0, y * 1.0, z * 1.0})
 
     {:noreply,
      assign(socket,
@@ -180,13 +170,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             page_title: world.name
           )
           |> maybe_compute_view()
-
-        socket =
-          if socket.assigns.render_mode == :three_d do
-            assign(socket, coarse_terrain: coarse_terrain(world.seed))
-          else
-            socket
-          end
 
         {:noreply, socket}
 
@@ -321,8 +304,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     |> assign(
       render_mode: :three_d,
       facets: Facets.get(world.frequency),
-      coarse_facets: Facets.get(@lod_frequency),
-      coarse_terrain: coarse_terrain(world.seed),
       visible_tiles: [],
       view_bucket: nil
     )
@@ -344,8 +325,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     |> assign(
       render_mode: :classic,
       facets: [],
-      coarse_facets: [],
-      coarse_terrain: %{},
       fine_window: [],
       view_bucket: nil,
       zoom_index: zoom_index
@@ -391,10 +370,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   # 3D mode never re-projects server-side; the tile DOM is static.
   defp maybe_compute_view(%{assigns: %{render_mode: :three_d}} = socket), do: socket
   defp maybe_compute_view(socket), do: compute_view(socket)
-
-  # Same seed, same noise field, coarser mesh — continents match the
-  # full-detail globe.
-  defp coarse_terrain(seed), do: Generator.generate_terrain_map(seed, Globe.get(@lod_frequency))
 
   defp compute_view(socket) do
     %{mesh: mesh, terrain_map: tm, yaw: yaw, pitch: pitch, zoom_index: zi} = socket.assigns
@@ -541,15 +516,18 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             data-pitch={@pitch}
             data-scale={@scale}
             data-r0={Facets.r0()}
+            data-texture={~p"/worlds/#{@world.id}/texture.png?seed=#{@world.seed}"}
           >
             <div class="globe-disc globe-disc3d"></div>
 
+            <%!-- Far-zoom impostor: the baked world texture warped into an
+                 orthographic disc. Real hex divs only exist up close. --%>
+            <canvas class="globe-canvas" style="display:none;"></canvas>
+
             <%!-- Keyed by world+seed+view bucket so Regenerate AND settled
-                 view changes swap the ignored DOM. Two detail levels; the
-                 hook shows exactly one: fine (windowed around the view
-                 center) while the disc edge is off-screen, coarse when the
-                 edge is visible (the whole hemisphere would otherwise
-                 composite). --%>
+                 view changes swap the ignored DOM. Real game hexes, windowed
+                 around the view center; hidden at far zoom in favor of the
+                 canvas impostor. --%>
             <div
               id={"globe3d-#{@world.id}-#{@world.seed}-#{:erlang.phash2(@view_bucket)}"}
               phx-update="ignore"
@@ -563,17 +541,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                   phx-value-id={facet.id}
                   style={"width:#{facet.w}px;height:#{facet.h}px;clip-path:#{facet.clip};transform:#{facet.matrix};"}
                   title={"##{facet.id} #{Map.get(@terrain_map, facet.id, :ocean)}"}
-                >
-                </div>
-              </div>
-              <div class="globe3d globe3d-coarse" style="display:none;">
-                <div
-                  :for={facet <- @coarse_facets}
-                  class={["hex-cell3d", terrain_class(Map.get(@coarse_terrain, facet.id, :ocean))]}
-                  phx-click="select_tile"
-                  phx-value-id={facet.id}
-                  phx-value-lod="coarse"
-                  style={"width:#{facet.w}px;height:#{facet.h}px;clip-path:#{facet.clip};transform:#{facet.matrix};"}
                 >
                 </div>
               </div>
@@ -752,11 +719,33 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             mounted() {
               this.grab = () => {
                 this.fine = this.el.querySelector(".globe3d-fine")
-                this.coarse = this.el.querySelector(".globe3d-coarse")
                 this.disc = this.el.querySelector(".globe-disc3d")
-                this.coarseShown = false
+                this.canvas = this.el.querySelector(".globe-canvas")
+                this.farMode = false
               }
               this.grab()
+
+              // --- baked world texture for the far-zoom impostor ---
+              this.tex = null
+              this.loadedUrl = null
+              this.loadTexture = () => {
+                const url = this.el.dataset.texture
+                if (!url || url === this.loadedUrl) return
+                this.loadedUrl = url
+                const img = new Image()
+                img.onload = () => {
+                  const oc = document.createElement("canvas")
+                  oc.width = img.width
+                  oc.height = img.height
+                  const octx = oc.getContext("2d")
+                  octx.drawImage(img, 0, 0)
+                  const idata = octx.getImageData(0, 0, img.width, img.height)
+                  this.tex = {data: new Uint32Array(idata.data.buffer), w: img.width, h: img.height}
+                  this.schedule()
+                }
+                img.src = url
+              }
+              this.loadTexture()
 
               const d = this.el.dataset
               this.yaw = parseFloat(d.yaw) || 0
@@ -768,11 +757,24 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               this.lastSync = 0
               this.syncTimer = null
 
+              // Impostor renders at half resolution and upscales — the
+              // intentional "fuzzy at a distance" look, and 4x fewer pixels.
+              this.q = 0.5
+
               const measure = () => {
                 const r = this.el.getBoundingClientRect()
                 this.cx = r.width / 2
                 this.cy = r.height / 2
                 this.fit = Math.max(Math.min(r.width, r.height) / 2, 25)
+                const cw = Math.max(Math.round(r.width * this.q), 1)
+                const ch = Math.max(Math.round(r.height * this.q), 1)
+                this.canvas.width = cw
+                this.canvas.height = ch
+                this.canvas.style.width = r.width + "px"
+                this.canvas.style.height = r.height + "px"
+                this.ctx = this.canvas.getContext("2d")
+                this.frame = this.ctx.createImageData(cw, ch)
+                this.frame32 = new Uint32Array(this.frame.data.buffer)
                 if (r.width > 0) this.pushEvent("viewport_resize", {w: Math.round(r.width), h: Math.round(r.height)})
               }
               measure()
@@ -786,35 +788,88 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               })
               this.ro.observe(this.el)
 
-              // LOD: full detail while the disc edge is off-screen; coarse
-              // once the edge shows (the entire hemisphere would otherwise
-              // hit the compositor). Hysteresis avoids flapping at the line.
+              // LOD: real hex divs while the disc edge is off-screen; the
+              // baked-texture canvas impostor once the edge shows (tiles are
+              // no longer usable game hexes out there anyway). Hysteresis
+              // avoids flapping at the line.
               this.updateLod = () => {
                 const corner = Math.hypot(this.cx, this.cy)
-                const wantCoarse = this.coarseShown
+                const wantFar = this.farMode
                   ? this.S < corner * 1.12
                   : this.S < corner * 1.02
-                if (wantCoarse !== this.coarseShown) {
-                  this.coarseShown = wantCoarse
-                  this.coarse.style.display = wantCoarse ? "" : "none"
-                  this.fine.style.display = wantCoarse ? "none" : ""
+                if (wantFar !== this.farMode) {
+                  this.farMode = wantFar
+                  this.canvas.style.display = wantFar ? "" : "none"
+                  this.fine.style.display = wantFar ? "none" : ""
                 }
               }
 
-              this.apply = () => {
-                const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw)
+              // World vector for a screen point (inverse view rotation).
+              this.unproject = (sx, sy) => {
+                const vx = (sx - this.cx) / this.S
+                const vy = (this.cy - sy) / this.S
+                const r2 = vx * vx + vy * vy
+                if (r2 > 1) return null
+                const vz = Math.sqrt(1 - r2)
+                const cyw = Math.cos(this.yaw), syw = Math.sin(this.yaw)
                 const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
-                const s = this.S / this.r0
-                // Columns of diag(1,-1,1)·R_view — orthographic (no perspective),
-                // identical to the server projection.
-                const m =
-                  `matrix3d(${-sy * s},${sp * cy * s},${cp * cy * s},0,` +
-                  `${cy * s},${sp * sy * s},${cp * sy * s},0,` +
-                  `0,${-cp * s},${sp * s},0,` +
-                  `${this.cx},${this.cy},0,1)`
+                return {
+                  x: -syw * vx - sp * cyw * vy + cp * cyw * vz,
+                  y: cyw * vx - sp * syw * vy + cp * syw * vz,
+                  z: cp * vy + sp * vz
+                }
+              }
+
+              this.renderCanvas = () => {
+                if (!this.tex || !this.frame32) return
+                const out = this.frame32
+                out.fill(0)
+                const q = this.q
+                const S = this.S * q, ccx = this.cx * q, ccy = this.cy * q
+                const cw = this.canvas.width, ch = this.canvas.height
+                const cyw = Math.cos(this.yaw), syw = Math.sin(this.yaw)
+                const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
+                const tex = this.tex.data, TW = this.tex.w, TH = this.tex.h
+                const INV2PI = 1 / (2 * Math.PI), INVPI = 1 / Math.PI
+                const x0 = Math.max(0, Math.floor(ccx - S)), x1 = Math.min(cw - 1, Math.ceil(ccx + S))
+                const y0 = Math.max(0, Math.floor(ccy - S)), y1 = Math.min(ch - 1, Math.ceil(ccy + S))
+                for (let py = y0; py <= y1; py++) {
+                  const vy = (ccy - py) / S
+                  const row = py * cw
+                  for (let px = x0; px <= x1; px++) {
+                    const vx = (px - ccx) / S
+                    const r2 = vx * vx + vy * vy
+                    if (r2 > 1) continue
+                    const vz = Math.sqrt(1 - r2)
+                    const wx = -syw * vx - sp * cyw * vy + cp * cyw * vz
+                    const wy = cyw * vx - sp * syw * vy + cp * syw * vz
+                    const wz = cp * vy + sp * vz
+                    let tx = ((Math.atan2(wy, wx) * INV2PI + 0.5) * TW) | 0
+                    let ty = ((0.5 - Math.asin(wz) * INVPI) * TH) | 0
+                    if (tx < 0) tx = 0; else if (tx >= TW) tx = TW - 1
+                    if (ty < 0) ty = 0; else if (ty >= TH) ty = TH - 1
+                    out[row + px] = tex[ty * TW + tx]
+                  }
+                }
+                this.ctx.putImageData(this.frame, 0, 0)
+              }
+
+              this.apply = () => {
                 this.updateLod()
-                const active = this.coarseShown ? this.coarse : this.fine
-                active.style.transform = m
+                if (this.farMode) {
+                  this.renderCanvas()
+                } else {
+                  const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw)
+                  const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
+                  const s = this.S / this.r0
+                  // Columns of diag(1,-1,1)·R_view — orthographic (no
+                  // perspective), identical to the server projection.
+                  this.fine.style.transform =
+                    `matrix3d(${-sy * s},${sp * cy * s},${cp * cy * s},0,` +
+                    `${cy * s},${sp * sy * s},${cp * sy * s},0,` +
+                    `0,${-cp * s},${sp * s},0,` +
+                    `${this.cx},${this.cy},0,1)`
+                }
                 const S = this.S
                 this.disc.style.left = (this.cx - S) + "px"
                 this.disc.style.top = (this.cy - S) + "px"
@@ -885,7 +940,10 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               })
               const end = (e) => {
                 if (this.pointer === null || e.pointerId !== this.pointer) return
-                if (this.moved) this.sync(true, true)
+                if (this.moved) {
+                  this.sync(true, true)
+                  this.suppressClick = true
+                }
                 this.pointer = null
                 this.moved = false
                 this.el.classList.remove("dragging")
@@ -917,8 +975,21 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               }
               window.addEventListener("keydown", this.onKey)
 
-              // --- client-side selection highlight (tile DOM is ignored) ---
+              // --- clicks: tile highlight up close, inverse-projected
+              //     select_at on the impostor ---
               this.el.addEventListener("click", (e) => {
+                if (this.suppressClick) {
+                  this.suppressClick = false
+                  return
+                }
+
+                if (this.farMode) {
+                  const r = this.el.getBoundingClientRect()
+                  const p = this.unproject(e.clientX - r.left, e.clientY - r.top)
+                  if (p) this.pushEvent("select_at", p)
+                  return
+                }
+
                 const t = e.target
                 if (t.classList && t.classList.contains("hex-cell3d")) {
                   this.el.querySelectorAll(".hex-cell3d.hex-selected")
@@ -931,8 +1002,10 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             },
 
             updated() {
-              // Regenerate swaps the ignored subtree (new id) — re-grab refs
+              // Regenerate swaps the ignored subtree (new id) and changes
+              // the texture URL — re-grab refs and reload the bake.
               this.grab()
+              this.loadTexture()
               this.apply()
             },
 

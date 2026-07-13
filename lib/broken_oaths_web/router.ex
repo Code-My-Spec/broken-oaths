@@ -21,6 +21,7 @@ defmodule BrokenOathsWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+    get "/worlds/:id/texture.png", WorldTextureController, :show
 
     live_session :worlds, layout: {BrokenOathsWeb.Layouts, :app_full} do
       live "/worlds", WorldLive.Index, :index

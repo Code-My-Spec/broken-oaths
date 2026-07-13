@@ -270,22 +270,27 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       assert html2 =~ ~s(yaw="0.0")
     end
 
-    test "3D mode renders a coarse LOD layer and maps its clicks to real tiles", %{
+    test "3D mode has the canvas impostor and texture URL", %{conn: conn, world: world} do
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+      html = view |> element("button", "3D β") |> render_click()
+
+      assert html =~ "globe-canvas"
+      assert html =~ "/worlds/#{world.id}/texture.png?seed=#{world.seed}"
+      refute html =~ "globe3d-coarse"
+    end
+
+    test "impostor clicks select the nearest real tile via select_at", %{
       conn: conn,
       world: world
     } do
       {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
-      html = view |> element("button", "3D β") |> render_click()
+      view |> element("button", "3D β") |> render_click()
 
-      assert html =~ "globe3d-coarse"
-      assert html =~ ~s(phx-value-lod="coarse")
-
-      # Coarse tile 0 is the north-pole pentagon of the f=18 mesh; the
-      # nearest fine tile is the north-pole pentagon (id 0) of the world mesh
+      # A point near the north pole selects the pole pentagon
       html =
         view
-        |> element(~s([phx-value-lod="coarse"][phx-value-id="0"]))
-        |> render_click()
+        |> element("#globe3d-stage")
+        |> render_hook("select_at", %{x: 0.01, y: -0.02, z: 0.999})
 
       assert html =~ "#0"
       assert html =~ "Pentagon (impassable)"
