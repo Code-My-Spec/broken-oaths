@@ -176,6 +176,23 @@ defmodule BrokenOaths.Worlds.GlobeTest do
     end
   end
 
+  describe "nearest_tile/2" do
+    test "a tile's own center maps to itself" do
+      mesh = Globe.build(3)
+
+      for id <- [0, 17, 45, 91] do
+        tile = Globe.tile(mesh, id)
+        assert Globe.nearest_tile(mesh, tile.center).id == id
+      end
+    end
+
+    test "a point near the north pole maps to the pole tile" do
+      mesh = Globe.build(3)
+      near_pole = {0.01, -0.02, 0.999}
+      assert Globe.nearest_tile(mesh, near_pole).id == 0
+    end
+  end
+
   describe "latlon/1" do
     test "poles and equator" do
       assert {lat, _} = Globe.latlon({0.0, 0.0, 1.0})

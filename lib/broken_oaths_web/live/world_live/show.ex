@@ -15,6 +15,13 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   @default_container_w 960
   @default_container_h 700
 
+  # Coarse LOD frequency for 3D mode. When the disc edge is visible the
+  # whole front hemisphere is on screen (~half of 10f²+2 tiles), which
+  # overwhelms the compositor at f=54; the coarse globe keeps that under
+  # ~1.6k quads. Terrain comes from the same seeded noise field, so the
+  # continents match the full-detail globe.
+  @lod_frequency 18
+
   # Rotation step ≈ this many pixels of screen travel at the view center.
   @pan_px 150
   # Pitch clamp (±85.9°) keeps the up-vector sane; pole tiles are still
@@ -59,6 +66,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         container_h: @default_container_h,
         render_mode: :classic,
         facets: [],
+        coarse_facets: [],
+        coarse_terrain: %{},
         selected_tile: nil,
         selected_terrain: nil,
         page_title: world.name,
@@ -83,8 +92,16 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   def handle_event("toggle_mode", _params, socket) do
     case socket.assigns.render_mode do
       :classic ->
-        facets = Facets.get(socket.assigns.world.frequency)
-        {:noreply, assign(socket, render_mode: :three_d, facets: facets, visible_tiles: [])}
+        world = socket.assigns.world
+
+        {:noreply,
+         assign(socket,
+           render_mode: :three_d,
+           facets: Facets.get(world.frequency),
+           coarse_facets: Facets.get(@lod_frequency),
+           coarse_terrain: coarse_terrain(world.seed),
+           visible_tiles: []
+         )}
 
       :three_d ->
         # Snap the continuous 3D scale back to the nearest zoom level
@@ -99,7 +116,13 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
         socket =
           socket
-          |> assign(render_mode: :classic, facets: [], zoom_index: zoom_index)
+          |> assign(
+            render_mode: :classic,
+            facets: [],
+            coarse_facets: [],
+            coarse_terrain: %{},
+            zoom_index: zoom_index
+          )
           |> compute_view()
 
         {:noreply, socket}
@@ -117,6 +140,19 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     scale = scale |> max(50) |> min(10_000) |> round()
 
     {:noreply, assign(socket, yaw: yaw, pitch: pitch, scale: scale)}
+  end
+
+  # A coarse-LOD tile lives in a different mesh; select the nearest tile of
+  # the real world mesh instead.
+  def handle_event("select_tile", %{"id" => id, "lod" => "coarse"}, socket) do
+    coarse = Globe.tile(Globe.get(@lod_frequency), String.to_integer(id))
+    tile = Globe.nearest_tile(socket.assigns.mesh, coarse.center)
+
+    {:noreply,
+     assign(socket,
+       selected_tile: tile,
+       selected_terrain: Map.get(socket.assigns.terrain_map, tile.id)
+     )}
   end
 
   def handle_event("select_tile", %{"id" => id}, socket) do
@@ -153,6 +189,13 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             page_title: world.name
           )
           |> maybe_compute_view()
+
+        socket =
+          if socket.assigns.render_mode == :three_d do
+            assign(socket, coarse_terrain: coarse_terrain(world.seed))
+          else
+            socket
+          end
 
         {:noreply, socket}
 
@@ -276,6 +319,10 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   # 3D mode never re-projects server-side; the tile DOM is static.
   defp maybe_compute_view(%{assigns: %{render_mode: :three_d}} = socket), do: socket
   defp maybe_compute_view(socket), do: compute_view(socket)
+
+  # Same seed, same noise field, coarser mesh — continents match the
+  # full-detail globe.
+  defp coarse_terrain(seed), do: Generator.generate_terrain_map(seed, Globe.get(@lod_frequency))
 
   defp compute_view(socket) do
     %{mesh: mesh, terrain_map: tm, yaw: yaw, pitch: pitch, zoom_index: zi} = socket.assigns
@@ -425,9 +472,12 @@ defmodule BrokenOathsWeb.WorldLive.Show do
           >
             <div class="globe-disc globe-disc3d"></div>
 
-            <%!-- Keyed by world+seed so Regenerate swaps the ignored DOM --%>
+            <%!-- Keyed by world+seed so Regenerate swaps the ignored DOM.
+                 Two detail levels; the hook shows exactly one: full detail
+                 while the disc edge is off-screen, coarse when the edge is
+                 visible (the whole hemisphere would otherwise composite). --%>
             <div id={"globe3d-#{@world.id}-#{@world.seed}"} phx-update="ignore" class="globe3d-anchor">
-              <div class="globe3d">
+              <div class="globe3d globe3d-fine">
                 <div
                   :for={facet <- @facets}
                   class={["hex-cell3d", terrain_class(Map.get(@terrain_map, facet.id, :ocean))]}
@@ -435,6 +485,17 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                   phx-value-id={facet.id}
                   style={"width:#{facet.w}px;height:#{facet.h}px;clip-path:#{facet.clip};transform:#{facet.matrix};"}
                   title={"##{facet.id} #{Map.get(@terrain_map, facet.id, :ocean)}"}
+                >
+                </div>
+              </div>
+              <div class="globe3d globe3d-coarse" style="display:none;">
+                <div
+                  :for={facet <- @coarse_facets}
+                  class={["hex-cell3d", terrain_class(Map.get(@coarse_terrain, facet.id, :ocean))]}
+                  phx-click="select_tile"
+                  phx-value-id={facet.id}
+                  phx-value-lod="coarse"
+                  style={"width:#{facet.w}px;height:#{facet.h}px;clip-path:#{facet.clip};transform:#{facet.matrix};"}
                 >
                 </div>
               </div>
@@ -612,8 +673,10 @@ defmodule BrokenOathsWeb.WorldLive.Show do
           export default {
             mounted() {
               this.grab = () => {
-                this.container = this.el.querySelector(".globe3d")
+                this.fine = this.el.querySelector(".globe3d-fine")
+                this.coarse = this.el.querySelector(".globe3d-coarse")
                 this.disc = this.el.querySelector(".globe-disc3d")
+                this.coarseShown = false
               }
               this.grab()
 
@@ -645,17 +708,35 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               })
               this.ro.observe(this.el)
 
+              // LOD: full detail while the disc edge is off-screen; coarse
+              // once the edge shows (the entire hemisphere would otherwise
+              // hit the compositor). Hysteresis avoids flapping at the line.
+              this.updateLod = () => {
+                const corner = Math.hypot(this.cx, this.cy)
+                const wantCoarse = this.coarseShown
+                  ? this.S < corner * 1.12
+                  : this.S < corner * 1.02
+                if (wantCoarse !== this.coarseShown) {
+                  this.coarseShown = wantCoarse
+                  this.coarse.style.display = wantCoarse ? "" : "none"
+                  this.fine.style.display = wantCoarse ? "none" : ""
+                }
+              }
+
               this.apply = () => {
                 const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw)
                 const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
                 const s = this.S / this.r0
                 // Columns of diag(1,-1,1)·R_view — orthographic (no perspective),
                 // identical to the server projection.
-                this.container.style.transform =
+                const m =
                   `matrix3d(${-sy * s},${sp * cy * s},${cp * cy * s},0,` +
                   `${cy * s},${sp * sy * s},${cp * sy * s},0,` +
                   `0,${-cp * s},${sp * s},0,` +
                   `${this.cx},${this.cy},0,1)`
+                this.updateLod()
+                const active = this.coarseShown ? this.coarse : this.fine
+                active.style.transform = m
                 const S = this.S
                 this.disc.style.left = (this.cx - S) + "px"
                 this.disc.style.top = (this.cy - S) + "px"

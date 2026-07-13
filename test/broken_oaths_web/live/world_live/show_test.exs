@@ -231,6 +231,27 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       assert html =~ "clip-path:polygon("
     end
 
+    test "3D mode renders a coarse LOD layer and maps its clicks to real tiles", %{
+      conn: conn,
+      world: world
+    } do
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+      html = view |> element("button", "3D β") |> render_click()
+
+      assert html =~ "globe3d-coarse"
+      assert html =~ ~s(phx-value-lod="coarse")
+
+      # Coarse tile 0 is the north-pole pentagon of the f=18 mesh; the
+      # nearest fine tile is the north-pole pentagon (id 0) of the world mesh
+      html =
+        view
+        |> element(~s([phx-value-lod="coarse"][phx-value-id="0"]))
+        |> render_click()
+
+      assert html =~ "#0"
+      assert html =~ "Pentagon (impassable)"
+    end
+
     test "3D mode view_sync updates the sidebar", %{conn: conn, world: world} do
       {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
       view |> element("button", "3D β") |> render_click()

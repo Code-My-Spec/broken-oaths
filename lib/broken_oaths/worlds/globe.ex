@@ -54,6 +54,17 @@ defmodule BrokenOaths.Worlds.Globe do
   @doc "Fetch a tile by id."
   def tile(mesh, id), do: Map.get(mesh.tiles, id)
 
+  @doc """
+  Tile whose center is nearest to the given unit vector (max dot product).
+  Linear scan — ~1ms even at f=54; used to map coarse-LOD clicks onto the
+  real world mesh.
+  """
+  def nearest_tile(mesh, {x, y, z}) do
+    mesh.tiles
+    |> Map.values()
+    |> Enum.max_by(fn %Tile{center: {cx, cy, cz}} -> cx * x + cy * y + cz * z end)
+  end
+
   @doc "Latitude/longitude in degrees for a unit-sphere point."
   def latlon({x, y, z}) do
     lat = :math.asin(max(-1.0, min(1.0, z))) * 180.0 / :math.pi()
