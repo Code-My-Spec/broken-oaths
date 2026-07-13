@@ -4,12 +4,16 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   alias BrokenOaths.Worlds
   alias BrokenOaths.Worlds.{Generator, Globe, Projection}
 
-  # Zoom = pixels per sphere radius. 350 fits the whole hemisphere disc
-  # into the 960x700 viewport; higher values zoom into the surface.
-  @zoom_scales [350, 500, 700, 1000, 1400, 2000]
+  # Zoom levels as multiples of the "whole globe fits" scale (min(w,h)/2
+  # pixels per sphere radius). Relative zoom keeps the on-screen TILE count
+  # roughly constant at any viewport size, so a full-screen globe costs the
+  # same as a small one — tiles just render larger.
+  @zoom_factors [1.0, 1.4286, 2.0, 2.8571, 4.0, 5.7143]
   @default_zoom_index 2
-  @container_w 960
-  @container_h 700
+
+  # Viewport size before the client reports its real dimensions.
+  @default_container_w 960
+  @default_container_h 700
 
   # Rotation step ≈ this many pixels of screen travel at the view center.
   @pan_px 150
@@ -51,6 +55,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         yaw: 0.0,
         pitch: 0.0,
         zoom_index: @default_zoom_index,
+        container_w: @default_container_w,
+        container_h: @default_container_h,
         selected_tile: nil,
         selected_terrain: nil,
         page_title: world.name,
@@ -118,7 +124,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   end
 
   def handle_event("zoom_in", _params, socket) do
-    new_index = min(socket.assigns.zoom_index + 1, length(@zoom_scales) - 1)
+    new_index = min(socket.assigns.zoom_index + 1, length(@zoom_factors) - 1)
 
     socket =
       socket
@@ -147,8 +153,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   # pulls the globe surface with the pointer, so the view moves opposite.
   def handle_event("drag_rotate", %{"dx" => dx, "dy" => dy}, socket)
       when is_number(dx) and is_number(dy) do
-    %{pitch: pitch} = socket.assigns
-    scale = Enum.at(@zoom_scales, socket.assigns.zoom_index)
+    %{pitch: pitch, scale: scale} = socket.assigns
 
     dyaw = -dx / scale / max(:math.cos(pitch), 0.25)
     dpitch = dy / scale
@@ -172,12 +177,26 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     {:noreply, push_navigate(socket, to: ~p"/worlds/#{id}")}
   end
 
+  # The GlobeDrag hook reports the viewport's real size on mount and resize.
+  def handle_event("viewport_resize", %{"w" => w, "h" => h}, socket)
+      when is_number(w) and is_number(h) do
+    w = w |> round() |> max(200) |> min(4000)
+    h = h |> round() |> max(200) |> min(4000)
+
+    socket =
+      socket
+      |> assign(container_w: w, container_h: h)
+      |> compute_view()
+
+    {:noreply, socket}
+  end
+
   # -------------------------------------------------------------------
   # Helpers
   # -------------------------------------------------------------------
 
   defp do_rotate(socket, dir) do
-    scale = Enum.at(@zoom_scales, socket.assigns.zoom_index)
+    scale = socket.assigns.scale
 
     step = @pan_px / scale
     # East-west steps cover similar screen distance near the poles
@@ -208,23 +227,24 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
   defp compute_view(socket) do
     %{mesh: mesh, terrain_map: tm, yaw: yaw, pitch: pitch, zoom_index: zi} = socket.assigns
-    scale = Enum.at(@zoom_scales, zi)
+    %{container_w: w, container_h: h} = socket.assigns
+
+    fit_scale = min(w, h) / 2
+    scale = max(round(Enum.at(@zoom_factors, zi) * fit_scale), 1)
 
     view = %{
       yaw: yaw,
       pitch: pitch,
       scale: scale,
-      cx: @container_w / 2,
-      cy: @container_h / 2,
-      w: @container_w,
-      h: @container_h
+      cx: w / 2,
+      cy: h / 2,
+      w: w,
+      h: h
     }
 
     assign(socket,
       visible_tiles: Projection.visible_tiles(mesh, tm, view),
-      scale: scale,
-      container_w: @container_w,
-      container_h: @container_h
+      scale: scale
     )
   end
 
@@ -308,7 +328,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             id="globe-viewport"
             class="globe-viewport"
             phx-hook=".GlobeDrag"
-            style={"position:relative;width:#{@container_w}px;height:#{@container_h}px;"}
+            style="position:relative;width:100%;height:100%;"
           >
             <%!-- Sphere disc behind the tiles: fills hairline seams dark --%>
             <div
@@ -371,12 +391,13 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
           <%!-- Keyboard hint --%>
           <div class="absolute bottom-4 right-4 text-xs opacity-40">
-            Drag or WASD / Arrows to rotate · +/− to zoom
+            Drag or WASD / Arrows to rotate · Wheel or +/− to zoom
           </div>
         </div>
 
-        <%!-- Input-only drag hook: converts pointer drags into throttled
-             drag_rotate events. All rendering stays server-side. --%>
+        <%!-- Input-only hook: converts pointer drags into throttled
+             drag_rotate events, wheel into zoom steps, and reports the
+             viewport's real size. All rendering stays server-side. --%>
         <script :type={Phoenix.LiveView.ColocatedHook} name=".GlobeDrag">
           export default {
             mounted() {
@@ -385,6 +406,38 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               this.timer = null
               this.pointer = null
               this.moved = false
+
+              // --- viewport size: report on mount and on resize ---
+              this.reportSize = () => {
+                const r = this.el.getBoundingClientRect()
+                const w = Math.round(r.width), h = Math.round(r.height)
+                if (w > 0 && h > 0 && (w !== this.w || h !== this.h)) {
+                  this.w = w
+                  this.h = h
+                  this.pushEvent("viewport_resize", {w, h})
+                }
+              }
+              this.reportSize()
+              this.resizeTimer = null
+              this.ro = new ResizeObserver(() => {
+                clearTimeout(this.resizeTimer)
+                this.resizeTimer = setTimeout(this.reportSize, 150)
+              })
+              this.ro.observe(this.el)
+
+              // --- wheel zoom: one zoom step per ~140ms of scrolling ---
+              this.wheelAccum = 0
+              this.lastZoom = 0
+              this.el.addEventListener("wheel", (e) => {
+                e.preventDefault()
+                this.wheelAccum += e.deltaY
+                const now = Date.now()
+                if (Math.abs(this.wheelAccum) >= 20 && now - this.lastZoom >= 140) {
+                  this.pushEvent(this.wheelAccum < 0 ? "zoom_in" : "zoom_out", {})
+                  this.wheelAccum = 0
+                  this.lastZoom = now
+                }
+              }, {passive: false})
 
               this.el.addEventListener("pointerdown", (e) => {
                 if (e.button !== 0) return
@@ -452,6 +505,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
             destroyed() {
               if (this.timer) clearTimeout(this.timer)
+              if (this.resizeTimer) clearTimeout(this.resizeTimer)
+              if (this.ro) this.ro.disconnect()
             }
           }
         </script>

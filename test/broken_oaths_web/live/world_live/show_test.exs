@@ -147,6 +147,32 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       assert html =~ "/ 85.9°"
     end
 
+    test "viewport resize rescales the globe", %{conn: conn, world: world} do
+      {:ok, view, html} = live(conn, ~p"/worlds/#{world.id}")
+      # Default 960x700 container: fit scale 350, default factor 2.0 -> 700
+      assert html =~ ">700<"
+
+      html =
+        view
+        |> element("#globe-viewport")
+        |> render_hook("viewport_resize", %{w: 1400, h: 1600})
+
+      # fit scale 700 x factor 2.0 -> 1400
+      assert html =~ ">1400<"
+    end
+
+    test "viewport resize clamps absurd dimensions", %{conn: conn, world: world} do
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+
+      html =
+        view
+        |> element("#globe-viewport")
+        |> render_hook("viewport_resize", %{w: 99_999, h: 1})
+
+      # w clamped to 4000, h to 200 -> fit 100 x 2.0 -> 200
+      assert html =~ ">200<"
+    end
+
     test "dragging rotates the globe", %{conn: conn, world: world} do
       {:ok, view, html} = live(conn, ~p"/worlds/#{world.id}")
       assert html =~ "0.0° / 0.0°"
