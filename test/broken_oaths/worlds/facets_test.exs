@@ -57,7 +57,8 @@ defmodule BrokenOaths.Worlds.FacetsTest do
 
       assert length(nums) == 16
 
-      [tx, ty, tz, 0.0, bx, by, bz, 0.0, nx, ny, nz, 0.0, px, py, pz, 1.0] = nums
+      [tx, ty, tz, z1, bx, by, bz, z2, nx, ny, nz, z3, px, py, pz, w1] = nums
+      assert [z1, z2, z3, w1] == [0.0, 0.0, 0.0, 1.0]
 
       # Orthonormal axis columns
       assert_in_delta tx * tx + ty * ty + tz * tz, 1.0, 1.0e-4

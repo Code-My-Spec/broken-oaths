@@ -79,6 +79,12 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     {:ok, socket}
   end
 
+  # Render mode lives in the URL (?mode=3d) so it survives refreshes.
+  def handle_params(params, _uri, socket) do
+    mode = if params["mode"] == "3d", do: :three_d, else: :classic
+    {:noreply, set_mode(socket, mode)}
+  end
+
   # -------------------------------------------------------------------
   # Events
   # -------------------------------------------------------------------
@@ -91,43 +97,14 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   end
 
   def handle_event("toggle_mode", _params, socket) do
-    case socket.assigns.render_mode do
-      :classic ->
-        world = socket.assigns.world
+    world = socket.assigns.world
 
-        {:noreply,
-         assign(socket,
-           render_mode: :three_d,
-           facets: Facets.get(world.frequency),
-           coarse_facets: Facets.get(@lod_frequency),
-           coarse_terrain: coarse_terrain(world.seed),
-           visible_tiles: []
-         )}
+    to =
+      if socket.assigns.render_mode == :classic,
+        do: ~p"/worlds/#{world.id}?mode=3d",
+        else: ~p"/worlds/#{world.id}"
 
-      :three_d ->
-        # Snap the continuous 3D scale back to the nearest zoom level
-        %{container_w: w, container_h: h, scale: scale} = socket.assigns
-        fit = min(w, h) / 2
-
-        zoom_index =
-          @zoom_factors
-          |> Enum.with_index()
-          |> Enum.min_by(fn {factor, _} -> abs(factor * fit - scale) end)
-          |> elem(1)
-
-        socket =
-          socket
-          |> assign(
-            render_mode: :classic,
-            facets: [],
-            coarse_facets: [],
-            coarse_terrain: %{},
-            zoom_index: zoom_index
-          )
-          |> compute_view()
-
-        {:noreply, socket}
-    end
+    {:noreply, push_patch(socket, to: to)}
   end
 
   # The Globe3D hook reports its settled view so the sidebar and any later
@@ -266,7 +243,12 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   end
 
   def handle_event("switch_world", %{"world_id" => id}, socket) do
-    {:noreply, push_navigate(socket, to: ~p"/worlds/#{id}")}
+    to =
+      if socket.assigns.render_mode == :three_d,
+        do: ~p"/worlds/#{id}?mode=3d",
+        else: ~p"/worlds/#{id}"
+
+    {:noreply, push_navigate(socket, to: to)}
   end
 
   # Both hooks report the viewport's real size on mount and resize.
@@ -314,6 +296,42 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
     socket
     |> assign(yaw: yaw, pitch: pitch)
+    |> compute_view()
+  end
+
+  defp set_mode(%{assigns: %{render_mode: mode}} = socket, mode), do: socket
+
+  defp set_mode(socket, :three_d) do
+    world = socket.assigns.world
+
+    assign(socket,
+      render_mode: :three_d,
+      facets: Facets.get(world.frequency),
+      coarse_facets: Facets.get(@lod_frequency),
+      coarse_terrain: coarse_terrain(world.seed),
+      visible_tiles: []
+    )
+  end
+
+  defp set_mode(socket, :classic) do
+    # Snap the continuous 3D scale back to the nearest zoom level
+    %{container_w: w, container_h: h, scale: scale} = socket.assigns
+    fit = min(w, h) / 2
+
+    zoom_index =
+      @zoom_factors
+      |> Enum.with_index()
+      |> Enum.min_by(fn {factor, _} -> abs(factor * fit - scale) end)
+      |> elem(1)
+
+    socket
+    |> assign(
+      render_mode: :classic,
+      facets: [],
+      coarse_facets: [],
+      coarse_terrain: %{},
+      zoom_index: zoom_index
+    )
     |> compute_view()
   end
 
