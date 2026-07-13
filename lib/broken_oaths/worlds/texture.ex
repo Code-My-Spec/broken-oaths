@@ -35,14 +35,23 @@ defmodule BrokenOaths.Worlds.Texture do
     mountains: {0x52, 0x52, 0x52}
   ]
 
-  @doc "Texture dimensions {w, h}; overridable for tests via config."
-  def dims do
-    Application.get_env(:broken_oaths, :texture_size, @default_dims)
+  @doc """
+  Texture dimensions {w, h} for a detail level; overridable for tests via
+  config. Level 1 is full size, level 0 half — a tiny first-paint texture
+  the client swaps out once level 1 arrives.
+  """
+  def dims(level \\ 1)
+
+  def dims(1), do: Application.get_env(:broken_oaths, :texture_size, @default_dims)
+
+  def dims(0) do
+    {w, h} = dims(1)
+    {max(div(w, 2), 2), max(div(h, 2), 2)}
   end
 
   @doc "Build (or fetch cached) the equirectangular PNG for a world."
-  def png(seed, frequency) do
-    {w, h} = dims()
+  def png(seed, frequency, level \\ 1) do
+    {w, h} = dims(level)
     key = {__MODULE__, @cache_version, :png, seed, frequency, w, h}
 
     case :persistent_term.get(key, nil) do
@@ -56,10 +65,13 @@ defmodule BrokenOaths.Worlds.Texture do
     end
   end
 
-  @doc "Pre-build the pixel index (used by the boot warm-up)."
+  @doc "Pre-build the pixel indexes (used by the boot warm-up)."
   def warm(frequency) do
-    {w, h} = dims()
-    index(frequency, w, h)
+    for level <- [0, 1] do
+      {w, h} = dims(level)
+      index(frequency, w, h)
+    end
+
     :ok
   end
 

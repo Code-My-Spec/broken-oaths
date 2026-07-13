@@ -66,6 +66,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         container_w: @default_container_w,
         container_h: @default_container_h,
         render_mode: :classic,
+        renderer3d: :canvas,
         facets: [],
         view_bucket: nil,
         device_coarse: false,
@@ -86,14 +87,21 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   # mount the LiveView at any exact camera state.
   def handle_params(params, _uri, socket) do
     mode = if params["mode"] == "3d", do: :three_d, else: :classic
+    # Default near renderer is the vector canvas; ?renderer=css3d keeps the
+    # matrix3d-facets experiment reachable.
+    renderer = if params["renderer"] == "css3d", do: :css3d, else: :canvas
 
     {socket, view_changed?} = apply_view_params(socket, params)
-    socket = set_mode(socket, mode)
+    socket = socket |> assign(renderer3d: renderer) |> set_mode(mode)
 
     socket =
-      if view_changed? and socket.assigns.render_mode == :classic,
-        do: compute_view(socket),
-        else: socket
+      case socket.assigns.render_mode do
+        :classic when view_changed? -> compute_view(socket)
+        # Bucket-deduped, so this is a no-op unless the params moved the view
+        # or switched renderers while already in 3D
+        :three_d -> rewindow(socket)
+        _ -> socket
+      end
 
     {:noreply, socket}
   end
@@ -415,10 +423,14 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   defp set_mode(socket, :three_d) do
     world = socket.assigns.world
 
+    # Facet transforms are only needed by the css3d experimental renderer
+    facets =
+      if socket.assigns.renderer3d == :css3d, do: Facets.get(world.frequency), else: []
+
     socket
     |> assign(
       render_mode: :three_d,
-      facets: Facets.get(world.frequency),
+      facets: facets,
       visible_tiles: [],
       view_bucket: nil
     )
@@ -474,18 +486,60 @@ defmodule BrokenOathsWeb.WorldLive.Show do
       {vx, vy, vz} = v
       terrain_map = socket.assigns.terrain_map
 
-      html =
-        facets
-        |> Enum.filter(fn %{center: {cx, cy, cz}} ->
-          cx * vx + cy * vy + cz * vz > min_dot
-        end)
-        |> Enum.map(&facet_div(&1, terrain_map))
-        |> IO.iodata_to_binary()
+      payload =
+        case socket.assigns.renderer3d do
+          :canvas ->
+            tiles =
+              socket.assigns.mesh.tiles
+              |> Map.values()
+              |> Enum.filter(fn %{center: {cx, cy, cz}} ->
+                cx * vx + cy * vy + cz * vz > min_dot
+              end)
+              |> Enum.map(&tile_row(&1, terrain_map))
+
+            %{palette: palette_colors(), tiles: tiles}
+
+          :css3d ->
+            html =
+              facets
+              |> Enum.filter(fn %{center: {cx, cy, cz}} ->
+                cx * vx + cy * vy + cz * vz > min_dot
+              end)
+              |> Enum.map(&facet_div(&1, terrain_map))
+              |> IO.iodata_to_binary()
+
+            %{html: html}
+        end
 
       socket
       |> assign(view_bucket: bucket)
-      |> push_event("globe3d:window", %{html: html})
+      |> push_event("globe3d:window", payload)
     end
+  end
+
+  # Compact tile row for the vector-canvas renderer:
+  # [id, palette_index, cx, cy, cz, corner1x, corner1y, corner1z, ...]
+  defp tile_row(tile, terrain_map) do
+    {cx, cy, cz} = tile.center
+
+    corners =
+      Enum.flat_map(tile.corners, fn {x, y, z} ->
+        [Float.round(x, 4), Float.round(y, 4), Float.round(z, 4)]
+      end)
+
+    [
+      tile.id,
+      palette_index(Map.get(terrain_map, tile.id, :ocean)),
+      Float.round(cx, 4),
+      Float.round(cy, 4),
+      Float.round(cz, 4) | corners
+    ]
+  end
+
+  defp palette_colors, do: Enum.map(@terrain_legend, fn {_t, color, _label} -> color end)
+
+  defp palette_index(terrain) do
+    Enum.find_index(@terrain_legend, fn {t, _color, _label} -> t == terrain end) || 0
   end
 
   # Seed, container dims and device class are part of the bucket so
@@ -494,7 +548,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     %{container_w: w, container_h: h, world: world, device_coarse: coarse} = socket.assigns
 
     {round(vx * 8), round(vy * 8), round(vz * 8), round(:math.log2(scale / 50) * 2), world.seed,
-     div(w, 200), div(h, 200), coarse}
+     div(w, 200), div(h, 200), coarse, socket.assigns.renderer3d}
   end
 
   # Server-built tile markup (no user data involved); phx-click works via
@@ -675,6 +729,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             data-scale={@scale}
             data-r0={Facets.r0()}
             data-lod-k={@lod_k}
+            data-renderer={@renderer3d}
+            data-selected-id={@selected_tile && @selected_tile.id}
             data-texture={~p"/worlds/#{@world.id}/texture.png?seed=#{@world.seed}"}
           >
             <%!-- EVERYTHING the hook mutates lives inside this single
@@ -910,22 +966,27 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               }
               this.grab()
 
-              // Tile windows arrive as pre-rendered HTML and bypass
-              // LiveView's DOM diffing entirely — the .globe3d-fine node is
-              // stable for the life of the view, so no re-binding races.
-              this.handleEvent("globe3d:window", ({html}) => {
-                if (!this.fine) return
-                this.fine.innerHTML = html
-                this.schedule()
+              // Tile windows bypass LiveView's DOM diffing entirely:
+              // vector payloads (canvas renderer) are drawn as polygons;
+              // css3d payloads arrive as pre-rendered HTML into the stable
+              // .globe3d-fine node.
+              this.handleEvent("globe3d:window", (payload) => {
+                if (payload.tiles) {
+                  this.tiles = payload.tiles
+                  this.palette = payload.palette || []
+                  this.schedule()
+                } else if (payload.html && this.fine) {
+                  this.fine.innerHTML = payload.html
+                  this.schedule()
+                }
               })
 
               // --- baked world texture for the far-zoom impostor ---
+              // Two-stage: the tiny level-0 bake paints almost instantly,
+              // then the full-resolution level 1 replaces it.
               this.tex = null
               this.loadedUrl = null
-              this.loadTexture = () => {
-                const url = this.el.dataset.texture
-                if (!url || url === this.loadedUrl) return
-                this.loadedUrl = url
+              this.decode = (src, cb) => {
                 const img = new Image()
                 img.onload = () => {
                   const oc = document.createElement("canvas")
@@ -934,10 +995,28 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                   const octx = oc.getContext("2d")
                   octx.drawImage(img, 0, 0)
                   const idata = octx.getImageData(0, 0, img.width, img.height)
-                  this.tex = {data: new Uint32Array(idata.data.buffer), w: img.width, h: img.height}
-                  this.schedule()
+                  cb({data: new Uint32Array(idata.data.buffer), w: img.width, h: img.height})
                 }
-                img.src = url
+                img.src = src
+              }
+              this.loadTexture = () => {
+                const url = this.el.dataset.texture
+                if (!url || url === this.loadedUrl) return
+                this.loadedUrl = url
+                this.decode(url + "&level=0", (tex) => {
+                  // Don't downgrade if a full-res bake for this URL landed first
+                  if (this.loadedUrl === url && (!this.tex || this.tex.level0)) {
+                    tex.level0 = true
+                    this.tex = tex
+                    this.schedule()
+                  }
+                })
+                this.decode(url, (tex) => {
+                  if (this.loadedUrl === url) {
+                    this.tex = tex
+                    this.schedule()
+                  }
+                })
               }
               this.loadTexture()
 
@@ -947,33 +1026,50 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               this.S = parseFloat(d.scale) || 700
               this.r0 = parseFloat(d.r0) || 700
               this.lodK = parseFloat(d.lodK) || 1.02
+              this.renderer = d.renderer || "canvas"
+              this.selectedId = d.selectedId ? parseInt(d.selectedId) : null
               this.maxPitch = 1.50
               this.raf = null
               this.lastSync = 0
               this.syncTimer = null
+              this.tiles = null
+              this.palette = []
 
               // Touch devices: smaller tile budget upstream, deeper zoom so
               // the budgeted hex window is still reachable, cheaper canvas.
               this.coarse = window.matchMedia("(pointer: coarse)").matches
 
-              // Impostor renders below full resolution and upscales — the
-              // intentional "fuzzy at a distance" look, and far fewer pixels.
+              // Far mode renders below full resolution and upscales — the
+              // intentional "fuzzy at a distance" look, and far fewer
+              // pixels. Near vector mode renders dpr-sharp.
               this.q = this.coarse ? 0.4 : 0.5
+
+              // Resize the canvas backing store for the current LOD: cheap
+              // low-res for the texture warp, dpr-sharp for polygons.
+              this.sizeCanvas = () => {
+                const nearVector = this.renderer === "canvas" && !this.farMode
+                const scale = nearVector ? Math.min(window.devicePixelRatio || 1, 2) : this.q
+                const cw = Math.max(Math.round(this.cssW * scale), 1)
+                const ch = Math.max(Math.round(this.cssH * scale), 1)
+                if (this.canvas.width === cw && this.canvas.height === ch) return
+                this.pxScale = scale
+                this.canvas.width = cw
+                this.canvas.height = ch
+                this.canvas.style.width = this.cssW + "px"
+                this.canvas.style.height = this.cssH + "px"
+                this.ctx = this.canvas.getContext("2d")
+                this.frame = this.ctx.createImageData(cw, ch)
+                this.frame32 = new Uint32Array(this.frame.data.buffer)
+              }
 
               const measure = () => {
                 const r = this.el.getBoundingClientRect()
                 this.cx = r.width / 2
                 this.cy = r.height / 2
+                this.cssW = Math.max(r.width, 1)
+                this.cssH = Math.max(r.height, 1)
                 this.fit = Math.max(Math.min(r.width, r.height) / 2, 25)
-                const cw = Math.max(Math.round(r.width * this.q), 1)
-                const ch = Math.max(Math.round(r.height * this.q), 1)
-                this.canvas.width = cw
-                this.canvas.height = ch
-                this.canvas.style.width = r.width + "px"
-                this.canvas.style.height = r.height + "px"
-                this.ctx = this.canvas.getContext("2d")
-                this.frame = this.ctx.createImageData(cw, ch)
-                this.frame32 = new Uint32Array(this.frame.data.buffer)
+                this.sizeCanvas()
                 if (r.width > 0) {
                   this.pushEvent("viewport_resize", {
                     w: Math.round(r.width),
@@ -994,19 +1090,28 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               })
               this.ro.observe(this.el)
 
-              // LOD: real hex divs only when the viewport fits inside the
+              // LOD: near detail only when the viewport fits inside the
               // device's budgeted tile window (data-lod-k, server-computed);
-              // the baked-texture canvas impostor otherwise. Display state
-              // is force-written every apply (cheap; browsers dedup
-              // same-value writes) so freshly swapped-in layers can never be
-              // left in the wrong state. Hysteresis lives in farMode.
+              // the baked-texture warp otherwise. With the vector renderer
+              // both levels draw on the canvas (polygons near, texture far);
+              // css3d swaps the canvas for the matrix3d tile DOM. Display
+              // state is force-written every apply (cheap; browsers dedup
+              // same-value writes). Hysteresis lives in farMode.
               this.updateLod = () => {
                 const corner = Math.hypot(this.cx, this.cy)
+                const wasFar = this.farMode
                 this.farMode = this.farMode
                   ? this.S < corner * this.lodK * 1.1
                   : this.S < corner * this.lodK
-                this.canvas.style.display = this.farMode ? "" : "none"
-                this.fine.style.display = this.farMode ? "none" : ""
+
+                if (this.renderer === "canvas") {
+                  if (wasFar !== this.farMode) this.sizeCanvas()
+                  this.canvas.style.display = ""
+                  this.fine.style.display = "none"
+                } else {
+                  this.canvas.style.display = this.farMode ? "" : "none"
+                  this.fine.style.display = this.farMode ? "none" : ""
+                }
               }
 
               // World vector for a screen point (inverse view rotation).
@@ -1025,11 +1130,64 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 }
               }
 
+              // Near mode, vector renderer: the windowed tiles as filled 2D
+              // paths — crisp at any zoom, no DOM, no compositor limits.
+              this.renderPolygons = () => {
+                const tiles = this.tiles
+                const ctx = this.ctx
+                if (!ctx) return
+                ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+                if (!tiles) return
+
+                const k = this.pxScale
+                const S = this.S * k, ccx = this.cx * k, ccy = this.cy * k
+                const cyw = Math.cos(this.yaw), syw = Math.sin(this.yaw)
+                const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
+                // View-space z of a world point (backface test)
+                const vz = (x, y, z) => cp * cyw * x + cp * syw * y + sp * z
+                let selected = null
+
+                for (const row of tiles) {
+                  if (vz(row[2], row[3], row[4]) <= 0.02) continue
+
+                  ctx.beginPath()
+                  for (let i = 5; i < row.length; i += 3) {
+                    const x = row[i], y = row[i + 1], z = row[i + 2]
+                    const px = ccx + S * (-syw * x + cyw * y)
+                    const py = ccy - S * (-sp * cyw * x - sp * syw * y + cp * z)
+                    if (i === 5) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+                  }
+                  ctx.closePath()
+                  const color = this.palette[row[1]] || "#1e3a8a"
+                  ctx.fillStyle = color
+                  ctx.fill()
+                  // Hairline same-color stroke seals seams between polygons
+                  ctx.strokeStyle = color
+                  ctx.lineWidth = 1
+                  ctx.stroke()
+                  if (row[0] === this.selectedId) selected = row
+                }
+
+                if (selected) {
+                  ctx.beginPath()
+                  for (let i = 5; i < selected.length; i += 3) {
+                    const x = selected[i], y = selected[i + 1], z = selected[i + 2]
+                    const px = ccx + S * (-syw * x + cyw * y)
+                    const py = ccy - S * (-sp * cyw * x - sp * syw * y + cp * z)
+                    if (i === 5) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+                  }
+                  ctx.closePath()
+                  ctx.strokeStyle = "#ffffff"
+                  ctx.lineWidth = Math.max(2 * k, 2)
+                  ctx.stroke()
+                }
+              }
+
               this.renderCanvas = () => {
                 if (!this.tex || !this.frame32) return
                 const out = this.frame32
                 out.fill(0)
-                const q = this.q
+                const q = this.pxScale
                 const S = this.S * q, ccx = this.cx * q, ccy = this.cy * q
                 const cw = this.canvas.width, ch = this.canvas.height
                 const cyw = Math.cos(this.yaw), syw = Math.sin(this.yaw)
@@ -1063,6 +1221,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 this.updateLod()
                 if (this.farMode) {
                   this.renderCanvas()
+                } else if (this.renderer === "canvas") {
+                  this.renderPolygons()
                 } else {
                   const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw)
                   const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
@@ -1232,7 +1392,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                   return
                 }
 
-                if (this.farMode) {
+                if (this.farMode || this.renderer === "canvas") {
                   const r = this.el.getBoundingClientRect()
                   const p = this.unproject(e.clientX - r.left, e.clientY - r.top)
                   if (p) this.pushEvent("select_at", p)
@@ -1253,10 +1413,11 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             updated() {
               // Regenerate swaps the ignored subtree (new id) and changes
               // the texture URL — re-grab refs and reload the bake. The LOD
-              // threshold can also change (server recomputes it from the
-              // device class).
+              // threshold and selection can also change server-side.
               this.grab()
               this.lodK = parseFloat(this.el.dataset.lodK) || this.lodK
+              const sel = this.el.dataset.selectedId
+              this.selectedId = sel ? parseInt(sel) : null
               this.loadTexture()
               this.apply()
             },

@@ -228,20 +228,24 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       assert html =~ "globe3d-stage"
       assert html =~ "globe3d-own-#{world.id}"
 
-      # Tiles arrive via push_event, never through the rendered DOM
-      assert_push_event(view, "globe3d:window", %{html: window_html})
-      assert window_html =~ "hex-cell3d"
-      assert window_html =~ "matrix3d("
+      # Tiles arrive via push_event as vector data, never through the DOM
+      assert_push_event(view, "globe3d:window", %{tiles: tiles, palette: palette})
       refute html =~ "hex-cell3d"
 
+      assert length(palette) == 8
       tile_count = BrokenOaths.Worlds.Globe.tile_count(@frequency)
-      facet_divs = window_html |> String.split("hex-cell3d") |> length() |> Kernel.-(1)
-      assert facet_divs > 0
-      assert facet_divs <= tile_count
+      assert length(tiles) > 0
+      assert length(tiles) <= tile_count
+
+      # Each row: [id, palette_index, cx, cy, cz | corner coords]
+      [id, pal | coords] = hd(tiles)
+      assert is_integer(id) and id < tile_count
+      assert pal in 0..7
+      assert length(coords) in [3 + 15, 3 + 18]
 
       # Regenerate pushes a recolored window (seed is in the bucket)
       view |> element("button", "Regenerate") |> render_click()
-      assert_push_event(view, "globe3d:window", %{html: _})
+      assert_push_event(view, "globe3d:window", %{tiles: _})
 
       # Toggle back restores the classic renderer
       html = view |> element("button", "Classic") |> render_click()
@@ -256,32 +260,31 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
     } do
       {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
       view |> element("button", "3D β") |> render_click()
-      assert_push_event(view, "globe3d:window", %{html: initial_html})
-      initial = initial_html |> String.split("hex-cell3d") |> length() |> Kernel.-(1)
+      assert_push_event(view, "globe3d:window", %{tiles: initial_tiles})
+      initial = length(initial_tiles)
 
       # Deep zoom, settled: window should be much smaller than the mesh
       view
       |> element("#globe3d-stage")
       |> render_hook("view_sync", %{yaw: 0.0, pitch: 0.0, scale: 5000, settled: true})
 
-      assert_push_event(view, "globe3d:window", %{html: zoomed_html})
-      zoomed = zoomed_html |> String.split("hex-cell3d") |> length() |> Kernel.-(1)
-      assert zoomed < initial
+      assert_push_event(view, "globe3d:window", %{tiles: zoomed_tiles})
+      assert length(zoomed_tiles) < initial
 
       # Rotating to the far side pushes a different window
       view
       |> element("#globe3d-stage")
       |> render_hook("view_sync", %{yaw: 3.14, pitch: 0.0, scale: 5000, settled: true})
 
-      assert_push_event(view, "globe3d:window", %{html: far_html})
-      refute far_html == zoomed_html
+      assert_push_event(view, "globe3d:window", %{tiles: far_tiles})
+      refute far_tiles == zoomed_tiles
 
       # Unsettled syncs do not re-window (no DOM churn mid-drag)
       view
       |> element("#globe3d-stage")
       |> render_hook("view_sync", %{yaw: 0.0, pitch: 0.0, scale: 5000, settled: false})
 
-      refute_push_event(view, "globe3d:window", %{html: _})
+      refute_push_event(view, "globe3d:window", %{tiles: _})
     end
 
     test "coarse-pointer devices get a budgeted LOD threshold", %{conn: conn, world: world} do
@@ -297,7 +300,48 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       # full-size math is unit-tested in ProjectionTest)
       assert html =~ ~s(data-lod-k="1.02")
       # And a fresh window was pushed for the new device class
-      assert_push_event(view, "globe3d:window", %{html: _})
+      assert_push_event(view, "globe3d:window", %{tiles: _})
+    end
+
+    test "?renderer=css3d keeps the matrix3d facet experiment reachable", %{
+      conn: conn,
+      world: world
+    } do
+      {:ok, view, html} = live(conn, ~p"/worlds/#{world.id}?mode=3d&renderer=css3d")
+      assert html =~ ~s(data-renderer="css3d")
+
+      assert_push_event(view, "globe3d:window", %{html: window_html})
+      assert window_html =~ "hex-cell3d"
+      assert window_html =~ "matrix3d("
+    end
+
+    test "any tile is reachable and clickable by selector in classic mode", %{
+      conn: conn,
+      world: world
+    } do
+      # The far side of the world: aim the camera at it via URL params,
+      # then click it through its server-rendered DOM element
+      far_tile = BrokenOathsWeb.GlobeHelpers.camera_on(world, 300)
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}?#{far_tile}")
+      open_sidebar(view)
+
+      html = BrokenOathsWeb.GlobeHelpers.click_tile(view, 300)
+      assert html =~ "#300"
+      assert html =~ "Neighbors"
+    end
+
+    test "globe mode gameplay flows drive the same server events", %{conn: conn, world: world} do
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}?mode=3d")
+      open_sidebar(view)
+
+      # Camera helper = a settled drag; selection helper = a canvas click
+      BrokenOathsWeb.GlobeHelpers.look_at(view, world, 300)
+      assert_push_event(view, "globe3d:window", %{tiles: _})
+
+      html = BrokenOathsWeb.GlobeHelpers.select_tile_at(view, world, 300)
+      assert html =~ "#300"
+      # Selection round-trips to the hook for the canvas highlight ring
+      assert html =~ ~s(data-selected-id="300")
     end
 
     test "3D mode has the canvas impostor and texture URL", %{conn: conn, world: world} do
