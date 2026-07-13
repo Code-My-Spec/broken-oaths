@@ -25,13 +25,15 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
     end
 
     test "shows world size as tile count", %{conn: conn, world: world} do
-      {:ok, _view, html} = live(conn, ~p"/worlds/#{world.id}")
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+      html = open_sidebar(view)
       assert html =~ "GP(#{@frequency})"
       assert html =~ "#{Globe.tile_count(@frequency)} tiles"
     end
 
     test "shows terrain legend", %{conn: conn, world: world} do
-      {:ok, _view, html} = live(conn, ~p"/worlds/#{world.id}")
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+      html = open_sidebar(view)
       assert html =~ "Ocean"
       assert html =~ "Grassland"
       assert html =~ "Mountains"
@@ -45,6 +47,7 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
 
     test "selecting a tile shows details", %{conn: conn, world: world} do
       {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+      open_sidebar(view)
 
       # Pick a tile that is definitely rendered under the default view
       tile_id = a_visible_tile_id()
@@ -65,6 +68,7 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       world: world
     } do
       {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+      open_sidebar(view)
 
       # Rotate up until the pole (tile 0) is in view
       for _ <- 1..8 do
@@ -113,7 +117,8 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
     end
 
     test "rotating changes the view yaw", %{conn: conn, world: world} do
-      {:ok, view, html} = live(conn, ~p"/worlds/#{world.id}")
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+      html = open_sidebar(view)
       assert html =~ "0.0° / 0.0°"
 
       view |> element("[phx-value-dir='right']") |> render_click()
@@ -123,6 +128,7 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
 
     test "rotation wraps around the full globe", %{conn: conn, world: world} do
       {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+      open_sidebar(view)
 
       # Default zoom: yaw step = (150/700)/1 ≈ 12.28°. 30 steps > 360°,
       # so yaw must wrap back below 360 rather than growing without bound.
@@ -137,6 +143,7 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
 
     test "pitch clamps at the pole", %{conn: conn, world: world} do
       {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+      open_sidebar(view)
 
       for _ <- 1..20 do
         view |> element("[phx-value-dir='up']") |> render_click()
@@ -174,7 +181,8 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
     end
 
     test "dragging rotates the globe", %{conn: conn, world: world} do
-      {:ok, view, html} = live(conn, ~p"/worlds/#{world.id}")
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+      html = open_sidebar(view)
       assert html =~ "0.0° / 0.0°"
 
       # Drag left 100px, down 50px at default zoom (scale 700):
@@ -189,6 +197,7 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
 
     test "drag pitch clamps at the pole", %{conn: conn, world: world} do
       {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+      open_sidebar(view)
 
       html =
         view
@@ -199,7 +208,8 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
     end
 
     test "keyboard navigation works", %{conn: conn, world: world} do
-      {:ok, view, html} = live(conn, ~p"/worlds/#{world.id}")
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+      html = open_sidebar(view)
       assert html =~ "0.0° / 0.0°"
 
       render_keydown(view, "keydown", %{"key" => "ArrowRight"})
@@ -288,6 +298,7 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       world: world
     } do
       {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+      open_sidebar(view)
       view |> element("button", "3D β") |> render_click()
 
       # A point near the north pole selects the pole pentagon
@@ -302,6 +313,7 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
 
     test "3D mode view_sync updates the sidebar", %{conn: conn, world: world} do
       {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+      open_sidebar(view)
       view |> element("button", "3D β") |> render_click()
 
       html =
@@ -312,6 +324,74 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       # 0.5 rad = 28.6°, -0.25 rad = -14.3°
       assert html =~ "28.6° / -14.3°"
       assert html =~ "1235px"
+    end
+
+    test "sidebar is collapsed by default and toggles", %{conn: conn, world: world} do
+      {:ok, view, html} = live(conn, ~p"/worlds/#{world.id}")
+      refute html =~ "Terrain Stats"
+      refute html =~ "World Info"
+
+      html = open_sidebar(view)
+      assert html =~ "Terrain Stats"
+      assert html =~ "World Info"
+      assert html =~ "Legend"
+
+      # The close button inside the sidebar collapses it again
+      html = view |> element("button[phx-click='toggle_sidebar']") |> render_click()
+      refute html =~ "Terrain Stats"
+    end
+
+    test "view params set the initial camera in classic mode", %{conn: conn, world: world} do
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}?yaw=90&pitch=20&zoom=1000")
+      html = open_sidebar(view)
+
+      assert html =~ "90.0° / 20.0°"
+      # zoom=1000 snaps to the exact 1000px zoom level (fit 350 x 2.8571)
+      assert html =~ ">1000<"
+    end
+
+    test "view params set the initial camera in 3D mode", %{conn: conn, world: world} do
+      {:ok, view, html} =
+        live(conn, ~p"/worlds/#{world.id}?mode=3d&yaw=45&pitch=-10&zoom=900")
+
+      # The hook reads its starting view from these attributes
+      assert html =~ ~s(data-yaw=)
+      assert html =~ ~s(data-scale="900")
+
+      html = open_sidebar(view)
+      assert html =~ "45.0° / -10.0°"
+      assert html =~ "900px"
+    end
+
+    test "view params clamp and wrap out-of-range values", %{conn: conn, world: world} do
+      {:ok, view, _html} =
+        live(conn, ~p"/worlds/#{world.id}?yaw=450&pitch=-89&zoom=999999")
+
+      html = open_sidebar(view)
+      # 450° wraps to 90°; -89° clamps to the -85.9° pitch limit
+      assert html =~ "90.0° / -85.9°"
+    end
+
+    test "malformed view params are ignored", %{conn: conn, world: world} do
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}?yaw=banana&zoom=")
+      html = open_sidebar(view)
+      assert html =~ "0.0° / 0.0°"
+    end
+
+    test "toggling modes preserves the camera in the URL", %{conn: conn, world: world} do
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+      open_sidebar(view)
+
+      # Rotate right once: 150/700 rad = 12.3°
+      view |> element("[phx-value-dir='right']") |> render_click()
+
+      html = view |> element("button", "3D β") |> render_click()
+      assert html =~ "globe3d-stage"
+      assert html =~ "12.3°"
+
+      html = view |> element("button", "Classic") |> render_click()
+      refute html =~ "globe3d-stage"
+      assert html =~ "12.3°"
     end
 
     test "name can be updated", %{conn: conn, world: world} do
@@ -336,6 +416,10 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
 
       assert_redirect(view, ~p"/worlds/#{other.id}")
     end
+  end
+
+  defp open_sidebar(view) do
+    view |> element("button[phx-click='toggle_sidebar']") |> render_click()
   end
 
   # A tile id guaranteed visible under the initial view (yaw 0, pitch 0,

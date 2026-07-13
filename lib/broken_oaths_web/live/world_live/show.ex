@@ -60,6 +60,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         render_mode: :classic,
         facets: [],
         view_bucket: nil,
+        sidebar_open: false,
         selected_tile: nil,
         selected_terrain: nil,
         page_title: world.name,
@@ -70,10 +71,65 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     {:ok, socket}
   end
 
-  # Render mode lives in the URL (?mode=3d) so it survives refreshes.
+  # Render mode and the camera live in the URL (?mode=3d&yaw=..&pitch=..&zoom=..),
+  # so views survive refreshes, are shareable, and — critically — tests can
+  # mount the LiveView at any exact camera state.
   def handle_params(params, _uri, socket) do
     mode = if params["mode"] == "3d", do: :three_d, else: :classic
-    {:noreply, set_mode(socket, mode)}
+
+    {socket, view_changed?} = apply_view_params(socket, params)
+    socket = set_mode(socket, mode)
+
+    socket =
+      if view_changed? and socket.assigns.render_mode == :classic,
+        do: compute_view(socket),
+        else: socket
+
+    {:noreply, socket}
+  end
+
+  # yaw/pitch arrive in degrees (matching the sidebar display); zoom is the
+  # scale in px per sphere radius. Absent or malformed params leave the
+  # current view untouched.
+  defp apply_view_params(socket, params) do
+    yaw = parse_degrees(params["yaw"])
+    pitch = parse_degrees(params["pitch"])
+    zoom = parse_zoom(params["zoom"])
+
+    changes =
+      Enum.reject(
+        [
+          yaw && {:yaw, wrap_yaw(yaw)},
+          pitch && {:pitch, clamp_pitch(pitch)},
+          zoom && {:scale, zoom},
+          zoom && {:zoom_index, nearest_zoom_index(socket, zoom)}
+        ],
+        &is_nil/1
+      )
+
+    if changes == [] do
+      {socket, false}
+    else
+      {assign(socket, changes), true}
+    end
+  end
+
+  defp parse_degrees(nil), do: nil
+
+  defp parse_degrees(value) do
+    case Float.parse(to_string(value)) do
+      {deg, _} -> deg * :math.pi() / 180.0
+      :error -> nil
+    end
+  end
+
+  defp parse_zoom(nil), do: nil
+
+  defp parse_zoom(value) do
+    case Float.parse(to_string(value)) do
+      {v, _} -> v |> round() |> max(50) |> min(10_000)
+      :error -> nil
+    end
   end
 
   # -------------------------------------------------------------------
@@ -88,14 +144,20 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   end
 
   def handle_event("toggle_mode", _params, socket) do
-    world = socket.assigns.world
+    %{world: world, yaw: yaw, pitch: pitch, scale: scale} = socket.assigns
+
+    view = [yaw: deg(yaw), pitch: deg(pitch), zoom: scale]
 
     to =
       if socket.assigns.render_mode == :classic,
-        do: ~p"/worlds/#{world.id}?mode=3d",
-        else: ~p"/worlds/#{world.id}"
+        do: ~p"/worlds/#{world.id}?#{[{:mode, "3d"} | view]}",
+        else: ~p"/worlds/#{world.id}?#{view}"
 
     {:noreply, push_patch(socket, to: to)}
+  end
+
+  def handle_event("toggle_sidebar", _params, socket) do
+    {:noreply, assign(socket, sidebar_open: !socket.assigns.sidebar_open)}
   end
 
   # The Globe3D hook reports its view for the sidebar; when the view has
@@ -291,14 +353,29 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   end
 
   defp apply_rotation(socket, dyaw, dpitch) do
-    two_pi = 2 * :math.pi()
-    yaw = socket.assigns.yaw + dyaw
-    yaw = yaw - two_pi * Float.floor(yaw / two_pi)
-    pitch = max(-@max_pitch, min(socket.assigns.pitch + dpitch, @max_pitch))
-
     socket
-    |> assign(yaw: yaw, pitch: pitch)
+    |> assign(
+      yaw: wrap_yaw(socket.assigns.yaw + dyaw),
+      pitch: clamp_pitch(socket.assigns.pitch + dpitch)
+    )
     |> compute_view()
+  end
+
+  defp wrap_yaw(yaw) do
+    two_pi = 2 * :math.pi()
+    yaw - two_pi * Float.floor(yaw / two_pi)
+  end
+
+  defp clamp_pitch(pitch), do: max(-@max_pitch, min(pitch, @max_pitch))
+
+  defp nearest_zoom_index(socket, scale) do
+    %{container_w: w, container_h: h} = socket.assigns
+    fit = min(w, h) / 2
+
+    @zoom_factors
+    |> Enum.with_index()
+    |> Enum.min_by(fn {factor, _} -> abs(factor * fit - scale) end)
+    |> elem(1)
   end
 
   defp set_mode(%{assigns: %{render_mode: mode}} = socket, mode), do: socket
@@ -317,22 +394,13 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   end
 
   defp set_mode(socket, :classic) do
-    # Snap the continuous 3D scale back to the nearest zoom level
-    %{container_w: w, container_h: h, scale: scale} = socket.assigns
-    fit = min(w, h) / 2
-
-    zoom_index =
-      @zoom_factors
-      |> Enum.with_index()
-      |> Enum.min_by(fn {factor, _} -> abs(factor * fit - scale) end)
-      |> elem(1)
-
     socket
     |> assign(
       render_mode: :classic,
       facets: [],
       view_bucket: nil,
-      zoom_index: zoom_index
+      # Snap the continuous 3D scale back to the nearest zoom level
+      zoom_index: nearest_zoom_index(socket, socket.assigns.scale)
     )
     |> compute_view()
   end
@@ -516,7 +584,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
       </div>
 
       <%!-- Main content --%>
-      <div class="flex flex-1 min-h-0">
+      <div class="flex flex-1 min-h-0 relative">
         <%!-- Globe viewport --%>
         <div class="flex-1 overflow-hidden bg-base-300 relative">
           <div
@@ -669,14 +737,47 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 }
               }, {passive: false})
 
+              this.touches = new Map()
+              this.pinchDist = null
+
               this.el.addEventListener("pointerdown", (e) => {
-                if (e.button !== 0) return
-                this.pointer = e.pointerId
-                this.last = {x: e.clientX, y: e.clientY}
-                this.moved = false
+                if (e.pointerType === "mouse" && e.button !== 0) return
+                this.touches.set(e.pointerId, {x: e.clientX, y: e.clientY})
+
+                if (this.touches.size === 2) {
+                  // Second finger: abandon drag, enter pinch
+                  this.pointer = null
+                  this.moved = false
+                  this.el.classList.remove("dragging")
+                  const [a, b] = [...this.touches.values()]
+                  this.pinchDist = Math.hypot(a.x - b.x, a.y - b.y)
+                  this.el.setPointerCapture(e.pointerId)
+                } else if (this.touches.size === 1) {
+                  this.pointer = e.pointerId
+                  this.last = {x: e.clientX, y: e.clientY}
+                  this.moved = false
+                }
               })
 
               this.el.addEventListener("pointermove", (e) => {
+                // Pinch: step through the server zoom levels as the spread
+                // crosses ±25% thresholds
+                if (this.pinchDist !== null && this.touches.has(e.pointerId)) {
+                  this.touches.set(e.pointerId, {x: e.clientX, y: e.clientY})
+                  if (this.touches.size === 2) {
+                    const [a, b] = [...this.touches.values()]
+                    const d = Math.hypot(a.x - b.x, a.y - b.y)
+                    if (d > this.pinchDist * 1.25) {
+                      this.pushEvent("zoom_in", {})
+                      this.pinchDist = d
+                    } else if (d < this.pinchDist * 0.8) {
+                      this.pushEvent("zoom_out", {})
+                      this.pinchDist = d
+                    }
+                  }
+                  return
+                }
+
                 if (this.pointer === null || e.pointerId !== this.pointer) return
                 const dx = e.clientX - this.last.x
                 const dy = e.clientY - this.last.y
@@ -698,6 +799,13 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               })
 
               const end = (e) => {
+                this.touches.delete(e.pointerId)
+
+                if (this.pinchDist !== null && this.touches.size < 2) {
+                  this.pinchDist = null
+                  return
+                }
+
                 if (this.pointer === null || e.pointerId !== this.pointer) return
                 if (this.moved) this.flush(true)
                 this.pointer = null
@@ -958,16 +1066,48 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 this.settleTimer = setTimeout(() => this.sync(true, true), 300)
               }
 
-              // --- drag ---
+              // --- drag + pinch ---
               this.pointer = null
               this.moved = false
+              this.touches = new Map()
+              this.pinchDist = null
+
               this.el.addEventListener("pointerdown", (e) => {
-                if (e.button !== 0) return
-                this.pointer = e.pointerId
-                this.last = {x: e.clientX, y: e.clientY}
-                this.moved = false
+                if (e.pointerType === "mouse" && e.button !== 0) return
+                this.touches.set(e.pointerId, {x: e.clientX, y: e.clientY})
+
+                if (this.touches.size === 2) {
+                  // Second finger: abandon drag, enter pinch
+                  this.pointer = null
+                  this.moved = false
+                  this.el.classList.remove("dragging")
+                  const [a, b] = [...this.touches.values()]
+                  this.pinchDist = Math.hypot(a.x - b.x, a.y - b.y)
+                  this.el.setPointerCapture(e.pointerId)
+                } else if (this.touches.size === 1) {
+                  this.pointer = e.pointerId
+                  this.last = {x: e.clientX, y: e.clientY}
+                  this.moved = false
+                }
               })
+
               this.el.addEventListener("pointermove", (e) => {
+                if (this.pinchDist !== null && this.touches.has(e.pointerId)) {
+                  this.touches.set(e.pointerId, {x: e.clientX, y: e.clientY})
+                  if (this.touches.size === 2) {
+                    const [a, b] = [...this.touches.values()]
+                    const d = Math.hypot(a.x - b.x, a.y - b.y)
+                    if (d > 0 && this.pinchDist > 0) {
+                      this.S *= d / this.pinchDist
+                      this.clampS()
+                      this.pinchDist = d
+                      this.schedule()
+                      this.sync(false)
+                    }
+                  }
+                  return
+                }
+
                 if (this.pointer === null || e.pointerId !== this.pointer) return
                 const dx = e.clientX - this.last.x
                 const dy = e.clientY - this.last.y
@@ -980,7 +1120,17 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 this.last = {x: e.clientX, y: e.clientY}
                 this.rotateBy(dx, dy)
               })
+
               const end = (e) => {
+                this.touches.delete(e.pointerId)
+
+                if (this.pinchDist !== null && this.touches.size < 2) {
+                  this.pinchDist = null
+                  this.suppressClick = true
+                  this.sync(true, true)
+                  return
+                }
+
                 if (this.pointer === null || e.pointerId !== this.pointer) return
                 if (this.moved) {
                   this.sync(true, true)
@@ -1062,11 +1212,33 @@ defmodule BrokenOathsWeb.WorldLive.Show do
           }
         </script>
 
+        <%!-- Collapsed-sidebar opener --%>
+        <button
+          :if={!@sidebar_open}
+          phx-click="toggle_sidebar"
+          class="absolute top-1/2 right-0 -translate-y-1/2 btn btn-sm btn-ghost bg-base-200/80 rounded-r-none border border-base-300 z-10"
+          title="Show info panel"
+        >
+          <.icon name="hero-chevron-left" class="w-4 h-4" />
+        </button>
+
         <%!-- Sidebar --%>
-        <div class="w-72 bg-base-200 border-l border-base-300 overflow-y-auto p-4 space-y-6 flex-none">
+        <div
+          :if={@sidebar_open}
+          class="w-72 bg-base-200 border-l border-base-300 overflow-y-auto p-4 space-y-6 flex-none"
+        >
           <%!-- World info --%>
           <div>
-            <h3 class="font-bold text-sm uppercase tracking-wide opacity-60 mb-2">World Info</h3>
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="font-bold text-sm uppercase tracking-wide opacity-60">World Info</h3>
+              <button
+                phx-click="toggle_sidebar"
+                class="btn btn-xs btn-square btn-ghost"
+                title="Hide info panel"
+              >
+                <.icon name="hero-chevron-right" class="w-4 h-4" />
+              </button>
+            </div>
             <dl class="text-sm space-y-1">
               <div class="flex justify-between">
                 <dt class="opacity-60">Seed</dt>
