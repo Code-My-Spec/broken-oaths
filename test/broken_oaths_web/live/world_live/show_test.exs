@@ -147,6 +147,31 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       assert html =~ "/ 85.9°"
     end
 
+    test "dragging rotates the globe", %{conn: conn, world: world} do
+      {:ok, view, html} = live(conn, ~p"/worlds/#{world.id}")
+      assert html =~ "0.0° / 0.0°"
+
+      # Drag left 100px, down 50px at default zoom (scale 700):
+      # yaw = 100/700 rad = 8.2°, pitch = 50/700 rad = 4.1°
+      html =
+        view
+        |> element("#globe-viewport")
+        |> render_hook("drag_rotate", %{dx: -100, dy: 50})
+
+      assert html =~ "8.2° / 4.1°"
+    end
+
+    test "drag pitch clamps at the pole", %{conn: conn, world: world} do
+      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
+
+      html =
+        view
+        |> element("#globe-viewport")
+        |> render_hook("drag_rotate", %{dx: 0, dy: 100_000})
+
+      assert html =~ "/ 85.9°"
+    end
+
     test "keyboard navigation works", %{conn: conn, world: world} do
       {:ok, view, html} = live(conn, ~p"/worlds/#{world.id}")
       assert html =~ "0.0° / 0.0°"

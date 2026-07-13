@@ -143,6 +143,19 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     do_rotate(socket, dir)
   end
 
+  # Client drag (GlobeDrag hook) sends accumulated pixel deltas; dragging
+  # pulls the globe surface with the pointer, so the view moves opposite.
+  def handle_event("drag_rotate", %{"dx" => dx, "dy" => dy}, socket)
+      when is_number(dx) and is_number(dy) do
+    %{pitch: pitch} = socket.assigns
+    scale = Enum.at(@zoom_scales, socket.assigns.zoom_index)
+
+    dyaw = -dx / scale / max(:math.cos(pitch), 0.25)
+    dpitch = dy / scale
+
+    {:noreply, apply_rotation(socket, dyaw, dpitch)}
+  end
+
   def handle_event("keydown", %{"key" => key}, socket) do
     case key do
       k when k in ["ArrowLeft", "a"] -> do_rotate(socket, "left")
@@ -164,32 +177,33 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   # -------------------------------------------------------------------
 
   defp do_rotate(socket, dir) do
-    %{yaw: yaw, pitch: pitch} = socket.assigns
     scale = Enum.at(@zoom_scales, socket.assigns.zoom_index)
 
     step = @pan_px / scale
     # East-west steps cover similar screen distance near the poles
-    yaw_step = step / max(:math.cos(pitch), 0.25)
+    yaw_step = step / max(:math.cos(socket.assigns.pitch), 0.25)
 
-    {yaw, pitch} =
+    {dyaw, dpitch} =
       case dir do
-        "left" -> {yaw - yaw_step, pitch}
-        "right" -> {yaw + yaw_step, pitch}
-        "up" -> {yaw, pitch + step}
-        "down" -> {yaw, pitch - step}
-        _ -> {yaw, pitch}
+        "left" -> {-yaw_step, 0.0}
+        "right" -> {yaw_step, 0.0}
+        "up" -> {0.0, step}
+        "down" -> {0.0, -step}
+        _ -> {0.0, 0.0}
       end
 
+    {:noreply, apply_rotation(socket, dyaw, dpitch)}
+  end
+
+  defp apply_rotation(socket, dyaw, dpitch) do
     two_pi = 2 * :math.pi()
+    yaw = socket.assigns.yaw + dyaw
     yaw = yaw - two_pi * Float.floor(yaw / two_pi)
-    pitch = max(-@max_pitch, min(pitch, @max_pitch))
+    pitch = max(-@max_pitch, min(socket.assigns.pitch + dpitch, @max_pitch))
 
-    socket =
-      socket
-      |> assign(yaw: yaw, pitch: pitch)
-      |> compute_view()
-
-    {:noreply, socket}
+    socket
+    |> assign(yaw: yaw, pitch: pitch)
+    |> compute_view()
   end
 
   defp compute_view(socket) do
@@ -291,7 +305,9 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         <%!-- Globe viewport --%>
         <div class="flex-1 overflow-hidden bg-base-300 relative">
           <div
+            id="globe-viewport"
             class="globe-viewport"
+            phx-hook=".GlobeDrag"
             style={"position:relative;width:#{@container_w}px;height:#{@container_h}px;"}
           >
             <%!-- Sphere disc behind the tiles: fills hairline seams dark --%>
@@ -355,9 +371,90 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
           <%!-- Keyboard hint --%>
           <div class="absolute bottom-4 right-4 text-xs opacity-40">
-            WASD / Arrows to rotate · +/− to zoom
+            Drag or WASD / Arrows to rotate · +/− to zoom
           </div>
         </div>
+
+        <%!-- Input-only drag hook: converts pointer drags into throttled
+             drag_rotate events. All rendering stays server-side. --%>
+        <script :type={Phoenix.LiveView.ColocatedHook} name=".GlobeDrag">
+          export default {
+            mounted() {
+              this.pending = {dx: 0, dy: 0}
+              this.lastSent = 0
+              this.timer = null
+              this.pointer = null
+              this.moved = false
+
+              this.el.addEventListener("pointerdown", (e) => {
+                if (e.button !== 0) return
+                this.pointer = e.pointerId
+                this.last = {x: e.clientX, y: e.clientY}
+                this.moved = false
+              })
+
+              this.el.addEventListener("pointermove", (e) => {
+                if (this.pointer === null || e.pointerId !== this.pointer) return
+                const dx = e.clientX - this.last.x
+                const dy = e.clientY - this.last.y
+
+                if (!this.moved) {
+                  // Small threshold so plain clicks still select tiles
+                  if (Math.abs(dx) + Math.abs(dy) < 4) return
+                  this.moved = true
+                  // Capturing retargets the eventual click to this element,
+                  // so a drag never fires a tile's phx-click
+                  this.el.setPointerCapture(this.pointer)
+                  this.el.classList.add("dragging")
+                }
+
+                this.last = {x: e.clientX, y: e.clientY}
+                this.pending.dx += dx
+                this.pending.dy += dy
+                this.flush(false)
+              })
+
+              const end = (e) => {
+                if (this.pointer === null || e.pointerId !== this.pointer) return
+                if (this.moved) this.flush(true)
+                this.pointer = null
+                this.moved = false
+                this.el.classList.remove("dragging")
+              }
+              this.el.addEventListener("pointerup", end)
+              this.el.addEventListener("pointercancel", end)
+            },
+
+            flush(force) {
+              const now = Date.now()
+
+              if (!force && now - this.lastSent < 90) {
+                if (!this.timer) {
+                  this.timer = setTimeout(() => {
+                    this.timer = null
+                    this.flush(true)
+                  }, 90 - (now - this.lastSent))
+                }
+                return
+              }
+
+              if (this.timer) {
+                clearTimeout(this.timer)
+                this.timer = null
+              }
+
+              const {dx, dy} = this.pending
+              if (dx === 0 && dy === 0) return
+              this.pending = {dx: 0, dy: 0}
+              this.lastSent = now
+              this.pushEvent("drag_rotate", {dx, dy})
+            },
+
+            destroyed() {
+              if (this.timer) clearTimeout(this.timer)
+            }
+          }
+        </script>
 
         <%!-- Sidebar --%>
         <div class="w-72 bg-base-200 border-l border-base-300 overflow-y-auto p-4 space-y-6 flex-none">

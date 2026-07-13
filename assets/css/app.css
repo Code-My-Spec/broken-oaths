@@ -113,6 +113,21 @@
   transition: filter 0.1s ease;
 }
 
+/* Drag-to-rotate surface */
+.globe-viewport {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.globe-viewport.dragging {
+  cursor: grabbing;
+}
+
+.globe-viewport.dragging .hex-cell {
+  cursor: grabbing;
+}
+
 /* Sphere silhouette behind the tiles; fills hairline seams dark. */
 .globe-disc {
   position: absolute;
