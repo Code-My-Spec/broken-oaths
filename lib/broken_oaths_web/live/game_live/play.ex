@@ -399,9 +399,13 @@ defmodule BrokenOathsWeb.GameLive.Play do
             this.el.addEventListener("pointerdown", (e) => {
               this.dragging = true
               this.moved = false
+              this.button = e.button
               this.last = {x: e.clientX, y: e.clientY}
               this.el.setPointerCapture(e.pointerId)
             })
+
+            // Right-click is a game action (queue move), not a menu
+            this.el.addEventListener("contextmenu", (e) => e.preventDefault())
 
             this.el.addEventListener("pointermove", (e) => {
               if (!this.dragging) return
@@ -417,7 +421,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
             this.el.addEventListener("pointerup", (e) => {
               this.dragging = false
-              if (!this.moved) this.click(e)
+              if (this.moved) return
+              if (this.button === 2) this.orderMove(e)
+              else this.click(e)
             })
 
             this.el.addEventListener("wheel", (e) => {
@@ -451,25 +457,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
             return {px, py, depth}
           },
 
-          click(e) {
+          // Nearest tile to a screen point, by exact tile geometry —
+          // correct at any zoom (no fuzzy capture radius).
+          hitTile(e) {
             const r = this.el.getBoundingClientRect()
             const p = this.unproject(e.clientX - r.left, e.clientY - r.top)
-            if (!p) return
-
-            let nearestUnit = null, bestUnitDot = 0.997
-            for (const u of this.units) {
-              const t = this.tiles.find((row) => row[0] === u.tile_id)
-              if (!t) continue
-              const dot = t[2] * p.x + t[3] * p.y + t[4] * p.z
-              if (dot > bestUnitDot) { bestUnitDot = dot; nearestUnit = u }
-            }
-
-            if (nearestUnit) {
-              this.pushEvent("select_unit", {unit_id: nearestUnit.id})
-              return
-            }
-
-            if (this.selectedId == null || this.tiles.length === 0) return
+            if (!p || this.tiles.length === 0) return null
 
             let nearestTile = null, bestTileDot = -Infinity
             for (const row of this.tiles) {
@@ -477,7 +470,26 @@ defmodule BrokenOathsWeb.GameLive.Play do
               if (dot > bestTileDot) { bestTileDot = dot; nearestTile = row[0] }
             }
 
-            if (nearestTile != null) this.pushEvent("queue_move", {unit_id: this.selectedId, to_tile: nearestTile})
+            return nearestTile
+          },
+
+          // Left click: select the unit standing on the clicked tile
+          // (or clear the selection when the tile is empty).
+          click(e) {
+            const tile = this.hitTile(e)
+            if (tile == null) return
+
+            const unit = this.units.find((u) => u.tile_id === tile)
+            if (unit) this.pushEvent("select_unit", {unit_id: unit.id})
+          },
+
+          // Right click: queue the selected unit's move to the clicked tile.
+          orderMove(e) {
+            if (this.selectedId == null) return
+            const tile = this.hitTile(e)
+            if (tile == null) return
+
+            this.pushEvent("queue_move", {unit_id: this.selectedId, to_tile: tile})
           },
 
           draw() {
