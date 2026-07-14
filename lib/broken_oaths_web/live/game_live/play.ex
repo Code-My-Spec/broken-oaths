@@ -384,6 +384,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
             this.ro = new ResizeObserver(measure)
             this.ro.observe(this.el)
 
+            this.airspace = {}
+            this.handleEvent("globe3d:airspace", ({levels}) => { this.airspace = levels; this.draw() })
             this.handleEvent("game:window", ({tiles}) => { this.tiles = tiles; this.draw() })
             this.handleEvent("game:visibility", ({visible}) => { this.visibleSet = new Set(visible); this.draw() })
             this.handleEvent("game:units", ({units}) => { this.units = units; this.draw() })
@@ -499,6 +501,14 @@ defmodule BrokenOathsWeb.GameLive.Play do
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
             ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
 
+            // Fog of war: the unexplored planet is a flat, opaque,
+            // colorless cloud shroud — the "cloud-wrapped" globe. Known
+            // tiles paint over it; everything else stays under cloud.
+            ctx.beginPath()
+            ctx.arc(this.cx, this.cy, this.scale, 0, 2 * Math.PI)
+            ctx.fillStyle = "#a8acb5"
+            ctx.fill()
+
             const order = this.tiles
               .map((row) => ({row, depth: this.project(row[2], row[3], row[4]).depth}))
               .filter(({depth}) => depth > 0.02)
@@ -513,9 +523,32 @@ defmodule BrokenOathsWeb.GameLive.Play do
               }
               ctx.closePath()
               ctx.fillStyle = color
-              ctx.globalAlpha = this.visibleSet.has(id) ? 1.0 : 0.45
               ctx.fill()
-              ctx.globalAlpha = 1.0
+
+              // Explored-but-out-of-vision: remembered terrain under a
+              // thin wash of the fog tone (distinct from full shroud)
+              if (!this.visibleSet.has(id)) {
+                ctx.fillStyle = "rgba(168,172,181,0.45)"
+                ctx.fill()
+              }
+            }
+
+            // Weather: translucent cloud hexes one shell above known
+            // terrain (levels from the airspace push; palette mirrors
+            // Worlds.Weather). Deliberately translucent + tinted so it
+            // never reads as the flat opaque fog shroud.
+            const CLOUD = {1: "rgba(250,251,253,0.38)", 2: "rgba(240,244,249,0.62)", 3: "rgba(104,110,124,0.8)"}
+            for (const {row} of order) {
+              const lvl = this.airspace[row[0]]
+              if (!lvl) continue
+              ctx.beginPath()
+              for (let i = 5; i < row.length; i += 3) {
+                const {px, py} = this.project(row[i] * 1.035, row[i + 1] * 1.035, row[i + 2] * 1.035)
+                if (i === 5) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+              }
+              ctx.closePath()
+              ctx.fillStyle = CLOUD[lvl]
+              ctx.fill()
             }
 
             for (const u of this.units) {
