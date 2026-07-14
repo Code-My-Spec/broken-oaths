@@ -1,6 +1,6 @@
 # CSS-3D Deep Findings (specialist agents, 2026-07-13)
 
-Collected from the five-angle CSS-3D research fan-out. Two reports below (animation/custom-properties, elevation/depth-sorting); lighting, perspective/limits, and scale/hybrid to be appended as they deliver. Every claim carried confidence + source in the originals; this file preserves the load-bearing conclusions.
+Collected from the five-angle CSS-3D research fan-out. All five specialist reports collected below. Every claim carried confidence + source in the originals; this file preserves the load-bearing conclusions.
 
 **Meta-conclusion for this project:** both reports independently validate the canvas pivot. The canvas renderer dodges (a) the custom-property main-thread trap and (b) the Blink painter-path depth-sort landmine entirely. CSS-3D remains viable for the `?renderer=css3d` experiment and for *tens* of hybrid DOM set pieces — never thousands.
 
@@ -112,3 +112,25 @@ Skia Graphite (Chrome on Apple Silicon, 2025): ~15% MotionMark, better GPU memor
 2. JS culling, not CSS containment, for hybrid pieces.
 3. Static sprite atlas for any DOM textures; no Houdini; no var()-driven textures.
 4. Live canvas/video in 3D facets: prototype on real iOS 26 hardware first or avoid.
+
+---
+
+## Report 5 — Perspective mode & hard limits (angle4)
+
+### Perspective is geometrically safe
+`perspective(d)` = single m34=-1/d term; each CSS face is a planar quad under one homography → foreshortening is perspective-correct by construction. Backface rule = sign of accumulated m33 (hidden iff m33<0) — well-specified; the only inherent artifact is rim tiles flickering at m33≈0 (silhouette boundary, not a bug).
+
+### The main-thread ceiling
+Compositor-thread animation of 3D transforms in a preserve-3d scene is NOT supported (dbaron, motion.dev) — the css3d renderer is main-thread regardless; perspective doesn't change the tier, but animating perspective-origin re-projects all ~6k descendants per frame (unquantified cost, flagged).
+
+### Z-fighting on coplanar decals
+"Coplanar" is float-ill-defined (csswg#1953, open since 2017; arbitrary engine thresholds). Sub-pixel epsilons shimmer; ~1px separates visibly near edge-on. **Fold rings/borders into the tile's own paint (border/box-shadow/pseudo-element)** — can't z-fight. (Canvas renderer note: we already draw the selection ring in the same paint pass — same principle.)
+
+### Hit-testing at scale
+WebKit bug 152548: clip-path clips paint but NOT pointer-events — hex corners steal clicks (Safari + Chrome affected; Firefox correct; open). preserve-3d/clip-path hits fall to the main-thread slow path. **Recommendation: never DOM-hit-test tile clicks — unproject the pointer to a tile id.** (Canvas renderer note: this is exactly our select_at design.)
+
+### Raster-scale — the sharpest css3d tradeoff
+Chrome re-rasters on scale change UNLESS will-change: transform, which pins a blurry-when-zoomed bitmap (since Chrome 53). No first-class raster-scale control exists (csswg#236, open since 2016); the sanctioned workaround is authoring 2-4x and scaling down = 4-16x VRAM per tile. Safari additionally rasterizes at unit scale under nested perspective+transform (WebKit 27684) — test zoom sharpness there. (This is the same blur-at-zoom problem our canvas near-mode solved by re-rendering dpr-sharp polygons per frame.)
+
+### Synthesis
+Perspective mode is safe geometry-wise but changes nothing about the main-thread ceiling; the css3d renderer's real costs are raster-scale blur vs re-raster churn and slow-path hit-testing — both of which the canvas renderer structurally avoids.
