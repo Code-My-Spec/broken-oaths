@@ -39,4 +39,16 @@ defmodule BrokenOathsSpex.Fixtures do
   # --- Game membership (sanctioned domain read) ---
   # Which region a player claimed is likewise invisible plumbing.
   defdelegate claimed_region(world, user), to: BrokenOaths.Game, as: :claimed_region
+
+  # --- Game infra (sanctioned test-tick surface) ---
+  # Turn boundaries are wall-clock (60s) in production; specs must never
+  # sleep, so the WorldServer exposes a deterministic tick. Triggering a
+  # tick is server-originated state (the timer would have done it), not
+  # a player action — sanctioned.
+  defdelegate advance_turn(world), to: BrokenOaths.Game, as: :advance_turn
+  defdelegate restart_world(world), to: BrokenOaths.Game, as: :restart_world_server
+
+  # --- Game reads for board-state assertions (sanctioned) ---
+  defdelegate player_units(world, user), to: BrokenOaths.Game, as: :player_units
+  defdelegate adjacent_tiles(world, tile_id), to: BrokenOaths.Worlds.Regions, as: :adjacent_tiles
 end
