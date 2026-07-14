@@ -150,9 +150,9 @@ defmodule BrokenOaths.Worlds.ProjectionTest do
       assert length(near) < length(far)
     end
 
-    test "unknown terrain defaults to ocean", %{mesh: mesh} do
+    test "terrain is opaque; missing tiles surface as nil", %{mesh: mesh} do
       rendered = Projection.visible_tiles(mesh, %{}, @view)
-      assert Enum.all?(rendered, &(&1.terrain == :ocean))
+      assert Enum.all?(rendered, &is_nil(&1.terrain))
     end
   end
 

@@ -1,36 +1,33 @@
 defmodule BrokenOaths.Worlds.Generator do
   @moduledoc """
-  Procedural world generation using layered Perlin noise.
-  Generates elevation and moisture maps to classify terrain types.
+  Procedural world generation using layered Perlin noise, classified into
+  Civ-style terrain: base type × relief × feature (see `Worlds.Terrain`).
 
   Terrain samples 3D noise at each tile's unit-sphere center, which is
-  seamless by construction. The 12 pentagons are forced to :mountains here
-  (single source of truth), making them non-traversable.
+  seamless by construction. A Whittaker-lite climate ladder picks the base:
+  |z| is sin(latitude) — bands come straight from the sphere geometry —
+  and altitude chills, so warmth runs ice cap → tundra ring → temperate →
+  tropics with a moisture wobble keeping every edge organic. Relief comes
+  from elevation; features (woods, rainforest, marsh, sea ice) layer on
+  top per climate.
+
+  The 12 pentagons are always mountains relief with a peak elevation
+  (non-traversable); their base still follows climate, so polar pentagons
+  are snowy peaks.
   """
   alias BrokenOaths.Worlds.Globe
   alias BrokenOaths.Worlds.Noise
+  alias BrokenOaths.Worlds.Terrain
 
   # Noise-space units across the unit sphere; tuned to match the feature
   # density of the old 200-wide flat map (200 * 0.035 ≈ 7 units per wrap).
   @globe_elevation_scale 2.2
   @globe_moisture_scale 2.8
 
-  @terrain_types [
-    {0.30, :ocean},
-    {0.35, :shallow_water},
-    {0.40, :beach},
-    {0.60, :grassland},
-    {0.75, :plains},
-    {0.85, :forest},
-    {0.92, :hills},
-    {1.01, :mountains}
-  ]
-
   @doc """
   Generate the terrain and elevation maps for a globe world in one noise
-  pass. Returns %{terrain: %{tile_id => atom}, elevation: %{tile_id => float}}
-  with elevation in [0.0, 1.0]. The 12 pentagons are always :mountains
-  (non-traversable) with a peak elevation.
+  pass. Returns %{terrain: %{tile_id => %Terrain{}}, elevation:
+  %{tile_id => float}} with elevation in [0.0, 1.0].
   """
   def generate_maps(seed, mesh) do
     elevation_perm = Noise.init(seed)
@@ -47,64 +44,87 @@ defmodule BrokenOaths.Worlds.Generator do
 
   @doc """
   Generate the terrain map for a globe world.
-  Returns %{tile_id => terrain_atom} for all tiles in the mesh.
+  Returns %{tile_id => %Terrain{}} for all tiles in the mesh.
   """
   def generate_terrain_map(seed, mesh) do
     generate_maps(seed, mesh).terrain
   end
 
-  defp tile_terrain(_eperm, _mperm, %Globe.Tile{pentagon?: true}), do: {:mountains, 0.95}
-
-  defp tile_terrain(eperm, mperm, %Globe.Tile{center: {x, y, z}}) do
+  defp tile_terrain(eperm, mperm, %Globe.Tile{center: {x, y, z}, pentagon?: pentagon?}) do
     es = @globe_elevation_scale
     ms = @globe_moisture_scale
-    elevation = Noise.fbm3d(eperm, x * es, y * es, z * es, 6)
     moisture = Noise.fbm3d(mperm, x * ms, y * ms, z * ms, 4)
 
-    terrain =
-      elevation
-      |> classify_terrain(moisture)
-      |> apply_climate(z, elevation, moisture)
+    elevation =
+      if pentagon?, do: 0.95, else: Noise.fbm3d(eperm, x * es, y * es, z * es, 6)
 
-    {terrain, Float.round(elevation, 3)}
-  end
-
-  # A Whittaker-lite climate ladder. |z| is sin(latitude) — bands come
-  # straight from the sphere geometry — and altitude chills, so warmth runs
-  # ice cap → tundra ring → temperate → tropics with a moisture wobble
-  # keeping every edge organic:
-  #
-  #   frozen water → sea ice        cold land → snow, then tundra
-  #   warm wet lowland → swamp      hot+wet → jungle    hot+dry → desert
-  #
-  defp apply_climate(terrain, z, elevation, moisture) do
     warmth = 1.0 - abs(z) * 1.15 - max(elevation - 0.55, 0.0) * 0.65 + (moisture - 0.5) * 0.1
 
+    {classify(elevation, warmth, moisture, pentagon?), Float.round(elevation, 3)}
+  end
+
+  # -------------------------------------------------------------------
+  # Classification: elevation → water/relief, warmth+moisture → base,
+  # then features layered on top.
+  # -------------------------------------------------------------------
+
+  defp classify(elevation, warmth, _moisture, _pentagon?) when elevation < 0.30 do
+    %Terrain{base: :ocean, feature: if(warmth < 0.06, do: :ice)}
+  end
+
+  defp classify(elevation, warmth, _moisture, _pentagon?) when elevation < 0.37 do
+    %Terrain{base: :coast, feature: if(warmth < 0.06, do: :ice)}
+  end
+
+  defp classify(elevation, warmth, moisture, pentagon?) do
+    relief =
+      cond do
+        pentagon? -> :mountains
+        elevation >= 0.88 -> :mountains
+        elevation >= 0.74 -> :hills
+        true -> :flat
+      end
+
+    base =
+      cond do
+        warmth < 0.12 -> :snow
+        warmth < 0.26 -> :tundra
+        moisture < 0.32 and warmth > 0.55 -> :desert
+        moisture < 0.45 or warmth > 0.66 -> :plains
+        true -> :grassland
+      end
+
+    %Terrain{
+      base: base,
+      relief: relief,
+      feature: feature(base, relief, elevation, warmth, moisture)
+    }
+  end
+
+  defp feature(base, relief, elevation, warmth, moisture) do
     cond do
-      terrain in [:ocean, :shallow_water] ->
-        if warmth < 0.06, do: :snow, else: terrain
+      relief == :mountains ->
+        nil
 
-      warmth < 0.12 ->
-        :snow
+      base in [:snow, :desert] ->
+        nil
 
-      warmth < 0.26 ->
-        :tundra
+      base == :grassland and relief == :flat and elevation < 0.47 and moisture > 0.68 and
+          warmth > 0.45 ->
+        :marsh
 
-      elevation >= 0.40 and elevation < 0.47 and moisture > 0.66 and warmth > 0.50 ->
-        :swamp
+      base in [:grassland, :plains] and warmth > 0.70 and moisture > 0.58 ->
+        :rainforest
 
-      warmth > 0.70 and moisture > 0.60 ->
-        :jungle
-
-      warmth > 0.60 and moisture < 0.32 ->
-        :desert
+      base in [:grassland, :plains, :tundra] and moisture > 0.55 and warmth > 0.20 ->
+        :woods
 
       true ->
-        terrain
+        nil
     end
   end
 
-  @doc "Compute terrain type statistics from a terrain map."
+  @doc "Compute terrain statistics from a terrain map, keyed by terrain."
   def terrain_stats(terrain_map) do
     total = map_size(terrain_map)
 
@@ -119,13 +139,15 @@ defmodule BrokenOaths.Worlds.Generator do
   end
 
   @doc """
-  Find suitable spawn points on grassland tiles, spread apart.
+  Find suitable spawn points on open grassland, spread apart.
   Distance is chord distance between unit-sphere tile centers.
   """
   def find_spawn_points(terrain_map, mesh, count) do
     candidates =
       terrain_map
-      |> Enum.filter(fn {_id, terrain} -> terrain == :grassland end)
+      |> Enum.filter(fn {_id, %Terrain{} = t} ->
+        t.base == :grassland and t.relief != :mountains and t.feature != :marsh
+      end)
       |> Enum.map(fn {id, _} -> id end)
       |> Enum.sort()
 
@@ -161,25 +183,5 @@ defmodule BrokenOaths.Worlds.Generator do
     dy = ay - by
     dz = az - bz
     dx * dx + dy * dy + dz * dz
-  end
-
-  defp classify_terrain(elevation, moisture) do
-    base = base_terrain(elevation)
-    modify_by_moisture(base, moisture)
-  end
-
-  defp base_terrain(elevation) do
-    Enum.find_value(@terrain_types, :mountains, fn {threshold, type} ->
-      if elevation < threshold, do: type
-    end)
-  end
-
-  defp modify_by_moisture(terrain, moisture) do
-    case terrain do
-      :grassland when moisture > 0.6 -> :forest
-      :grassland when moisture < 0.35 -> :plains
-      :plains when moisture > 0.7 -> :grassland
-      other -> other
-    end
   end
 end

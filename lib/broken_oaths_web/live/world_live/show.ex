@@ -2,7 +2,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   use BrokenOathsWeb, :live_view
 
   alias BrokenOaths.Worlds
-  alias BrokenOaths.Worlds.{Facets, Generator, Globe, Projection, Texture}
+  alias BrokenOaths.Worlds.{Facets, Generator, Globe, Projection, Terrain, Texture}
 
   # Zoom levels as multiples of the "whole globe fits" scale (min(w,h)/2
   # pixels per sphere radius). Relative zoom keeps the on-screen TILE count
@@ -32,22 +32,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   # Pitch clamp (±85.9°) keeps the up-vector sane; pole tiles are still
   # dead-center visible well before the clamp.
   @max_pitch 1.50
-
-  @terrain_legend [
-    {:ocean, "#1e3a8a", "Ocean"},
-    {:shallow_water, "#3b82f6", "Shallow Water"},
-    {:beach, "#fbbf24", "Beach / Coast"},
-    {:grassland, "#22c55e", "Grassland"},
-    {:plains, "#84cc16", "Plains"},
-    {:forest, "#15803d", "Forest"},
-    {:hills, "#92400e", "Hills"},
-    {:mountains, "#525252", "Mountains"},
-    {:tundra, "#8d9b8a", "Tundra"},
-    {:snow, "#e6ecf2", "Snow / Ice"},
-    {:jungle, "#065f46", "Jungle"},
-    {:swamp, "#3f6212", "Swamp"},
-    {:desert, "#d9c26b", "Desert"}
-  ]
 
   # -------------------------------------------------------------------
   # Mount
@@ -86,7 +70,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         selected_tile: nil,
         selected_terrain: nil,
         page_title: world.name,
-        terrain_legend: @terrain_legend
+        terrain_legend: Terrain.legend()
       )
       |> compute_view()
 
@@ -538,15 +522,29 @@ defmodule BrokenOathsWeb.WorldLive.Show do
           :canvas ->
             elevation_map = socket.assigns.elevation_map
 
-            tiles =
+            window =
               socket.assigns.mesh.tiles
               |> Map.values()
               |> Enum.filter(fn %{center: {cx, cy, cz}} ->
                 cx * vx + cy * vy + cz * vz > min_dot
               end)
-              |> Enum.map(&tile_row(&1, terrain_map, elevation_map))
 
-            %{palette: palette_colors(), tiles: tiles}
+            # Palette is dynamic: distinct composed Terrain colors in this
+            # window, tiles referencing them by index
+            {rows, {rev_palette, _index}} =
+              Enum.map_reduce(window, {[], %{}}, fn tile, {plist, pmap} ->
+                color = Terrain.color(Map.get(terrain_map, tile.id))
+
+                {idx, plist, pmap} =
+                  case pmap do
+                    %{^color => idx} -> {idx, plist, pmap}
+                    _ -> {map_size(pmap), [color | plist], Map.put(pmap, color, map_size(pmap))}
+                  end
+
+                {tile_row(tile, idx, elevation_map), {plist, pmap}}
+              end)
+
+            %{palette: Enum.reverse(rev_palette), tiles: rows}
 
           :css3d ->
             html =
@@ -568,7 +566,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
   # Compact tile row for the vector-canvas renderer:
   # [id, palette_index, cx, cy, cz, elevation, corner1x, corner1y, corner1z, ...]
-  defp tile_row(tile, terrain_map, elevation_map) do
+  defp tile_row(tile, palette_index, elevation_map) do
     {cx, cy, cz} = tile.center
 
     corners =
@@ -578,18 +576,12 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
     [
       tile.id,
-      palette_index(Map.get(terrain_map, tile.id, :ocean)),
+      palette_index,
       Float.round(cx, 4),
       Float.round(cy, 4),
       Float.round(cz, 4),
       Map.get(elevation_map, tile.id, 0.0) | corners
     ]
-  end
-
-  defp palette_colors, do: Enum.map(@terrain_legend, fn {_t, color, _label} -> color end)
-
-  defp palette_index(terrain) do
-    Enum.find_index(@terrain_legend, fn {t, _color, _label} -> t == terrain end) || 0
   end
 
   # Seed, container dims and device class are part of the bucket so
@@ -604,14 +596,11 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   # Server-built tile markup (no user data involved); phx-click works via
   # LiveView's delegated event handling even inside ignored DOM.
   defp facet_div(facet, terrain_map) do
-    terrain = Map.get(terrain_map, facet.id, :ocean)
+    terrain = Map.get(terrain_map, facet.id)
     id = Integer.to_string(facet.id)
-    terrain_s = Atom.to_string(terrain)
 
     [
-      ~s(<div class="hex-cell3d hex-),
-      terrain_s,
-      ~s(" phx-click="select_tile" phx-value-id="),
+      ~s(<div class="hex-cell3d" phx-click="select_tile" phx-value-id="),
       id,
       ~s(" style="width:),
       Integer.to_string(facet.w),
@@ -621,10 +610,12 @@ defmodule BrokenOathsWeb.WorldLive.Show do
       facet.clip,
       ";transform:",
       facet.matrix,
+      ";background-color:",
+      Terrain.color(terrain),
       ~s(;" title="#),
       id,
       " ",
-      terrain_s,
+      Terrain.label(terrain),
       ~s("></div>)
     ]
   end
@@ -656,8 +647,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     )
   end
 
-  defp terrain_class(terrain), do: "hex-#{terrain}"
-
   defp deg(radians), do: Float.round(radians * 180.0 / :math.pi(), 1)
 
   defp format_latlon(center) do
@@ -665,27 +654,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     ns = if lat >= 0, do: "N", else: "S"
     ew = if lon >= 0, do: "E", else: "W"
     "#{Float.round(abs(lat), 1)}°#{ns} #{Float.round(abs(lon), 1)}°#{ew}"
-  end
-
-  defp terrain_label(nil), do: "—"
-
-  defp terrain_label(terrain) do
-    case terrain do
-      :ocean -> "Ocean"
-      :shallow_water -> "Shallow Water"
-      :beach -> "Beach"
-      :grassland -> "Grassland"
-      :plains -> "Plains"
-      :forest -> "Forest"
-      :hills -> "Hills"
-      :mountains -> "Mountains"
-      :tundra -> "Tundra"
-      :snow -> "Snow"
-      :jungle -> "Jungle"
-      :swamp -> "Swamp"
-      :desert -> "Desert"
-      _ -> to_string(terrain)
-    end
   end
 
   # -------------------------------------------------------------------
@@ -759,13 +727,12 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               :for={tile <- @visible_tiles}
               class={[
                 "hex-cell",
-                terrain_class(tile.terrain),
                 @selected_tile && @selected_tile.id == tile.id && "hex-selected"
               ]}
               phx-click="select_tile"
               phx-value-id={tile.id}
-              style={"left:#{tile.left}px;top:#{tile.top}px;width:#{tile.width}px;height:#{tile.height}px;clip-path:#{tile.clip_path};"}
-              title={"##{tile.id} #{tile.terrain}"}
+              style={"left:#{tile.left}px;top:#{tile.top}px;width:#{tile.width}px;height:#{tile.height}px;clip-path:#{tile.clip_path};background-color:#{Terrain.color(tile.terrain)};"}
+              title={"##{tile.id} #{Terrain.label(tile.terrain)}"}
             >
             </div>
           </div>
@@ -1652,9 +1619,12 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               <div class="flex items-center justify-between">
                 <dt class="opacity-60">Terrain</dt>
                 <dd class="flex items-center gap-1.5">
-                  <span class={["inline-block w-3 h-3 rounded-sm", terrain_class(@selected_terrain)]}>
+                  <span
+                    class="inline-block w-3 h-3 rounded-sm"
+                    style={"background:#{Terrain.color(@selected_terrain)}"}
+                  >
                   </span>
-                  {terrain_label(@selected_terrain)}
+                  {Terrain.label(@selected_terrain)}
                 </dd>
               </div>
               <div class="flex justify-between">
@@ -1674,9 +1644,12 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             <h3 class="font-bold text-sm uppercase tracking-wide opacity-60 mb-2">Terrain Stats</h3>
             <div class="space-y-1">
               <div :for={{terrain, _count, pct} <- @stats} class="flex items-center gap-2 text-sm">
-                <span class={["inline-block w-3 h-3 rounded-sm flex-none", terrain_class(terrain)]}>
+                <span
+                  class="inline-block w-3 h-3 rounded-sm flex-none"
+                  style={"background:#{Terrain.color(terrain)}"}
+                >
                 </span>
-                <span class="flex-1">{terrain_label(terrain)}</span>
+                <span class="flex-1">{Terrain.label(terrain)}</span>
                 <span class="opacity-60 font-mono text-xs">{pct}%</span>
               </div>
             </div>
@@ -1689,7 +1662,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             <h3 class="font-bold text-sm uppercase tracking-wide opacity-60 mb-2">Legend</h3>
             <div class="space-y-1">
               <div
-                :for={{_terrain, color, label} <- @terrain_legend}
+                :for={{color, label} <- @terrain_legend}
                 class="flex items-center gap-2 text-sm"
               >
                 <span class="inline-block w-4 h-3 rounded-sm flex-none" style={"background:#{color}"}>

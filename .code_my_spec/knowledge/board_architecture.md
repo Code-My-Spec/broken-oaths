@@ -30,3 +30,7 @@ As of 2026-07-13 (commit 885f330). This is the contract for all future gameplay 
 - Tile windows/payloads bypass LiveView diffing (push_event), keyed by a view bucket (view direction ⊕ zoom band ⊕ seed ⊕ dims ⊕ device ⊕ renderer).
 - Device tile budgets: `Projection.budget_theta/2` + `lod_k/3` (touch 1500 / desktop 7500) size the window and the canvas↔detail switchover.
 - Texture bakes: `Worlds.Texture` equirect palette PNGs per (seed, frequency, level), pixel→tile index cached per frequency, warmed at boot.
+
+## Terrain model (Civ-style, added 2026-07-13)
+
+`Worlds.Terrain` struct: **base** (ocean | coast | grassland | plains | desert | tundra | snow) × **relief** (flat | hills | mountains) × **feature** (nil | woods | rainforest | marsh | ice). Gameplay reads components (yields ← base, movement ← relief/feature, features add/remove independently). Display color is COMPOSED: feature overlays base, relief shades through (`Terrain.color/1`); labels via `Terrain.label/1` ("Plains Hills · Rainforest"). Palettes are dynamic everywhere (canvas window payloads and texture PLTE collect distinct composed colors). Pentagons = mountains relief with climate-driven base (polar pentagons are Snow Mountains), still impassable via the pentagon flag. Classification lives in Generator.classify/4: elevation → water/relief, warmth+moisture (Whittaker-lite) → base, then features. There is no :beach — coast is water (0.30–0.37 elevation).

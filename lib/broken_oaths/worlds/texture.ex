@@ -16,30 +16,13 @@ defmodule BrokenOaths.Worlds.Texture do
       seed's entry until restart — acceptable at this size.
   """
 
-  alias BrokenOaths.Worlds.{Generator, Globe}
+  alias BrokenOaths.Worlds.{Generator, Globe, Terrain}
 
   # Bump when the index/png layout OR palette changes (persistent_term
   # survives reloads, and browsers cache the PNGs as immutable).
-  @cache_version 3
+  @cache_version 4
 
   @default_dims {2048, 1024}
-
-  # Must cover every terrain atom Generator can produce; order = palette index.
-  @palette [
-    ocean: {0x1E, 0x3A, 0x8A},
-    shallow_water: {0x3B, 0x82, 0xF6},
-    beach: {0xFB, 0xBF, 0x24},
-    grassland: {0x22, 0xC5, 0x5E},
-    plains: {0x84, 0xCC, 0x16},
-    forest: {0x15, 0x80, 0x3D},
-    hills: {0x92, 0x40, 0x0E},
-    mountains: {0x52, 0x52, 0x52},
-    tundra: {0x8D, 0x9B, 0x8A},
-    snow: {0xE6, 0xEC, 0xF2},
-    jungle: {0x06, 0x5F, 0x46},
-    swamp: {0x3F, 0x62, 0x12},
-    desert: {0xD9, 0xC2, 0x6B}
-  ]
 
   @doc """
   Texture dimensions {w, h} for a detail level; overridable for tests via
@@ -206,11 +189,21 @@ defmodule BrokenOaths.Worlds.Texture do
     terrain_map = Generator.generate_terrain_map(seed, Globe.get(frequency))
     n = Globe.tile_count(frequency)
 
+    # Dynamic palette: distinct composed Terrain colors on this world.
+    # Palette PNGs allow 256 entries; base × relief × feature combos stay
+    # far below that.
+    {tile_indices, {rev_palette, _map}} =
+      Enum.map_reduce(0..(n - 1), {[], %{}}, fn id, {plist, pmap} ->
+        rgb = Terrain.rgb_bytes(Map.fetch!(terrain_map, id))
+
+        case pmap do
+          %{^rgb => idx} -> {idx, {plist, pmap}}
+          _ -> {map_size(pmap), {[rgb | plist], Map.put(pmap, rgb, map_size(pmap))}}
+        end
+      end)
+
     # tile id -> palette index, as a flat binary for O(1) lookup
-    tile_pal =
-      for id <- 0..(n - 1), into: <<>> do
-        <<palette_index(Map.fetch!(terrain_map, id))>>
-      end
+    tile_pal = for idx <- tile_indices, into: <<>>, do: <<idx>>
 
     raw =
       for py <- 0..(h - 1), into: <<>> do
@@ -227,7 +220,7 @@ defmodule BrokenOaths.Worlds.Texture do
       end
 
     plte =
-      for {_terrain, {r, g, b}} <- @palette, into: <<>> do
+      for {r, g, b} <- Enum.reverse(rev_palette), into: <<>> do
         <<r, g, b>>
       end
 
@@ -243,10 +236,5 @@ defmodule BrokenOaths.Worlds.Texture do
   defp chunk(type, data) do
     payload = type <> data
     <<byte_size(data)::32>> <> payload <> <<:erlang.crc32(payload)::32>>
-  end
-
-  defp palette_index(terrain) do
-    Enum.find_index(@palette, fn {t, _} -> t == terrain end) ||
-      raise "no palette color for terrain #{inspect(terrain)}"
   end
 end

@@ -235,17 +235,4 @@
   z-index: 2;
 }
 
-/* Terrain colors */
-.hex-ocean { background-color: #1e3a8a; }
-.hex-shallow_water { background-color: #3b82f6; }
-.hex-beach { background-color: #fbbf24; }
-.hex-grassland { background-color: #22c55e; }
-.hex-plains { background-color: #84cc16; }
-.hex-forest { background-color: #15803d; }
-.hex-hills { background-color: #92400e; }
-.hex-mountains { background-color: #525252; }
-.hex-tundra { background-color: #8d9b8a; }
-.hex-snow { background-color: #e6ecf2; }
-.hex-jungle { background-color: #065f46; }
-.hex-swamp { background-color: #3f6212; }
-.hex-desert { background-color: #d9c26b; }
+/* Terrain colors are composed server-side (Worlds.Terrain) and inlined */

@@ -115,7 +115,8 @@ defmodule BrokenOaths.Worlds.Projection do
 
     %{
       id: tile.id,
-      terrain: Map.get(terrain_map, tile.id, :ocean),
+      # Terrain is opaque to projection; missing tiles surface as nil
+      terrain: Map.get(terrain_map, tile.id),
       pentagon?: tile.pentagon?,
       left: left,
       top: top,

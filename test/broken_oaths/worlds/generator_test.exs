@@ -3,6 +3,7 @@ defmodule BrokenOaths.Worlds.GeneratorTest do
 
   alias BrokenOaths.Worlds.Generator
   alias BrokenOaths.Worlds.Globe
+  alias BrokenOaths.Worlds.Terrain
 
   @test_seed 42
 
@@ -17,25 +18,31 @@ defmodule BrokenOaths.Worlds.GeneratorTest do
       assert Enum.sort(Map.keys(terrain_map)) == Enum.sort(Map.keys(mesh.tiles))
     end
 
-    test "all values are valid terrain atoms", %{mesh: mesh} do
-      valid =
-        ~w(ocean shallow_water beach grassland plains forest hills mountains tundra snow jungle swamp desert)a
+    test "all values are valid Terrain structs", %{mesh: mesh} do
+      bases = ~w(ocean coast grassland plains desert tundra snow)a
+      reliefs = ~w(flat hills mountains)a
+      features = [nil, :woods, :rainforest, :marsh, :ice]
 
       terrain_map = Generator.generate_terrain_map(@test_seed, mesh)
 
-      for {_id, terrain} <- terrain_map do
-        assert terrain in valid, "Invalid terrain: #{inspect(terrain)}"
+      for {_id, %Terrain{} = t} <- terrain_map do
+        assert t.base in bases, "Invalid base: #{inspect(t)}"
+        assert t.relief in reliefs
+        assert t.feature in features
+        # Water is always flat; features never sit on mountains
+        if Terrain.water?(t), do: assert(t.relief == :flat)
+        if t.relief == :mountains, do: assert(t.feature == nil)
       end
     end
 
-    test "all 12 pentagons are mountains", %{mesh: mesh} do
+    test "all 12 pentagons are mountains relief", %{mesh: mesh} do
       terrain_map = Generator.generate_terrain_map(@test_seed, mesh)
 
       pentagons = Enum.filter(Map.values(mesh.tiles), & &1.pentagon?)
       assert length(pentagons) == 12
 
       for tile <- pentagons do
-        assert terrain_map[tile.id] == :mountains
+        assert terrain_map[tile.id].relief == :mountains
       end
     end
 
@@ -81,10 +88,10 @@ defmodule BrokenOaths.Worlds.GeneratorTest do
 
         cond do
           abs(z) > 0.97 ->
-            assert terrain[tile.id] == :snow
+            assert terrain[tile.id].base == :snow or terrain[tile.id].feature == :ice
 
           abs(z) < 0.25 ->
-            refute terrain[tile.id] in [:snow, :tundra]
+            refute terrain[tile.id].base in [:snow, :tundra]
 
           true ->
             :ok
@@ -97,7 +104,7 @@ defmodule BrokenOaths.Worlds.GeneratorTest do
 
       for tile <- Map.values(mesh.tiles), tile.pentagon? do
         assert elevation[tile.id] == 0.95
-        assert terrain[tile.id] == :mountains
+        assert terrain[tile.id].relief == :mountains
       end
 
       assert terrain == Generator.generate_terrain_map(@test_seed, mesh)
@@ -115,7 +122,8 @@ defmodule BrokenOaths.Worlds.GeneratorTest do
       assert length(points) == 3
 
       for id <- points do
-        assert tm[id] == :grassland
+        assert tm[id].base == :grassland
+        refute tm[id].relief == :mountains
       end
     end
 
@@ -156,7 +164,7 @@ defmodule BrokenOaths.Worlds.GeneratorTest do
       assert length(stats) > 0
 
       for {terrain, count, pct} <- stats do
-        assert is_atom(terrain)
+        assert %Terrain{} = terrain
         assert is_integer(count)
         assert count > 0
         assert is_float(pct)
