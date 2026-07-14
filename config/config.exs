@@ -46,12 +46,13 @@ config :broken_oaths, BrokenOaths.Mailer, adapter: Swoosh.Adapters.Local
 
 # OAuth integrations (cms_gen.integrations). Providers register here as
 # they are generated.
-config :broken_oaths, :integration_providers, [:codemyspec]
+config :broken_oaths, :integration_providers, [:codemyspec, :google]
 
 config :broken_oaths, :codemyspec_url, "https://codemyspec.com"
 
 config :broken_oaths, :oauth_providers, %{
-  codemyspec: BrokenOaths.Integrations.Providers.Codemyspec
+  codemyspec: BrokenOaths.Integrations.Providers.Codemyspec,
+  google: BrokenOaths.Integrations.Providers.Google
 }
 
 # Cloak vault for encrypted OAuth token storage.

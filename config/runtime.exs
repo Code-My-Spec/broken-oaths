@@ -30,6 +30,11 @@ config :broken_oaths,
   codemyspec_client_id: System.get_env("CODEMYSPEC_CLIENT_ID"),
   codemyspec_client_secret: System.get_env("CODEMYSPEC_CLIENT_SECRET")
 
+# Google OAuth (cms_gen.integration_provider Google google)
+config :broken_oaths,
+  google_client_id: System.get_env("GOOGLE_CLIENT_ID"),
+  google_client_secret: System.get_env("GOOGLE_CLIENT_SECRET")
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

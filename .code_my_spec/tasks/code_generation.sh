@@ -15,6 +15,7 @@ mix cms_gen.integrations
 
 # OAuth providers (one per .code_my_spec/integrations/*.md)
 mix cms_gen.integration_provider CodeMySpec codemyspec
+mix cms_gen.integration_provider Google google
 
 # CodeMySpec feedback widget with screenshot capture
 mix cms_gen.feedback_widget
