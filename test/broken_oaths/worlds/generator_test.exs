@@ -18,7 +18,9 @@ defmodule BrokenOaths.Worlds.GeneratorTest do
     end
 
     test "all values are valid terrain atoms", %{mesh: mesh} do
-      valid = ~w(ocean shallow_water beach grassland plains forest hills mountains tundra snow)a
+      valid =
+        ~w(ocean shallow_water beach grassland plains forest hills mountains tundra snow jungle swamp desert)a
+
       terrain_map = Generator.generate_terrain_map(@test_seed, mesh)
 
       for {_id, terrain} <- terrain_map do

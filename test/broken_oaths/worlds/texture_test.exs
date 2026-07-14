@@ -66,8 +66,8 @@ defmodule BrokenOaths.Worlds.TextureTest do
       assert <<137, 80, 78, 71, 13, 10, 26, 10, rest::binary>> = png
       # IHDR: size, bit depth 8, color type 3 (palette)
       assert <<_len::32, "IHDR", ^w::32, ^h::32, 8, 3, 0, 0, 0, _crc::32, rest2::binary>> = rest
-      # PLTE with 10 colors
-      assert <<30::32, "PLTE", _plte::binary-size(30), _crc2::32, _::binary>> = rest2
+      # PLTE with 13 colors
+      assert <<39::32, "PLTE", _plte::binary-size(39), _crc2::32, _::binary>> = rest2
       # ends with IEND
       assert String.ends_with?(png, "IEND" <> <<174, 66, 96, 130>>)
     end
@@ -89,7 +89,7 @@ defmodule BrokenOaths.Worlds.TextureTest do
 
       # spot-check some pixels are valid palette indices
       for i <- Enum.take_every(1..(byte_size(raw) - 1), 977) do
-        assert :binary.at(raw, i) < 10
+        assert :binary.at(raw, i) < 13
       end
     end
 

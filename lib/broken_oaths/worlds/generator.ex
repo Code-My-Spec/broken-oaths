@@ -69,18 +69,38 @@ defmodule BrokenOaths.Worlds.Generator do
     {terrain, Float.round(elevation, 3)}
   end
 
-  # Cold turns land to tundra then snow. |z| is sin(latitude) — polar bands
-  # come straight from the sphere geometry — plus altitude chill for
-  # snowcapped ranges and a moisture wobble so band edges stay organic.
-  # Deep polar water freezes to sea ice.
+  # A Whittaker-lite climate ladder. |z| is sin(latitude) — bands come
+  # straight from the sphere geometry — and altitude chills, so warmth runs
+  # ice cap → tundra ring → temperate → tropics with a moisture wobble
+  # keeping every edge organic:
+  #
+  #   frozen water → sea ice        cold land → snow, then tundra
+  #   warm wet lowland → swamp      hot+wet → jungle    hot+dry → desert
+  #
   defp apply_climate(terrain, z, elevation, moisture) do
-    cold = abs(z) + max(elevation - 0.55, 0.0) * 0.8 + (moisture - 0.5) * 0.12
+    warmth = 1.0 - abs(z) * 1.15 - max(elevation - 0.55, 0.0) * 0.65 + (moisture - 0.5) * 0.1
 
     cond do
-      terrain in [:ocean, :shallow_water] -> if cold > 0.93, do: :snow, else: terrain
-      cold > 0.88 -> :snow
-      cold > 0.74 -> :tundra
-      true -> terrain
+      terrain in [:ocean, :shallow_water] ->
+        if warmth < 0.06, do: :snow, else: terrain
+
+      warmth < 0.12 ->
+        :snow
+
+      warmth < 0.26 ->
+        :tundra
+
+      elevation >= 0.40 and elevation < 0.47 and moisture > 0.66 and warmth > 0.50 ->
+        :swamp
+
+      warmth > 0.70 and moisture > 0.60 ->
+        :jungle
+
+      warmth > 0.60 and moisture < 0.32 ->
+        :desert
+
+      true ->
+        terrain
     end
   end
 

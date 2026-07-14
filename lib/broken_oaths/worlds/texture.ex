@@ -20,7 +20,7 @@ defmodule BrokenOaths.Worlds.Texture do
 
   # Bump when the index/png layout OR palette changes (persistent_term
   # survives reloads, and browsers cache the PNGs as immutable).
-  @cache_version 2
+  @cache_version 3
 
   @default_dims {2048, 1024}
 
@@ -35,7 +35,10 @@ defmodule BrokenOaths.Worlds.Texture do
     hills: {0x92, 0x40, 0x0E},
     mountains: {0x52, 0x52, 0x52},
     tundra: {0x8D, 0x9B, 0x8A},
-    snow: {0xE6, 0xEC, 0xF2}
+    snow: {0xE6, 0xEC, 0xF2},
+    jungle: {0x06, 0x5F, 0x46},
+    swamp: {0x3F, 0x62, 0x12},
+    desert: {0xD9, 0xC2, 0x6B}
   ]
 
   @doc """

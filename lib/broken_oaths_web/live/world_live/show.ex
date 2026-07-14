@@ -43,7 +43,10 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     {:hills, "#92400e", "Hills"},
     {:mountains, "#525252", "Mountains"},
     {:tundra, "#8d9b8a", "Tundra"},
-    {:snow, "#e6ecf2", "Snow / Ice"}
+    {:snow, "#e6ecf2", "Snow / Ice"},
+    {:jungle, "#065f46", "Jungle"},
+    {:swamp, "#3f6212", "Swamp"},
+    {:desert, "#d9c26b", "Desert"}
   ]
 
   # -------------------------------------------------------------------
@@ -678,6 +681,9 @@ defmodule BrokenOathsWeb.WorldLive.Show do
       :mountains -> "Mountains"
       :tundra -> "Tundra"
       :snow -> "Snow"
+      :jungle -> "Jungle"
+      :swamp -> "Swamp"
+      :desert -> "Desert"
       _ -> to_string(terrain)
     end
   end

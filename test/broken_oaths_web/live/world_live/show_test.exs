@@ -232,7 +232,7 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       assert_push_event(view, "globe3d:window", %{tiles: tiles, palette: palette})
       refute html =~ "hex-cell3d"
 
-      assert length(palette) == 10
+      assert length(palette) == 13
       tile_count = BrokenOaths.Worlds.Globe.tile_count(@frequency)
       assert length(tiles) > 0
       assert length(tiles) <= tile_count
@@ -240,7 +240,7 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       # Each row: [id, palette_index, cx, cy, cz, elevation | corner coords]
       [id, pal, _cx, _cy, _cz, elevation | corners] = hd(tiles)
       assert is_integer(id) and id < tile_count
-      assert pal in 0..9
+      assert pal in 0..12
       assert elevation >= 0.0 and elevation <= 1.0
       assert length(corners) in [15, 18]
 
