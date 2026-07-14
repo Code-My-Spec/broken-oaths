@@ -24,6 +24,14 @@ defmodule BrokenOathsWeb.WorldTextureControllerTest do
     assert <<_::binary-size(16), 64::32, 32::32, _::binary>> = body
   end
 
+  test "serves the cloud-cover map", %{conn: conn} do
+    world = world_fixture(%{seed: 4244})
+
+    conn = get(conn, ~p"/worlds/#{world.id}/clouds.png")
+    assert <<137, 80, 78, 71, _::binary>> = response(conn, 200)
+    assert response_content_type(conn, :png) =~ "image/png"
+  end
+
   test "404s for a missing world", %{conn: conn} do
     assert_error_sent 404, fn ->
       get(conn, ~p"/worlds/0/texture.png")

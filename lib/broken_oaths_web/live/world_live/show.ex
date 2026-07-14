@@ -69,8 +69,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         sidebar_open: false,
         selected_tile: nil,
         selected_terrain: nil,
-        page_title: world.name,
-        terrain_legend: Terrain.legend()
+        page_title: world.name
       )
       |> compute_view()
 
@@ -757,6 +756,9 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             data-texture={
               ~p"/worlds/#{@world.id}/texture.png?seed=#{@world.seed}&v=#{Texture.version()}"
             }
+            data-clouds={
+              ~p"/worlds/#{@world.id}/clouds.png?seed=#{@world.seed}&v=#{Texture.version()}"
+            }
           >
             <%!-- EVERYTHING the hook mutates lives inside this single
                  phx-update="ignore" wrapper. The hook styles the disc,
@@ -1083,8 +1085,44 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                     this.schedule()
                   }
                 })
+
+                const cloudsUrl = this.el.dataset.clouds
+                if (cloudsUrl && cloudsUrl !== this.cloudsUrl) {
+                  this.cloudsUrl = cloudsUrl
+                  this.decode(cloudsUrl, (tex) => {
+                    if (this.cloudsUrl === cloudsUrl) {
+                      this.cloudTex = tex
+                      this.schedule()
+                    }
+                  })
+                }
               }
+              this.cloudTex = null
+              this.cloudsUrl = null
               this.loadTexture()
+
+              // Clouds drift east: one lap per cloudPeriod seconds
+              this.cloudPeriod = 900
+              this.cloudDrift = () =>
+                (((Date.now() / 1000) % this.cloudPeriod) / this.cloudPeriod) * 2 * Math.PI
+
+              // Cloud opacity [0,1] at a world lat/lon, drifted; soft
+              // threshold so only the denser noise reads as cloud
+              this.cloudAt = (lat, lon) => {
+                const c = this.cloudTex
+                if (!c) return 0
+                const TWO_PI = 2 * Math.PI
+                let dl = lon + this.cloudDrift()
+                dl = dl - TWO_PI * Math.floor((dl + Math.PI) / TWO_PI)
+                let tx = ((dl / TWO_PI + 0.5) * c.w) | 0
+                let ty = ((0.5 - lat / Math.PI) * c.h) | 0
+                if (tx < 0) tx = 0; else if (tx >= c.w) tx = c.w - 1
+                if (ty < 0) ty = 0; else if (ty >= c.h) ty = c.h - 1
+                const v = (c.data[ty * c.w + tx] & 255) / 255
+                let t = (v - 0.56) / 0.2
+                t = t <= 0 ? 0 : t >= 1 ? 1 : t
+                return t * t * (3 - 2 * t)
+              }
 
               const d = this.el.dataset
               this.yaw = parseFloat(d.yaw) || 0
@@ -1255,6 +1293,13 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                   ctx.strokeStyle = color
                   ctx.lineWidth = Math.max(1.5, k)
                   ctx.stroke()
+
+                  // Weather: translucent cloud cover, dimmer at night
+                  const cloud = this.cloudAt(Math.asin(row[4]), Math.atan2(row[3], row[2]))
+                  if (cloud > 0.04) {
+                    ctx.fillStyle = "rgba(235,240,246," + (cloud * 0.8 * (0.3 + 0.7 * t)).toFixed(3) + ")"
+                    ctx.fill()
+                  }
                 }
 
                 this.drawSelection()
@@ -1299,6 +1344,9 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 const tex = this.tex.data, TW = this.tex.w, TH = this.tex.h
                 const INV2PI = 1 / (2 * Math.PI), INVPI = 1 / Math.PI
                 const [sun_x, sun_y, sun_z] = this.sunVec()
+                const ctex = this.cloudTex
+                const cdrift = this.cloudDrift()
+                const TWO_PI = 2 * Math.PI
                 const x0 = Math.max(0, Math.floor(ccx - S)), x1 = Math.min(cw - 1, Math.ceil(ccx + S))
                 const y0 = Math.max(0, Math.floor(ccy - S)), y1 = Math.min(ch - 1, Math.ceil(ccy + S))
                 for (let py = y0; py <= y1; py++) {
@@ -1312,8 +1360,10 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                     const wx = -syw * vx - sp * cyw * vy + cp * cyw * vz
                     const wy = cyw * vx - sp * syw * vy + cp * syw * vz
                     const wz = cp * vy + sp * vz
-                    let tx = ((Math.atan2(wy, wx) * INV2PI + 0.5) * TW) | 0
-                    let ty = ((0.5 - Math.asin(wz) * INVPI) * TH) | 0
+                    const lon = Math.atan2(wy, wx)
+                    const lat = Math.asin(wz)
+                    let tx = ((lon * INV2PI + 0.5) * TW) | 0
+                    let ty = ((0.5 - lat * INVPI) * TH) | 0
                     if (tx < 0) tx = 0; else if (tx >= TW) tx = TW - 1
                     if (ty < 0) ty = 0; else if (ty >= TH) ty = TH - 1
 
@@ -1325,9 +1375,29 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                     const f = 0.32 + t * 0.68
 
                     const v = tex[ty * TW + tx]
-                    const r = ((v & 255) * f) | 0
-                    const g = (((v >>> 8) & 255) * f) | 0
-                    const b = (((v >>> 16) & 255) * f) | 0
+                    let r = ((v & 255) * f) | 0
+                    let g = (((v >>> 8) & 255) * f) | 0
+                    let b = (((v >>> 16) & 255) * f) | 0
+
+                    // Weather: blend drifting cloud cover toward sunlit white
+                    if (ctex) {
+                      let dl = lon + cdrift
+                      dl = dl - TWO_PI * Math.floor((dl + Math.PI) / TWO_PI)
+                      let cx2 = ((dl * INV2PI + 0.5) * ctex.w) | 0
+                      let cy2 = ty * ctex.h / TH | 0
+                      if (cx2 < 0) cx2 = 0; else if (cx2 >= ctex.w) cx2 = ctex.w - 1
+                      const cv = (ctex.data[cy2 * ctex.w + cx2] & 255) / 255
+                      let a = (cv - 0.56) / 0.2
+                      a = a <= 0 ? 0 : a >= 1 ? 1 : a
+                      a = a * a * (3 - 2 * a) * 0.8
+                      if (a > 0.02) {
+                        const cl = (150 + 105 * t) * (0.32 + 0.68 * t) | 0
+                        r = (r * (1 - a) + cl * a) | 0
+                        g = (g * (1 - a) + cl * a) | 0
+                        b = (b * (1 - a) + cl * a) | 0
+                      }
+                    }
+
                     out[row + px] = (v & 0xff000000) | (b << 16) | (g << 8) | r
                   }
                 }
@@ -1651,23 +1721,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 </span>
                 <span class="flex-1">{Terrain.label(terrain)}</span>
                 <span class="opacity-60 font-mono text-xs">{pct}%</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="divider my-0"></div>
-
-          <%!-- Legend --%>
-          <div>
-            <h3 class="font-bold text-sm uppercase tracking-wide opacity-60 mb-2">Legend</h3>
-            <div class="space-y-1">
-              <div
-                :for={{color, label} <- @terrain_legend}
-                class="flex items-center gap-2 text-sm"
-              >
-                <span class="inline-block w-4 h-3 rounded-sm flex-none" style={"background:#{color}"}>
-                </span>
-                <span>{label}</span>
               </div>
             </div>
           </div>

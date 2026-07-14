@@ -16,7 +16,7 @@ defmodule BrokenOaths.Worlds.Texture do
       seed's entry until restart — acceptable at this size.
   """
 
-  alias BrokenOaths.Worlds.{Generator, Globe, Terrain}
+  alias BrokenOaths.Worlds.{Generator, Globe, Noise, Terrain}
 
   # Bump when the index/png layout OR palette changes (persistent_term
   # survives reloads, and browsers cache the PNGs as immutable).
@@ -40,6 +40,59 @@ defmodule BrokenOaths.Worlds.Texture do
 
   @doc "Cache version — clients bust immutable texture URLs with it."
   def version, do: @cache_version
+
+  @doc """
+  Grayscale equirectangular cloud-cover map for a world (value = cloud
+  density), from low-octave 3D noise on the sphere — seamless like the
+  terrain. The client drifts it in longitude over time and blends it over
+  both render paths. Uses the level-0 dims: clouds are soft, they don't
+  need resolution.
+  """
+  def cloud_png(seed) do
+    {w, h} = dims(0)
+    key = {__MODULE__, @cache_version, :clouds, seed, w, h}
+
+    case :persistent_term.get(key, nil) do
+      nil ->
+        png = build_cloud_png(seed, w, h)
+        :persistent_term.put(key, png)
+        png
+
+      png ->
+        png
+    end
+  end
+
+  defp build_cloud_png(seed, w, h) do
+    perm = Noise.init(seed + 777_777)
+    scale = 3.1
+
+    raw =
+      for py <- 0..(h - 1), into: <<>> do
+        lat = :math.pi() * (0.5 - (py + 0.5) / h)
+        slat = :math.sin(lat)
+        clat = :math.cos(lat)
+
+        row =
+          for px <- 0..(w - 1), into: <<>> do
+            lon = 2 * :math.pi() * ((px + 0.5) / w - 0.5)
+            x = clat * :math.cos(lon) * scale
+            y = clat * :math.sin(lon) * scale
+            z = slat * scale
+            <<round(Noise.fbm3d(perm, x, y, z, 4) * 255)>>
+          end
+
+        <<0>> <> row
+      end
+
+    # Grayscale PNG: color type 0, bit depth 8
+    ihdr = <<w::32, h::32, 8, 0, 0, 0, 0>>
+
+    <<137, 80, 78, 71, 13, 10, 26, 10>> <>
+      chunk("IHDR", ihdr) <>
+      chunk("IDAT", :zlib.compress(raw)) <>
+      chunk("IEND", <<>>)
+  end
 
   @doc "Build (or fetch cached) the equirectangular PNG for a world."
   def png(seed, frequency, level \\ 1) do

@@ -31,14 +31,6 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       assert html =~ "#{Globe.tile_count(@frequency)} tiles"
     end
 
-    test "shows terrain legend", %{conn: conn, world: world} do
-      {:ok, view, _html} = live(conn, ~p"/worlds/#{world.id}")
-      html = open_sidebar(view)
-      assert html =~ "Ocean"
-      assert html =~ "Grassland"
-      assert html =~ "Mountains"
-    end
-
     test "shows terrain stats", %{conn: conn, world: world} do
       {:ok, _view, html} = live(conn, ~p"/worlds/#{world.id}")
       # Stats section should show percentages
@@ -412,7 +404,6 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       html = open_sidebar(view)
       assert html =~ "Terrain Stats"
       assert html =~ "World Info"
-      assert html =~ "Legend"
 
       # The close button inside the sidebar collapses it again
       html = view |> element("button[phx-click='toggle_sidebar']") |> render_click()
