@@ -3,6 +3,10 @@ import Config
 # Only in tests, remove the complexity from the password hashing algorithm
 config :bcrypt_elixir, :log_rounds, 1
 
+# Pin the weather epoch so cloud maps (and cached airspace textures) are
+# deterministic in tests regardless of wall clock.
+config :broken_oaths, :weather_epoch, 0
+
 # Configure your database
 #
 # The MIX_TEST_PARTITION environment variable can be used
@@ -28,6 +32,10 @@ config :broken_oaths, BrokenOaths.Mailer, adapter: Swoosh.Adapters.Test
 
 # Don't pre-build the full-size globe mesh; tests use small frequencies
 config :broken_oaths, :globe_warmup, false
+
+# Specs drive turns deterministically via Game.advance_turn/1; a live
+# timer would race the sandbox connection after a test's owner stops.
+config :broken_oaths, :game_auto_tick, false
 
 # Tiny impostor textures keep texture tests fast
 config :broken_oaths, :texture_size, {128, 64}

@@ -23,6 +23,17 @@ defmodule BrokenOaths.Worlds.WeatherTest do
     refute Weather.map(@seed + 1, mesh) == map
   end
 
+  test "weather changes between epochs but is deterministic within one" do
+    mesh = Globe.get(@frequency)
+
+    epoch_0 = Weather.map(@seed, mesh, 0)
+    epoch_1 = Weather.map(@seed, mesh, 1)
+
+    refute epoch_1 == epoch_0
+    assert Weather.map(@seed, mesh, 1) == epoch_1
+    assert epoch_1 != %{}
+  end
+
   test "level/3 returns 0 for clear tiles and the mapped level otherwise" do
     mesh = Globe.get(@frequency)
     map = Weather.map(@seed, mesh)

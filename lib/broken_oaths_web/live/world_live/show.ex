@@ -66,12 +66,19 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         device_coarse: false,
         lod_k: 1.02,
         sun_period: @sun_period,
+        weather_epoch: Weather.current_epoch(),
         sidebar_open: false,
         selected_tile: nil,
         selected_terrain: nil,
         page_title: world.name
       )
       |> compute_view()
+
+    # Weather evolves by epoch: wake at each boundary to re-push the new
+    # cloud map and bust the airspace texture URL.
+    if connected?(socket) do
+      Process.send_after(self(), :weather_epoch, Weather.ms_until_next_epoch())
+    end
 
     {:ok, socket}
   end
@@ -143,6 +150,23 @@ defmodule BrokenOathsWeb.WorldLive.Show do
       {v, _} -> v |> round() |> max(50) |> min(10_000)
       :error -> nil
     end
+  end
+
+  # -------------------------------------------------------------------
+  # Weather epochs
+  # -------------------------------------------------------------------
+
+  def handle_info(:weather_epoch, socket) do
+    Process.send_after(self(), :weather_epoch, Weather.ms_until_next_epoch())
+
+    socket = assign(socket, weather_epoch: Weather.current_epoch())
+
+    socket =
+      if socket.assigns.render_mode == :three_d,
+        do: push_airspace(socket),
+        else: socket
+
+    {:noreply, socket}
   end
 
   # -------------------------------------------------------------------
@@ -781,7 +805,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               ~p"/worlds/#{@world.id}/texture.png?seed=#{@world.seed}&v=#{Texture.version()}"
             }
             data-airspace={
-              ~p"/worlds/#{@world.id}/airspace.png?seed=#{@world.seed}&v=#{Texture.version()}"
+              ~p"/worlds/#{@world.id}/airspace.png?seed=#{@world.seed}&v=#{Texture.version()}&e=#{@weather_epoch}"
             }
           >
             <%!-- EVERYTHING the hook mutates lives inside this single

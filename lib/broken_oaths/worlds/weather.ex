@@ -6,13 +6,17 @@ defmodule BrokenOaths.Worlds.Weather do
   surface (baked texture impostor far, translucent hex polygons near).
 
   Levels: 0 clear (omitted from the map), 1 wisps, 2 cloud, 3 storm.
-  Deterministic from the world seed, so the whole layer is derivable
-  data (never persisted), same as terrain.
+
+  Weather CHANGES: the cloud field is sampled at an offset that drifts
+  with the weather epoch (a #{600}s wall-clock bucket), so systems slide
+  across the globe and morph between epochs. Still fully deterministic
+  from `(seed, epoch)` — derivable data, never persisted, same as
+  terrain. Tests pin the epoch via `config :broken_oaths, :weather_epoch`.
   """
 
   alias BrokenOaths.Worlds.Noise
 
-  @cache_version 1
+  @cache_version 2
 
   # Offset keeps the cloud field independent of the terrain fields.
   @seed_offset 777_777
@@ -21,17 +25,48 @@ defmodule BrokenOaths.Worlds.Weather do
 
   @thresholds {0.56, 0.63, 0.71}
 
+  # One weather epoch = 10 minutes; systems visibly evolve session to
+  # session and drift mid-session for anyone who stays a while.
+  @epoch_seconds 600
+
+  # Per-epoch drift of the sample window through noise space: mostly a
+  # steady "zonal wind" along x with a slower wobble in y/z so patterns
+  # morph rather than just translate.
+  @drift {0.22, 0.09, 0.05}
+
   @doc """
-  Sparse cloud map for a world: `%{tile_id => level}` with level 1..3.
-  Clear tiles are absent.
+  The current weather epoch (wall clock), or the pinned value from
+  `config :broken_oaths, :weather_epoch` (used by tests).
   """
-  def map(seed, mesh) do
-    key = {__MODULE__, @cache_version, seed, mesh.frequency}
+  def current_epoch do
+    case Application.get_env(:broken_oaths, :weather_epoch) do
+      nil -> System.system_time(:second) |> div(@epoch_seconds)
+      pinned -> pinned
+    end
+  end
+
+  @doc "Milliseconds until the next epoch boundary (for LiveView timers)."
+  def ms_until_next_epoch do
+    now = System.system_time(:millisecond)
+    epoch_ms = @epoch_seconds * 1000
+    epoch_ms - rem(now, epoch_ms) + 50
+  end
+
+  @doc """
+  Sparse cloud map for a world at an epoch: `%{tile_id => level}` with
+  level 1..3. Clear tiles are absent. Defaults to the current epoch.
+  """
+  def map(seed, mesh, epoch \\ nil) do
+    epoch = epoch || current_epoch()
+    key = {__MODULE__, @cache_version, seed, mesh.frequency, epoch}
 
     case :persistent_term.get(key, nil) do
       nil ->
-        map = build(seed, mesh)
+        map = build(seed, mesh, epoch)
         :persistent_term.put(key, map)
+        # Keep only a short trail of epochs cached — erase the one that
+        # just scrolled out of relevance so long-running nodes don't leak.
+        :persistent_term.erase({__MODULE__, @cache_version, seed, mesh.frequency, epoch - 2})
         map
 
       map ->
@@ -39,16 +74,20 @@ defmodule BrokenOaths.Worlds.Weather do
     end
   end
 
-  @doc "Cloud level (0..3) for one tile."
+  @doc "Cloud level (0..3) for one tile at the current epoch."
   def level(seed, mesh, tile_id), do: Map.get(map(seed, mesh), tile_id, 0)
 
-  defp build(seed, mesh) do
+  defp build(seed, mesh, epoch) do
     perm = Noise.init(seed + @seed_offset)
     {t1, t2, t3} = @thresholds
+    {dx, dy, dz} = @drift
+    ox = epoch * dx
+    oy = epoch * dy
+    oz = epoch * dz
 
     for {id, tile} <- mesh.tiles,
         {x, y, z} = tile.center,
-        v = Noise.fbm3d(perm, x * @scale, y * @scale, z * @scale, @octaves),
+        v = Noise.fbm3d(perm, x * @scale + ox, y * @scale + oy, z * @scale + oz, @octaves),
         v > t1,
         into: %{} do
       level =

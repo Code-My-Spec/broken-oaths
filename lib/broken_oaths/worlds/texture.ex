@@ -64,14 +64,20 @@ defmodule BrokenOaths.Worlds.Texture do
   HEXES. Palette PNG with a tRNS chunk — level 0 is fully transparent,
   levels 1..3 increasingly opaque.
   """
-  def airspace_png(seed, frequency, level \\ 1) do
+  def airspace_png(seed, frequency, level \\ 1, epoch \\ nil) do
+    epoch = epoch || Weather.current_epoch()
     {w, h} = dims(level)
-    key = {__MODULE__, @cache_version, :airspace, seed, frequency, w, h}
+    key = {__MODULE__, @cache_version, :airspace, seed, frequency, w, h, epoch}
 
     case :persistent_term.get(key, nil) do
       nil ->
-        png = build_airspace_png(seed, frequency, w, h)
+        png = build_airspace_png(seed, frequency, w, h, epoch)
         :persistent_term.put(key, png)
+
+        :persistent_term.erase(
+          {__MODULE__, @cache_version, :airspace, seed, frequency, w, h, epoch - 2}
+        )
+
         png
 
       png ->
@@ -79,10 +85,10 @@ defmodule BrokenOaths.Worlds.Texture do
     end
   end
 
-  defp build_airspace_png(seed, frequency, w, h) do
+  defp build_airspace_png(seed, frequency, w, h, epoch) do
     ids = index(frequency, w, h)
     mesh = Globe.get(frequency)
-    weather = Weather.map(seed, mesh)
+    weather = Weather.map(seed, mesh, epoch)
     n = Globe.tile_count(frequency)
 
     # tile id -> palette index (= cloud level), flat binary for O(1) lookup
