@@ -110,6 +110,43 @@ defmodule BrokenOaths.Game.Turn do
     {new_state, [{:turn_advanced, new_turn}]}
   end
 
+  @doc """
+  Immediate movement: spend `unit_id`'s remaining points on its pending
+  order right now. Orders execute as they're issued — the turn boundary
+  only recharges movement and continues whatever path remains. Same
+  collision semantics as the tick: a step into an occupied tile
+  interrupts the order in place.
+  """
+  @spec move_now(state(), term()) :: state()
+  def move_now(state, unit_id) do
+    case Map.get(state.orders, unit_id) do
+      %{kind: :move, status: :pending, path: path} when path != [] ->
+        unit = Map.fetch!(state.units, unit_id)
+
+        movers = %{
+          unit_id => %{
+            tile_id: unit.tile_id,
+            path: path,
+            status: :pending,
+            movement_left: unit.movement
+          }
+        }
+
+        positions = Map.new(state.units, fn {id, u} -> {id, u.tile_id} end)
+        {movers, positions} = run_rounds(movers, positions)
+
+        %{
+          state
+          | units: apply_positions(state.units, movers, positions),
+            orders: apply_orders(state.orders, movers)
+        }
+        |> refresh_explored()
+
+      _ ->
+        state
+    end
+  end
+
   # -------------------------------------------------------------------
   # Movement point reset
   # -------------------------------------------------------------------

@@ -181,6 +181,13 @@ defmodule BrokenOathsWeb.GameLive.Play do
     {:noreply, socket}
   end
 
+  # Any board mutation (a queued order executing immediately, a join, an
+  # abandon) broadcasts :units_changed — every connected view re-pulls
+  # the fog-filtered board so units move live, mid-turn.
+  def handle_info(:units_changed, socket) do
+    {:noreply, refresh_board(socket)}
+  end
+
   # -------------------------------------------------------------------
   # Helpers
   # -------------------------------------------------------------------

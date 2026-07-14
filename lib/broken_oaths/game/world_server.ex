@@ -79,9 +79,20 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   @doc "Ensure the server is running, then make a synchronous request against it."
-  def call(world, message) do
+  def call(world, message), do: call(world, message, _retries_left = 5)
+
+  defp call(world, message, retries_left) do
     {:ok, pid} = ensure_started(world)
     GenServer.call(pid, message)
+  catch
+    # The server can die between lookup and call (a restart, an idle
+    # shutdown) — and the Registry unregisters asynchronously after the
+    # process exits, so an immediate retry can still resolve the dead
+    # pid. Short backoff, then re-resolve.
+    :exit, {reason, {GenServer, :call, _}}
+    when retries_left > 0 and reason in [:noproc, :normal, :shutdown] ->
+      Process.sleep(25)
+      call(world, message, retries_left - 1)
   end
 
   @doc "Stop and lazily-restart the server, forcing a fresh rehydrate from the DB."
@@ -112,8 +123,12 @@ defmodule BrokenOaths.Game.WorldServer do
   @impl true
   def handle_call({:join, user}, _from, state) do
     case do_join(state, user) do
-      {:ok, player, new_state} -> {:reply, {:ok, player}, new_state}
-      {:error, reason} -> {:reply, {:error, reason}, state}
+      {:ok, player, new_state} ->
+        if new_state != state, do: broadcast(new_state.world.id, [:units_changed])
+        {:reply, {:ok, player}, new_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
@@ -151,8 +166,23 @@ defmodule BrokenOaths.Game.WorldServer do
 
   def handle_call({:queue_move, user, unit_id, to_tile}, _from, state) do
     case do_queue_move(state, user, unit_id, to_tile) do
-      {:ok, path, new_state} -> {:reply, {:ok, %{path: path}}, new_state}
-      {:error, reason} -> {:reply, {:error, reason}, state}
+      {:ok, _path, queued} ->
+        # Orders execute immediately with whatever movement the unit has
+        # left; the turn boundary only recharges and continues.
+        moved = Turn.move_now(queued, unit_id)
+        persist_tick!(queued, moved)
+        broadcast(moved.world.id, [:units_changed])
+
+        remaining =
+          case Map.get(moved.orders, unit_id) do
+            %{path: rest} -> rest
+            nil -> []
+          end
+
+        {:reply, {:ok, %{path: remaining}}, moved}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
@@ -161,7 +191,9 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   def handle_call({:abandon, user}, _from, state) do
-    {:reply, :ok, do_abandon(state, user)}
+    new_state = do_abandon(state, user)
+    broadcast(new_state.world.id, [:units_changed])
+    {:reply, :ok, new_state}
   end
 
   @impl true

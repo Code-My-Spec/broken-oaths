@@ -1,11 +1,14 @@
 defmodule BrokenOathsSpex.Story875.Criterion7426Spex do
   @moduledoc """
   Story 875 — Queue Movement Orders
-  Criterion 7426 — a unit whose next step becomes occupied halts in place, keeps its interrupted path, and is never lost.
+  Criterion 7426 — a unit whose next step becomes occupied halts in
+  place, keeps its interrupted path, and is never lost.
 
-  The globe board has no tile DOM; orders travel as LiveView events
-  (render_hook) and results come back as pushed payloads and unit
-  positions — per the board doctrine.
+  Model note (PM decision 2026-07-14): movement is immediate; the
+  boundary recharges. "Blocked mid-journey" = the walker exhausted its
+  points partway, a blocker took its NEXT tile, and the recharge
+  attempt hits the occupied step. The construction is confirmed against
+  the server's own pushed path so route ambiguity can't fake it.
   """
 
   use BrokenOathsSpex.Case
@@ -30,48 +33,92 @@ defmodule BrokenOathsSpex.Story875.Criterion7426Spex do
         {:ok, Map.put(context, :play_live, play_live)}
       end
 
-      given_ "the settler's queued path runs through a tile the lord will take", context do
+      given_ "the settler rests with no movement and a controlled next step", context do
         land? = fn tile -> Fixtures.tile_class(context.world, tile) == :land end
         units = Fixtures.player_units(context.world, context.user)
         [settler | _] = for u <- units, u.type == :settler, do: u
         [lord | _] = for u <- units, u.type == :lord, do: u
+        occupied = MapSet.new(for u <- units, do: u.tile_id)
 
-        # Find a (shared, beyond) pair where `shared` is adjacent to both
-        # units and `beyond` forces the settler's shortest path THROUGH
-        # `shared`: beyond is adjacent to shared but NOT to the settler
-        # (else BFS legitimately shortcuts around the collision).
-        settler_adjacent = Fixtures.adjacent_tiles(context.world, settler.tile_id)
-
-        shared_candidates =
-          context.world
-          |> Fixtures.adjacent_tiles(settler.tile_id)
-          |> Enum.filter(land?)
-          |> Enum.filter(&(&1 in Fixtures.adjacent_tiles(context.world, lord.tile_id)))
-
-        {shared, beyond} =
-          shared_candidates
-          |> Enum.flat_map(fn sh ->
-            context.world
-            |> Fixtures.adjacent_tiles(sh)
-            |> Enum.reject(&(&1 in [settler.tile_id, lord.tile_id] or &1 in settler_adjacent))
+        # Burn the settler's movement on a two-hex walk so it rests with
+        # zero points; later queues just replace its pending path.
+        grow = fn frontier, seen ->
+          next =
+            frontier
+            |> Enum.flat_map(&Fixtures.adjacent_tiles(context.world, &1))
+            |> Enum.uniq()
+            |> Enum.reject(&(MapSet.member?(seen, &1) or MapSet.member?(occupied, &1)))
             |> Enum.filter(land?)
-            |> Enum.map(&{sh, &1})
-          end)
-          |> List.first() ||
-            raise "no (shared, beyond) pair exists for this seed — pick a different fixture seed"
 
-        render_hook(context.play_live, "queue_move", %{
-          "unit_id" => settler.id,
-          "to_tile" => beyond
-        })
+          {next, MapSet.union(seen, MapSet.new(next))}
+        end
 
-        render_hook(context.play_live, "queue_move", %{"unit_id" => lord.id, "to_tile" => shared})
+        seen = MapSet.new([settler.tile_id])
+        {l1, seen} = grow.([settler.tile_id], seen)
+        {l2, _} = grow.(l1, seen)
+        [burn | _] = l2
 
-        {:ok,
-         context |> Map.put(:settler, settler) |> Map.put(:lord, lord) |> Map.put(:shared, shared)}
+        render_hook(context.play_live, "queue_move", %{"unit_id" => settler.id, "to_tile" => burn})
+        assert_push_event(context.play_live, "game:path", %{tiles: _})
+
+        [settler_now] =
+          for u <- Fixtures.player_units(context.world, context.user), u.id == settler.id, do: u
+
+        assert settler_now.movement == 0
+
+        # Find (next_step, dest) DETERMINISTICALLY: next_step adjacent to
+        # both the resting settler and the lord; dest one hex beyond,
+        # not adjacent to the settler, and — crucially — next_step is the
+        # ONLY unoccupied land tile adjacent to both settler and dest,
+        # so the server's shortest path can only be [next_step, dest].
+        settler_adj = Fixtures.adjacent_tiles(context.world, settler_now.tile_id)
+        lord_adj = Fixtures.adjacent_tiles(context.world, lord.tile_id)
+
+        passable = fn tile ->
+          land?.(tile) and tile != lord.tile_id and tile != settler_now.tile_id
+        end
+
+        {n3, dest} =
+          Enum.find_value(settler_adj, fn n3 ->
+            with true <- n3 in lord_adj,
+                 true <- passable.(n3),
+                 dest when not is_nil(dest) <-
+                   context.world
+                   |> Fixtures.adjacent_tiles(n3)
+                   |> Enum.filter(passable)
+                   |> Enum.reject(&(&1 in settler_adj))
+                   |> Enum.find(fn dest ->
+                     common =
+                       context.world
+                       |> Fixtures.adjacent_tiles(dest)
+                       |> Enum.filter(&(&1 in settler_adj))
+                       |> Enum.filter(passable)
+
+                     common == [n3]
+                   end) do
+              {n3, dest}
+            else
+              _ -> nil
+            end
+          end) ||
+            raise "no blockable construction exists for this seed — pick a different fixture seed"
+
+        render_hook(context.play_live, "queue_move", %{"unit_id" => settler.id, "to_tile" => dest})
+
+        # The lord claims the settler's pending next step immediately.
+        render_hook(context.play_live, "queue_move", %{"unit_id" => lord.id, "to_tile" => n3})
+
+        context =
+          context
+          |> Map.put(:settler, settler)
+          |> Map.put(:lord, lord)
+          |> Map.put(:resting_tile, settler_now.tile_id)
+          |> Map.put(:next_step, n3)
+
+        {:ok, context}
       end
 
-      when_ "the turn resolves with the lord occupying the shared tile", context do
+      when_ "the boundary recharges and the settler tries its next step", context do
         Fixtures.advance_turn(context.world)
         {:ok, context}
       end
@@ -81,7 +128,8 @@ defmodule BrokenOathsSpex.Story875.Criterion7426Spex do
         [settler] = for u <- units, u.id == context.settler.id, do: u
         [lord] = for u <- units, u.id == context.lord.id, do: u
 
-        assert lord.tile_id == context.shared or settler.tile_id == context.shared
+        assert lord.tile_id == context.next_step
+        assert settler.tile_id == context.resting_tile
         refute lord.tile_id == settler.tile_id
 
         render_hook(context.play_live, "select_unit", %{"unit_id" => context.settler.id})
