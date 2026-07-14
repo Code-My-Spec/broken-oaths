@@ -39,3 +39,7 @@ npm-debug.log
 .code_my_spec/internal/
 /diagnostics.jsonl
 
+
+# Environment files with secrets.
+.env
+.env.*
