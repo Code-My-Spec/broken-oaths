@@ -43,6 +43,39 @@ qa_world =
       world
   end
 
+# A deliberately tiny world (frequency 8 -> 642 tiles) that resolves to
+# exactly two spawnable regions (per BrokenOaths.Worlds.Regions.spawnable/1's
+# 175-tile habitability floor). QA World (frequency 54) has ~104 spawnable
+# regions and can't be filled by hand — this fixture exists so "world just
+# filled up" / abandon-and-reclaim scenarios (story 873) are testable
+# through the browser with two throwaway joins.
+#
+# NOTE: frequency 5-6 worlds reliably trigger a Spawner crash (see issue
+# 6b8a69f3-d401-4cb7-b45f-ad3ceaf414e6 — a `:land` tile fully enclosed by
+# same-region `:mountain` tiles has no path to the BFS boundary and blows
+# up `Map.fetch!/2`), which crashes `world_full?/1` and takes down the
+# entire /play picker for every world, not just the broken one. Frequency
+# 7-8 avoided it in every seed tried during QA. Do NOT lower this
+# frequency without re-verifying every spawnable region is crash-safe
+# (see the per-region probe in the story 873 QA session) — a bad world
+# left `status: "active"` breaks /play for everyone until fixed or
+# archived. The frequency-5 repro world from that bug hunt is world id 7,
+# "QA World (Full Test)", left in the DB with `status: "archived"` as a
+# standing repro case — do not reactivate it.
+qa_fill_world =
+  case Enum.find(Worlds.list_worlds(), &(&1.name == "QA World (Fill Test)")) do
+    nil ->
+      {:ok, world} =
+        Worlds.create_world(%{name: "QA World (Fill Test)", seed: 111_222, frequency: 8})
+
+      IO.puts("Created QA World (Fill Test) (seed 111222, 2 spawnable regions)")
+      world
+
+    world ->
+      IO.puts("QA World (Fill Test) already exists (id #{world.id})")
+      world
+  end
+
 IO.puts("""
 
 === QA credentials ===
@@ -51,8 +84,9 @@ password: #{qa_password}
 user id:  #{user.id}
 
 === QA URLs (dev server, port 4050) ===
-login:         http://localhost:4050/users/log-in
-world (globe): http://localhost:4050/worlds/#{qa_world.id}
-world (DOM):   http://localhost:4050/worlds/#{qa_world.id}?mode=classic
-mailbox:       http://localhost:4050/dev/mailbox
+login:              http://localhost:4050/users/log-in
+world (globe):      http://localhost:4050/worlds/#{qa_world.id}
+world (DOM):        http://localhost:4050/worlds/#{qa_world.id}?mode=classic
+fill-test world:    http://localhost:4050/worlds/#{qa_fill_world.id}
+mailbox:            http://localhost:4050/dev/mailbox
 """)

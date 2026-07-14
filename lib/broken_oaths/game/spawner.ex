@@ -88,7 +88,14 @@ defmodule BrokenOaths.Game.Spawner do
     land = for tile <- tiles, Regions.tile_class(world, tile) == :land, do: tile
     depth = boundary_depths(land, MapSet.new(tiles), world)
 
-    Enum.sort_by(land, fn tile -> {-Map.fetch!(depth, tile), tile} end)
+    # Land pockets fully enclosed by same-region mountains never reach
+    # the boundary BFS (no depth entry) — and they'd be spawn traps a
+    # settler could never walk out of. Exclude them rather than crash;
+    # a region with NO reachable land simply yields no candidates and
+    # placement falls through to the next region.
+    land
+    |> Enum.filter(&Map.has_key?(depth, &1))
+    |> Enum.sort_by(fn tile -> {-Map.fetch!(depth, tile), tile} end)
   end
 
   # Multi-source BFS from every region tile that touches something outside

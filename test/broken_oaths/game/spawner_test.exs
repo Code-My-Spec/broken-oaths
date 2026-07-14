@@ -63,4 +63,27 @@ defmodule BrokenOaths.Game.SpawnerTest do
       refute first.region_id == second.region_id
     end
   end
+
+  describe "mountain-enclosed land pockets (regression: issue 6b8a69f3)" do
+    test "spawn_player never crashes on the frequency-5 repro world" do
+      # Seed 500555 at frequency 5 produces a region containing a :land
+      # tile fully enclosed by same-region mountains; this used to
+      # KeyError inside central_land_tiles and take down /play.
+      world = %BrokenOaths.Worlds.World{seed: 500_555, frequency: 5}
+
+      result = Spawner.spawn_player(world, [])
+
+      assert match?({:ok, %{lord_tile: _, settler_tile: _}}, result) or
+               result == {:error, :world_full}
+
+      # Fill every spawnable region without ever raising
+      Enum.reduce_while(0..50, [], fn _, taken ->
+        case Spawner.spawn_player(world, taken) do
+          {:ok, %{region_id: r}} -> {:cont, [r | taken]}
+          {:error, :world_full} -> {:halt, taken}
+        end
+      end)
+    end
+  end
+
 end

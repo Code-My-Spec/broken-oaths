@@ -86,9 +86,31 @@ scenarios:
     `#login_form_password` form.
   - "QA World" (seed 424242, frequency 54 = 29,162 tiles) — a
     deterministic globe so terrain/weather facts are stable across
-    machines.
-  - Prints: credentials, world URLs (globe + classic mode), and the
-    dev mailbox URL.
+    machines. Has ~104 spawnable regions (`Regions.spawnable/1`'s
+    175-tile habitability floor) — too many to fill by hand through
+    the browser.
+  - "QA World (Fill Test)" (seed 111222, frequency 8 = 642 tiles,
+    world id 10 as of this writing) — resolves to exactly **two**
+    spawnable regions, added for story 873 QA. Lets a tester fill the
+    world with two throwaway joins and then exercise "world just
+    filled up" / abandon-and-reclaim scenarios without scripting
+    dozens of accounts.
+  - Prints: credentials, world URLs (globe + classic mode), the
+    fill-test world URL, and the dev mailbox URL.
+  - **Do not seed worlds at frequency 5-6.** They reliably trigger a
+    Spawner crash (issue `6b8a69f3-d401-4cb7-b45f-ad3ceaf414e6`): a
+    `:land` tile fully enclosed by same-region `:mountain` tiles has
+    no BFS path to the region boundary, and `Spawner.central_land_tiles/2`
+    raises `KeyError`. This crashes `world_full?/1`, which crashes the
+    entire `/play` picker for **every** world, not just the bad one —
+    it's a full outage of the join page as long as any `status:
+    "active"` world has this terrain shape. World id 7, "QA World
+    (Full Test)" (frequency 5, seed 500555), is deliberately left
+    `status: "archived"` in the DB as a standing repro case — do not
+    reactivate it. Every seed frequency tried at 7-8 was crash-safe in
+    a spot-check across ten seeds; re-verify per-region safety with a
+    dry-run probe (see the story 873 QA session) before introducing
+    another low-frequency world.
 
 For magic-link testing specifically: submit `#login_form_magic` with
 any seeded email, then read the link from **http://localhost:4050/dev/mailbox**
@@ -122,6 +144,16 @@ keep frames. Status: open.
 Agent shells sandboxed by Claude Code cannot write `config/*` via
 python/bash (Operation not permitted) — use the file-edit tools
 instead. Status: open (environmental, not an app bug).
+
+### Sandbox blocks the vibium daemon socket
+
+`vibium go`/`vibium daemon start` fail with "socket not available after
+5s" under the default Claude Code sandbox — the daemon's socket lives
+under `~/Library/Caches/vibium/`, which isn't in the sandbox's writable
+path allowlist (only `~/.cache`, `~/.npm`, `~/.mix`, etc. are). Run
+vibium commands with the sandbox disabled for this session (bash tool
+`dangerouslyDisableSandbox: true`) rather than retrying in-sandbox.
+Status: open (environmental, not an app bug).
 
 ## Notes
 
