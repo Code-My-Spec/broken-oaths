@@ -281,7 +281,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         # New seed = new bucket: pushes a recolored tile window in 3D mode
         socket =
           if socket.assigns.render_mode == :three_d,
-            do: socket |> rewindow() |> push_selection() |> push_puffs(),
+            do: socket |> rewindow() |> push_selection(),
             else: socket
 
         {:noreply, socket}
@@ -424,13 +424,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
   defp push_selection(socket), do: socket
 
-  # Weather objects: puff geometry extracted from the seed's cloud field
-  defp push_puffs(socket) do
-    push_event(socket, "globe3d:puffs", %{
-      puffs: Texture.cloud_puffs(socket.assigns.world.seed)
-    })
-  end
-
   defp tile_budget(true), do: @tile_budget_touch
   defp tile_budget(false), do: @tile_budget_desktop
 
@@ -472,7 +465,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     )
     |> rewindow()
     |> push_selection()
-    |> push_puffs()
   end
 
   defp set_mode(socket, :classic) do
@@ -1094,26 +1086,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               }
               this.loadTexture()
 
-              // Weather objects: puff geometry pushed by the server.
-              // Clouds drift east (one lap per cloudPeriod seconds) as a
-              // rotation about the polar axis, at altitude 1.035R.
-              this.cloudPeriod = 900
-              this.cloudDrift = () =>
-                (((Date.now() / 1000) % this.cloudPeriod) / this.cloudPeriod) * 2 * Math.PI
-
-              this.puffs = null
-              this.hasStorms = false
-              this.handleEvent("globe3d:puffs", ({puffs}) => {
-                this.puffs = puffs
-                this.schedule()
-              })
-
-              // Storm cells flicker with lightning — keep re-rendering at a
-              // low tick while any are on screen (and the tab is visible)
-              this.stormTimer = setInterval(() => {
-                if (this.hasStorms && !document.hidden) this.schedule()
-              }, 280)
-
               const d = this.el.dataset
               this.yaw = parseFloat(d.yaw) || 0
               this.pitch = parseFloat(d.pitch) || 0
@@ -1285,120 +1257,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                   ctx.stroke()
                 }
 
-                this.drawPuffs()
                 this.drawSelection()
-              }
-
-              // Weather pass: puff clusters at altitude 1.035R with ground
-              // shadows and lightning on storm cells. Drawn over either
-              // render path, before the selection ring.
-              this.drawPuffs = () => {
-                const puffs = this.puffs
-                this.hasStorms = false
-                if (!puffs) return
-                const ctx = this.ctx
-                if (!ctx) return
-
-                const k = this.pxScale
-                const S = this.S * k, ccx = this.cx * k, ccy = this.cy * k
-                const cyw = Math.cos(this.yaw), syw = Math.sin(this.yaw)
-                const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
-                const drift = this.cloudDrift()
-                const cd = Math.cos(drift), sd = Math.sin(drift)
-                const [sun_x, sun_y, sun_z] = this.sunVec()
-                const now = Date.now()
-
-                // Shadow offset: opposite the sun's screen direction
-                const svx = -syw * sun_x + cyw * sun_y
-                const svy = -sp * cyw * sun_x - sp * syw * sun_y + cp * sun_z
-                const shx = -svx * 9 * k, shy = svy * 9 * k
-
-                const ALT = 1.035
-
-                for (let i = 0; i < puffs.length; i++) {
-                  const p = puffs[i]
-                  // Drift: rotate about the polar axis
-                  const x = p[0] * cd - p[1] * sd
-                  const y = p[0] * sd + p[1] * cd
-                  const z = p[2], r = p[3], d = p[4]
-
-                  const vx = -syw * x + cyw * y
-                  const vy = -sp * cyw * x - sp * syw * y + cp * z
-                  const vz = cp * cyw * x + cp * syw * y + sp * z
-                  if (vz < 0.08) continue
-
-                  const gx = ccx + S * vx, gy = ccy - S * vy
-                  const px2 = ccx + S * ALT * vx, py2 = ccy - S * ALT * vy
-                  const rpx = r * S
-                  if (rpx < 1.5) continue
-
-                  // Day factor at the puff
-                  const light = x * sun_x + y * sun_y + z * sun_z
-                  let t = (light + 0.15) / 0.3
-                  t = t < 0 ? 0 : t > 1 ? 1 : t
-                  t = t * t * (3 - 2 * t)
-                  const shade = 0.35 + 0.65 * t
-
-                  // White cumulus -> grey rain -> black storm
-                  const base = d < 0.34 ? [246, 249, 253] : d < 0.7 ? [168, 176, 188] : [58, 63, 76]
-                  const cr = (base[0] * shade) | 0
-                  const cg = (base[1] * shade) | 0
-                  const cb = (base[2] * shade) | 0
-                  const alpha = 0.5 + 0.38 * d
-                  const storm = d >= 0.7
-                  if (storm) this.hasStorms = true
-
-                  // Ground shadow first
-                  ctx.fillStyle = "rgba(6,8,18," + (0.18 * alpha).toFixed(3) + ")"
-                  this.blob(ctx, i, gx + shx, gy + shy, rpx)
-
-                  // Lightning: pseudo-random flicker per storm cell
-                  let flash = false
-                  if (storm && t !== undefined) {
-                    const h = ((i + 1) * 2654435761 ^ ((now / 240) | 0) * 40503) >>> 0
-                    flash = h % 13 === 0
-                  }
-
-                  if (flash) {
-                    // Jagged bolt from cloud base to ground
-                    ctx.beginPath()
-                    ctx.moveTo(px2, py2 + rpx * 0.3)
-                    const segs = 4
-                    for (let sgi = 1; sgi <= segs; sgi++) {
-                      const f2 = sgi / segs
-                      const jit = Math.sin(i * 37.7 + sgi * 91.3 + ((now / 240) | 0)) * rpx * 0.35
-                      ctx.lineTo(px2 + (gx - px2) * f2 + jit, py2 + rpx * 0.3 + (gy - py2 - rpx * 0.3) * f2)
-                    }
-                    ctx.strokeStyle = "rgba(255,250,190,0.9)"
-                    ctx.lineWidth = Math.max(1.5, k)
-                    ctx.stroke()
-                  }
-
-                  // The puff itself: a cluster of blobs
-                  ctx.fillStyle = "rgba(" + cr + "," + cg + "," + cb + "," + alpha.toFixed(3) + ")"
-                  this.blob(ctx, i, px2, py2, rpx)
-
-                  if (flash) {
-                    // Lit-from-within flash core
-                    ctx.fillStyle = "rgba(255,252,220,0.55)"
-                    ctx.beginPath()
-                    ctx.arc(px2, py2, rpx * 0.55, 0, 6.2832)
-                    ctx.fill()
-                  }
-                }
-              }
-
-              // A puff-shaped cluster: 4 overlapping circles, deterministic
-              // per puff index (no per-frame allocation or randomness drift)
-              this.blob = (ctx, i, x, y, r) => {
-                for (let j = 0; j < 4; j++) {
-                  const ang = i * 2.399 + j * 1.71
-                  const dist = r * 0.42 * (j / 3)
-                  const rr = r * (0.82 - 0.14 * j)
-                  ctx.beginPath()
-                  ctx.arc(x + Math.cos(ang) * dist, y + Math.sin(ang) * dist * 0.6, rr, 0, 6.2832)
-                  ctx.fill()
-                }
               }
 
               // Selection ring, drawn over either render path at any zoom.
@@ -1475,7 +1334,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                   }
                 }
                 this.ctx.putImageData(this.frame, 0, 0)
-                this.drawPuffs()
                 this.drawSelection()
               }
 
@@ -1692,7 +1550,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               if (this.settleTimer) clearTimeout(this.settleTimer)
               if (this.resizeTimer) clearTimeout(this.resizeTimer)
               if (this.sunTimer) clearInterval(this.sunTimer)
-              if (this.stormTimer) clearInterval(this.stormTimer)
             }
           }
         </script>

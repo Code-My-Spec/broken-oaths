@@ -16,7 +16,7 @@ defmodule BrokenOaths.Worlds.Texture do
       seed's entry until restart — acceptable at this size.
   """
 
-  alias BrokenOaths.Worlds.{Generator, Globe, Noise, Terrain}
+  alias BrokenOaths.Worlds.{Generator, Globe, Terrain}
 
   # Bump when the index/png layout OR palette changes (persistent_term
   # survives reloads, and browsers cache the PNGs as immutable).
@@ -40,84 +40,6 @@ defmodule BrokenOaths.Worlds.Texture do
 
   @doc "Cache version — clients bust immutable texture URLs with it."
   def version, do: @cache_version
-
-  @doc """
-  Cloud puffs for a world: real weather objects extracted as local maxima
-  of low-octave 3D noise on the sphere. Each puff is
-  `[x, y, z, angular_radius, density]` with density in [0,1] — the client
-  renders white cumulus (low), grey rain clouds (mid) and black
-  storm cells with lightning (high), floating above the surface.
-  """
-  def cloud_puffs(seed) do
-    key = {__MODULE__, @cache_version, :puffs, seed}
-
-    case :persistent_term.get(key, nil) do
-      nil ->
-        puffs = build_puffs(seed)
-        :persistent_term.put(key, puffs)
-        puffs
-
-      puffs ->
-        puffs
-    end
-  end
-
-  defp build_puffs(seed) do
-    perm = Noise.init(seed + 777_777)
-    scale = 3.1
-    w = 96
-    h = 48
-
-    # Sample the cloud field on a coarse lat/lon grid
-    vals =
-      for j <- 0..(h - 1), i <- 0..(w - 1), into: %{} do
-        lat = :math.pi() * (0.5 - (j + 0.5) / h)
-        lon = 2 * :math.pi() * ((i + 0.5) / w - 0.5)
-        clat = :math.cos(lat)
-
-        v =
-          Noise.fbm3d(
-            perm,
-            clat * :math.cos(lon) * scale,
-            clat * :math.sin(lon) * scale,
-            :math.sin(lat) * scale,
-            4
-          )
-
-        {{i, j}, v}
-      end
-
-    # Puff = a grid cell that beats the threshold AND all 8 neighbors
-    # (longitude wraps; polar rows skipped — weather thins at the caps)
-    for j <- 1..(h - 2),
-        i <- 0..(w - 1),
-        v = vals[{i, j}],
-        v > 0.56,
-        local_max?(vals, i, j, v, w) do
-      lat = :math.pi() * (0.5 - (j + 0.5) / h)
-      lon = 2 * :math.pi() * ((i + 0.5) / w - 0.5)
-      clat = :math.cos(lat)
-
-      density = min((v - 0.56) / 0.22, 1.0)
-
-      [
-        Float.round(clat * :math.cos(lon), 4),
-        Float.round(clat * :math.sin(lon), 4),
-        Float.round(:math.sin(lat), 4),
-        Float.round(0.045 + 0.075 * density, 4),
-        Float.round(density, 3)
-      ]
-    end
-  end
-
-  defp local_max?(vals, i, j, v, w) do
-    Enum.all?([-1, 0, 1], fn dj ->
-      Enum.all?([-1, 0, 1], fn di ->
-        (di == 0 and dj == 0) or
-          vals[{rem(i + di + w, w), j + dj}] |> then(&(&1 == nil or &1 <= v))
-      end)
-    end)
-  end
 
   @doc "Build (or fetch cached) the equirectangular PNG for a world."
   def png(seed, frequency, level \\ 1) do
