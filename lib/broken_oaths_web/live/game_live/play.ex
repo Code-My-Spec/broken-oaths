@@ -13,8 +13,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
   tile DOM — geometry, visibility and units travel as pushed client
   events and the canvas hook owns painting:
 
-    * `game:window`     — `%{tiles: [[id, color, cx, cy, cz, cx1, cy1, cz1, ...], ...]}`,
-                           fog-filtered to only known (visible ∪ explored) tiles
+    * `game:window`     — `%{tiles: [[id, color, decor, cx, cy, cz, cx1, cy1, cz1, ...], ...]}`,
+                           fog-filtered to only known (visible ∪ explored) tiles;
+                           `decor` names a billboard sprite (or nil) per the
+                           art-pipeline ADR
     * `game:visibility` — `%{visible: [tile_id], explored: [tile_id]}`
     * `game:units`      — `%{units: [unit]}`, fog-filtered (own units always
                            included; another player's unit only while visible)
@@ -285,15 +287,34 @@ defmodule BrokenOathsWeb.GameLive.Play do
     })
   end
 
-  # Compact row for the client painter: [id, color, cx, cy, cz, corner1x, corner1y, corner1z, ...]
+  # Compact row for the client painter:
+  # [id, color, decor, cx, cy, cz, corner1x, corner1y, corner1z, ...]
   defp tile_row(tile_id, mesh, terrain_map) do
     tile = Globe.tile(mesh, tile_id)
     terrain = Map.get(terrain_map, tile_id)
     {cx, cy, cz} = tile.center
     corners = Enum.flat_map(tile.corners, fn {x, y, z} -> [round4(x), round4(y), round4(z)] end)
 
-    [tile.id, Terrain.color(terrain), round4(cx), round4(cy), round4(cz) | corners]
+    [
+      tile.id,
+      Terrain.color(terrain),
+      decor(terrain),
+      round4(cx),
+      round4(cy),
+      round4(cz) | corners
+    ]
   end
+
+  # Which billboard sprite (if any) a tile's relief/feature earns — the
+  # client learns decor from this push, never by re-deriving terrain
+  # (ADR game-art-pipeline). Mountains dominate features; hills yield
+  # to tree cover.
+  defp decor(nil), do: nil
+  defp decor(%{relief: :mountains}), do: "mountain"
+  defp decor(%{feature: :woods}), do: "woods"
+  defp decor(%{feature: :rainforest}), do: "rainforest"
+  defp decor(%{relief: :hills}), do: "hills"
+  defp decor(_terrain), do: nil
 
   defp round4(f), do: Float.round(f, 4)
 
@@ -424,6 +445,24 @@ defmodule BrokenOathsWeb.GameLive.Play do
             this.path = null
             this.anims = new Map()
             this.raf = null
+            this.arc = 0.02
+
+            // Billboard sprites (ADR game-art-pipeline). Anything not yet
+            // loaded falls back to the original programmer art.
+            this.sprites = {}
+            for (const [key, path] of Object.entries({
+              lord: "/images/game/units/lord.png",
+              settler: "/images/game/units/settler.png",
+              mountain: "/images/game/decor/mountain.png",
+              hills: "/images/game/decor/hills.png",
+              woods: "/images/game/decor/woods.png",
+              rainforest: "/images/game/decor/rainforest.png",
+            })) {
+              const img = new Image()
+              img.onload = () => this.draw()
+              img.src = path
+              this.sprites[key] = img
+            }
 
             const measure = () => {
               const r = this.el.getBoundingClientRect()
@@ -440,7 +479,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
             this.ro.observe(this.el)
 
             this.airspace = {}
-            this.handleEvent("globe3d:airspace", ({levels}) => { this.airspace = levels; this.draw() })
+            this.handleEvent("globe3d:airspace", ({levels, arc}) => {
+              this.airspace = levels
+              if (arc) this.arc = arc
+              this.draw()
+            })
             this.handleEvent("game:window", ({tiles}) => {
               this.tiles = tiles
               this.tileById = new Map(tiles.map((row) => [row[0], row]))
@@ -542,7 +585,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
             let nearestTile = null, bestTileDot = -Infinity
             for (const row of this.tiles) {
-              const dot = row[2] * p.x + row[3] * p.y + row[4] * p.z
+              const dot = row[3] * p.x + row[4] * p.y + row[5] * p.z
               if (dot > bestTileDot) { bestTileDot = dot; nearestTile = row[0] }
             }
 
@@ -574,7 +617,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
           center(tileId) {
             const row = this.tileById.get(tileId)
-            return row ? [row[2], row[3], row[4]] : null
+            return row ? [row[3], row[4], row[5]] : null
+          },
+
+          spriteFor(key) {
+            const img = key && this.sprites[key]
+            return img && img.complete && img.naturalWidth ? img : null
           },
 
           // Where a unit currently renders: mid-slide if animating,
@@ -631,16 +679,16 @@ defmodule BrokenOathsWeb.GameLive.Play do
             ctx.fill()
 
             const order = this.tiles
-              .map((row) => ({row, depth: this.project(row[2], row[3], row[4]).depth}))
+              .map((row) => ({row, depth: this.project(row[3], row[4], row[5]).depth}))
               .filter(({depth}) => depth > 0.02)
               .sort((a, b) => a.depth - b.depth)
 
             for (const {row} of order) {
               const [id, color] = row
               ctx.beginPath()
-              for (let i = 5; i < row.length; i += 3) {
+              for (let i = 6; i < row.length; i += 3) {
                 const {px, py} = this.project(row[i], row[i + 1], row[i + 2])
-                if (i === 5) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+                if (i === 6) ctx.moveTo(px, py); else ctx.lineTo(px, py)
               }
               ctx.closePath()
               ctx.fillStyle = color
@@ -654,6 +702,22 @@ defmodule BrokenOathsWeb.GameLive.Play do
               }
             }
 
+            // Terrain decor billboards (mountains, hills, tree cover) at
+            // projected tile centers, back-to-front, dimmed on remembered
+            // tiles. Skipped entirely below readability size.
+            ctx.imageSmoothingEnabled = false
+            const decorSize = Math.min(Math.max(this.scale * this.arc * 1.7, 10), 72)
+            if (decorSize >= 10) {
+              for (const {row} of order) {
+                const img = this.spriteFor(row[2])
+                if (!img) continue
+                const {px, py} = this.project(row[3], row[4], row[5])
+                ctx.globalAlpha = this.visibleSet.has(row[0]) ? 1 : 0.55
+                ctx.drawImage(img, px - decorSize / 2, py - decorSize * 0.62, decorSize, decorSize)
+              }
+              ctx.globalAlpha = 1
+            }
+
             // Weather: translucent cloud hexes one shell above known
             // terrain (levels from the airspace push; palette mirrors
             // Worlds.Weather). Deliberately translucent + tinted so it
@@ -663,9 +727,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
               const lvl = this.airspace[row[0]]
               if (!lvl) continue
               ctx.beginPath()
-              for (let i = 5; i < row.length; i += 3) {
+              for (let i = 6; i < row.length; i += 3) {
                 const {px, py} = this.project(row[i] * 1.035, row[i + 1] * 1.035, row[i + 2] * 1.035)
-                if (i === 5) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+                if (i === 6) ctx.moveTo(px, py); else ctx.lineTo(px, py)
               }
               ctx.closePath()
               ctx.fillStyle = CLOUD[lvl]
@@ -673,19 +737,22 @@ defmodule BrokenOathsWeb.GameLive.Play do
             }
 
             const now = performance.now()
+            const unitSize = Math.min(Math.max(this.scale * this.arc * 1.5, 14), 64)
             for (const u of this.units) {
               const pos = this.unitPos(u, now)
               if (!pos) continue
               const {px, py, depth} = this.project(pos[0], pos[1], pos[2])
               if (depth < 0.02) continue
               const color = u.type === "lord" ? "#f5c542" : "#42a5f5"
+              const img = this.spriteFor(u.type)
+              const ringR = img ? unitSize * 0.45 : 8
 
               // A unit with a pending path pulses — the "I'm on the move"
               // signal, visible without selecting it.
               if (u.order && u.order.status === "pending") {
                 const ph = (now % 1200) / 1200
                 ctx.beginPath()
-                ctx.arc(px, py, 8 + ph * 8, 0, 2 * Math.PI)
+                ctx.arc(px, py, ringR + ph * 8, 0, 2 * Math.PI)
                 ctx.strokeStyle = color
                 ctx.globalAlpha = 0.7 * (1 - ph)
                 ctx.lineWidth = 2
@@ -693,13 +760,27 @@ defmodule BrokenOathsWeb.GameLive.Play do
                 ctx.globalAlpha = 1
               }
 
-              ctx.beginPath()
-              ctx.arc(px, py, u.id === this.selectedId ? 7 : 5, 0, 2 * Math.PI)
-              ctx.fillStyle = color
-              ctx.fill()
-              ctx.lineWidth = 1.5
-              ctx.strokeStyle = "#1a1a1a"
-              ctx.stroke()
+              if (img) {
+                // Ground ellipse marks selection under the sprite's feet.
+                if (u.id === this.selectedId) {
+                  ctx.beginPath()
+                  ctx.ellipse(px, py + unitSize * 0.28, unitSize * 0.4, unitSize * 0.16, 0, 0, 2 * Math.PI)
+                  ctx.strokeStyle = "#ffffff"
+                  ctx.lineWidth = 2
+                  ctx.stroke()
+                }
+                ctx.drawImage(img, px - unitSize / 2, py - unitSize * 0.68, unitSize, unitSize)
+              } else {
+                // Fallback programmer art — the board never depends on an
+                // asset request to be playable (ADR game-art-pipeline).
+                ctx.beginPath()
+                ctx.arc(px, py, u.id === this.selectedId ? 7 : 5, 0, 2 * Math.PI)
+                ctx.fillStyle = color
+                ctx.fill()
+                ctx.lineWidth = 1.5
+                ctx.strokeStyle = "#1a1a1a"
+                ctx.stroke()
+              }
             }
 
             if (this.path && this.path.length) {
