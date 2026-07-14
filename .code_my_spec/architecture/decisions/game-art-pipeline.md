@@ -26,11 +26,16 @@ render at once.
 ## Decision 1 — Billboards over texture mapping
 
 In-game art is **billboard sprites drawn upright at projected tile
-centers**, layered above flat color-filled terrain polygons. We never
-texture-map tile surfaces on the canvas board.
+centers**, layered above terrain polygons. We never perspective-map
+textures onto tile surfaces on the canvas board.
 
-- The color fill stays the terrain's ground truth (and matches the 3D
-  world-preview texture baked from the same palette).
+- Tile polygons are filled with **screen-space repeating patterns**
+  (seamless ground textures per terrain base/feature, generated via
+  Nano Banana, `canvas createPattern` scaled with zoom) — flat terrain
+  color remains both the fallback until textures load and the ground
+  truth the 3D world-preview texture is baked from. Pattern fills are
+  legal because they need no perspective mapping; relief is still
+  decor's job, never the texture's.
 - Decor sprites (mountain peaks, hill bumps, tree clusters) sit on
   tiles whose relief/feature warrants them; unit/city sprites sit above
   decor. Draw order: terrain fill → fog wash → decor → weather → units.

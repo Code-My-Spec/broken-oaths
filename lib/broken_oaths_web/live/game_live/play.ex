@@ -13,10 +13,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
   tile DOM — geometry, visibility and units travel as pushed client
   events and the canvas hook owns painting:
 
-    * `game:window`     — `%{tiles: [[id, color, decor, cx, cy, cz, cx1, cy1, cz1, ...], ...]}`,
+    * `game:window`     — `%{tiles: [[id, color, decor, tex, cx, cy, cz, cx1, cy1, cz1, ...], ...]}`,
                            fog-filtered to only known (visible ∪ explored) tiles;
-                           `decor` names a billboard sprite (or nil) per the
-                           art-pipeline ADR
+                           `decor` names a billboard sprite (or nil) and `tex`
+                           a ground texture, per the art-pipeline ADR
     * `game:visibility` — `%{visible: [tile_id], explored: [tile_id]}`
     * `game:units`      — `%{units: [unit]}`, fog-filtered (own units always
                            included; another player's unit only while visible)
@@ -288,7 +288,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   end
 
   # Compact row for the client painter:
-  # [id, color, decor, cx, cy, cz, corner1x, corner1y, corner1z, ...]
+  # [id, color, decor, tex, cx, cy, cz, corner1x, corner1y, corner1z, ...]
   defp tile_row(tile_id, mesh, terrain_map) do
     tile = Globe.tile(mesh, tile_id)
     terrain = Map.get(terrain_map, tile_id)
@@ -299,6 +299,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
       tile.id,
       Terrain.color(terrain),
       decor(terrain),
+      texture(terrain),
       round4(cx),
       round4(cy),
       round4(cz) | corners
@@ -315,6 +316,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
   defp decor(%{feature: :rainforest}), do: "rainforest"
   defp decor(%{relief: :hills}), do: "hills"
   defp decor(_terrain), do: nil
+
+  # Ground texture key: the feature's floor wins over the base's. Relief
+  # is decor's job (mountain/hills billboards), never the texture's.
+  defp texture(nil), do: "ocean"
+  defp texture(%{feature: feature}) when not is_nil(feature), do: Atom.to_string(feature)
+  defp texture(%{base: base}), do: Atom.to_string(base)
 
   defp round4(f), do: Float.round(f, 4)
 
@@ -464,6 +471,20 @@ defmodule BrokenOathsWeb.GameLive.Play do
               this.sprites[key] = img
             }
 
+            // Ground textures: seamless tiles pattern-filled into tile
+            // polygons in screen space (canvas 2D can't perspective-map,
+            // but pattern fills read fine at game zoom). Flat terrain
+            // color remains the fallback until a texture loads.
+            this.terrainTex = {}
+            this.patterns = {}
+            for (const key of ["grassland", "plains", "desert", "tundra", "snow", "ocean",
+                               "coast", "woods", "rainforest", "marsh", "ice"]) {
+              const img = new Image()
+              img.onload = () => this.draw()
+              img.src = "/images/game/terrain/" + key + ".png"
+              this.terrainTex[key] = img
+            }
+
             const measure = () => {
               const r = this.el.getBoundingClientRect()
               this.cx = r.width / 2
@@ -585,7 +606,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
             let nearestTile = null, bestTileDot = -Infinity
             for (const row of this.tiles) {
-              const dot = row[3] * p.x + row[4] * p.y + row[5] * p.z
+              const dot = row[4] * p.x + row[5] * p.y + row[6] * p.z
               if (dot > bestTileDot) { bestTileDot = dot; nearestTile = row[0] }
             }
 
@@ -617,12 +638,23 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
           center(tileId) {
             const row = this.tileById.get(tileId)
-            return row ? [row[3], row[4], row[5]] : null
+            return row ? [row[4], row[5], row[6]] : null
           },
 
           spriteFor(key) {
             const img = key && this.sprites[key]
             return img && img.complete && img.naturalWidth ? img : null
+          },
+
+          // Repeating ground pattern for a texture key, scaled with zoom
+          // so terrain doesn't swim against the tiles. Null until loaded.
+          patternFor(ctx, key) {
+            const img = key && this.terrainTex[key]
+            if (!img || !img.complete || !img.naturalWidth) return null
+            if (!this.patterns[key]) this.patterns[key] = ctx.createPattern(img, "repeat")
+            const k = Math.max(this.scale / 1400, 0.25)
+            this.patterns[key].setTransform(new DOMMatrix().scale(k))
+            return this.patterns[key]
           },
 
           // Where a unit currently renders: mid-slide if animating,
@@ -679,19 +711,19 @@ defmodule BrokenOathsWeb.GameLive.Play do
             ctx.fill()
 
             const order = this.tiles
-              .map((row) => ({row, depth: this.project(row[3], row[4], row[5]).depth}))
+              .map((row) => ({row, depth: this.project(row[4], row[5], row[6]).depth}))
               .filter(({depth}) => depth > 0.02)
               .sort((a, b) => a.depth - b.depth)
 
             for (const {row} of order) {
               const [id, color] = row
               ctx.beginPath()
-              for (let i = 6; i < row.length; i += 3) {
+              for (let i = 7; i < row.length; i += 3) {
                 const {px, py} = this.project(row[i], row[i + 1], row[i + 2])
-                if (i === 6) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+                if (i === 7) ctx.moveTo(px, py); else ctx.lineTo(px, py)
               }
               ctx.closePath()
-              ctx.fillStyle = color
+              ctx.fillStyle = this.patternFor(ctx, row[3]) || color
               ctx.fill()
 
               // Explored-but-out-of-vision: remembered terrain under a
@@ -711,7 +743,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
               for (const {row} of order) {
                 const img = this.spriteFor(row[2])
                 if (!img) continue
-                const {px, py} = this.project(row[3], row[4], row[5])
+                const {px, py} = this.project(row[4], row[5], row[6])
                 ctx.globalAlpha = this.visibleSet.has(row[0]) ? 1 : 0.55
                 ctx.drawImage(img, px - decorSize / 2, py - decorSize * 0.62, decorSize, decorSize)
               }
@@ -727,9 +759,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
               const lvl = this.airspace[row[0]]
               if (!lvl) continue
               ctx.beginPath()
-              for (let i = 6; i < row.length; i += 3) {
+              for (let i = 7; i < row.length; i += 3) {
                 const {px, py} = this.project(row[i] * 1.035, row[i + 1] * 1.035, row[i + 2] * 1.035)
-                if (i === 6) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+                if (i === 7) ctx.moveTo(px, py); else ctx.lineTo(px, py)
               }
               ctx.closePath()
               ctx.fillStyle = CLOUD[lvl]
