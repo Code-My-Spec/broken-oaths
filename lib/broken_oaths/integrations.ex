@@ -9,6 +9,7 @@ defmodule BrokenOaths.Integrations do
 
   defdelegate get_integration(scope, provider), to: IntegrationRepository
   defdelegate list_integrations(scope), to: IntegrationRepository
+  defdelegate update_integration(scope, provider, attrs), to: IntegrationRepository
   defdelegate delete_integration(scope, provider), to: IntegrationRepository
   defdelegate connected?(scope, provider), to: IntegrationRepository
 

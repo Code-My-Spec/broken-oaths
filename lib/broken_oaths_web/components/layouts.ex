@@ -69,6 +69,12 @@ defmodule BrokenOathsWeb.Layouts do
     </main>
 
     <.flash_group flash={@flash} />
+
+    <.live_component
+      module={BrokenOathsWeb.FeedbackWidget}
+      id="codemyspec-feedback"
+      current_scope={@current_scope}
+    />
     """
   end
 
@@ -100,6 +106,12 @@ defmodule BrokenOathsWeb.Layouts do
     </main>
 
     <.flash_group flash={@flash} />
+
+    <.live_component
+      module={BrokenOathsWeb.FeedbackWidget}
+      id="codemyspec-feedback"
+      current_scope={assigns[:current_scope]}
+    />
     """
   end
 

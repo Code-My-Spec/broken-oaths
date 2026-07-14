@@ -24,7 +24,9 @@ defmodule BrokenOathsWeb.Router do
     get "/worlds/:id/texture.png", WorldTextureController, :show
     get "/worlds/:id/airspace.png", WorldTextureController, :airspace
 
-    live_session :worlds, layout: {BrokenOathsWeb.Layouts, :app_full} do
+    live_session :worlds,
+      layout: {BrokenOathsWeb.Layouts, :app_full},
+      on_mount: [{BrokenOathsWeb.UserAuth, :mount_current_scope}] do
       live "/worlds", WorldLive.Index, :index
       live "/worlds/:id", WorldLive.Show, :show
     end

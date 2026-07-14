@@ -52,12 +52,5 @@
       <% end %>
     </ul>
     {@inner_content}
-    <%= if assigns[:socket] do %>
-      <.live_component
-        module={BrokenOathsWeb.FeedbackWidget}
-        id="codemyspec-feedback"
-        current_scope={assigns[:current_scope]}
-      />
-    <% end %>
   </body>
 </html>

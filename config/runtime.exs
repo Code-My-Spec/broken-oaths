@@ -23,18 +23,6 @@ end
 config :broken_oaths, BrokenOathsWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4050"))]
 
-# CodeMySpec feedback widget credentials. Generate them on the project
-# page at codemyspec.com and set the env vars before deploying.
-config :broken_oaths,
-  codemyspec_url: System.get_env("CODEMYSPEC_URL") || "https://codemyspec.com",
-  codemyspec_client_id: System.get_env("CODEMYSPEC_CLIENT_ID"),
-  codemyspec_client_secret: System.get_env("CODEMYSPEC_CLIENT_SECRET")
-
-# Google OAuth (cms_gen.integration_provider Google google)
-config :broken_oaths,
-  google_client_id: System.get_env("GOOGLE_CLIENT_ID"),
-  google_client_secret: System.get_env("GOOGLE_CLIENT_SECRET")
-
 # === Secret loading ==========================================================
 #
 # Deployed containers (UAT + prod, both MIX_ENV=prod) carry only AWS
@@ -47,6 +35,37 @@ if config_env() == :prod do
     app_env -> BrokenOaths.Secrets.load!(app_env)
   end
 end
+
+# Local dev convenience: load .env into System env so optional
+# integrations (CodeMySpec feedback widget, Google OAuth) work without
+# exporting vars by hand. Existing env vars win; test never loads it.
+if config_env() == :dev and File.exists?(".env") do
+  ".env"
+  |> File.read!()
+  |> String.split("\n")
+  |> Enum.each(fn line ->
+    with [key, value] <- String.split(String.trim(line), "=", parts: 2),
+         false <- String.starts_with?(key, "#"),
+         nil <- System.get_env(key) do
+      System.put_env(key, String.trim(value, "\""))
+    else
+      _ -> :ok
+    end
+  end)
+end
+
+# CodeMySpec feedback widget credentials. Generate them on the project
+# page at codemyspec.com; deployed envs read them from SSM (loaded
+# above), dev reads them from .env.
+config :broken_oaths,
+  codemyspec_url: System.get_env("CODEMYSPEC_URL") || "https://codemyspec.com",
+  codemyspec_client_id: System.get_env("CODEMYSPEC_CLIENT_ID"),
+  codemyspec_client_secret: System.get_env("CODEMYSPEC_CLIENT_SECRET")
+
+# Google OAuth (cms_gen.integration_provider Google google)
+config :broken_oaths,
+  google_client_id: System.get_env("GOOGLE_CLIENT_ID"),
+  google_client_secret: System.get_env("GOOGLE_CLIENT_SECRET")
 
 if config_env() == :prod do
   # Cloak vault key for encrypted OAuth token storage. The compile-time
