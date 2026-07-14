@@ -23,6 +23,10 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   @window_margin_touch 0.2
   @window_margin_desktop 0.35
 
+  # Full day/night cycle length in seconds (purely visual for now; move
+  # sun state server-side when gameplay starts caring about time of day).
+  @sun_period 1800
+
   # Rotation step ≈ this many pixels of screen travel at the view center.
   @pan_px 150
   # Pitch clamp (±85.9°) keeps the up-vector sane; pole tiles are still
@@ -49,7 +53,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     worlds = Worlds.list_worlds()
 
     mesh = Globe.get(world.frequency)
-    terrain_map = Generator.generate_terrain_map(world.seed, mesh)
+    %{terrain: terrain_map, elevation: elevation_map} = Generator.generate_maps(world.seed, mesh)
     stats = Generator.terrain_stats(terrain_map)
 
     socket =
@@ -59,6 +63,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         worlds: worlds,
         mesh: mesh,
         terrain_map: terrain_map,
+        elevation_map: elevation_map,
         stats: stats,
         yaw: 0.0,
         pitch: 0.0,
@@ -71,6 +76,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         view_bucket: nil,
         device_coarse: false,
         lod_k: 1.02,
+        sun_period: @sun_period,
         sidebar_open: false,
         selected_tile: nil,
         selected_terrain: nil,
@@ -264,7 +270,9 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     case Worlds.update_world(socket.assigns.world, %{seed: new_seed}) do
       {:ok, world} ->
         # The mesh depends only on frequency; only terrain regenerates.
-        terrain_map = Generator.generate_terrain_map(world.seed, socket.assigns.mesh)
+        %{terrain: terrain_map, elevation: elevation_map} =
+          Generator.generate_maps(world.seed, socket.assigns.mesh)
+
         stats = Generator.terrain_stats(terrain_map)
         worlds = Worlds.list_worlds()
 
@@ -274,6 +282,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             world: world,
             worlds: worlds,
             terrain_map: terrain_map,
+            elevation_map: elevation_map,
             stats: stats,
             selected_tile: nil,
             selected_terrain: nil,
@@ -522,13 +531,15 @@ defmodule BrokenOathsWeb.WorldLive.Show do
       payload =
         case socket.assigns.renderer3d do
           :canvas ->
+            elevation_map = socket.assigns.elevation_map
+
             tiles =
               socket.assigns.mesh.tiles
               |> Map.values()
               |> Enum.filter(fn %{center: {cx, cy, cz}} ->
                 cx * vx + cy * vy + cz * vz > min_dot
               end)
-              |> Enum.map(&tile_row(&1, terrain_map))
+              |> Enum.map(&tile_row(&1, terrain_map, elevation_map))
 
             %{palette: palette_colors(), tiles: tiles}
 
@@ -551,8 +562,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   end
 
   # Compact tile row for the vector-canvas renderer:
-  # [id, palette_index, cx, cy, cz, corner1x, corner1y, corner1z, ...]
-  defp tile_row(tile, terrain_map) do
+  # [id, palette_index, cx, cy, cz, elevation, corner1x, corner1y, corner1z, ...]
+  defp tile_row(tile, terrain_map, elevation_map) do
     {cx, cy, cz} = tile.center
 
     corners =
@@ -565,7 +576,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
       palette_index(Map.get(terrain_map, tile.id, :ocean)),
       Float.round(cx, 4),
       Float.round(cy, 4),
-      Float.round(cz, 4) | corners
+      Float.round(cz, 4),
+      Map.get(elevation_map, tile.id, 0.0) | corners
     ]
   end
 
@@ -762,6 +774,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             data-scale={@scale}
             data-r0={Facets.r0()}
             data-lod-k={@lod_k}
+            data-sun-period={@sun_period}
             data-renderer={@renderer3d}
             data-selected-id={@selected_tile && @selected_tile.id}
             data-texture={~p"/worlds/#{@world.id}/texture.png?seed=#{@world.seed}"}
@@ -1007,12 +1020,45 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 if (payload.tiles) {
                   this.tiles = payload.tiles
                   this.palette = payload.palette || []
+                  this.buildShades()
                   this.schedule()
                 } else if (payload.html && this.fine) {
                   this.fine.innerHTML = payload.html
                   this.schedule()
                 }
               })
+
+              // 16 brightness steps per terrain color (0.30 night .. 1.15
+              // sunlit peak) — precomputed so per-frame shading allocates
+              // nothing.
+              this.shades = null
+              this.buildShades = () => {
+                this.shades = this.palette.map((hex) => {
+                  const r = parseInt(hex.slice(1, 3), 16)
+                  const g = parseInt(hex.slice(3, 5), 16)
+                  const b = parseInt(hex.slice(5, 7), 16)
+                  const out = []
+                  for (let i = 0; i < 16; i++) {
+                    const f = 0.30 + (i / 15) * 0.85
+                    out.push(
+                      `rgb(${Math.min(255, Math.round(r * f))},${Math.min(255, Math.round(g * f))},${Math.min(255, Math.round(b * f))})`
+                    )
+                  }
+                  return out
+                })
+              }
+
+              // Sun direction from wall clock: one full day per sun-period
+              // seconds, with a slight axial tilt. Visual-only for now.
+              this.sunPeriod = parseFloat(this.el.dataset.sunPeriod) || 1800
+              this.sunVec = () => {
+                const a = ((Date.now() / 1000) % this.sunPeriod) / this.sunPeriod * 2 * Math.PI
+                const tz = 0.20
+                const n = Math.sqrt(1 + tz * tz)
+                return [Math.cos(a) / n, Math.sin(a) / n, tz / n]
+              }
+              // Keep the terminator creeping while idle
+              this.sunTimer = setInterval(() => this.schedule(), 10000)
 
               // Selection geometry — drawable at any zoom, in both render
               // paths, independent of the current tile window.
@@ -1186,24 +1232,49 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
                 // View-space z of a world point (backface test)
                 const vz = (x, y, z) => cp * cyw * x + cp * syw * y + sp * z
+                const [sun_x, sun_y, sun_z] = this.sunVec()
 
+                // Painter's order (far first) so relief-lifted tiles at the
+                // rim overlap their lower neighbors correctly
+                const order = []
                 for (const row of tiles) {
-                  if (vz(row[2], row[3], row[4]) <= 0.02) continue
+                  const z = vz(row[2], row[3], row[4])
+                  if (z > 0.02) order.push([z, row])
+                }
+                order.sort((a, b) => a[0] - b[0])
+
+                for (const [, row] of order) {
+                  // Day/night: smoothstep across the terminator, plus a
+                  // brightness accent for high ground
+                  const light = row[2] * sun_x + row[3] * sun_y + row[4] * sun_z
+                  let t = (light + 0.15) / 0.3
+                  t = t < 0 ? 0 : t > 1 ? 1 : t
+                  t = t * t * (3 - 2 * t)
+                  const h = row[5]
+                  const relief = Math.max(h - 0.40, 0)
+                  const f = 0.30 + t * (0.62 + relief * 0.55)
+                  let idx = Math.round(((f - 0.30) / 0.85) * 15)
+                  idx = idx < 0 ? 0 : idx > 15 ? 15 : idx
+                  const color = this.shades ? this.shades[row[1]][idx] : this.palette[row[1]]
+
+                  // Radial extrusion: land rises above sea level (visible
+                  // as silhouette relief at the planet's rim)
+                  const lift = 1 + relief * 0.04
 
                   ctx.beginPath()
-                  for (let i = 5; i < row.length; i += 3) {
-                    const x = row[i], y = row[i + 1], z = row[i + 2]
+                  for (let i = 6; i < row.length; i += 3) {
+                    const x = row[i] * lift, y = row[i + 1] * lift, z = row[i + 2] * lift
                     const px = ccx + S * (-syw * x + cyw * y)
                     const py = ccy - S * (-sp * cyw * x - sp * syw * y + cp * z)
-                    if (i === 5) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+                    if (i === 6) ctx.moveTo(px, py); else ctx.lineTo(px, py)
                   }
                   ctx.closePath()
-                  const color = this.palette[row[1]] || "#1e3a8a"
                   ctx.fillStyle = color
                   ctx.fill()
-                  // Hairline same-color stroke seals seams between polygons
+                  // Same-color stroke seals seams — slightly wider than a
+                  // hairline to also cover relief-lift gaps at elevation steps
                   ctx.strokeStyle = color
-                  ctx.lineWidth = 1
+                  ctx.lineWidth = Math.max(1.5, k)
                   ctx.stroke()
                 }
 
@@ -1248,6 +1319,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
                 const tex = this.tex.data, TW = this.tex.w, TH = this.tex.h
                 const INV2PI = 1 / (2 * Math.PI), INVPI = 1 / Math.PI
+                const [sun_x, sun_y, sun_z] = this.sunVec()
                 const x0 = Math.max(0, Math.floor(ccx - S)), x1 = Math.min(cw - 1, Math.ceil(ccx + S))
                 const y0 = Math.max(0, Math.floor(ccy - S)), y1 = Math.min(ch - 1, Math.ceil(ccy + S))
                 for (let py = y0; py <= y1; py++) {
@@ -1265,7 +1337,19 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                     let ty = ((0.5 - Math.asin(wz) * INVPI) * TH) | 0
                     if (tx < 0) tx = 0; else if (tx >= TW) tx = TW - 1
                     if (ty < 0) ty = 0; else if (ty >= TH) ty = TH - 1
-                    out[row + px] = tex[ty * TW + tx]
+
+                    // Day/night terminator: smoothstep on sun · surface
+                    const light = wx * sun_x + wy * sun_y + wz * sun_z
+                    let t = (light + 0.15) / 0.3
+                    t = t < 0 ? 0 : t > 1 ? 1 : t
+                    t = t * t * (3 - 2 * t)
+                    const f = 0.32 + t * 0.68
+
+                    const v = tex[ty * TW + tx]
+                    const r = ((v & 255) * f) | 0
+                    const g = (((v >>> 8) & 255) * f) | 0
+                    const b = (((v >>> 16) & 255) * f) | 0
+                    out[row + px] = (v & 0xff000000) | (b << 16) | (g << 8) | r
                   }
                 }
                 this.ctx.putImageData(this.frame, 0, 0)
@@ -1484,6 +1568,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               if (this.syncTimer) clearTimeout(this.syncTimer)
               if (this.settleTimer) clearTimeout(this.settleTimer)
               if (this.resizeTimer) clearTimeout(this.resizeTimer)
+              if (this.sunTimer) clearInterval(this.sunTimer)
             }
           }
         </script>

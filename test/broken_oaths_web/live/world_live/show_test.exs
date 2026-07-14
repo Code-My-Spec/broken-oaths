@@ -237,11 +237,12 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       assert length(tiles) > 0
       assert length(tiles) <= tile_count
 
-      # Each row: [id, palette_index, cx, cy, cz | corner coords]
-      [id, pal | coords] = hd(tiles)
+      # Each row: [id, palette_index, cx, cy, cz, elevation | corner coords]
+      [id, pal, _cx, _cy, _cz, elevation | corners] = hd(tiles)
       assert is_integer(id) and id < tile_count
       assert pal in 0..7
-      assert length(coords) in [3 + 15, 3 + 18]
+      assert elevation >= 0.0 and elevation <= 1.0
+      assert length(corners) in [15, 18]
 
       # Regenerate pushes a recolored window (seed is in the bucket)
       view |> element("button", "Regenerate") |> render_click()

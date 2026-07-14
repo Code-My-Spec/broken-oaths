@@ -54,6 +54,35 @@ defmodule BrokenOaths.Worlds.GeneratorTest do
     end
   end
 
+  describe "generate_maps/2" do
+    setup do
+      %{mesh: Globe.build(8)}
+    end
+
+    test "elevation covers every tile in [0, 1] and is deterministic", %{mesh: mesh} do
+      %{elevation: elevation} = Generator.generate_maps(@test_seed, mesh)
+
+      assert map_size(elevation) == Globe.tile_count(8)
+
+      for {_id, e} <- elevation do
+        assert e >= 0.0 and e <= 1.0
+      end
+
+      assert Generator.generate_maps(@test_seed, mesh).elevation == elevation
+    end
+
+    test "pentagons peak; terrain agrees with generate_terrain_map", %{mesh: mesh} do
+      %{terrain: terrain, elevation: elevation} = Generator.generate_maps(@test_seed, mesh)
+
+      for tile <- Map.values(mesh.tiles), tile.pentagon? do
+        assert elevation[tile.id] == 0.95
+        assert terrain[tile.id] == :mountains
+      end
+
+      assert terrain == Generator.generate_terrain_map(@test_seed, mesh)
+    end
+  end
+
   describe "find_spawn_points/3 (globe)" do
     setup do
       mesh = Globe.build(8)

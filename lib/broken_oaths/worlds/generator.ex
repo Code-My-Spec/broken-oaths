@@ -27,27 +27,40 @@ defmodule BrokenOaths.Worlds.Generator do
   ]
 
   @doc """
-  Generate the terrain map for a globe world.
-  Returns %{tile_id => terrain_atom} for all tiles in the mesh.
-  The 12 pentagons are always :mountains (non-traversable).
+  Generate the terrain and elevation maps for a globe world in one noise
+  pass. Returns %{terrain: %{tile_id => atom}, elevation: %{tile_id => float}}
+  with elevation in [0.0, 1.0]. The 12 pentagons are always :mountains
+  (non-traversable) with a peak elevation.
   """
-  def generate_terrain_map(seed, mesh) do
+  def generate_maps(seed, mesh) do
     elevation_perm = Noise.init(seed)
     moisture_perm = Noise.init(seed + 12345)
 
-    Map.new(mesh.tiles, fn {id, tile} ->
-      {id, tile_terrain(elevation_perm, moisture_perm, tile)}
-    end)
+    {terrain, elevation} =
+      Enum.reduce(mesh.tiles, {%{}, %{}}, fn {id, tile}, {t_acc, e_acc} ->
+        {terrain, elev} = tile_terrain(elevation_perm, moisture_perm, tile)
+        {Map.put(t_acc, id, terrain), Map.put(e_acc, id, elev)}
+      end)
+
+    %{terrain: terrain, elevation: elevation}
   end
 
-  defp tile_terrain(_eperm, _mperm, %Globe.Tile{pentagon?: true}), do: :mountains
+  @doc """
+  Generate the terrain map for a globe world.
+  Returns %{tile_id => terrain_atom} for all tiles in the mesh.
+  """
+  def generate_terrain_map(seed, mesh) do
+    generate_maps(seed, mesh).terrain
+  end
+
+  defp tile_terrain(_eperm, _mperm, %Globe.Tile{pentagon?: true}), do: {:mountains, 0.95}
 
   defp tile_terrain(eperm, mperm, %Globe.Tile{center: {x, y, z}}) do
     es = @globe_elevation_scale
     ms = @globe_moisture_scale
     elevation = Noise.fbm3d(eperm, x * es, y * es, z * es, 6)
     moisture = Noise.fbm3d(mperm, x * ms, y * ms, z * ms, 4)
-    classify_terrain(elevation, moisture)
+    {classify_terrain(elevation, moisture), Float.round(elevation, 3)}
   end
 
   @doc "Compute terrain type statistics from a terrain map."
