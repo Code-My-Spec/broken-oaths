@@ -76,11 +76,12 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     {:ok, socket}
   end
 
-  # Render mode and the camera live in the URL (?mode=3d&yaw=..&pitch=..&zoom=..),
+  # Render mode and the camera live in the URL (?mode=classic&yaw=..&pitch=..&zoom=..),
   # so views survive refreshes, are shareable, and — critically — tests can
-  # mount the LiveView at any exact camera state.
+  # mount the LiveView at any exact camera state. The 3D globe is the
+  # default; ?mode=classic keeps the selector-testable DOM board reachable.
   def handle_params(params, _uri, socket) do
-    mode = if params["mode"] == "3d", do: :three_d, else: :classic
+    mode = if params["mode"] == "classic", do: :classic, else: :three_d
     # Default near renderer is the vector canvas; ?renderer=css3d keeps the
     # matrix3d-facets experiment reachable.
     renderer = if params["renderer"] == "css3d", do: :css3d, else: :canvas
@@ -162,8 +163,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
     to =
       if socket.assigns.render_mode == :classic,
-        do: ~p"/worlds/#{world.id}?#{[{:mode, "3d"} | view]}",
-        else: ~p"/worlds/#{world.id}?#{view}"
+        do: ~p"/worlds/#{world.id}?#{view}",
+        else: ~p"/worlds/#{world.id}?#{[{:mode, "classic"} | view]}"
 
     {:noreply, push_patch(socket, to: to)}
   end
@@ -354,8 +355,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   def handle_event("switch_world", %{"world_id" => id}, socket) do
     to =
       if socket.assigns.render_mode == :three_d,
-        do: ~p"/worlds/#{id}?mode=3d",
-        else: ~p"/worlds/#{id}"
+        do: ~p"/worlds/#{id}",
+        else: ~p"/worlds/#{id}?mode=classic"
 
     {:noreply, push_navigate(socket, to: to)}
   end
