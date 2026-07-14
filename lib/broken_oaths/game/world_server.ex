@@ -513,8 +513,11 @@ defmodule BrokenOaths.Game.WorldServer do
 
   defp format_order(nil), do: nil
 
+  # The remaining path travels with the order (owner-only, see above) so
+  # the board can render the route from the unit to its destination and
+  # keep it current as movement consumes steps (story 875 rule).
   defp format_order(%{path: path, status: status}),
-    do: %{target_tile: List.last(path), status: status}
+    do: %{target_tile: List.last(path), status: status, path: path}
 
   # -------------------------------------------------------------------
   # Persistence — tick delta

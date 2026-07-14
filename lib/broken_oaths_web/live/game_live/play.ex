@@ -19,7 +19,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
     * `game:units`      — `%{units: [unit]}`, fog-filtered (own units always
                            included; another player's unit only while visible)
     * `game:selected`   — `%{unit_id: id | nil}`, echoes the current selection
-    * `game:path`       — `%{unit_id: id, tiles: [tile_id]}`, a queued order's path
+    * `game:path`       — `%{unit_id: id, tiles: [tile_id]}`, the selected
+                           unit's remaining order path — pushed on queue, on
+                           selection, and on every board refresh (empty when
+                           the unit has no order)
     * `globe3d:airspace`— `%{levels: %{tile_id => 1..3}, arc: float}` (reused
                            weather layer from `BrokenOaths.Worlds.Weather`)
 
@@ -43,8 +46,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
     * `visibility(world, user)` — `%{visible: [tile_id], explored: [tile_id]}`
     * `units_visible_to(world, user)` — fog-filtered unit list; each unit
       exposes at least `id`, `type`, `tile_id`, `hp`, `max_hp`, `movement`,
-      `max_movement`, and `order` (`nil` or `%{target_tile:, status:}`,
-      status `:pending | :interrupted`) — shape expected by `GameLive.UnitPanel`
+      `max_movement`, and `order` (`nil` or `%{target_tile:, status:, path:}`,
+      status `:pending | :interrupted`, path the remaining route) — shape
+      expected by `GameLive.UnitPanel` and the board's path rendering
     * `queue_move(world, user, unit_id, to_tile)` —
       `{:ok, %{path: [tile_id]}} | {:error, reason}`
     * `abandon_world(world, user)` — wipes the player's units and frees
@@ -125,6 +129,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         order_error: nil
       )
       |> push_event("game:selected", %{unit_id: unit_id})
+      |> push_selected_path()
 
     {:noreply, socket}
   end
@@ -245,6 +250,21 @@ defmodule BrokenOathsWeb.GameLive.Play do
       selected_order: selected_unit && selected_unit.order
     )
     |> push_board_state()
+    |> push_selected_path()
+  end
+
+  # A queued order's remaining route renders whenever its unit is
+  # selected — re-pushed on every refresh so the line shrinks as
+  # movement consumes steps and disappears on arrival (story 875 rule).
+  defp push_selected_path(socket) do
+    case socket.assigns.selected_unit do
+      nil ->
+        socket
+
+      unit ->
+        tiles = (unit.order && unit.order.path) || []
+        push_event(socket, "game:path", %{unit_id: unit.id, tiles: tiles})
+    end
   end
 
   defp push_board_state(socket) do
