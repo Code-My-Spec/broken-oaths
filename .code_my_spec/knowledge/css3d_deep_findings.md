@@ -84,3 +84,31 @@ CSS: animated background gradients force repaints — prefer pulsing `filter`/`o
 
 ### Unverified
 6k per-tile filter/custom-prop writes at 60fps (no benchmark exists); Safari 2026 opacity-flattening behavior; Chrome dirty-rect union thresholds for scattered animated facets.
+
+---
+
+## Report 4 — Scale limits & hybrid tricks (angle5)
+
+### The binding constraint: iOS 26 / WebKit 26 GPU regression
+WebKit 26 moved compositing to a WebGPU-backed GPU process with aggressive VRAM limits — scenes with **~50–120 composited layers now stutter, drop layers, and crash the GPU process** on current iPads/iPhones (Home Assistant issue #28367; mechanism attribution Med). **Implication: hybrid DOM set pieces floated over the canvas must stay at LOW DOUBLE DIGITS on iOS.** This is the number that governs the units-as-DOM question: dozens max, never hundreds.
+
+### Containment/culling
+`content-visibility`/`contain: paint` on an in-3D node forces flat — containment and preserve-3d are mutually exclusive on the same node. Cull hybrid pieces with JS distance/backface checks (CSS DOOM's approach), never CSS containment.
+
+### Re-raster + will-change
+Script-driven scale changes re-raster composited content unless `will-change: transform` (which freezes a blurry bitmap). One parent-matrix rotation avoids this; per-tile scripted scale trips it. will-change explosion = the exact WebKit-26 crash pattern.
+
+### Hybrid media inside 3D facets
+Canvas/video INSIDE 3D-transformed facets is the least-documented, highest-risk combo (live texture re-upload per frame; Safari matrix3d blur artifacts). Static textures/sprite atlases are the safe default. Houdini paint worklets: Chromium-only + repaint-on-property-change — do not use.
+
+### Texture selection
+`image-set()` picks by DPR only, NOT by an element's transformed scale — perspective-shrunk tiles won't auto-downgrade. One shared sprite atlas via background-position beats per-tile images (one decoded bitmap). NEVER drive background-image through an animated custom property (per-frame re-raster of every texture, Chrome AND Safari — CSS DOOM's confirmed footgun).
+
+### Desktop tailwind
+Skia Graphite (Chrome on Apple Silicon, 2025): ~15% MotionMark, better GPU memory — desktop-only; does not relieve the mobile-Safari ceiling where the real limits live.
+
+### Synthesis for canvas-primary + hybrid set pieces
+1. Cap floated DOM 3D layers at low double digits on iOS (the WebKit-26 crash is the binding constraint).
+2. JS culling, not CSS containment, for hybrid pieces.
+3. Static sprite atlas for any DOM textures; no Houdini; no var()-driven textures.
+4. Live canvas/video in 3D facets: prototype on real iOS 26 hardware first or avoid.
