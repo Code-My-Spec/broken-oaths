@@ -281,7 +281,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         # New seed = new bucket: pushes a recolored tile window in 3D mode
         socket =
           if socket.assigns.render_mode == :three_d,
-            do: socket |> rewindow() |> push_selection(),
+            do: socket |> rewindow() |> push_selection() |> push_puffs(),
             else: socket
 
         {:noreply, socket}
@@ -424,6 +424,13 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
   defp push_selection(socket), do: socket
 
+  # Weather objects: puff geometry extracted from the seed's cloud field
+  defp push_puffs(socket) do
+    push_event(socket, "globe3d:puffs", %{
+      puffs: Texture.cloud_puffs(socket.assigns.world.seed)
+    })
+  end
+
   defp tile_budget(true), do: @tile_budget_touch
   defp tile_budget(false), do: @tile_budget_desktop
 
@@ -465,6 +472,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     )
     |> rewindow()
     |> push_selection()
+    |> push_puffs()
   end
 
   defp set_mode(socket, :classic) do
@@ -755,9 +763,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             data-selected-id={@selected_tile && @selected_tile.id}
             data-texture={
               ~p"/worlds/#{@world.id}/texture.png?seed=#{@world.seed}&v=#{Texture.version()}"
-            }
-            data-clouds={
-              ~p"/worlds/#{@world.id}/clouds.png?seed=#{@world.seed}&v=#{Texture.version()}"
             }
           >
             <%!-- EVERYTHING the hook mutates lives inside this single
@@ -1086,43 +1091,28 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                   }
                 })
 
-                const cloudsUrl = this.el.dataset.clouds
-                if (cloudsUrl && cloudsUrl !== this.cloudsUrl) {
-                  this.cloudsUrl = cloudsUrl
-                  this.decode(cloudsUrl, (tex) => {
-                    if (this.cloudsUrl === cloudsUrl) {
-                      this.cloudTex = tex
-                      this.schedule()
-                    }
-                  })
-                }
               }
-              this.cloudTex = null
-              this.cloudsUrl = null
               this.loadTexture()
 
-              // Clouds drift east: one lap per cloudPeriod seconds
+              // Weather objects: puff geometry pushed by the server.
+              // Clouds drift east (one lap per cloudPeriod seconds) as a
+              // rotation about the polar axis, at altitude 1.035R.
               this.cloudPeriod = 900
               this.cloudDrift = () =>
                 (((Date.now() / 1000) % this.cloudPeriod) / this.cloudPeriod) * 2 * Math.PI
 
-              // Cloud opacity [0,1] at a world lat/lon, drifted; soft
-              // threshold so only the denser noise reads as cloud
-              this.cloudAt = (lat, lon) => {
-                const c = this.cloudTex
-                if (!c) return 0
-                const TWO_PI = 2 * Math.PI
-                let dl = lon + this.cloudDrift()
-                dl = dl - TWO_PI * Math.floor((dl + Math.PI) / TWO_PI)
-                let tx = ((dl / TWO_PI + 0.5) * c.w) | 0
-                let ty = ((0.5 - lat / Math.PI) * c.h) | 0
-                if (tx < 0) tx = 0; else if (tx >= c.w) tx = c.w - 1
-                if (ty < 0) ty = 0; else if (ty >= c.h) ty = c.h - 1
-                const v = (c.data[ty * c.w + tx] & 255) / 255
-                let t = (v - 0.56) / 0.2
-                t = t <= 0 ? 0 : t >= 1 ? 1 : t
-                return t * t * (3 - 2 * t)
-              }
+              this.puffs = null
+              this.hasStorms = false
+              this.handleEvent("globe3d:puffs", ({puffs}) => {
+                this.puffs = puffs
+                this.schedule()
+              })
+
+              // Storm cells flicker with lightning — keep re-rendering at a
+              // low tick while any are on screen (and the tab is visible)
+              this.stormTimer = setInterval(() => {
+                if (this.hasStorms && !document.hidden) this.schedule()
+              }, 280)
 
               const d = this.el.dataset
               this.yaw = parseFloat(d.yaw) || 0
@@ -1293,16 +1283,122 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                   ctx.strokeStyle = color
                   ctx.lineWidth = Math.max(1.5, k)
                   ctx.stroke()
+                }
 
-                  // Weather: translucent cloud cover, dimmer at night
-                  const cloud = this.cloudAt(Math.asin(row[4]), Math.atan2(row[3], row[2]))
-                  if (cloud > 0.04) {
-                    ctx.fillStyle = "rgba(235,240,246," + (cloud * 0.8 * (0.3 + 0.7 * t)).toFixed(3) + ")"
+                this.drawPuffs()
+                this.drawSelection()
+              }
+
+              // Weather pass: puff clusters at altitude 1.035R with ground
+              // shadows and lightning on storm cells. Drawn over either
+              // render path, before the selection ring.
+              this.drawPuffs = () => {
+                const puffs = this.puffs
+                this.hasStorms = false
+                if (!puffs) return
+                const ctx = this.ctx
+                if (!ctx) return
+
+                const k = this.pxScale
+                const S = this.S * k, ccx = this.cx * k, ccy = this.cy * k
+                const cyw = Math.cos(this.yaw), syw = Math.sin(this.yaw)
+                const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
+                const drift = this.cloudDrift()
+                const cd = Math.cos(drift), sd = Math.sin(drift)
+                const [sun_x, sun_y, sun_z] = this.sunVec()
+                const now = Date.now()
+
+                // Shadow offset: opposite the sun's screen direction
+                const svx = -syw * sun_x + cyw * sun_y
+                const svy = -sp * cyw * sun_x - sp * syw * sun_y + cp * sun_z
+                const shx = -svx * 9 * k, shy = svy * 9 * k
+
+                const ALT = 1.035
+
+                for (let i = 0; i < puffs.length; i++) {
+                  const p = puffs[i]
+                  // Drift: rotate about the polar axis
+                  const x = p[0] * cd - p[1] * sd
+                  const y = p[0] * sd + p[1] * cd
+                  const z = p[2], r = p[3], d = p[4]
+
+                  const vx = -syw * x + cyw * y
+                  const vy = -sp * cyw * x - sp * syw * y + cp * z
+                  const vz = cp * cyw * x + cp * syw * y + sp * z
+                  if (vz < 0.08) continue
+
+                  const gx = ccx + S * vx, gy = ccy - S * vy
+                  const px2 = ccx + S * ALT * vx, py2 = ccy - S * ALT * vy
+                  const rpx = r * S
+                  if (rpx < 1.5) continue
+
+                  // Day factor at the puff
+                  const light = x * sun_x + y * sun_y + z * sun_z
+                  let t = (light + 0.15) / 0.3
+                  t = t < 0 ? 0 : t > 1 ? 1 : t
+                  t = t * t * (3 - 2 * t)
+                  const shade = 0.35 + 0.65 * t
+
+                  // White cumulus -> grey rain -> black storm
+                  const base = d < 0.34 ? [246, 249, 253] : d < 0.7 ? [168, 176, 188] : [58, 63, 76]
+                  const cr = (base[0] * shade) | 0
+                  const cg = (base[1] * shade) | 0
+                  const cb = (base[2] * shade) | 0
+                  const alpha = 0.5 + 0.38 * d
+                  const storm = d >= 0.7
+                  if (storm) this.hasStorms = true
+
+                  // Ground shadow first
+                  ctx.fillStyle = "rgba(6,8,18," + (0.18 * alpha).toFixed(3) + ")"
+                  this.blob(ctx, i, gx + shx, gy + shy, rpx)
+
+                  // Lightning: pseudo-random flicker per storm cell
+                  let flash = false
+                  if (storm && t !== undefined) {
+                    const h = ((i + 1) * 2654435761 ^ ((now / 240) | 0) * 40503) >>> 0
+                    flash = h % 13 === 0
+                  }
+
+                  if (flash) {
+                    // Jagged bolt from cloud base to ground
+                    ctx.beginPath()
+                    ctx.moveTo(px2, py2 + rpx * 0.3)
+                    const segs = 4
+                    for (let sgi = 1; sgi <= segs; sgi++) {
+                      const f2 = sgi / segs
+                      const jit = Math.sin(i * 37.7 + sgi * 91.3 + ((now / 240) | 0)) * rpx * 0.35
+                      ctx.lineTo(px2 + (gx - px2) * f2 + jit, py2 + rpx * 0.3 + (gy - py2 - rpx * 0.3) * f2)
+                    }
+                    ctx.strokeStyle = "rgba(255,250,190,0.9)"
+                    ctx.lineWidth = Math.max(1.5, k)
+                    ctx.stroke()
+                  }
+
+                  // The puff itself: a cluster of blobs
+                  ctx.fillStyle = "rgba(" + cr + "," + cg + "," + cb + "," + alpha.toFixed(3) + ")"
+                  this.blob(ctx, i, px2, py2, rpx)
+
+                  if (flash) {
+                    // Lit-from-within flash core
+                    ctx.fillStyle = "rgba(255,252,220,0.55)"
+                    ctx.beginPath()
+                    ctx.arc(px2, py2, rpx * 0.55, 0, 6.2832)
                     ctx.fill()
                   }
                 }
+              }
 
-                this.drawSelection()
+              // A puff-shaped cluster: 4 overlapping circles, deterministic
+              // per puff index (no per-frame allocation or randomness drift)
+              this.blob = (ctx, i, x, y, r) => {
+                for (let j = 0; j < 4; j++) {
+                  const ang = i * 2.399 + j * 1.71
+                  const dist = r * 0.42 * (j / 3)
+                  const rr = r * (0.82 - 0.14 * j)
+                  ctx.beginPath()
+                  ctx.arc(x + Math.cos(ang) * dist, y + Math.sin(ang) * dist * 0.6, rr, 0, 6.2832)
+                  ctx.fill()
+                }
               }
 
               // Selection ring, drawn over either render path at any zoom.
@@ -1344,9 +1440,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 const tex = this.tex.data, TW = this.tex.w, TH = this.tex.h
                 const INV2PI = 1 / (2 * Math.PI), INVPI = 1 / Math.PI
                 const [sun_x, sun_y, sun_z] = this.sunVec()
-                const ctex = this.cloudTex
-                const cdrift = this.cloudDrift()
-                const TWO_PI = 2 * Math.PI
                 const x0 = Math.max(0, Math.floor(ccx - S)), x1 = Math.min(cw - 1, Math.ceil(ccx + S))
                 const y0 = Math.max(0, Math.floor(ccy - S)), y1 = Math.min(ch - 1, Math.ceil(ccy + S))
                 for (let py = y0; py <= y1; py++) {
@@ -1375,33 +1468,14 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                     const f = 0.32 + t * 0.68
 
                     const v = tex[ty * TW + tx]
-                    let r = ((v & 255) * f) | 0
-                    let g = (((v >>> 8) & 255) * f) | 0
-                    let b = (((v >>> 16) & 255) * f) | 0
-
-                    // Weather: blend drifting cloud cover toward sunlit white
-                    if (ctex) {
-                      let dl = lon + cdrift
-                      dl = dl - TWO_PI * Math.floor((dl + Math.PI) / TWO_PI)
-                      let cx2 = ((dl * INV2PI + 0.5) * ctex.w) | 0
-                      let cy2 = ty * ctex.h / TH | 0
-                      if (cx2 < 0) cx2 = 0; else if (cx2 >= ctex.w) cx2 = ctex.w - 1
-                      const cv = (ctex.data[cy2 * ctex.w + cx2] & 255) / 255
-                      let a = (cv - 0.56) / 0.2
-                      a = a <= 0 ? 0 : a >= 1 ? 1 : a
-                      a = a * a * (3 - 2 * a) * 0.8
-                      if (a > 0.02) {
-                        const cl = (150 + 105 * t) * (0.32 + 0.68 * t) | 0
-                        r = (r * (1 - a) + cl * a) | 0
-                        g = (g * (1 - a) + cl * a) | 0
-                        b = (b * (1 - a) + cl * a) | 0
-                      }
-                    }
-
+                    const r = ((v & 255) * f) | 0
+                    const g = (((v >>> 8) & 255) * f) | 0
+                    const b = (((v >>> 16) & 255) * f) | 0
                     out[row + px] = (v & 0xff000000) | (b << 16) | (g << 8) | r
                   }
                 }
                 this.ctx.putImageData(this.frame, 0, 0)
+                this.drawPuffs()
                 this.drawSelection()
               }
 
@@ -1618,6 +1692,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               if (this.settleTimer) clearTimeout(this.settleTimer)
               if (this.resizeTimer) clearTimeout(this.resizeTimer)
               if (this.sunTimer) clearInterval(this.sunTimer)
+              if (this.stormTimer) clearInterval(this.stormTimer)
             }
           }
         </script>

@@ -99,16 +99,26 @@ defmodule BrokenOaths.Worlds.TextureTest do
       assert Texture.png(@seed, @frequency) == Texture.png(@seed, @frequency)
     end
 
-    test "cloud_png is a grayscale PNG at level-0 dims, seed-dependent" do
-      png = Texture.cloud_png(@seed)
-      {w, h} = Texture.dims(0)
+    test "cloud_puffs are on-sphere, bounded, deterministic, seed-dependent" do
+      puffs = Texture.cloud_puffs(@seed)
 
-      assert <<137, 80, 78, 71, 13, 10, 26, 10, rest::binary>> = png
-      # IHDR: bit depth 8, color type 0 (grayscale)
-      assert <<_len::32, "IHDR", ^w::32, ^h::32, 8, 0, 0, 0, 0, _::binary>> = rest
+      assert puffs != []
 
-      assert Texture.cloud_png(@seed) == png
-      refute Texture.cloud_png(@seed + 1) == png
+      for [x, y, z, r, d] <- puffs do
+        # unit-sphere center
+        assert_in_delta x * x + y * y + z * z, 1.0, 0.01
+        assert r >= 0.045 and r <= 0.121
+        assert d >= 0.0 and d <= 1.0
+      end
+
+      assert Texture.cloud_puffs(@seed) == puffs
+      refute Texture.cloud_puffs(@seed + 1) == puffs
+    end
+
+    test "some seed produces storm-density puffs" do
+      assert Enum.any?(0..40, fn s ->
+               Enum.any?(Texture.cloud_puffs(@seed + s), fn [_, _, _, _, d] -> d > 0.72 end)
+             end)
     end
 
     test "different seeds give different textures" do

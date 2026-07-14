@@ -22,7 +22,6 @@ defmodule BrokenOathsWeb.Router do
 
     get "/", PageController, :home
     get "/worlds/:id/texture.png", WorldTextureController, :show
-    get "/worlds/:id/clouds.png", WorldTextureController, :clouds
 
     live_session :worlds, layout: {BrokenOathsWeb.Layouts, :app_full} do
       live "/worlds", WorldLive.Index, :index

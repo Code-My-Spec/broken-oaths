@@ -16,12 +16,6 @@ defmodule BrokenOathsWeb.WorldTextureController do
     send_png(conn, png)
   end
 
-  @doc "Grayscale cloud-cover map for the weather layer."
-  def clouds(conn, %{"id" => id}) do
-    world = Worlds.get_world!(id)
-    send_png(conn, Texture.cloud_png(world.seed))
-  end
-
   defp send_png(conn, png) do
     conn
     |> put_resp_content_type("image/png")

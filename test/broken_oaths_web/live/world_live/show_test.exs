@@ -224,6 +224,10 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       assert_push_event(view, "globe3d:window", %{tiles: tiles, palette: palette})
       refute html =~ "hex-cell3d"
 
+      # Weather rides along as puff geometry [x, y, z, radius, density]
+      assert_push_event(view, "globe3d:puffs", %{puffs: puffs})
+      assert Enum.all?(puffs, &match?([_, _, _, _, _], &1))
+
       assert length(palette) >= 5 and length(palette) <= 256
       tile_count = BrokenOaths.Worlds.Globe.tile_count(@frequency)
       assert length(tiles) > 0
