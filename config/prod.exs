@@ -8,15 +8,10 @@ import Config
 config :broken_oaths, BrokenOathsWeb.Endpoint,
   cache_static_manifest: "priv/static/cache_manifest.json"
 
-# Force using SSL in production. This also sets the "strict-security-transport" header,
-# known as HSTS. If you have a health check endpoint, you may want to exclude it below.
-# Note `:force_ssl` is required to be set at compile-time.
-config :broken_oaths, BrokenOathsWeb.Endpoint,
-  force_ssl: [rewrite_on: [:x_forwarded_proto]],
-  exclude: [
-    # paths: ["/health"],
-    hosts: ["localhost", "127.0.0.1"]
-  ]
+# No app-level force_ssl: kamal-proxy terminates TLS and redirects
+# http -> https at the edge (proxy.ssl: true in config/deploy*.yml), and
+# its plain-HTTP health probes must get a 200 from the app, not a 301.
+# Same posture as the rest of the fleet.
 
 # Configure Swoosh API Client
 config :swoosh, api_client: Swoosh.ApiClient.Req
