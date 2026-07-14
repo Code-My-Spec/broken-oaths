@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Generate game art via the Gemini image API (Nano Banana).
+#
+#   scripts/art-gen "a stone age settlement on a green hex tile" out.png
+#   scripts/art-gen --pro "epic game logo, 'Broken Oaths'" logo.png
+#
+# Reads GEMINI_API_KEY from the environment or .env at the repo root.
+# Default model is the fast/cheap draft tier; --pro switches to the
+# quality tier for finals (logos, hero art).
+
+set -euo pipefail
+
+MODEL="gemini-2.5-flash-image"
+if [[ "${1:-}" == "--pro" ]]; then
+  MODEL="gemini-3-pro-image-preview"
+  shift
+fi
+
+PROMPT="${1:?usage: scripts/art-gen [--pro] \"prompt\" output.png}"
+OUT="${2:?usage: scripts/art-gen [--pro] \"prompt\" output.png}"
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ -z "${GEMINI_API_KEY:-}" && -f "$REPO_ROOT/.env" ]]; then
+  GEMINI_API_KEY="$(awk -F= '/^GEMINI_API_KEY=/{print $2}' "$REPO_ROOT/.env")"
+fi
+[[ -n "${GEMINI_API_KEY:-}" ]] || { echo "GEMINI_API_KEY not set (env or .env)" >&2; exit 1; }
+
+RESP_FILE="$(mktemp)"
+trap 'rm -f "$RESP_FILE"' EXIT
+
+curl -sS -o "$RESP_FILE" "https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent" \
+  -H "x-goog-api-key: ${GEMINI_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d "$(python3 -c '
+import json, sys
+print(json.dumps({
+  "contents": [{"parts": [{"text": sys.argv[1]}]}],
+  "generationConfig": {"responseModalities": ["IMAGE"]}
+}))' "$PROMPT")"
+
+python3 -c '
+import base64, json, sys
+
+resp_file, out = sys.argv[1], sys.argv[2]
+with open(resp_file) as f:
+    resp = json.load(f)
+
+if "error" in resp:
+    err = resp["error"]
+    print("API error: " + str(err.get("message", err)), file=sys.stderr)
+    sys.exit(1)
+
+for cand in resp.get("candidates", []):
+    for part in cand.get("content", {}).get("parts", []):
+        data = part.get("inlineData", {}).get("data")
+        if data:
+            with open(out, "wb") as f:
+                f.write(base64.b64decode(data))
+            print(out)
+            sys.exit(0)
+
+print("No image in response: " + json.dumps(resp)[:500], file=sys.stderr)
+sys.exit(1)
+' "$RESP_FILE" "$OUT"
