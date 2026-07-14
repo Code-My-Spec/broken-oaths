@@ -1,5 +1,5 @@
 defmodule BrokenOathsWeb.PageControllerTest do
-  use BrokenOathsWeb.ConnCase
+  use BrokenOathsTest.ConnCase
 
   test "GET /", %{conn: conn} do
     conn = get(conn, ~p"/")

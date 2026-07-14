@@ -1,5 +1,5 @@
 defmodule BrokenOathsWeb.UserSessionControllerTest do
-  use BrokenOathsWeb.ConnCase, async: true
+  use BrokenOathsTest.ConnCase, async: true
 
   import BrokenOaths.UsersFixtures
   alias BrokenOaths.Users

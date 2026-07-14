@@ -1,5 +1,5 @@
 defmodule BrokenOathsWeb.WorldTextureControllerTest do
-  use BrokenOathsWeb.ConnCase, async: true
+  use BrokenOathsTest.ConnCase, async: true
 
   import BrokenOaths.WorldsFixtures
 

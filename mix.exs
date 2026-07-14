@@ -10,7 +10,7 @@ defmodule BrokenOaths.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
-      compilers: [:phoenix_live_view] ++ Mix.compilers(),
+      compilers: compilers(Mix.env()),
       listeners: [Phoenix.CodeReloader]
     ]
   end
@@ -20,20 +20,26 @@ defmodule BrokenOaths.MixProject do
   # Type `mix help compile.app` for more information.
   def application do
     [
-      mod: {BrokenOaths.Application, []},
+      mod: {BrokenOathsWeb.Application, []},
       extra_applications: [:logger, :runtime_tools]
     ]
   end
 
   def cli do
     [
-      preferred_envs: [precommit: :test]
+      preferred_envs: [precommit: :test, spex: :test]
     ]
   end
 
   # Specifies which paths to compile per environment.
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
+
+  defp compilers(:test),
+    do: [:diagnostics, :boundary, :phoenix_live_view, :erlang, :elixir, :spex, :app]
+
+  defp compilers(_),
+    do: [:diagnostics, :boundary, :phoenix_live_view, :erlang, :elixir, :app]
 
   # Specifies your project dependencies.
   #
@@ -66,7 +72,13 @@ defmodule BrokenOaths.MixProject do
       {:gettext, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:client_utils, "~> 0.1"},
+      {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
+      {:sexy_spex, github: "JediLuke/spex", branch: "main", only: :test},
+      {:boundary, "~> 0.10", runtime: false},
+      {:code_my_spec_generators, "~> 0.1", only: :dev}
     ]
   end
 

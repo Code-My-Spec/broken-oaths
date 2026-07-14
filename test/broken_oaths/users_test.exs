@@ -1,5 +1,5 @@
 defmodule BrokenOaths.UsersTest do
-  use BrokenOaths.DataCase
+  use BrokenOathsTest.DataCase
 
   alias BrokenOaths.Users
 

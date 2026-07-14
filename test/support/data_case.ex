@@ -1,4 +1,4 @@
-defmodule BrokenOaths.DataCase do
+defmodule BrokenOathsTest.DataCase do
   @moduledoc """
   This module defines the setup for tests requiring
   access to the application's data layer.
@@ -10,7 +10,7 @@ defmodule BrokenOaths.DataCase do
   we enable the SQL sandbox, so changes done to the database
   are reverted at the end of every test. If you are using
   PostgreSQL, you can even run database tests asynchronously
-  by setting `use BrokenOaths.DataCase, async: true`, although
+  by setting `use BrokenOathsTest.DataCase, async: true`, although
   this option is not recommended for other databases.
   """
 
@@ -23,12 +23,12 @@ defmodule BrokenOaths.DataCase do
       import Ecto
       import Ecto.Changeset
       import Ecto.Query
-      import BrokenOaths.DataCase
+      import BrokenOathsTest.DataCase
     end
   end
 
   setup tags do
-    BrokenOaths.DataCase.setup_sandbox(tags)
+    BrokenOathsTest.DataCase.setup_sandbox(tags)
     :ok
   end
 

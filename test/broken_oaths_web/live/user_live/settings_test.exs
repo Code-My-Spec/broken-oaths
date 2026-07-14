@@ -1,5 +1,5 @@
 defmodule BrokenOathsWeb.UserLive.SettingsTest do
-  use BrokenOathsWeb.ConnCase, async: true
+  use BrokenOathsTest.ConnCase, async: true
 
   alias BrokenOaths.Users
   import Phoenix.LiveViewTest

@@ -35,3 +35,7 @@ broken_oaths-*.tar
 npm-debug.log
 /assets/node_modules/
 
+# CodeMySpec local state.
+.code_my_spec/internal/
+/diagnostics.jsonl
+

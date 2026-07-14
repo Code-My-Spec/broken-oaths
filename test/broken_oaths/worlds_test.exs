@@ -1,5 +1,5 @@
 defmodule BrokenOaths.WorldsTest do
-  use BrokenOaths.DataCase, async: true
+  use BrokenOathsTest.DataCase, async: true
 
   alias BrokenOaths.Worlds
   alias BrokenOaths.Worlds.World

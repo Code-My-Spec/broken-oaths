@@ -1,5 +1,5 @@
 defmodule BrokenOathsWeb.ErrorJSONTest do
-  use BrokenOathsWeb.ConnCase, async: true
+  use BrokenOathsTest.ConnCase, async: true
 
   test "renders 404" do
     assert BrokenOathsWeb.ErrorJSON.render("404.json", %{}) == %{errors: %{detail: "Not Found"}}

@@ -1,5 +1,5 @@
 defmodule BrokenOathsWeb.UserLive.ConfirmationTest do
-  use BrokenOathsWeb.ConnCase, async: true
+  use BrokenOathsTest.ConnCase, async: true
 
   import Phoenix.LiveViewTest
   import BrokenOaths.UsersFixtures
