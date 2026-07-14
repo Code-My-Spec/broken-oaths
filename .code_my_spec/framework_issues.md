@@ -82,6 +82,25 @@ lost to scrollback with no way to re-print them; recovered by
 inspecting a sibling project. Generators should support a
 `--print-instructions` (no-op) mode and be idempotent by default.
 
+## 10. architecture_design initial mode did not auto-execute the proposal
+      (severity: medium)
+The initial-mode prompt says "Stop. The evaluator runs validate + execute
+atomically" — but after writing proposal.md and stopping (twice, across
+turns), no specs appeared and no feedback came back. Manual
+`execute_proposal` + `evaluate_task` was required. Either the stop-hook
+executor didn't fire for this requirement, or the promised auto-execution
+doesn't exist; the engineer had to notice missing specs themselves.
+
+## 11. Proposal type enum rejects 'genserver' but nothing documents the
+      allowed list up front (severity: low)
+The architecture_proposal document spec embedded in the prompt shows
+Types like context/schema/liveview in examples but never lists the full
+enum; a `genserver` child type (a natural designation for a WorldServer)
+failed validation only at execute time. The valid list (context, schema,
+module, liveview, liveview_component, live_context, controller,
+component, channel, plug, infrastructure) should appear in the prompt's
+format section.
+
 ## 9. Plugin hook mangles piped `mix test` invocations (severity: medium)
 With the codemyspec plugin active, `mix test 2>&1 | tail -5` fails with
 "Paths given to mix test did not match any directory/file: 2>&1, |,
