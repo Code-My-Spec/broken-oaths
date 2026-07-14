@@ -1137,6 +1137,13 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               // Cloud shell altitude, as a multiple of the surface radius
               this.ALT = 1.035
 
+              // Rain + lightning animate at a low tick while any
+              // rain-bearing tile is on screen (near view only)
+              this.hasWeatherAnim = false
+              this.weatherTimer = setInterval(() => {
+                if (this.hasWeatherAnim && !document.hidden) this.schedule()
+              }, 110)
+
               this.loadTexture()
 
               const d = this.el.dataset
@@ -1312,9 +1319,14 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
                 // Airspace pass: cloud tiles as translucent hexes at
                 // ALT above the surface — same geometry, same painter
-                // order (all clouds sit above all terrain).
+                // order (all clouds sit above all terrain). Levels 2-3
+                // rain onto the ground below; level 3 cells strike.
+                this.hasWeatherAnim = false
                 if (this.airspace && this.cloudShades) {
                   const A = this.ALT
+                  const now = Date.now()
+                  const wet = []
+
                   for (const [, row] of order) {
                     const lvl = this.airspace[row[0]]
                     if (!lvl) continue
@@ -1335,6 +1347,89 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                     ctx.closePath()
                     ctx.fillStyle = style
                     ctx.fill()
+
+                    if (lvl >= 2) wet.push(row)
+                  }
+
+                  if (wet.length) {
+                    this.hasWeatherAnim = true
+
+                    // Rain: streaks falling from the cloud base to the
+                    // ground within each wet hex, deterministic per
+                    // (tile, drop) so frames animate coherently
+                    ctx.lineCap = "round"
+                    for (const row of wet) {
+                      const id = row[0], lvl = this.airspace[id]
+                      const gx = ccx + S * (-syw * row[2] + cyw * row[3])
+                      const gy = ccy - S * (-sp * cyw * row[2] - sp * syw * row[3] + cp * row[4])
+                      const cx2 = ccx + S * A * (-syw * row[2] + cyw * row[3])
+                      const cy2 = ccy - S * A * (-sp * cyw * row[2] - sp * syw * row[3] + cp * row[4])
+                      // Hex radius on screen, from the first corner
+                      const fx = ccx + S * (-syw * row[6] + cyw * row[7])
+                      const fy = ccy - S * (-sp * cyw * row[6] - sp * syw * row[7] + cp * row[8])
+                      const hr = Math.hypot(fx - gx, fy - gy) * 0.62
+                      const fallX = gx - cx2, fallY = gy - cy2
+                      const drops = lvl === 3 ? 9 : 5
+
+                      ctx.strokeStyle = lvl === 3 ? "rgba(175,195,225,0.55)" : "rgba(185,205,232,0.4)"
+                      ctx.lineWidth = Math.max(1, k * 0.7)
+                      ctx.beginPath()
+                      for (let i = 0; i < drops; i++) {
+                        const h = ((id + 1) * 2654435761 ^ (i + 1) * 40503) >>> 0
+                        const ox = ((h & 1023) / 1023 - 0.5) * 2 * hr
+                        const oy = (((h >>> 10) & 1023) / 1023 - 0.5) * 2 * hr * 0.6
+                        const phase = ((now / 650) + (h >>> 20) / 4096) % 1
+                        const hx = cx2 + ox + fallX * phase
+                        const hy = cy2 + oy + fallY * phase
+                        ctx.moveTo(hx - fallX * 0.16, hy - fallY * 0.16)
+                        ctx.lineTo(hx, hy)
+                      }
+                      ctx.stroke()
+                    }
+                    ctx.lineCap = "butt"
+
+                    // Lightning: storm cells strike on a hash-flickered
+                    // ~240ms bucket — jagged bolt cloud->ground plus a
+                    // flash refill of the hex
+                    const bucket = (now / 240) | 0
+                    for (const row of wet) {
+                      const id = row[0]
+                      if (this.airspace[id] !== 3) continue
+                      const h = ((id + 1) * 2654435761 ^ bucket * 40503) >>> 0
+                      if (h % 11 !== 0) continue
+
+                      const gx = ccx + S * (-syw * row[2] + cyw * row[3])
+                      const gy = ccy - S * (-sp * cyw * row[2] - sp * syw * row[3] + cp * row[4])
+                      const cx2 = ccx + S * A * (-syw * row[2] + cyw * row[3])
+                      const cy2 = ccy - S * A * (-sp * cyw * row[2] - sp * syw * row[3] + cp * row[4])
+                      const fx = ccx + S * (-syw * row[6] + cyw * row[7])
+                      const fy = ccy - S * (-sp * cyw * row[6] - sp * syw * row[7] + cp * row[8])
+                      const hr = Math.hypot(fx - gx, fy - gy)
+
+                      // Bolt: 4 jagged segments with per-strike jitter
+                      ctx.beginPath()
+                      ctx.moveTo(cx2, cy2)
+                      for (let sgi = 1; sgi <= 4; sgi++) {
+                        const f2 = sgi / 4
+                        const jit = (((h >>> (sgi * 4)) & 15) / 15 - 0.5) * hr * 0.7
+                        ctx.lineTo(cx2 + (gx - cx2) * f2 + (sgi < 4 ? jit : 0), cy2 + (gy - cy2) * f2)
+                      }
+                      ctx.strokeStyle = "rgba(255,250,190,0.95)"
+                      ctx.lineWidth = Math.max(1.5, k)
+                      ctx.stroke()
+
+                      // Lit-from-within flash on the storm hex
+                      ctx.beginPath()
+                      for (let i = 6; i < row.length; i += 3) {
+                        const x = row[i] * A, y = row[i + 1] * A, z = row[i + 2] * A
+                        const px = ccx + S * (-syw * x + cyw * y)
+                        const py = ccy - S * (-sp * cyw * x - sp * syw * y + cp * z)
+                        if (i === 6) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+                      }
+                      ctx.closePath()
+                      ctx.fillStyle = "rgba(255,252,215,0.30)"
+                      ctx.fill()
+                    }
                   }
                 }
 
@@ -1675,6 +1770,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               if (this.settleTimer) clearTimeout(this.settleTimer)
               if (this.resizeTimer) clearTimeout(this.resizeTimer)
               if (this.sunTimer) clearInterval(this.sunTimer)
+              if (this.weatherTimer) clearInterval(this.weatherTimer)
             }
           }
         </script>
