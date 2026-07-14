@@ -61,6 +61,9 @@ A persistent, browser-based strategy game combining Civilization-style hex-based
 ### 1. Player Onboarding
 
 #### 1.1 Player Registration
+
+> ✅ Covered — implemented directly via phx.gen.auth (magic link + password); no story record needed.
+
 **As a** new user  
 **I want to** create an account  
 **So that** I can join the game and save my progress
@@ -73,6 +76,9 @@ A persistent, browser-based strategy game combining Civilization-style hex-based
 - Redirected to main game view
 
 #### 1.2 New Player Spawns in World
+
+> ✅ Imported to CodeMySpec — story 873 "New Player Spawns in World" (batch 1, merged with stone_age.md §1.1). Region placement split out as story 877.
+
 **As a** new player  
 **I want to** start with a settler and lord in a new region  
 **So that** I can begin building my civilization
@@ -117,6 +123,9 @@ A persistent, browser-based strategy game combining Civilization-style hex-based
 - Fog of war updates as units move
 
 #### 2.3 Selecting and Inspecting
+
+> ✅ Partially imported — the unit-selection substrate landed in story 875 "Queue Movement Orders" (batch 1). City/hex inspection arrives with the city stories (878-880).
+
 **As a** player  
 **I want to** click units and cities to see details  
 **So that** I can manage them
@@ -132,6 +141,9 @@ A persistent, browser-based strategy game combining Civilization-style hex-based
 ### 3. Turn System
 
 #### 3.1 Automatic Turn Processing
+
+> ✅ Imported to CodeMySpec — story 874 "Automatic Turn Processing" (batch 1, merged with stone_age.md §5.1).
+
 **As a** player  
 **I want to** turns to process automatically every 60 seconds  
 **So that** the game progresses continuously
@@ -149,6 +161,9 @@ A persistent, browser-based strategy game combining Civilization-style hex-based
 - Timer resets to 60 seconds
 
 #### 3.2 Queue Movement Orders
+
+> ✅ Imported to CodeMySpec — story 875 "Queue Movement Orders" (batch 1, merged with stone_age.md §5.2).
+
 **As a** player  
 **I want to** queue movement for my units between turns  
 **So that** they move when the turn processes
@@ -182,6 +197,9 @@ A persistent, browser-based strategy game combining Civilization-style hex-based
 - Must protect your lord or risk losing your entire vassal empire
 
 #### 4.2 Settler Founds City
+
+> ✅ Imported to CodeMySpec 2026-07-14 — story 878 "Settler Founds City" (batch 2, merged with stone_age.md §2.1).
+
 **As a** player  
 **I want to** use my settler to found a city  
 **So that** I can produce resources and more units
@@ -196,6 +214,9 @@ A persistent, browser-based strategy game combining Civilization-style hex-based
 - City can immediately begin production
 
 #### 4.3 Worker Improves Terrain
+
+> ✅ Imported to CodeMySpec 2026-07-14 — story 882 "Worker Improves Terrain" (batch 2, merged with stone_age.md §4.3).
+
 **As a** player  
 **I want to** build workers to improve hexes  
 **So that** my cities generate more resources
@@ -211,6 +232,9 @@ A persistent, browser-based strategy game combining Civilization-style hex-based
 - Workers can be captured by enemy units (don't auto-delete in enemy territory)
 
 #### 4.4 Warrior Military Unit
+
+> ✅ Imported to CodeMySpec 2026-07-14 — story 881 "Stone Age Warrior Production" (batch 2, merged with stone_age.md §4.2). Attack mechanics deferred to the combat stories.
+
 **As a** player  
 **I want to** build warriors to defend and attack  
 **So that** I can protect my territory and conquer others
@@ -228,6 +252,9 @@ A persistent, browser-based strategy game combining Civilization-style hex-based
 ### 5. Cities
 
 #### 5.1 City Production Queue
+
+> ✅ Imported to CodeMySpec 2026-07-14 — story 879 "City Production Queue" (batch 2, merged with stone_age.md §2.2).
+
 **As a** player  
 **I want to** tell my cities what to build  
 **So that** they produce units and buildings over time
@@ -243,6 +270,9 @@ A persistent, browser-based strategy game combining Civilization-style hex-based
 - Can queue multiple items (build warrior, then settler, then worker)
 
 #### 5.2 City Growth
+
+> ✅ Imported to CodeMySpec 2026-07-14 — story 880 "City Growth" (batch 2, merged with stone_age.md §2.3).
+
 **As a** player  
 **I want to** my cities to grow larger over time  
 **So that** they become more productive
@@ -519,6 +549,9 @@ A persistent, browser-based strategy game combining Civilization-style hex-based
 ### 11. Fog of War
 
 #### 11.1 Exploration and Vision
+
+> ✅ Imported to CodeMySpec — story 876 "Fog of War and Exploration" (batch 1, merged with stone_age.md §7.1).
+
 **As a** player  
 **I want to** only see areas I've explored  
 **So that** the game has discovery and scouting mechanics

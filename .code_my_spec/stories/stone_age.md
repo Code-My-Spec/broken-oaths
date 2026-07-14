@@ -4,6 +4,8 @@
 
 ### 1.1 New Player Spawns in World
 
+> ✅ Imported to CodeMySpec — story 873 "New Player Spawns in World" (batch 1). Region placement split out as story 877.
+
 **As a** new player  
 **I want to** spawn with a settler and lord unit in an unexplored region  
 **So that** I can begin building my civilization in a safe starting position
@@ -27,6 +29,8 @@
 
 ### 2.1 Settler Founds First City
 
+> ✅ Imported to CodeMySpec 2026-07-14 — story 878 "Settler Founds City" (batch 2). Barbarian-spawn trigger deferred to the barbarian stories.
+
 **As a** player  
 **I want to** use my settler to found my first city  
 **So that** I can begin producing resources and units, even though this will trigger barbarian threats
@@ -42,6 +46,8 @@
 - Player notified: "Your city attracts attention. Barbarian camps are forming in the wilderness."
 
 ### 2.2 City Production Queue
+
+> ✅ Imported to CodeMySpec 2026-07-14 — story 879 "City Production Queue" (batch 2).
 
 **As a** player  
 **I want to** set production in my cities  
@@ -59,6 +65,8 @@
 - Can queue multiple items (build warrior, then settler, then worker)
 
 ### 2.3 City Growth
+
+> ✅ Imported to CodeMySpec 2026-07-14 — story 880 "City Growth" (batch 2).
 
 **As a** player  
 **I want to** my cities to grow larger over time  
@@ -157,6 +165,8 @@
 
 ### 4.2 Stone Age Warrior Production
 
+> ✅ Imported to CodeMySpec 2026-07-14 — story 881 "Stone Age Warrior Production" (batch 2). Combat resolution deferred to the combat stories.
+
 **As a** player  
 **I want to** build warrior units  
 **So that** I can defend my cities and eventually push back barbarians
@@ -173,6 +183,8 @@
 - Warriors heal 15 HP per turn when garrisoned in city
 
 ### 4.3 Worker Unit Production
+
+> ✅ Imported to CodeMySpec 2026-07-14 — story 882 "Worker Improves Terrain" (batch 2). Barbarian-vulnerability consequences deferred to the barbarian stories.
 
 **As a** player  
 **I want to** build workers to improve hexes  
@@ -191,6 +203,8 @@
 - Player warned when worker is threatened by barbarians
 
 ### 4.4 Settler Unit Production
+
+> ✅ Imported to CodeMySpec 2026-07-14 — story 883 "Settler Production and Expansion" (batch 2).
 
 **As a** player  
 **I want to** build additional settlers  
@@ -213,6 +227,8 @@
 
 ### 5.1 Automatic Turn Processing
 
+> ✅ Imported to CodeMySpec — story 874 "Automatic Turn Processing" (batch 1). Note: movement now executes immediately on order; the boundary recharges (PM decision 2026-07-14).
+
 **As a** player  
 **I want to** turns to process automatically every 60 seconds  
 **So that** the game progresses continuously
@@ -231,6 +247,8 @@
 - Turn number increments (displayed in UI)
 
 ### 5.2 Queue Movement Orders
+
+> ✅ Imported to CodeMySpec — story 875 "Queue Movement Orders" (batch 1). Extended since import: multi-hex paths, fog-of-war targets (criterion 7441), always-rendered path (criterion 7442), immediate execution.
 
 **As a** player  
 **I want to** queue movement for my units between turns  
@@ -294,6 +312,8 @@
 ## 7. Fog of War & Exploration
 
 ### 7.1 Vision and Exploration
+
+> ✅ Imported to CodeMySpec — story 876 "Fog of War and Exploration" (batch 1).
 
 **As a** player  
 **I want to** only see areas I've explored  
