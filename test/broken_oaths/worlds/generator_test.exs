@@ -18,7 +18,7 @@ defmodule BrokenOaths.Worlds.GeneratorTest do
     end
 
     test "all values are valid terrain atoms", %{mesh: mesh} do
-      valid = ~w(ocean shallow_water beach grassland plains forest hills mountains)a
+      valid = ~w(ocean shallow_water beach grassland plains forest hills mountains tundra snow)a
       terrain_map = Generator.generate_terrain_map(@test_seed, mesh)
 
       for {_id, terrain} <- terrain_map do
@@ -69,6 +69,25 @@ defmodule BrokenOaths.Worlds.GeneratorTest do
       end
 
       assert Generator.generate_maps(@test_seed, mesh).elevation == elevation
+    end
+
+    test "poles are frozen, equator is not", %{mesh: mesh} do
+      %{terrain: terrain} = Generator.generate_maps(@test_seed, mesh)
+
+      for tile <- Map.values(mesh.tiles), not tile.pentagon? do
+        {_x, _y, z} = tile.center
+
+        cond do
+          abs(z) > 0.97 ->
+            assert terrain[tile.id] == :snow
+
+          abs(z) < 0.25 ->
+            refute terrain[tile.id] in [:snow, :tundra]
+
+          true ->
+            :ok
+        end
+      end
     end
 
     test "pentagons peak; terrain agrees with generate_terrain_map", %{mesh: mesh} do

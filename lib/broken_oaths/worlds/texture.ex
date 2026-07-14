@@ -18,8 +18,9 @@ defmodule BrokenOaths.Worlds.Texture do
 
   alias BrokenOaths.Worlds.{Generator, Globe}
 
-  # Bump when the index/png layout changes (persistent_term survives reloads).
-  @cache_version 1
+  # Bump when the index/png layout OR palette changes (persistent_term
+  # survives reloads, and browsers cache the PNGs as immutable).
+  @cache_version 2
 
   @default_dims {2048, 1024}
 
@@ -32,7 +33,9 @@ defmodule BrokenOaths.Worlds.Texture do
     plains: {0x84, 0xCC, 0x16},
     forest: {0x15, 0x80, 0x3D},
     hills: {0x92, 0x40, 0x0E},
-    mountains: {0x52, 0x52, 0x52}
+    mountains: {0x52, 0x52, 0x52},
+    tundra: {0x8D, 0x9B, 0x8A},
+    snow: {0xE6, 0xEC, 0xF2}
   ]
 
   @doc """
@@ -48,6 +51,9 @@ defmodule BrokenOaths.Worlds.Texture do
     {w, h} = dims(1)
     {max(div(w, 2), 2), max(div(h, 2), 2)}
   end
+
+  @doc "Cache version — clients bust immutable texture URLs with it."
+  def version, do: @cache_version
 
   @doc "Build (or fetch cached) the equirectangular PNG for a world."
   def png(seed, frequency, level \\ 1) do

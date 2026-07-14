@@ -60,7 +60,28 @@ defmodule BrokenOaths.Worlds.Generator do
     ms = @globe_moisture_scale
     elevation = Noise.fbm3d(eperm, x * es, y * es, z * es, 6)
     moisture = Noise.fbm3d(mperm, x * ms, y * ms, z * ms, 4)
-    {classify_terrain(elevation, moisture), Float.round(elevation, 3)}
+
+    terrain =
+      elevation
+      |> classify_terrain(moisture)
+      |> apply_climate(z, elevation, moisture)
+
+    {terrain, Float.round(elevation, 3)}
+  end
+
+  # Cold turns land to tundra then snow. |z| is sin(latitude) — polar bands
+  # come straight from the sphere geometry — plus altitude chill for
+  # snowcapped ranges and a moisture wobble so band edges stay organic.
+  # Deep polar water freezes to sea ice.
+  defp apply_climate(terrain, z, elevation, moisture) do
+    cold = abs(z) + max(elevation - 0.55, 0.0) * 0.8 + (moisture - 0.5) * 0.12
+
+    cond do
+      terrain in [:ocean, :shallow_water] -> if cold > 0.93, do: :snow, else: terrain
+      cold > 0.88 -> :snow
+      cold > 0.74 -> :tundra
+      true -> terrain
+    end
   end
 
   @doc "Compute terrain type statistics from a terrain map."

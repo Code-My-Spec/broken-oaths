@@ -2,7 +2,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   use BrokenOathsWeb, :live_view
 
   alias BrokenOaths.Worlds
-  alias BrokenOaths.Worlds.{Facets, Generator, Globe, Projection}
+  alias BrokenOaths.Worlds.{Facets, Generator, Globe, Projection, Texture}
 
   # Zoom levels as multiples of the "whole globe fits" scale (min(w,h)/2
   # pixels per sphere radius). Relative zoom keeps the on-screen TILE count
@@ -41,7 +41,9 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     {:plains, "#84cc16", "Plains"},
     {:forest, "#15803d", "Forest"},
     {:hills, "#92400e", "Hills"},
-    {:mountains, "#525252", "Mountains"}
+    {:mountains, "#525252", "Mountains"},
+    {:tundra, "#8d9b8a", "Tundra"},
+    {:snow, "#e6ecf2", "Snow / Ice"}
   ]
 
   # -------------------------------------------------------------------
@@ -674,6 +676,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
       :forest -> "Forest"
       :hills -> "Hills"
       :mountains -> "Mountains"
+      :tundra -> "Tundra"
+      :snow -> "Snow"
       _ -> to_string(terrain)
     end
   end
@@ -777,7 +781,9 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             data-sun-period={@sun_period}
             data-renderer={@renderer3d}
             data-selected-id={@selected_tile && @selected_tile.id}
-            data-texture={~p"/worlds/#{@world.id}/texture.png?seed=#{@world.seed}"}
+            data-texture={
+              ~p"/worlds/#{@world.id}/texture.png?seed=#{@world.seed}&v=#{Texture.version()}"
+            }
           >
             <%!-- EVERYTHING the hook mutates lives inside this single
                  phx-update="ignore" wrapper. The hook styles the disc,
