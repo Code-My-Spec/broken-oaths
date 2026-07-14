@@ -2,7 +2,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   use BrokenOathsWeb, :live_view
 
   alias BrokenOaths.Worlds
-  alias BrokenOaths.Worlds.{Facets, Generator, Globe, Projection, Terrain, Texture}
+  alias BrokenOaths.Worlds.{Facets, Generator, Globe, Projection, Terrain, Texture, Weather}
 
   # Zoom levels as multiples of the "whole globe fits" scale (min(w,h)/2
   # pixels per sphere radius). Relative zoom keeps the on-screen TILE count
@@ -281,7 +281,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         # New seed = new bucket: pushes a recolored tile window in 3D mode
         socket =
           if socket.assigns.render_mode == :three_d,
-            do: socket |> rewindow() |> push_selection(),
+            do: socket |> rewindow() |> push_selection() |> push_airspace(),
             else: socket
 
         {:noreply, socket}
@@ -424,6 +424,14 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
   defp push_selection(socket), do: socket
 
+  # Airspace: the sparse per-tile cloud map, pushed once per world/seed.
+  # The near renderer draws these as translucent hexes one shell above
+  # the surface; the far renderer samples the baked airspace texture.
+  defp push_airspace(socket) do
+    %{world: world, mesh: mesh} = socket.assigns
+    push_event(socket, "globe3d:airspace", %{levels: Weather.map(world.seed, mesh)})
+  end
+
   defp tile_budget(true), do: @tile_budget_touch
   defp tile_budget(false), do: @tile_budget_desktop
 
@@ -465,6 +473,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     )
     |> rewindow()
     |> push_selection()
+    |> push_airspace()
   end
 
   defp set_mode(socket, :classic) do
@@ -755,6 +764,9 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             data-selected-id={@selected_tile && @selected_tile.id}
             data-texture={
               ~p"/worlds/#{@world.id}/texture.png?seed=#{@world.seed}&v=#{Texture.version()}"
+            }
+            data-airspace={
+              ~p"/worlds/#{@world.id}/airspace.png?seed=#{@world.seed}&v=#{Texture.version()}"
             }
           >
             <%!-- EVERYTHING the hook mutates lives inside this single
@@ -1083,7 +1095,48 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                   }
                 })
 
+                // Airspace: the cloud-layer bake (palette+tRNS, so the
+                // decoded pixels carry per-tile alpha)
+                const aurl = this.el.dataset.airspace
+                if (aurl && aurl !== this.airspaceUrl) {
+                  this.airspaceUrl = aurl
+                  this.decode(aurl, (tex) => {
+                    if (this.airspaceUrl === aurl) {
+                      this.atex = tex
+                      this.schedule()
+                    }
+                  })
+                }
               }
+              this.atex = null
+              this.airspaceUrl = null
+
+              // Airspace near path: sparse tile id -> cloud level (1..3),
+              // drawn as translucent hexes one shell above the surface.
+              // Base RGBA per level mirrors Worlds.Weather.palette/0;
+              // 16-step day/night shade tables like the terrain pass.
+              this.airspace = null
+              this.cloudShades = null
+              this.handleEvent("globe3d:airspace", ({levels}) => {
+                this.airspace = levels
+                const base = {1: [250, 251, 253, 96], 2: [240, 244, 249, 175], 3: [104, 110, 124, 215]}
+                this.cloudShades = {}
+                for (const lvl of [1, 2, 3]) {
+                  const [r, g, b, a255] = base[lvl]
+                  const a = (a255 / 255).toFixed(3)
+                  const steps = []
+                  for (let i = 0; i < 16; i++) {
+                    const f = 0.35 + 0.65 * (i / 15)
+                    steps.push("rgba(" + ((r * f) | 0) + "," + ((g * f) | 0) + "," + ((b * f) | 0) + "," + a + ")")
+                  }
+                  this.cloudShades[lvl] = steps
+                }
+                this.schedule()
+              })
+
+              // Cloud shell altitude, as a multiple of the surface radius
+              this.ALT = 1.035
+
               this.loadTexture()
 
               const d = this.el.dataset
@@ -1257,6 +1310,34 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                   ctx.stroke()
                 }
 
+                // Airspace pass: cloud tiles as translucent hexes at
+                // ALT above the surface — same geometry, same painter
+                // order (all clouds sit above all terrain).
+                if (this.airspace && this.cloudShades) {
+                  const A = this.ALT
+                  for (const [, row] of order) {
+                    const lvl = this.airspace[row[0]]
+                    if (!lvl) continue
+                    const light = row[2] * sun_x + row[3] * sun_y + row[4] * sun_z
+                    let t = (light + 0.15) / 0.3
+                    t = t < 0 ? 0 : t > 1 ? 1 : t
+                    t = t * t * (3 - 2 * t)
+                    let idx = Math.round(t * 15)
+                    const style = this.cloudShades[lvl][idx]
+
+                    ctx.beginPath()
+                    for (let i = 6; i < row.length; i += 3) {
+                      const x = row[i] * A, y = row[i + 1] * A, z = row[i + 2] * A
+                      const px = ccx + S * (-syw * x + cyw * y)
+                      const py = ccy - S * (-sp * cyw * x - sp * syw * y + cp * z)
+                      if (i === 6) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+                    }
+                    ctx.closePath()
+                    ctx.fillStyle = style
+                    ctx.fill()
+                  }
+                }
+
                 this.drawSelection()
               }
 
@@ -1297,40 +1378,84 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 const cyw = Math.cos(this.yaw), syw = Math.sin(this.yaw)
                 const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
                 const tex = this.tex.data, TW = this.tex.w, TH = this.tex.h
+                const atexObj = this.atex
+                const atex = atexObj && atexObj.data, AW = atexObj && atexObj.w, AH = atexObj && atexObj.h
+                const A = this.ALT, A2 = A * A
+                const RMAX = atex ? A : 1
                 const INV2PI = 1 / (2 * Math.PI), INVPI = 1 / Math.PI
                 const [sun_x, sun_y, sun_z] = this.sunVec()
-                const x0 = Math.max(0, Math.floor(ccx - S)), x1 = Math.min(cw - 1, Math.ceil(ccx + S))
-                const y0 = Math.max(0, Math.floor(ccy - S)), y1 = Math.min(ch - 1, Math.ceil(ccy + S))
+                const x0 = Math.max(0, Math.floor(ccx - S * RMAX)), x1 = Math.min(cw - 1, Math.ceil(ccx + S * RMAX))
+                const y0 = Math.max(0, Math.floor(ccy - S * RMAX)), y1 = Math.min(ch - 1, Math.ceil(ccy + S * RMAX))
                 for (let py = y0; py <= y1; py++) {
                   const vy = (ccy - py) / S
                   const row = py * cw
                   for (let px = x0; px <= x1; px++) {
                     const vx = (px - ccx) / S
                     const r2 = vx * vx + vy * vy
-                    if (r2 > 1) continue
-                    const vz = Math.sqrt(1 - r2)
-                    const wx = -syw * vx - sp * cyw * vy + cp * cyw * vz
-                    const wy = cyw * vx - sp * syw * vy + cp * syw * vz
-                    const wz = cp * vy + sp * vz
-                    const lon = Math.atan2(wy, wx)
-                    const lat = Math.asin(wz)
-                    let tx = ((lon * INV2PI + 0.5) * TW) | 0
-                    let ty = ((0.5 - lat * INVPI) * TH) | 0
-                    if (tx < 0) tx = 0; else if (tx >= TW) tx = TW - 1
-                    if (ty < 0) ty = 0; else if (ty >= TH) ty = TH - 1
+                    if (r2 > A2 || (r2 > 1 && !atex)) continue
 
-                    // Day/night terminator: smoothstep on sun · surface
-                    const light = wx * sun_x + wy * sun_y + wz * sun_z
-                    let t = (light + 0.15) / 0.3
-                    t = t < 0 ? 0 : t > 1 ? 1 : t
-                    t = t * t * (3 - 2 * t)
-                    const f = 0.32 + t * 0.68
+                    let pr = 0, pg = 0, pb = 0, pa = 0
 
-                    const v = tex[ty * TW + tx]
-                    const r = ((v & 255) * f) | 0
-                    const g = (((v >>> 8) & 255) * f) | 0
-                    const b = (((v >>> 16) & 255) * f) | 0
-                    out[row + px] = (v & 0xff000000) | (b << 16) | (g << 8) | r
+                    if (r2 <= 1) {
+                      // Surface sample, day/night shaded
+                      const vz = Math.sqrt(1 - r2)
+                      const wx = -syw * vx - sp * cyw * vy + cp * cyw * vz
+                      const wy = cyw * vx - sp * syw * vy + cp * syw * vz
+                      const wz = cp * vy + sp * vz
+                      const lon = Math.atan2(wy, wx)
+                      const lat = Math.asin(wz)
+                      let tx = ((lon * INV2PI + 0.5) * TW) | 0
+                      let ty = ((0.5 - lat * INVPI) * TH) | 0
+                      if (tx < 0) tx = 0; else if (tx >= TW) tx = TW - 1
+                      if (ty < 0) ty = 0; else if (ty >= TH) ty = TH - 1
+
+                      const light = wx * sun_x + wy * sun_y + wz * sun_z
+                      let t = (light + 0.15) / 0.3
+                      t = t < 0 ? 0 : t > 1 ? 1 : t
+                      t = t * t * (3 - 2 * t)
+                      const f = 0.32 + t * 0.68
+
+                      const v = tex[ty * TW + tx]
+                      pr = ((v & 255) * f) | 0
+                      pg = (((v >>> 8) & 255) * f) | 0
+                      pb = (((v >>> 16) & 255) * f) | 0
+                      pa = 255
+                    }
+
+                    // Airspace shell: unproject the same pixel onto the
+                    // cloud sphere at ALT and alpha-blend the hex bake.
+                    // Different radius = real parallax against the ground
+                    // and a cloud crescent past the limb.
+                    if (atex) {
+                      const azn = Math.sqrt(A2 - r2) / A
+                      const axn = vx / A, ayn = vy / A
+                      const wx = -syw * axn - sp * cyw * ayn + cp * cyw * azn
+                      const wy = cyw * axn - sp * syw * ayn + cp * syw * azn
+                      const wz = cp * ayn + sp * azn
+                      let ax = ((Math.atan2(wy, wx) * INV2PI + 0.5) * AW) | 0
+                      let ay = ((0.5 - Math.asin(wz) * INVPI) * AH) | 0
+                      if (ax < 0) ax = 0; else if (ax >= AW) ax = AW - 1
+                      if (ay < 0) ay = 0; else if (ay >= AH) ay = AH - 1
+                      const cv = atex[ay * AW + ax]
+                      const ca = cv >>> 24
+                      if (ca > 0) {
+                        const light = wx * sun_x + wy * sun_y + wz * sun_z
+                        let t = (light + 0.15) / 0.3
+                        t = t < 0 ? 0 : t > 1 ? 1 : t
+                        t = t * t * (3 - 2 * t)
+                        const f = 0.35 + t * 0.65
+                        const cr = ((cv & 255) * f) | 0
+                        const cg = (((cv >>> 8) & 255) * f) | 0
+                        const cb = (((cv >>> 16) & 255) * f) | 0
+                        const ia = 255 - ca
+                        pr = (cr * ca + pr * ia + 127) / 255 | 0
+                        pg = (cg * ca + pg * ia + 127) / 255 | 0
+                        pb = (cb * ca + pb * ia + 127) / 255 | 0
+                        pa = Math.max(pa, ca)
+                      }
+                    }
+
+                    if (pa > 0) out[row + px] = (pa << 24) | (pb << 16) | (pg << 8) | pr
                   }
                 }
                 this.ctx.putImageData(this.frame, 0, 0)

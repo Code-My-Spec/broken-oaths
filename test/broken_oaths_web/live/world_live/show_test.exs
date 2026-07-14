@@ -224,6 +224,11 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       assert_push_event(view, "globe3d:window", %{tiles: tiles, palette: palette})
       refute html =~ "hex-cell3d"
 
+      # Airspace rides along: sparse tile-id => cloud-level map
+      assert_push_event(view, "globe3d:airspace", %{levels: levels})
+      assert map_size(levels) > 0
+      assert Enum.all?(levels, fn {_id, l} -> l in 1..3 end)
+
       assert length(palette) >= 5 and length(palette) <= 256
       tile_count = BrokenOaths.Worlds.Globe.tile_count(@frequency)
       assert length(tiles) > 0

@@ -16,6 +16,17 @@ defmodule BrokenOathsWeb.WorldTextureController do
     send_png(conn, png)
   end
 
+  @doc """
+  The airspace (cloud layer) impostor texture — same equirect bake as
+  the terrain, palette+tRNS PNG with per-tile cloud levels.
+  """
+  def airspace(conn, %{"id" => id} = params) do
+    world = Worlds.get_world!(id)
+    level = if params["level"] == "0", do: 0, else: 1
+    png = Texture.airspace_png(world.seed, world.frequency, level)
+    send_png(conn, png)
+  end
+
   defp send_png(conn, png) do
     conn
     |> put_resp_content_type("image/png")

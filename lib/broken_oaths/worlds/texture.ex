@@ -16,7 +16,7 @@ defmodule BrokenOaths.Worlds.Texture do
       seed's entry until restart — acceptable at this size.
   """
 
-  alias BrokenOaths.Worlds.{Generator, Globe, Terrain}
+  alias BrokenOaths.Worlds.{Generator, Globe, Terrain, Weather}
 
   # Bump when the index/png layout OR palette changes (persistent_term
   # survives reloads, and browsers cache the PNGs as immutable).
@@ -55,6 +55,70 @@ defmodule BrokenOaths.Worlds.Texture do
       png ->
         png
     end
+  end
+
+  @doc """
+  The airspace impostor: an equirectangular PNG of the cloud layer,
+  baked from per-tile Weather levels through the same pixel → tile
+  index as the terrain texture, so the far view shows genuine cloud
+  HEXES. Palette PNG with a tRNS chunk — level 0 is fully transparent,
+  levels 1..3 increasingly opaque.
+  """
+  def airspace_png(seed, frequency, level \\ 1) do
+    {w, h} = dims(level)
+    key = {__MODULE__, @cache_version, :airspace, seed, frequency, w, h}
+
+    case :persistent_term.get(key, nil) do
+      nil ->
+        png = build_airspace_png(seed, frequency, w, h)
+        :persistent_term.put(key, png)
+        png
+
+      png ->
+        png
+    end
+  end
+
+  defp build_airspace_png(seed, frequency, w, h) do
+    ids = index(frequency, w, h)
+    mesh = Globe.get(frequency)
+    weather = Weather.map(seed, mesh)
+    n = Globe.tile_count(frequency)
+
+    # tile id -> palette index (= cloud level), flat binary for O(1) lookup
+    tile_pal = for id <- 0..(n - 1), into: <<>>, do: <<Map.get(weather, id, 0)>>
+
+    raw =
+      for py <- 0..(h - 1), into: <<>> do
+        row_base = py * w
+
+        row =
+          for px <- 0..(w - 1), into: <<>> do
+            tile = :atomics.get(ids, row_base + px + 1)
+            <<:binary.at(tile_pal, tile)>>
+          end
+
+        <<0>> <> row
+      end
+
+    palette = Weather.palette()
+
+    plte =
+      for level <- 0..3, into: <<>> do
+        {r, g, b, _a} = palette[level]
+        <<r, g, b>>
+      end
+
+    trns = for level <- 0..3, into: <<>>, do: <<elem(palette[level], 3)>>
+
+    ihdr = <<w::32, h::32, 8, 3, 0, 0, 0>>
+
+    <<137, 80, 78, 71, 13, 10, 26, 10>> <>
+      chunk("IHDR", ihdr) <>
+      chunk("PLTE", plte) <>
+      chunk("tRNS", trns) <>
+      chunk("IDAT", :zlib.compress(raw)) <>
+      chunk("IEND", <<>>)
   end
 
   @doc "Pre-build the pixel indexes (used by the boot warm-up)."

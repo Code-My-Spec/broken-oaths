@@ -99,6 +99,23 @@ defmodule BrokenOaths.Worlds.TextureTest do
       assert Texture.png(@seed, @frequency) == Texture.png(@seed, @frequency)
     end
 
+    test "airspace_png is a palette PNG with a tRNS alpha chunk" do
+      png = Texture.airspace_png(@seed, @frequency)
+      {w, h} = Texture.dims(1)
+
+      assert <<137, 80, 78, 71, 13, 10, 26, 10, rest::binary>> = png
+      # IHDR: bit depth 8, color type 3 (palette)
+      assert <<_len::32, "IHDR", ^w::32, ^h::32, 8, 3, 0, 0, 0, _::binary>> = rest
+      # 4 palette entries (levels 0..3) and per-entry alpha
+      assert [_, _] = :binary.split(png, "PLTE")
+      assert [_, after_trns] = :binary.split(png, "tRNS")
+      # Level 0 alpha is 0 (fully transparent)
+      assert <<0, _a1, _a2, _a3, _::binary>> = after_trns
+
+      assert Texture.airspace_png(@seed, @frequency) == png
+      refute Texture.airspace_png(@seed + 1, @frequency) == png
+    end
+
     test "different seeds give different textures" do
       refute Texture.png(@seed, @frequency) == Texture.png(@seed + 1, @frequency)
     end
