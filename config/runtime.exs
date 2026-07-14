@@ -35,7 +35,34 @@ config :broken_oaths,
   google_client_id: System.get_env("GOOGLE_CLIENT_ID"),
   google_client_secret: System.get_env("GOOGLE_CLIENT_SECRET")
 
+# === Secret loading ==========================================================
+#
+# Deployed containers (UAT + prod, both MIX_ENV=prod) carry only AWS
+# bootstrap creds + APP_ENV; every app secret is fetched from SSM
+# Parameter Store (/broken_oaths/<APP_ENV>/*) into System env here,
+# BEFORE any config below reads it. Local dev/test never set APP_ENV.
 if config_env() == :prod do
+  case System.get_env("APP_ENV") do
+    nil -> :ok
+    app_env -> BrokenOaths.Secrets.load!(app_env)
+  end
+end
+
+if config_env() == :prod do
+  # Cloak vault key for encrypted OAuth token storage. The compile-time
+  # dev/test key in config.exs must never reach production.
+  config :broken_oaths, BrokenOaths.Vault,
+    ciphers: [
+      default:
+        {Cloak.Ciphers.AES.GCM,
+         tag: "AES.GCM.V1",
+         key:
+           Base.decode64!(
+             System.get_env("CLOAK_KEY") ||
+               raise("environment variable CLOAK_KEY is missing (base64 32-byte key)")
+           )}
+    ]
+
   database_url =
     System.get_env("DATABASE_URL") ||
       raise """

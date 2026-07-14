@@ -15,6 +15,16 @@ defmodule BrokenOathsWeb.Endpoint do
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
 
+  # Health probe before Plug.Static: kamal-proxy checks /up over plain
+  # HTTP inside the box; /health is the public external check.
+  plug :health_check
+
+  defp health_check(%{request_path: path} = conn, _opts) when path in ["/up", "/health"] do
+    conn |> Plug.Conn.send_resp(200, "OK") |> Plug.Conn.halt()
+  end
+
+  defp health_check(conn, _opts), do: conn
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),

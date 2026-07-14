@@ -1,0 +1,46 @@
+# Kamal config for broken_oaths UAT on the Hetzner UAT box (Nuremberg ARM).
+# Run with: scripts/deploy-uat
+#
+# Same shape as deploy.yml; differs in host and arch. Service name
+# matches deploy.yml so the multi-arch image labels resolve.
+
+service: broken-oaths
+image: code-my-spec/broken_oaths
+
+servers:
+  web:
+    hosts:
+      - 46.225.105.88
+    options:
+      network: db_net           # pre-attach so app can reach infra-postgres-1 at start
+    proxy:                      # role-level override
+      ssl: true
+      host: uat.broken-oaths.com
+      app_port: 4000
+      healthcheck:
+        path: /up
+
+registry:
+  server: ghcr.io
+  username: johns10
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+builder:
+  arch: arm64
+  local: true
+
+# Container fetches its own secrets from /broken_oaths/uat/* in SSM at
+# boot via BrokenOaths.Secrets.load!/1 (config/runtime.exs). The only env
+# Kamal carries is AWS bootstrap creds + APP_ENV.
+env:
+  clear:
+    APP_ENV: uat
+    AWS_REGION: us-east-1
+    PORT: "4000"
+  secret:
+    - AWS_ACCESS_KEY_ID
+    - AWS_SECRET_ACCESS_KEY
+
+ssh:
+  user: root

@@ -76,6 +76,8 @@ defmodule BrokenOaths.MixProject do
       {:assent, "~> 0.3"},
       {:cloak, "~> 1.1"},
       {:cloak_ecto, "~> 1.3"},
+      {:ex_aws, "~> 2.5"},
+      {:ex_aws_ssm, "~> 2.1"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:client_utils, "~> 0.1"},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},

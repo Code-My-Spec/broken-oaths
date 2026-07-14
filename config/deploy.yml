@@ -1,0 +1,45 @@
+# Kamal config for broken_oaths PROD on the Hetzner prod box (Ashburn x86).
+# Run with: scripts/deploy
+#
+# Same fleet pattern as cleaner_crm / metric_flow — see the devops repo.
+
+service: broken-oaths
+image: code-my-spec/broken_oaths
+
+servers:
+  web:
+    hosts:
+      - 178.156.143.212
+    options:
+      network: db_net           # pre-attach so app can reach infra-postgres-1 at start
+    proxy:                      # role-level override
+      ssl: true
+      host: broken-oaths.com
+      app_port: 4000
+      healthcheck:
+        path: /up
+
+registry:
+  server: ghcr.io
+  username: johns10
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+builder:
+  arch: amd64
+  local: true
+
+# Container fetches its own secrets from /broken_oaths/prod/* in SSM at
+# boot via BrokenOaths.Secrets.load!/1 (config/runtime.exs). The only env
+# Kamal carries is AWS bootstrap creds + APP_ENV.
+env:
+  clear:
+    APP_ENV: prod
+    AWS_REGION: us-east-1
+    PORT: "4000"
+  secret:
+    - AWS_ACCESS_KEY_ID
+    - AWS_SECRET_ACCESS_KEY
+
+ssh:
+  user: root

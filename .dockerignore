@@ -1,0 +1,16 @@
+_build/
+deps/
+.git/
+.github/
+.code_my_spec/
+docs/
+test/
+scripts/
+.kamal/
+config/deploy*.yml
+priv/static/assets/
+priv/static/uploads/
+node_modules/
+*.md
+.env*
+geo/
