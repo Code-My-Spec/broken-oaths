@@ -25,4 +25,18 @@ defmodule BrokenOathsSpex.Fixtures do
   # A world existing is server-side state (worlds are provisioned, not
   # player-created in the gameplay loop), so seeding one is sanctioned.
   defdelegate world_fixture(attrs \\ %{}), to: BrokenOaths.WorldsFixtures
+
+  # --- Regions (sanctioned domain reads) ---
+  # Region identity is deliberately invisible to players ("invisible
+  # plumbing" — PM decision on story 877), so region-math criteria have
+  # no UI surface to observe. These narrow reads are the sanctioned
+  # shortcut for those specs; they expose seed-derived server state,
+  # never let a spec mutate anything.
+  defdelegate region_partition(world), to: BrokenOaths.Worlds.Regions, as: :partition
+  defdelegate spawnable_regions(world), to: BrokenOaths.Worlds.Regions, as: :spawnable
+  defdelegate tile_class(world, tile_id), to: BrokenOaths.Worlds.Regions, as: :tile_class
+
+  # --- Game membership (sanctioned domain read) ---
+  # Which region a player claimed is likewise invisible plumbing.
+  defdelegate claimed_region(world, user), to: BrokenOaths.Game, as: :claimed_region
 end
