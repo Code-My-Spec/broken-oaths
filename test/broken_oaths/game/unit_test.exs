@@ -1,0 +1,103 @@
+defmodule BrokenOaths.Game.UnitTest do
+  use BrokenOathsTest.DataCase, async: true
+
+  alias BrokenOaths.Game.Player
+  alias BrokenOaths.Game.Unit
+  alias BrokenOaths.UsersFixtures
+  alias BrokenOaths.Worlds.World
+  alias BrokenOaths.WorldsFixtures
+
+  defp player_fixture(attrs \\ %{}) do
+    world = attrs[:world] || WorldsFixtures.world_fixture()
+    user = UsersFixtures.user_fixture()
+
+    {:ok, player} =
+      %Player{}
+      |> Player.changeset(%{
+        world_id: world.id,
+        user_id: user.id,
+        region_id: attrs[:region_id] || 1,
+        joined_turn: 0
+      })
+      |> Repo.insert()
+
+    player
+  end
+
+  defp valid_attrs do
+    player = player_fixture()
+
+    %{
+      world_id: player.world_id,
+      player_id: player.id,
+      type: :lord,
+      tile_id: 42,
+      hp: 10,
+      max_hp: 10,
+      movement: 2,
+      max_movement: 2
+    }
+  end
+
+  test "changeset with valid attrs is valid" do
+    changeset = Unit.changeset(%Unit{}, valid_attrs())
+    assert changeset.valid?
+  end
+
+  test "changeset requires all fields" do
+    changeset = Unit.changeset(%Unit{}, %{})
+    refute changeset.valid?
+
+    assert %{
+             world_id: ["can't be blank"],
+             player_id: ["can't be blank"],
+             type: ["can't be blank"],
+             tile_id: ["can't be blank"],
+             hp: ["can't be blank"],
+             max_hp: ["can't be blank"],
+             movement: ["can't be blank"],
+             max_movement: ["can't be blank"]
+           } = errors_on(changeset)
+  end
+
+  test "type must be lord or settler" do
+    changeset = Unit.changeset(%Unit{}, %{valid_attrs() | type: :wizard})
+    refute changeset.valid?
+    assert %{type: ["is invalid"]} = errors_on(changeset)
+  end
+
+  test "hp must be greater than 0" do
+    changeset = Unit.changeset(%Unit{}, %{valid_attrs() | hp: 0})
+    refute changeset.valid?
+    assert %{hp: ["must be greater than 0"]} = errors_on(changeset)
+  end
+
+  test "hp cannot exceed max_hp" do
+    changeset = Unit.changeset(%Unit{}, %{valid_attrs() | hp: 11, max_hp: 10})
+    refute changeset.valid?
+    assert %{hp: ["must be less than or equal to max_hp"]} = errors_on(changeset)
+  end
+
+  test "movement cannot exceed max_movement" do
+    changeset = Unit.changeset(%Unit{}, %{valid_attrs() | movement: 3, max_movement: 2})
+    refute changeset.valid?
+    assert %{movement: ["must be less than or equal to max_movement"]} = errors_on(changeset)
+  end
+
+  test "movement can be zero" do
+    changeset = Unit.changeset(%Unit{}, %{valid_attrs() | movement: 0})
+    assert changeset.valid?
+  end
+
+  test "only one unit per tile per world" do
+    attrs = valid_attrs()
+    assert {:ok, _unit} = Unit.changeset(%Unit{}, attrs) |> Repo.insert()
+
+    world = Repo.get!(World, attrs.world_id)
+    other_player = player_fixture(%{world: world, region_id: 2})
+    dup_attrs = %{attrs | world_id: world.id, player_id: other_player.id}
+
+    {:error, changeset} = Unit.changeset(%Unit{}, dup_attrs) |> Repo.insert()
+    assert %{world_id: ["has already been taken"]} = errors_on(changeset)
+  end
+end
