@@ -57,4 +57,12 @@ defmodule BrokenOathsSpex.Fixtures do
   # --- Game reads for board-state assertions (sanctioned) ---
   defdelegate player_units(world, user), to: BrokenOaths.Game, as: :player_units
   defdelegate adjacent_tiles(world, tile_id), to: BrokenOaths.Worlds.Regions, as: :adjacent_tiles
+
+  # A tile's unit-sphere center — what the client sends when the player
+  # right-clicks the globe (fog targets have no id client-side, so
+  # orders travel as points). Seed-derived geometry, read-only.
+  def tile_center(world, tile_id) do
+    mesh = BrokenOaths.Worlds.Globe.get(world.frequency)
+    BrokenOaths.Worlds.Globe.tile(mesh, tile_id).center
+  end
 end

@@ -129,6 +129,17 @@ defmodule BrokenOathsWeb.GameLive.Play do
     {:noreply, socket}
   end
 
+  # Right-clicks arrive as the clicked point on the unit sphere, not a
+  # tile id: the client's tile window is fog-filtered, so it cannot name
+  # a tile it has never seen. The server resolves which tile the player
+  # aimed at — orders into and through the fog of war are legal, and no
+  # hidden tile data ever travels to the client to make them so.
+  def handle_event("queue_move", %{"unit_id" => unit_id, "to_point" => [x, y, z]}, socket)
+      when is_number(x) and is_number(y) and is_number(z) do
+    to_tile = nearest_tile(socket.assigns.mesh, {x, y, z})
+    handle_event("queue_move", %{"unit_id" => unit_id, "to_tile" => to_tile}, socket)
+  end
+
   def handle_event("queue_move", %{"unit_id" => unit_id, "to_tile" => to_tile}, socket) do
     %{world: world, user: user} = socket.assigns
 
@@ -266,6 +277,19 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   defp round4(f), do: Float.round(f, 4)
 
+  # The mesh tile whose center is nearest the given unit-sphere point
+  # (max dot product). Linear over the mesh — ~29k tiles at f=54, a few
+  # ms once per right-click.
+  defp nearest_tile(mesh, {x, y, z}) do
+    {id, _tile} =
+      Enum.max_by(mesh.tiles, fn {_id, tile} ->
+        {cx, cy, cz} = tile.center
+        cx * x + cy * y + cz * z
+      end)
+
+    id
+  end
+
   defp order_error_message(:not_owner), do: "You don't control that unit."
   defp order_error_message(:occupied), do: "Another unit already holds that tile."
   defp order_error_message(:impassable), do: "That terrain can't be crossed."
@@ -357,8 +381,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
       <%!-- Canvas-only board: no tile DOM. Camera (drag rotate + wheel zoom)
            lives entirely client-side since fog is unit-position-derived, not
            camera-derived — the server never needs to know the current view.
-           A click on a unit selects it; a click elsewhere with a unit
-           selected queues a move to the nearest known tile. --%>
+           A left click on a unit selects it; a right click queues a move
+           toward the clicked point on the sphere — resolved to a tile
+           server-side, so targets under the fog of war work too. --%>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".Board">
         export default {
           mounted() {
@@ -372,10 +397,13 @@ defmodule BrokenOathsWeb.GameLive.Play do
             this.maxPitch = 1.50
 
             this.tiles = []
+            this.tileById = new Map()
             this.units = []
             this.visibleSet = new Set()
             this.selectedId = null
             this.path = null
+            this.anims = new Map()
+            this.raf = null
 
             const measure = () => {
               const r = this.el.getBoundingClientRect()
@@ -393,9 +421,28 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
             this.airspace = {}
             this.handleEvent("globe3d:airspace", ({levels}) => { this.airspace = levels; this.draw() })
-            this.handleEvent("game:window", ({tiles}) => { this.tiles = tiles; this.draw() })
+            this.handleEvent("game:window", ({tiles}) => {
+              this.tiles = tiles
+              this.tileById = new Map(tiles.map((row) => [row[0], row]))
+              this.draw()
+            })
             this.handleEvent("game:visibility", ({visible}) => { this.visibleSet = new Set(visible); this.draw() })
-            this.handleEvent("game:units", ({units}) => { this.units = units; this.draw() })
+            this.handleEvent("game:units", ({units}) => {
+              // A unit whose tile changed slides there instead of teleporting.
+              const prev = new Map(this.units.map((u) => [u.id, u.tile_id]))
+              const now = performance.now()
+              for (const u of units) {
+                const was = prev.get(u.id)
+                if (was != null && was !== u.tile_id) {
+                  const from = this.unitPos({id: u.id, tile_id: was}, now)
+                  const to = this.center(u.tile_id)
+                  if (from && to) this.anims.set(u.id, {from, to, start: now})
+                }
+              }
+              this.units = units
+              this.ensureLoop()
+              this.draw()
+            })
             this.handleEvent("game:selected", ({unit_id}) => { this.selectedId = unit_id; this.path = null; this.draw() })
             this.handleEvent("game:path", ({unit_id, tiles}) => {
               if (unit_id === this.selectedId) this.path = tiles
@@ -492,13 +539,60 @@ defmodule BrokenOathsWeb.GameLive.Play do
             if (unit) this.pushEvent("select_unit", {unit_id: unit.id})
           },
 
-          // Right click: queue the selected unit's move to the clicked tile.
+          // Right click: queue the selected unit's move toward the clicked
+          // point on the globe. The point (not a tile id) goes up because
+          // the client's tile window is fog-filtered — the server resolves
+          // which tile was aimed at, so orders into the shroud work.
           orderMove(e) {
             if (this.selectedId == null) return
-            const tile = this.hitTile(e)
-            if (tile == null) return
+            const r = this.el.getBoundingClientRect()
+            const p = this.unproject(e.clientX - r.left, e.clientY - r.top)
+            if (!p) return
 
-            this.pushEvent("queue_move", {unit_id: this.selectedId, to_tile: tile})
+            this.pushEvent("queue_move", {unit_id: this.selectedId, to_point: [p.x, p.y, p.z]})
+          },
+
+          center(tileId) {
+            const row = this.tileById.get(tileId)
+            return row ? [row[2], row[3], row[4]] : null
+          },
+
+          // Where a unit currently renders: mid-slide if animating,
+          // otherwise its tile center.
+          unitPos(u, now) {
+            const a = this.anims.get(u.id)
+            if (!a) return this.center(u.tile_id)
+            const t = Math.min(1, (now - a.start) / 450)
+            const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
+            return this.slerp(a.from, a.to, ease)
+          },
+
+          slerp(a, b, t) {
+            let dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+            dot = Math.min(1, Math.max(-1, dot))
+            const th = Math.acos(dot)
+            if (th < 1e-4) return b
+            const s = Math.sin(th)
+            const wa = Math.sin((1 - t) * th) / s
+            const wb = Math.sin(t * th) / s
+            return [a[0] * wa + b[0] * wb, a[1] * wa + b[1] * wb, a[2] * wa + b[2] * wb]
+          },
+
+          // Animation loop — runs only while a slide is in flight or a
+          // unit with a pending path needs its pulse.
+          ensureLoop() {
+            if (this.raf) return
+            const step = () => {
+              this.raf = null
+              const now = performance.now()
+              for (const [id, a] of this.anims) {
+                if (now - a.start > 450) this.anims.delete(id)
+              }
+              this.draw()
+              const pulsing = this.units.some((u) => u.order && u.order.status === "pending")
+              if (this.anims.size || pulsing) this.raf = requestAnimationFrame(step)
+            }
+            this.raf = requestAnimationFrame(step)
           },
 
           draw() {
@@ -558,14 +652,30 @@ defmodule BrokenOathsWeb.GameLive.Play do
               ctx.fill()
             }
 
+            const now = performance.now()
             for (const u of this.units) {
-              const t = this.tiles.find((row) => row[0] === u.tile_id)
-              if (!t) continue
-              const {px, py, depth} = this.project(t[2], t[3], t[4])
+              const pos = this.unitPos(u, now)
+              if (!pos) continue
+              const {px, py, depth} = this.project(pos[0], pos[1], pos[2])
               if (depth < 0.02) continue
+              const color = u.type === "lord" ? "#f5c542" : "#42a5f5"
+
+              // A unit with a pending path pulses — the "I'm on the move"
+              // signal, visible without selecting it.
+              if (u.order && u.order.status === "pending") {
+                const ph = (now % 1200) / 1200
+                ctx.beginPath()
+                ctx.arc(px, py, 8 + ph * 8, 0, 2 * Math.PI)
+                ctx.strokeStyle = color
+                ctx.globalAlpha = 0.7 * (1 - ph)
+                ctx.lineWidth = 2
+                ctx.stroke()
+                ctx.globalAlpha = 1
+              }
+
               ctx.beginPath()
               ctx.arc(px, py, u.id === this.selectedId ? 7 : 5, 0, 2 * Math.PI)
-              ctx.fillStyle = u.type === "lord" ? "#f5c542" : "#42a5f5"
+              ctx.fillStyle = color
               ctx.fill()
               ctx.lineWidth = 1.5
               ctx.strokeStyle = "#1a1a1a"
@@ -574,11 +684,13 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
             if (this.path && this.path.length) {
               ctx.beginPath()
-              this.path.forEach((tileId, i) => {
-                const t = this.tiles.find((row) => row[0] === tileId)
-                if (!t) return
-                const {px, py} = this.project(t[2], t[3], t[4])
-                if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+              // Path steps under fog have no client geometry — the line
+              // simply bridges between the tiles the player knows.
+              this.path.forEach((tileId) => {
+                const c = this.center(tileId)
+                if (!c) return
+                const {px, py} = this.project(c[0], c[1], c[2])
+                ctx.lineTo(px, py)
               })
               ctx.strokeStyle = "#ffffff"
               ctx.lineWidth = 2
@@ -590,6 +702,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
           destroyed() {
             if (this.ro) this.ro.disconnect()
+            if (this.raf) cancelAnimationFrame(this.raf)
           }
         }
       </script>
