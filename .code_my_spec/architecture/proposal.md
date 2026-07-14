@@ -39,7 +39,7 @@ player; hidden tiles never reach a client.
 - BrokenOaths.Game.Unit (schema) [Stories: 873, 875]: A unit on the board — type (lord/settler), owner, tile id, hp, movement points
 - BrokenOaths.Game.Order (schema) [Stories: 875]: A queued order for the next turn boundary — unit, kind (move), target tile, validation state
 - BrokenOaths.Game.Exploration (schema) [Stories: 876]: Per-player explored-tile mask for a world, persisted as part of the delta
-- BrokenOaths.Game.WorldServer (genserver) [Stories: 874]: One process per world (Registry-addressed, lazily started) — owns live state, runs the send_after turn tick, applies commands, broadcasts diffs
+- BrokenOaths.Game.WorldServer (module) [Stories: 874]: GenServer, one process per world (Registry-addressed, lazily started) — owns live state, runs the send_after turn tick, applies commands, broadcasts diffs
 - BrokenOaths.Game.Turn (module) [Stories: 874]: Pure turn pipeline — tick(state) resolves queued orders simultaneously, advances the turn counter; property-testable without processes
 - BrokenOaths.Game.Spawner (module) [Stories: 873, 877]: Spawn placement — claims an open region, picks a valid start tile (terrain-checked, far from neighbors), creates the starting Lord + Settler and 50 gold
 - BrokenOaths.Game.Visibility (module) [Stories: 876]: Pure fog-of-war math — vision radii per unit type (Lord sees farther), three-state tile visibility (unexplored / explored / visible), per-player world filtering
