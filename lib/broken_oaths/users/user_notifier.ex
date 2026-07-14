@@ -9,7 +9,9 @@ defmodule BrokenOaths.Users.UserNotifier do
     email =
       new()
       |> to(recipient)
-      |> from({"BrokenOaths", "contact@example.com"})
+      |> from(
+        Application.get_env(:broken_oaths, :mailer_from, {"BrokenOaths", "contact@example.com"})
+      )
       |> subject(subject)
       |> text_body(body)
 

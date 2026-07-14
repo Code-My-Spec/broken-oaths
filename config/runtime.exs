@@ -107,6 +107,20 @@ if config_env() == :prod do
     ],
     secret_key_base: secret_key_base
 
+  # Resend for real email delivery (fleet ADR). Only when the key is
+  # present — a UAT/prod box without it keeps the Local adapter and
+  # boots fine, emails just stay undelivered.
+  if resend_api_key = System.get_env("RESEND_API_KEY") do
+    config :broken_oaths, BrokenOaths.Mailer,
+      adapter: Swoosh.Adapters.Resend,
+      api_key: resend_api_key
+
+    config :broken_oaths,
+           :mailer_from,
+           {System.get_env("MAILER_FROM_NAME") || "Broken Oaths",
+            System.get_env("MAILER_FROM_EMAIL") || "no-reply@#{host}"}
+  end
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key
