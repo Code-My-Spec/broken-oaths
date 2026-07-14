@@ -429,7 +429,21 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   # the surface; the far renderer samples the baked airspace texture.
   defp push_airspace(socket) do
     %{world: world, mesh: mesh} = socket.assigns
-    push_event(socket, "globe3d:airspace", %{levels: Weather.map(world.seed, mesh)})
+    levels = Weather.map(world.seed, mesh)
+
+    # Storm-cell centers for the far renderer, which has no tile
+    # geometry: [x, y, z] unit vectors for every level-3 tile.
+    storms =
+      for {id, 3} <- levels do
+        {x, y, z} = Globe.tile(mesh, id).center
+        [Float.round(x, 4), Float.round(y, 4), Float.round(z, 4)]
+      end
+
+    push_event(socket, "globe3d:airspace", %{
+      levels: levels,
+      storms: storms,
+      arc: Float.round(1.1071 / mesh.frequency, 5)
+    })
   end
 
   defp tile_budget(true), do: @tile_budget_touch
@@ -1116,9 +1130,13 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               // Base RGBA per level mirrors Worlds.Weather.palette/0;
               // 16-step day/night shade tables like the terrain pass.
               this.airspace = null
+              this.stormCells = null
+              this.tileArc = 0.0205
               this.cloudShades = null
-              this.handleEvent("globe3d:airspace", ({levels}) => {
+              this.handleEvent("globe3d:airspace", ({levels, storms, arc}) => {
                 this.airspace = levels
+                this.stormCells = storms || []
+                if (arc) this.tileArc = arc
                 const base = {1: [250, 251, 253, 96], 2: [240, 244, 249, 175], 3: [104, 110, 124, 215]}
                 this.cloudShades = {}
                 for (const lvl of [1, 2, 3]) {
@@ -1142,7 +1160,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               this.hasWeatherAnim = false
               this.weatherTimer = setInterval(() => {
                 if (this.hasWeatherAnim && !document.hidden) this.schedule()
-              }, 110)
+              }, 240)
 
               this.loadTexture()
 
@@ -1319,13 +1337,12 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
                 // Airspace pass: cloud tiles as translucent hexes at
                 // ALT above the surface — same geometry, same painter
-                // order (all clouds sit above all terrain). Levels 2-3
-                // rain onto the ground below; level 3 cells strike.
+                // order (all clouds sit above all terrain). Storm cells
+                // (level 3) strike with lightning.
                 this.hasWeatherAnim = false
                 if (this.airspace && this.cloudShades) {
                   const A = this.ALT
-                  const now = Date.now()
-                  const wet = []
+                  const storms = []
 
                   for (const [, row] of order) {
                     const lvl = this.airspace[row[0]]
@@ -1348,55 +1365,20 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                     ctx.fillStyle = style
                     ctx.fill()
 
-                    if (lvl >= 2) wet.push(row)
+                    if (lvl === 3) storms.push(row)
                   }
 
-                  if (wet.length) {
+                  if (storms.length) {
                     this.hasWeatherAnim = true
 
-                    // Rain: streaks falling from the cloud base to the
-                    // ground within each wet hex, deterministic per
-                    // (tile, drop) so frames animate coherently
-                    ctx.lineCap = "round"
-                    for (const row of wet) {
-                      const id = row[0], lvl = this.airspace[id]
-                      const gx = ccx + S * (-syw * row[2] + cyw * row[3])
-                      const gy = ccy - S * (-sp * cyw * row[2] - sp * syw * row[3] + cp * row[4])
-                      const cx2 = ccx + S * A * (-syw * row[2] + cyw * row[3])
-                      const cy2 = ccy - S * A * (-sp * cyw * row[2] - sp * syw * row[3] + cp * row[4])
-                      // Hex radius on screen, from the first corner
-                      const fx = ccx + S * (-syw * row[6] + cyw * row[7])
-                      const fy = ccy - S * (-sp * cyw * row[6] - sp * syw * row[7] + cp * row[8])
-                      const hr = Math.hypot(fx - gx, fy - gy) * 0.62
-                      const fallX = gx - cx2, fallY = gy - cy2
-                      const drops = lvl === 3 ? 9 : 5
-
-                      ctx.strokeStyle = lvl === 3 ? "rgba(175,195,225,0.55)" : "rgba(185,205,232,0.4)"
-                      ctx.lineWidth = Math.max(1, k * 0.7)
-                      ctx.beginPath()
-                      for (let i = 0; i < drops; i++) {
-                        const h = ((id + 1) * 2654435761 ^ (i + 1) * 40503) >>> 0
-                        const ox = ((h & 1023) / 1023 - 0.5) * 2 * hr
-                        const oy = (((h >>> 10) & 1023) / 1023 - 0.5) * 2 * hr * 0.6
-                        const phase = ((now / 650) + (h >>> 20) / 4096) % 1
-                        const hx = cx2 + ox + fallX * phase
-                        const hy = cy2 + oy + fallY * phase
-                        ctx.moveTo(hx - fallX * 0.16, hy - fallY * 0.16)
-                        ctx.lineTo(hx, hy)
-                      }
-                      ctx.stroke()
-                    }
-                    ctx.lineCap = "butt"
-
                     // Lightning: storm cells strike on a hash-flickered
-                    // ~240ms bucket — jagged bolt cloud->ground plus a
+                    // ~480ms window — jagged bolt cloud->ground plus a
                     // flash refill of the hex
-                    const bucket = (now / 240) | 0
-                    for (const row of wet) {
+                    const bucket = (Date.now() / 480) | 0
+                    for (const row of storms) {
                       const id = row[0]
-                      if (this.airspace[id] !== 3) continue
                       const h = ((id + 1) * 2654435761 ^ bucket * 40503) >>> 0
-                      if (h % 11 !== 0) continue
+                      if (h % 9 !== 0) continue
 
                       const gx = ccx + S * (-syw * row[2] + cyw * row[3])
                       const gy = ccy - S * (-sp * cyw * row[2] - sp * syw * row[3] + cp * row[4])
@@ -1554,6 +1536,55 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                   }
                 }
                 this.ctx.putImageData(this.frame, 0, 0)
+
+                // Lightning at far zoom: storm cells strike over the
+                // warped texture using their pushed centers
+                this.hasWeatherAnim = false
+                if (this.stormCells && this.stormCells.length) {
+                  const ctx = this.ctx
+                  const A = this.ALT
+                  const bucket = (Date.now() / 480) | 0
+                  const hr = Math.max(S * this.tileArc * 0.62, 2)
+                  let visible = false
+                  for (let ci = 0; ci < this.stormCells.length; ci++) {
+                    const c = this.stormCells[ci]
+                    const x = c[0], y = c[1], z = c[2]
+                    const vz2 = cp * cyw * x + cp * syw * y + sp * z
+                    if (vz2 < 0.1) continue
+                    const gx = ccx + S * (-syw * x + cyw * y)
+                    const gy = ccy - S * (-sp * cyw * x - sp * syw * y + cp * z)
+                    if (gx < -hr || gx > cw + hr || gy < -hr || gy > ch + hr) continue
+                    visible = true
+
+                    const h = ((ci + 1) * 2654435761 ^ bucket * 40503) >>> 0
+                    if (h % 9 !== 0) continue
+
+                    const cx2 = ccx + S * A * (-syw * x + cyw * y)
+                    const cy2 = ccy - S * A * (-sp * cyw * x - sp * syw * y + cp * z)
+
+                    // Flash core reads at any distance; bolt when there's
+                    // room between the cloud shell and the ground
+                    ctx.beginPath()
+                    ctx.arc(cx2, cy2, hr * 0.85, 0, 6.2832)
+                    ctx.fillStyle = "rgba(255,252,215,0.5)"
+                    ctx.fill()
+
+                    if (Math.hypot(gx - cx2, gy - cy2) > 3) {
+                      ctx.beginPath()
+                      ctx.moveTo(cx2, cy2)
+                      for (let sgi = 1; sgi <= 4; sgi++) {
+                        const f2 = sgi / 4
+                        const jit = (((h >>> (sgi * 4)) & 15) / 15 - 0.5) * hr * 0.7
+                        ctx.lineTo(cx2 + (gx - cx2) * f2 + (sgi < 4 ? jit : 0), cy2 + (gy - cy2) * f2)
+                      }
+                      ctx.strokeStyle = "rgba(255,250,190,0.9)"
+                      ctx.lineWidth = Math.max(1, q)
+                      ctx.stroke()
+                    }
+                  }
+                  this.hasWeatherAnim = visible
+                }
+
                 this.drawSelection()
               }
 
