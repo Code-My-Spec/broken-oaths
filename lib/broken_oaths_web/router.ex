@@ -60,9 +60,23 @@ defmodule BrokenOathsWeb.Router do
       on_mount: [{BrokenOathsWeb.UserAuth, :require_authenticated}] do
       live "/users/settings", UserLive.Settings, :edit
       live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
+
+      live "/accounts", AccountLive.Index, :index
+      live "/accounts/picker", AccountLive.Picker, :index
+      live "/accounts/:id", AccountLive.Manage, :show
+      live "/accounts/:id/manage", AccountLive.Manage, :show
+      live "/accounts/:id/members", AccountLive.Members, :show
+      live "/accounts/:id/invitations", AccountLive.Invitations, :show
+      live "/integrations", IntegrationLive.Index, :index
     end
 
     post "/users/update-password", UserSessionController, :update_password
+  end
+
+  scope "/integrations/oauth", BrokenOathsWeb do
+    pipe_through [:browser, :require_authenticated_user]
+    get "/:provider", IntegrationsController, :request
+    get "/callback/:provider", IntegrationsController, :callback
   end
 
   scope "/", BrokenOathsWeb do
@@ -73,6 +87,8 @@ defmodule BrokenOathsWeb.Router do
       live "/users/register", UserLive.Registration, :new
       live "/users/log-in", UserLive.Login, :new
       live "/users/log-in/:token", UserLive.Confirmation, :new
+
+      live "/invitations/accept/:token", InvitationsLive.Accept, :new
     end
 
     post "/users/log-in", UserSessionController, :create

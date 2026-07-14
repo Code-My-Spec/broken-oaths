@@ -18,7 +18,9 @@ defmodule BrokenOaths.Users.Scope do
 
   alias BrokenOaths.Users.User
 
-  defstruct user: nil
+  defstruct user: nil,
+            active_account: nil,
+            active_account_id: nil
 
   @doc """
   Creates a scope for the given user.

@@ -23,6 +23,13 @@ end
 config :broken_oaths, BrokenOathsWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4050"))]
 
+# CodeMySpec feedback widget credentials. Generate them on the project
+# page at codemyspec.com and set the env vars before deploying.
+config :broken_oaths,
+  codemyspec_url: System.get_env("CODEMYSPEC_URL") || "https://codemyspec.com",
+  codemyspec_client_id: System.get_env("CODEMYSPEC_CLIENT_ID"),
+  codemyspec_client_secret: System.get_env("CODEMYSPEC_CLIENT_SECRET")
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

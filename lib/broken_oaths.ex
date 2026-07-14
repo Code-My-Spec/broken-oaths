@@ -6,5 +6,7 @@ defmodule BrokenOaths do
   Contexts are also responsible for managing your data, regardless
   if it comes from the database, an external API or others.
   """
-  use Boundary, deps: [], exports: :all
+  # BrokenOathsWeb.Endpoint.url() builds absolute links for outbound
+  # invitation emails — the standard phx.gen.auth-style exception.
+  use Boundary, deps: [], exports: :all, dirty_xrefs: [BrokenOathsWeb.Endpoint]
 end

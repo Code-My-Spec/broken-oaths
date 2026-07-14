@@ -44,6 +44,25 @@ config :broken_oaths, BrokenOathsWeb.Endpoint,
 # at the `config/runtime.exs`.
 config :broken_oaths, BrokenOaths.Mailer, adapter: Swoosh.Adapters.Local
 
+# OAuth integrations (cms_gen.integrations). Providers register here as
+# they are generated.
+config :broken_oaths, :integration_providers, [:codemyspec]
+
+config :broken_oaths, :codemyspec_url, "https://codemyspec.com"
+
+config :broken_oaths, :oauth_providers, %{
+  codemyspec: BrokenOaths.Integrations.Providers.Codemyspec
+}
+
+# Cloak vault for encrypted OAuth token storage.
+# Dev/test key only — production must override via CLOAK_KEY in runtime.exs.
+config :broken_oaths, BrokenOaths.Vault,
+  ciphers: [
+    default:
+      {Cloak.Ciphers.AES.GCM,
+       tag: "AES.GCM.V1", key: Base.decode64!("IakiNeC1WvqOVV4WKHRCCraKWKXip4iDyFI/Xs3Q1go=")}
+  ]
+
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.25.4",
