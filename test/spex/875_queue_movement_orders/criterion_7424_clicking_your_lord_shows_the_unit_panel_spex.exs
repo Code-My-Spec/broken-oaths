@@ -16,8 +16,8 @@ defmodule BrokenOathsSpex.Story875.Criterion7424Spex do
 
   spex "clicking your lord shows the unit panel" do
     scenario "the unit panel shows the lord's details" do
-      given_ :a_world
-      given_ :registered_player
+      given_(:a_world)
+      given_(:registered_player)
 
       given_ "the player joined the world and is on the board", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")

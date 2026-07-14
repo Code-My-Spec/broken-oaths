@@ -17,9 +17,9 @@ defmodule BrokenOathsSpex.Story876.Criterion7434Spex do
 
   spex "a stranger in remembered territory is invisible" do
     scenario "another player's unit disappears when it leaves your vision" do
-      given_ :a_world
-      given_ :registered_player
-      given_ :second_registered_player
+      given_(:a_world)
+      given_(:registered_player)
+      given_(:second_registered_player)
 
       given_ "both players joined the world", context do
         for conn <- [context.conn, context.other_conn] do
@@ -41,7 +41,10 @@ defmodule BrokenOathsSpex.Story876.Criterion7434Spex do
 
         [stranger | _] = Fixtures.player_units(context.world, context.other_user)
 
-        render_hook(play_live, "queue_move", %{"unit_id" => lord.id, "to_tile" => stranger.tile_id})
+        render_hook(play_live, "queue_move", %{
+          "unit_id" => lord.id,
+          "to_tile" => stranger.tile_id
+        })
 
         # walk until the stranger enters vision (bounded)
         seen =
@@ -69,7 +72,9 @@ defmodule BrokenOathsSpex.Story876.Criterion7434Spex do
         land? = fn tile -> Fixtures.tile_class(context.world, tile) == :land end
 
         [lord] =
-          for u <- Fixtures.player_units(context.world, context.user), u.id == context.lord.id, do: u
+          for u <- Fixtures.player_units(context.world, context.user),
+              u.id == context.lord.id,
+              do: u
 
         retreat =
           Enum.reduce(1..5, [lord.tile_id], fn _, [here | _] = acc ->
@@ -83,16 +88,26 @@ defmodule BrokenOathsSpex.Story876.Criterion7434Spex do
             [next | acc]
           end)
 
-        render_hook(context.play_live, "queue_move", %{"unit_id" => lord.id, "to_tile" => hd(retreat)})
+        render_hook(context.play_live, "queue_move", %{
+          "unit_id" => lord.id,
+          "to_tile" => hd(retreat)
+        })
+
         for _ <- 1..5, do: Fixtures.advance_turn(context.world)
         {:ok, context}
       end
 
       then_ "the stranger's terrain is remembered but the stranger is gone", context do
-        assert_push_event(context.play_live, "game:visibility", %{explored: explored})
+        # A fresh mount pushes the CURRENT board state exactly once —
+        # this is what a player looking at the area actually sees
+        # (and avoids matching stale per-tick pushes queued during the
+        # long approach/retreat given_ steps).
+        {:ok, fresh, _html} = live(context.conn, ~p"/play/#{context.world.id}")
+
+        assert_push_event(fresh, "game:visibility", %{explored: explored})
         assert context.stranger.tile_id in explored
 
-        assert_push_event(context.play_live, "game:units", %{units: units})
+        assert_push_event(fresh, "game:units", %{units: units})
         refute Enum.any?(units, &(&1.id == context.stranger.id))
         {:ok, context}
       end

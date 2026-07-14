@@ -17,8 +17,8 @@ defmodule BrokenOathsSpex.Story876.Criterion7431Spex do
 
   spex "a fresh spawn sees a cloud-wrapped planet with one clear bubble" do
     scenario "visibility covers the spawn bubble and little else" do
-      given_ :a_world
-      given_ :registered_player
+      given_(:a_world)
+      given_(:registered_player)
 
       given_ "the player joined the world and is on the board", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")
@@ -32,7 +32,11 @@ defmodule BrokenOathsSpex.Story876.Criterion7431Spex do
       end
 
       when_ "the board loads for the first time", context do
-        assert_push_event(context.play_live, "game:visibility", %{visible: visible, explored: explored})
+        assert_push_event(context.play_live, "game:visibility", %{
+          visible: visible,
+          explored: explored
+        })
+
         {:ok, context |> Map.put(:visible, visible) |> Map.put(:explored, explored)}
       end
 

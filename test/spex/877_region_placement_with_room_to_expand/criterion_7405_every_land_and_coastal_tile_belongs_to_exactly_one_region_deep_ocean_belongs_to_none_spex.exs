@@ -12,7 +12,7 @@ defmodule BrokenOathsSpex.Story877.Criterion7405Spex do
 
   spex "the partition covers land and coast exactly once" do
     scenario "every land and coastal tile belongs to exactly one region; deep ocean belongs to none" do
-      given_ :a_world
+      given_(:a_world)
 
       when_ "the region partition is computed", context do
         {:ok, Map.put(context, :partition, Fixtures.region_partition(context.world))}

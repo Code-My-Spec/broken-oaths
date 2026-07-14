@@ -12,8 +12,8 @@ defmodule BrokenOathsSpex.Story873.Criterion7415Spex do
 
   spex "returning player resumes where their civilization is" do
     scenario "the board opens centered on their units" do
-      given_ :a_world
-      given_ :registered_player
+      given_(:a_world)
+      given_(:registered_player)
 
       given_ "the player joined the world earlier", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")

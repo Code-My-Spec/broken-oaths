@@ -7,7 +7,7 @@ defmodule BrokenOaths.Game.VisibilityTest do
   alias BrokenOaths.Worlds.World
 
   @frequency 8
-  @seed 424242
+  @seed 424_242
 
   defp world, do: %World{seed: @seed, frequency: @frequency}
 
@@ -61,7 +61,16 @@ defmodule BrokenOaths.Game.VisibilityTest do
         world: w,
         turn: 1,
         units: %{
-          1 => %{id: 1, player_id: :p1, type: :lord, tile_id: 0, hp: 10, max_hp: 10, movement: 3, max_movement: 3}
+          1 => %{
+            id: 1,
+            player_id: :p1,
+            type: :lord,
+            tile_id: 0,
+            hp: 10,
+            max_hp: 10,
+            movement: 3,
+            max_movement: 3
+          }
         },
         orders: %{},
         players: %{p1: %{id: :p1, user_id: 1, region_id: 0, gold: 50}},
@@ -85,7 +94,16 @@ defmodule BrokenOaths.Game.VisibilityTest do
         world: w,
         turn: 1,
         units: %{
-          1 => %{id: 1, player_id: :p1, type: :lord, tile_id: 0, hp: 10, max_hp: 10, movement: 3, max_movement: 3},
+          1 => %{
+            id: 1,
+            player_id: :p1,
+            type: :lord,
+            tile_id: 0,
+            hp: 10,
+            max_hp: 10,
+            movement: 3,
+            max_movement: 3
+          },
           2 => %{
             id: 2,
             player_id: :p2,
@@ -96,7 +114,16 @@ defmodule BrokenOaths.Game.VisibilityTest do
             movement: 3,
             max_movement: 3
           },
-          3 => %{id: 3, player_id: :p2, type: :lord, tile_id: hidden_tile, hp: 10, max_hp: 10, movement: 3, max_movement: 3}
+          3 => %{
+            id: 3,
+            player_id: :p2,
+            type: :lord,
+            tile_id: hidden_tile,
+            hp: 10,
+            max_hp: 10,
+            movement: 3,
+            max_movement: 3
+          }
         },
         orders: %{},
         players: %{

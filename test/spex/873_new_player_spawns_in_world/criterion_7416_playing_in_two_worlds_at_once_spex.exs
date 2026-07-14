@@ -12,8 +12,8 @@ defmodule BrokenOathsSpex.Story873.Criterion7416Spex do
 
   spex "playing in two worlds at once" do
     scenario "joining a second world keeps both resumable" do
-      given_ :a_world
-      given_ :registered_player
+      given_(:a_world)
+      given_(:registered_player)
 
       given_ "a second world exists", context do
         {:ok, Map.put(context, :second_world, Fixtures.world_fixture(%{seed: 515_151}))}

@@ -69,6 +69,9 @@ defmodule BrokenOathsWeb.Router do
       live "/accounts/:id/members", AccountLive.Members, :show
       live "/accounts/:id/invitations", AccountLive.Invitations, :show
       live "/integrations", IntegrationLive.Index, :index
+
+      live "/play", GameLive.Join, :index
+      live "/play/:id", GameLive.Play, :show
     end
 
     post "/users/update-password", UserSessionController, :update_password

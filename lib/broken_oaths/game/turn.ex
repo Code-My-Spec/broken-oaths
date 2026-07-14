@@ -125,16 +125,24 @@ defmodule BrokenOaths.Game.Turn do
 
   defp resolve_orders(state) do
     movers =
-      for {unit_id, %{kind: :move, status: :pending, path: path}} <- state.orders, path != [], into: %{} do
+      for {unit_id, %{kind: :move, status: :pending, path: path}} <- state.orders,
+          path != [],
+          into: %{} do
         unit = Map.fetch!(state.units, unit_id)
-        {unit_id, %{tile_id: unit.tile_id, path: path, status: :pending, movement_left: unit.movement}}
+
+        {unit_id,
+         %{tile_id: unit.tile_id, path: path, status: :pending, movement_left: unit.movement}}
       end
 
     positions = Map.new(state.units, fn {id, unit} -> {id, unit.tile_id} end)
 
     {movers, positions} = run_rounds(movers, positions)
 
-    %{state | units: apply_positions(state.units, movers, positions), orders: apply_orders(state.orders, movers)}
+    %{
+      state
+      | units: apply_positions(state.units, movers, positions),
+        orders: apply_orders(state.orders, movers)
+    }
   end
 
   defp run_rounds(movers, positions) do
@@ -150,7 +158,9 @@ defmodule BrokenOaths.Game.Turn do
 
   defp active_movers(movers) do
     movers
-    |> Enum.filter(fn {_id, m} -> m.status == :pending and m.path != [] and m.movement_left > 0 end)
+    |> Enum.filter(fn {_id, m} ->
+      m.status == :pending and m.path != [] and m.movement_left > 0
+    end)
     |> Enum.map(fn {id, _m} -> id end)
     |> Enum.sort()
   end
@@ -170,8 +180,11 @@ defmodule BrokenOaths.Game.Turn do
   defp apply_positions(units, movers, positions) do
     Map.new(units, fn {id, unit} ->
       case Map.fetch(movers, id) do
-        {:ok, mover} -> {id, %{unit | tile_id: Map.fetch!(positions, id), movement: mover.movement_left}}
-        :error -> {id, unit}
+        {:ok, mover} ->
+          {id, %{unit | tile_id: Map.fetch!(positions, id), movement: mover.movement_left}}
+
+        :error ->
+          {id, unit}
       end
     end)
   end

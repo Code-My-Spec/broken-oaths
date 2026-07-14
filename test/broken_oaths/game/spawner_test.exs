@@ -8,7 +8,7 @@ defmodule BrokenOaths.Game.SpawnerTest do
   # This seed/frequency pair has exactly two spawnable regions (0 and 1),
   # which makes the "next region" and "world full" paths cheap to exercise.
   @frequency 8
-  @seed 424242
+  @seed 424_242
 
   defp world, do: %World{seed: @seed, frequency: @frequency}
 
@@ -32,7 +32,8 @@ defmodule BrokenOaths.Game.SpawnerTest do
     end
 
     test "lord_tile and settler_tile are land, distinct, and mesh-adjacent" do
-      {:ok, %{lord_tile: lord_tile, settler_tile: settler_tile}} = Spawner.spawn_player(world(), [])
+      {:ok, %{lord_tile: lord_tile, settler_tile: settler_tile}} =
+        Spawner.spawn_player(world(), [])
 
       assert Regions.tile_class(world(), lord_tile) == :land
       assert Regions.tile_class(world(), settler_tile) == :land
@@ -44,7 +45,8 @@ defmodule BrokenOaths.Game.SpawnerTest do
       {:ok, %{region_id: region_id, lord_tile: lord_tile, settler_tile: settler_tile}} =
         Spawner.spawn_player(world(), [])
 
-      region_tiles = world() |> Regions.partition() |> Map.fetch!(:regions) |> Map.fetch!(region_id)
+      region_tiles =
+        world() |> Regions.partition() |> Map.fetch!(:regions) |> Map.fetch!(region_id)
 
       assert lord_tile in region_tiles
       assert settler_tile in region_tiles

@@ -12,8 +12,8 @@ defmodule BrokenOathsSpex.Story877.Criterion7409Spex do
 
   spex "a full world turns new players away" do
     scenario "joining a full world is refused" do
-      given_ :a_world
-      given_ :registered_player
+      given_(:a_world)
+      given_(:registered_player)
 
       given_ "every spawnable region is already claimed", context do
         for _region <- Fixtures.spawnable_regions(context.world) do

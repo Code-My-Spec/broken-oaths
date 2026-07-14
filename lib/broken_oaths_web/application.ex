@@ -13,8 +13,10 @@ defmodule BrokenOathsWeb.Application do
         BrokenOaths.Repo,
         {DNSCluster, query: Application.get_env(:broken_oaths, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: BrokenOaths.PubSub},
-        # Start a worker by calling: BrokenOaths.Worker.start_link(arg)
-        # {BrokenOaths.Worker, arg},
+        # One WorldServer per active game world, lazily started and
+        # addressed by world id (see BrokenOaths.Game.WorldServer).
+        {Registry, keys: :unique, name: BrokenOaths.GameRegistry},
+        {DynamicSupervisor, name: BrokenOaths.GameSupervisor, strategy: :one_for_one},
         # Start to serve requests, typically the last entry
         BrokenOathsWeb.Endpoint
       ] ++ globe_warmup()

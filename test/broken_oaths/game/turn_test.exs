@@ -7,7 +7,7 @@ defmodule BrokenOaths.Game.TurnTest do
   alias BrokenOaths.Worlds.World
 
   @frequency 8
-  @seed 424242
+  @seed 424_242
 
   defp world, do: %World{seed: @seed, frequency: @frequency}
 
@@ -130,7 +130,12 @@ defmodule BrokenOaths.Game.TurnTest do
     test "the outcome is deterministic across repeated resolution of the same state" do
       u1 = unit(1, tile: 1, max_movement: 1)
       u2 = unit(2, tile: 2, max_movement: 1)
-      orders = %{1 => %{kind: :move, path: [50], status: :pending}, 2 => %{kind: :move, path: [50], status: :pending}}
+
+      orders = %{
+        1 => %{kind: :move, path: [50], status: :pending},
+        2 => %{kind: :move, path: [50], status: :pending}
+      }
+
       state = base_state(%{1 => u1, 2 => u2}, orders)
 
       {first, _} = Turn.tick(state)
@@ -204,7 +209,12 @@ defmodule BrokenOaths.Game.TurnTest do
 
     test "a player with no units has an empty, unchanged explored set" do
       state = base_state(%{}, %{})
-      state = %{state | players: %{1 => %{id: 1, user_id: 1, region_id: 0, gold: 50}}, explored: %{}}
+
+      state = %{
+        state
+        | players: %{1 => %{id: 1, user_id: 1, region_id: 0, gold: 50}},
+          explored: %{}
+      }
 
       {new_state, _events} = Turn.tick(state)
 

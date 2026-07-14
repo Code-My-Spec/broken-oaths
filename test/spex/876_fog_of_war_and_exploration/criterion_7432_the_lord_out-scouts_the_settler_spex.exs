@@ -17,8 +17,8 @@ defmodule BrokenOathsSpex.Story876.Criterion7432Spex do
 
   spex "the lord out-scouts the settler" do
     scenario "vision follows each unit's range" do
-      given_ :a_world
-      given_ :registered_player
+      given_(:a_world)
+      given_(:registered_player)
 
       given_ "the player joined the world and is on the board", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")

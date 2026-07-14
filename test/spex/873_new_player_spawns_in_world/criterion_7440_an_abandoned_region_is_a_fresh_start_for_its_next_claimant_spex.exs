@@ -12,9 +12,9 @@ defmodule BrokenOathsSpex.Story873.Criterion7440Spex do
 
   spex "an abandoned region is a fresh start for its next claimant" do
     scenario "the next claimant inherits nothing" do
-      given_ :a_world
-      given_ :registered_player
-      given_ :second_registered_player
+      given_(:a_world)
+      given_(:registered_player)
+      given_(:second_registered_player)
 
       given_ "the first player joined, then abandoned their region", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")

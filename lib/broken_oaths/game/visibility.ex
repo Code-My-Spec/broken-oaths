@@ -20,7 +20,11 @@ defmodule BrokenOaths.Game.Visibility do
 
   @type tile_id :: non_neg_integer()
   @type unit_type :: :lord | :settler | atom()
-  @type unit :: %{required(:type) => unit_type, required(:tile_id) => tile_id, optional(atom()) => term()}
+  @type unit :: %{
+          required(:type) => unit_type,
+          required(:tile_id) => tile_id,
+          optional(atom()) => term()
+        }
 
   @default_vision_radius 2
 

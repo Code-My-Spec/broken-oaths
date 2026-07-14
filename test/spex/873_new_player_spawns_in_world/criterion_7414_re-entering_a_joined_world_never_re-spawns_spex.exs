@@ -12,8 +12,8 @@ defmodule BrokenOathsSpex.Story873.Criterion7414Spex do
 
   spex "re-entering a joined world never re-spawns" do
     scenario "refresh and picker re-entry preserve the civilization" do
-      given_ :a_world
-      given_ :registered_player
+      given_(:a_world)
+      given_(:registered_player)
 
       given_ "the player has joined and knows their units", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")

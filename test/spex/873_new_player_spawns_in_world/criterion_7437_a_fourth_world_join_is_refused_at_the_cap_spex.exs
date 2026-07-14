@@ -12,7 +12,7 @@ defmodule BrokenOathsSpex.Story873.Criterion7437Spex do
 
   spex "a fourth world join is refused at the cap" do
     scenario "three memberships is the ceiling" do
-      given_ :registered_player
+      given_(:registered_player)
 
       given_ "the player already plays in three worlds", context do
         worlds =

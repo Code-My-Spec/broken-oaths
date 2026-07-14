@@ -24,6 +24,11 @@ config :broken_oaths,
   ecto_repos: [BrokenOaths.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+# WorldServer's 60s self-scheduled turn tick. Disabled in test so the
+# deterministic `Game.advance_turn/1` (see BrokenOathsSpex.Fixtures) is
+# the only tick source specs ever see.
+config :broken_oaths, :game_auto_tick, true
+
 # Configure the endpoint
 config :broken_oaths, BrokenOathsWeb.Endpoint,
   url: [host: "localhost"],

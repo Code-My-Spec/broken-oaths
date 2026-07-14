@@ -17,9 +17,9 @@ defmodule BrokenOathsSpex.Story876.Criterion7436Spex do
 
   spex "hidden tiles never travel over the wire" do
     scenario "every pushed payload is fog-filtered" do
-      given_ :a_world
-      given_ :registered_player
-      given_ :second_registered_player
+      given_(:a_world)
+      given_(:registered_player)
+      given_(:second_registered_player)
 
       given_ "both players joined the world", context do
         for conn <- [context.conn, context.other_conn] do

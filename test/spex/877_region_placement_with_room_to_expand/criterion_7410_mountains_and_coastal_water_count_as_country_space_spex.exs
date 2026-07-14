@@ -12,7 +12,7 @@ defmodule BrokenOathsSpex.Story877.Criterion7410Spex do
 
   spex "mountains and coastal water count as country space" do
     scenario "region contents are land, mountains, and coastal water only" do
-      given_ :a_world
+      given_(:a_world)
 
       when_ "the region partition is computed", context do
         {:ok, Map.put(context, :partition, Fixtures.region_partition(context.world))}

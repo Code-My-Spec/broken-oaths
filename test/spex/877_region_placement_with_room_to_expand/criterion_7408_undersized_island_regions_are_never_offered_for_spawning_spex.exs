@@ -12,8 +12,8 @@ defmodule BrokenOathsSpex.Story877.Criterion7408Spex do
 
   spex "undersized island regions are never offered for spawning" do
     scenario "a new player is placed in a full-sized region" do
-      given_ :a_world
-      given_ :registered_player
+      given_(:a_world)
+      given_(:registered_player)
 
       when_ "the player joins the world", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")

@@ -12,8 +12,8 @@ defmodule BrokenOathsSpex.Story877.Criterion7411Spex do
 
   spex "a claimed region has room for about seven cities" do
     scenario "the claimed region's size is roughly 250 hexes" do
-      given_ :a_world
-      given_ :registered_player
+      given_(:a_world)
+      given_(:registered_player)
 
       when_ "the player joins the world", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")

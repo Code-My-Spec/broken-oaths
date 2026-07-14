@@ -17,9 +17,9 @@ defmodule BrokenOathsSpex.Story876.Criterion7435Spex do
 
   spex "two players see two different worlds" do
     scenario "each spawn bubble is private" do
-      given_ :a_world
-      given_ :registered_player
-      given_ :second_registered_player
+      given_(:a_world)
+      given_(:registered_player)
+      given_(:second_registered_player)
 
       given_ "both players joined the world", context do
         for conn <- [context.conn, context.other_conn] do
@@ -38,7 +38,11 @@ defmodule BrokenOathsSpex.Story876.Criterion7435Spex do
         {:ok, theirs, _html} = live(context.other_conn, ~p"/play/#{context.world.id}")
 
         assert_push_event(mine, "game:visibility", %{visible: my_visible, explored: my_explored})
-        assert_push_event(theirs, "game:visibility", %{visible: their_visible, explored: their_explored})
+
+        assert_push_event(theirs, "game:visibility", %{
+          visible: their_visible,
+          explored: their_explored
+        })
 
         context =
           context

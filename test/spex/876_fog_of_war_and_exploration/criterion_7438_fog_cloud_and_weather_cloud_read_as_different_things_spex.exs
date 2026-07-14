@@ -17,8 +17,8 @@ defmodule BrokenOathsSpex.Story876.Criterion7438Spex do
 
   spex "fog cloud and weather cloud read as different things" do
     scenario "fog and weather arrive as separate, differently-styled layers" do
-      given_ :a_world
-      given_ :registered_player
+      given_(:a_world)
+      given_(:registered_player)
 
       given_ "the player joined the world and is on the board", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")

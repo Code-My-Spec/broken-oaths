@@ -17,8 +17,8 @@ defmodule BrokenOathsSpex.Story876.Criterion7433Spex do
 
   spex "terrain stays on the map after the scout moves on" do
     scenario "a visited tile becomes remembered, not forgotten" do
-      given_ :a_world
-      given_ :registered_player
+      given_(:a_world)
+      given_(:registered_player)
 
       given_ "the player joined the world and is on the board", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")
@@ -49,14 +49,22 @@ defmodule BrokenOathsSpex.Story876.Criterion7433Spex do
             [next | acc]
           end)
 
-        render_hook(context.play_live, "queue_move", %{"unit_id" => lord.id, "to_tile" => hd(walk)})
+        render_hook(context.play_live, "queue_move", %{
+          "unit_id" => lord.id,
+          "to_tile" => hd(walk)
+        })
+
         for _ <- 1..4, do: Fixtures.advance_turn(context.world)
 
         {:ok, context |> Map.put(:origin, lord.tile_id)}
       end
 
       when_ "the board's visibility refreshes", context do
-        assert_push_event(context.play_live, "game:visibility", %{visible: visible, explored: explored})
+        assert_push_event(context.play_live, "game:visibility", %{
+          visible: visible,
+          explored: explored
+        })
+
         {:ok, context |> Map.put(:visible, visible) |> Map.put(:explored, explored)}
       end
 

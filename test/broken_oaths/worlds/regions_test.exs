@@ -6,7 +6,7 @@ defmodule BrokenOaths.Worlds.RegionsTest do
   alias BrokenOaths.Worlds.World
 
   @frequency 8
-  @seed 424242
+  @seed 424_242
   @total_tiles Globe.tile_count(@frequency)
 
   defp world(seed \\ @seed, frequency \\ @frequency) do

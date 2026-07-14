@@ -12,7 +12,7 @@ defmodule BrokenOathsSpex.Story877.Criterion7404Spex do
 
   spex "the region partition is deterministic" do
     scenario "same seed always produces the same region partition" do
-      given_ :a_world
+      given_(:a_world)
 
       given_ "the world's region partition has been computed once", context do
         {:ok, Map.put(context, :first_partition, Fixtures.region_partition(context.world))}

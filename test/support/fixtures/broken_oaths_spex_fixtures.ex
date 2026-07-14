@@ -46,6 +46,12 @@ defmodule BrokenOathsSpex.Fixtures do
   # tick is server-originated state (the timer would have done it), not
   # a player action — sanctioned.
   defdelegate advance_turn(world), to: BrokenOaths.Game, as: :advance_turn
+
+  # Known-debt shortcut (see bdd/spex/boundaries.md): a true simultaneous
+  # UI race is unconstructible in LiveViewTest (helpers are test-process
+  # only). The join flow is covered end-to-end by criteria 7406/7412;
+  # criterion 7407 races the same serialization point the UI path hits.
+  defdelegate join_world(world, user), to: BrokenOaths.Game
   defdelegate restart_world(world), to: BrokenOaths.Game, as: :restart_world_server
 
   # --- Game reads for board-state assertions (sanctioned) ---

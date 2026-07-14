@@ -12,8 +12,8 @@ defmodule BrokenOathsSpex.Story873.Criterion7413Spex do
 
   spex "picking a world that just filled up fails gracefully" do
     scenario "the last region is taken between render and click" do
-      given_ :a_world
-      given_ :registered_player
+      given_(:a_world)
+      given_(:registered_player)
 
       given_ "the player has the picker open showing the world as joinable", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")

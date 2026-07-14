@@ -16,8 +16,8 @@ defmodule BrokenOathsSpex.Story874.Criterion7421Spex do
 
   spex "a server restart never loses or double-runs a turn" do
     scenario "the world resumes exactly where it was" do
-      given_ :a_world
-      given_ :registered_player
+      given_(:a_world)
+      given_(:registered_player)
 
       given_ "the player has joined the world", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")
@@ -59,7 +59,11 @@ defmodule BrokenOathsSpex.Story874.Criterion7421Spex do
 
         Fixtures.advance_turn(context.world)
 
-        [unit] = for u <- Fixtures.player_units(context.world, context.user), u.id == context.unit_id, do: u
+        [unit] =
+          for u <- Fixtures.player_units(context.world, context.user),
+              u.id == context.unit_id,
+              do: u
+
         assert unit.tile_id == context.target
 
         # Anchor: the board still renders after the restart

@@ -12,8 +12,8 @@ defmodule BrokenOathsSpex.Story873.Criterion7439Spex do
 
   spex "abandoning wipes the civilization and reopens the region" do
     scenario "abandon with confirmation clears the board" do
-      given_ :a_world
-      given_ :registered_player
+      given_(:a_world)
+      given_(:registered_player)
 
       given_ "the player has joined and holds a region", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")

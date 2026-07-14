@@ -16,8 +16,8 @@ defmodule BrokenOathsSpex.Story874.Criterion7420Spex do
 
   spex "the world lives while everyone sleeps" do
     scenario "ten turns pass with nobody connected" do
-      given_ :a_world
-      given_ :registered_player
+      given_(:a_world)
+      given_(:registered_player)
 
       given_ "the player has joined the world", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")

@@ -1,3 +1,5 @@
 defmodule BrokenOathsSpex do
-  use Boundary, top_level?: true, deps: [BrokenOathsTest, BrokenOathsWeb, BrokenOathsSpex.Fixtures]
+  use Boundary,
+    top_level?: true,
+    deps: [BrokenOathsTest, BrokenOathsWeb, BrokenOathsSpex.Fixtures]
 end

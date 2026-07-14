@@ -78,7 +78,9 @@ defmodule BrokenOaths.Worlds.Regions do
   # Caching
   # -------------------------------------------------------------------
 
-  defp partition_key(world), do: {__MODULE__, :partition, @cache_version, world.seed, world.frequency}
+  defp partition_key(world),
+    do: {__MODULE__, :partition, @cache_version, world.seed, world.frequency}
+
   defp classes_key(world), do: {__MODULE__, :classes, @cache_version, world.seed, world.frequency}
 
   defp cached(key, build) do
@@ -247,6 +249,7 @@ defmodule BrokenOaths.Worlds.Regions do
   end
 
   defp pick_seeds(selected, _min_dist, _centers, 0), do: Enum.reverse(selected)
+
   defp pick_seeds(selected, min_dist, _centers, _remaining) when map_size(min_dist) == 0,
     do: Enum.reverse(selected)
 

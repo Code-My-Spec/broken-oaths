@@ -16,9 +16,9 @@ defmodule BrokenOathsSpex.Story874.Criterion7423Spex do
 
   spex "two connected players tick over together" do
     scenario "both browsers show the new turn without a refresh" do
-      given_ :a_world
-      given_ :registered_player
-      given_ :second_registered_player
+      given_(:a_world)
+      given_(:registered_player)
+      given_(:second_registered_player)
 
       given_ "both players joined and are watching the board", context do
         views =
@@ -47,7 +47,10 @@ defmodule BrokenOathsSpex.Story874.Criterion7423Spex do
       then_ "both connected views show the advanced turn without refreshing", context do
         for view <- context.views do
           html = render(view)
-          [turn] = Regex.run(~r/data-test="turn-number"[^>]*>(\d+)</, html, capture: :all_but_first)
+
+          [turn] =
+            Regex.run(~r/data-test="turn-number"[^>]*>(\d+)</, html, capture: :all_but_first)
+
           assert String.to_integer(turn) == context.turn_before + 1
         end
 

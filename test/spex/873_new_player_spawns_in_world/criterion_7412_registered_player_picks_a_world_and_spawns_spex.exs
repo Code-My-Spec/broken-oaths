@@ -12,8 +12,8 @@ defmodule BrokenOathsSpex.Story873.Criterion7412Spex do
 
   spex "registered player picks a world and spawns" do
     scenario "the picker join leads to the board" do
-      given_ :a_world
-      given_ :registered_player
+      given_(:a_world)
+      given_(:registered_player)
 
       when_ "the player picks the world from the picker", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")

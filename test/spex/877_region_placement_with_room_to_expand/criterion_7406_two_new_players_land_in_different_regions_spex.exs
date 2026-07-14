@@ -12,9 +12,9 @@ defmodule BrokenOathsSpex.Story877.Criterion7406Spex do
 
   spex "two new players land in different regions" do
     scenario "sequential joiners claim distinct regions" do
-      given_ :a_world
-      given_ :registered_player
-      given_ :second_registered_player
+      given_(:a_world)
+      given_(:registered_player)
+      given_(:second_registered_player)
 
       given_ "the first player has joined the world", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")

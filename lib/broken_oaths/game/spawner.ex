@@ -48,8 +48,11 @@ defmodule BrokenOaths.Game.Spawner do
     |> central_land_tiles(world)
     |> find_pair(world)
     |> case do
-      nil -> place(rest, world)
-      {lord_tile, settler_tile} -> {:ok, %{region_id: region_id, lord_tile: lord_tile, settler_tile: settler_tile}}
+      nil ->
+        place(rest, world)
+
+      {lord_tile, settler_tile} ->
+        {:ok, %{region_id: region_id, lord_tile: lord_tile, settler_tile: settler_tile}}
     end
   end
 

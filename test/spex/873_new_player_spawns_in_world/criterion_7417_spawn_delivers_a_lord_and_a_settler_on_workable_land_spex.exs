@@ -12,8 +12,8 @@ defmodule BrokenOathsSpex.Story873.Criterion7417Spex do
 
   spex "spawn delivers a lord and a settler on workable land" do
     scenario "the starting units are right" do
-      given_ :a_world
-      given_ :registered_player
+      given_(:a_world)
+      given_(:registered_player)
 
       when_ "the player joins the world", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")

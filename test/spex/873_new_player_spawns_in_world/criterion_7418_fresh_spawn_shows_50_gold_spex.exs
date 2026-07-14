@@ -12,8 +12,8 @@ defmodule BrokenOathsSpex.Story873.Criterion7418Spex do
 
   spex "fresh spawn shows 50 gold" do
     scenario "the gold readout says 50" do
-      given_ :a_world
-      given_ :registered_player
+      given_(:a_world)
+      given_(:registered_player)
 
       when_ "the player joins and the board loads", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")

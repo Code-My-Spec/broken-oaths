@@ -16,9 +16,9 @@ defmodule BrokenOathsSpex.Story874.Criterion7422Spex do
 
   spex "nothing moves until the boundary, then everything moves at once" do
     scenario "two players' queued moves resolve in the same tick" do
-      given_ :a_world
-      given_ :registered_player
-      given_ :second_registered_player
+      given_(:a_world)
+      given_(:registered_player)
+      given_(:second_registered_player)
 
       given_ "both players joined the world", context do
         for conn <- [context.conn, context.other_conn] do
@@ -34,7 +34,10 @@ defmodule BrokenOathsSpex.Story874.Criterion7422Spex do
 
       given_ "each player queues a move for one of their units", context do
         moves =
-          for {conn, user} <- [{context.conn, context.user}, {context.other_conn, context.other_user}] do
+          for {conn, user} <- [
+                {context.conn, context.user},
+                {context.other_conn, context.other_user}
+              ] do
             {:ok, play_live, _html} = live(conn, ~p"/play/#{context.world.id}")
             [unit | _] = Fixtures.player_units(context.world, user)
             [target | _] = Fixtures.adjacent_tiles(context.world, unit.tile_id)
