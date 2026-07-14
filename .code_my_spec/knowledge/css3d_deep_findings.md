@@ -59,3 +59,28 @@ Extruded hex prism = cap + up to 6 walls. With backface culling + walls only at 
 
 ### Recommendations (as delivered)
 Prototype a few hundred extruded prisms at grazing angles in Chrome/Safari/Firefox before committing; options if Chrome paint path pops through: (a) keep extrusion subtle enough for scalar order to hold, (b) per-tile compositing for cliffs only, (c) **fake elevation with shading instead of translateZ so the surface stays convex** — note: (c) is exactly what the production canvas renderer does (radial lift is drawn, not composited), which sidesteps this entire class of problem.
+
+---
+
+## Report 3 — Lighting fakes (angle2)
+
+### Baking shading (both renderers)
+Nobody computes real lighting in CSS-3D — they bake per-face lightness into color. Best reference: **Julia Miocene's light-and-shadow method** (miocene.io, Jun 2025): `color-mix(in srgb, base, light N%)` ladder by angle-from-light; shadows are **never black** — mix toward the *complement of the light color*. Transfers verbatim to canvas per-tile fills. (Our shade tables already do a brightness ladder; the complement-tinted-shadow trick is an easy upgrade for nicer nights.)
+
+### The compositor economics (css3d renderer only)
+- `filter: brightness()` is composited (no repaint); `background-color` is NOT — re-baking colors on 6k divs per frame = massive repaint. CSS DOOM proves filter+inherited `--light` custom property is cheap at thousands of divs (per-SECTOR brightness, though — not per-face directional).
+- These economics are **moot on canvas**: per-tile recompute per frame is the normal canvas path — a key reason canvas won for a moving sun over a rotating globe.
+
+### Flattening rules (exact spec list, CSS Transforms L2 §7.1)
+Grouping properties force `transform-style: flat`: overflow≠visible/clip, opacity<1, filter, clip, clip-path, isolation:isolate, mask-image, mask-border-source, mix-blend-mode≠normal, contain:paint, content-visibility:hidden. Safe on LEAF tiles or on SIBLINGS above the 3D context; fatal on the preserve-3d container or ancestors.
+
+### Terminator/rim/atmosphere as overlays — TRANSFERS TO CANVAS
+Because the projection is orthographic, the globe silhouette is a plain 2D circle, so day/night + rim can be a 2D overlay:
+- css3d: counter-rotated sibling overlay (asymmetric border-radius hemisphere + inset box-shadow feather + radial-gradient limb darkening) — one composited transform per frame.
+- **canvas: same layering as compositing passes** — `globalCompositeOperation: "multiply"` for terminator shading, `"screen"/"lighter"` for rim glow, radial-gradient fill for atmosphere halo (Rob DiMarzo's solar-system recipes for the gradient shapes). Zero per-tile cost. ← candidate: add an atmosphere rim-glow pass to our canvas renderer.
+
+### Specular/water shimmer
+CSS: animated background gradients force repaints — prefer pulsing `filter`/`opacity` or one overlay disc over water. Canvas: shimmer = per-frame brightness/gradient offset on water tiles, no special penalty.
+
+### Unverified
+6k per-tile filter/custom-prop writes at 60fps (no benchmark exists); Safari 2026 opacity-flattening behavior; Chrome dirty-rect union thresholds for scattered animated facets.
