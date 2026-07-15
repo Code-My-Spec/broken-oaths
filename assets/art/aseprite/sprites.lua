@@ -196,4 +196,31 @@ build("rainforest", "decor", {
   "................",
 })
 
+-- ---------------------------------------------------------------- city
+build("city", "decor", {
+  K = rgba("#1a1a1a"),
+  T = rgba("#c9a55a"), -- thatch
+  D = rgba("#a3823f"), -- thatch shade
+  W = rgba("#8a5a2b"), -- wall wood
+  V = rgba("#6b4520"), -- wall shade / door
+  F = rgba("#a83232"), -- banner
+}, {
+  "............K...",
+  "...........KFK..",
+  "......KK...KFFK.",
+  ".....KTTK..KFK..",
+  "....KTTDTK..K...",
+  "...KTTTTDTK.K...",
+  "..KTDTTTTTTKK...",
+  ".KTTTTDTTTTDK...",
+  ".KKKKKKKKKKKK...",
+  "..KWWVWWVWWK....",
+  "..KWWKVVKWWK....",
+  "..KWWKVVKWWK....",
+  ".KKKKKKKKKKKK...",
+  "................",
+  "................",
+  "................",
+})
+
 print("sprite set complete")
