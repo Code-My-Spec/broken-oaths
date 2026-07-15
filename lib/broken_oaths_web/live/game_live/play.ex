@@ -646,14 +646,16 @@ defmodule BrokenOathsWeb.GameLive.Play do
             return img && img.complete && img.naturalWidth ? img : null
           },
 
-          // Repeating ground pattern for a texture key, scaled with zoom
-          // so terrain doesn't swim against the tiles. Null until loaded.
-          patternFor(ctx, key) {
+          // Repeating ground pattern for a texture key, anchored to the
+          // tile's projected center so the texture travels with the tile
+          // through pans, zooms, and slides (screen-anchored patterns
+          // visibly swim under the globe). Null until loaded.
+          patternFor(ctx, key, px, py) {
             const img = key && this.terrainTex[key]
             if (!img || !img.complete || !img.naturalWidth) return null
             if (!this.patterns[key]) this.patterns[key] = ctx.createPattern(img, "repeat")
             const k = Math.max(this.scale / 1400, 0.25)
-            this.patterns[key].setTransform(new DOMMatrix().scale(k))
+            this.patterns[key].setTransform(new DOMMatrix([k, 0, 0, k, px, py]))
             return this.patterns[key]
           },
 
@@ -711,11 +713,14 @@ defmodule BrokenOathsWeb.GameLive.Play do
             ctx.fill()
 
             const order = this.tiles
-              .map((row) => ({row, depth: this.project(row[4], row[5], row[6]).depth}))
+              .map((row) => {
+                const c = this.project(row[4], row[5], row[6])
+                return {row, depth: c.depth, cx: c.px, cy: c.py}
+              })
               .filter(({depth}) => depth > 0.02)
               .sort((a, b) => a.depth - b.depth)
 
-            for (const {row} of order) {
+            for (const {row, cx, cy} of order) {
               const [id, color] = row
               ctx.beginPath()
               for (let i = 7; i < row.length; i += 3) {
@@ -723,7 +728,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
                 if (i === 7) ctx.moveTo(px, py); else ctx.lineTo(px, py)
               }
               ctx.closePath()
-              ctx.fillStyle = this.patternFor(ctx, row[3]) || color
+              ctx.fillStyle = this.patternFor(ctx, row[3], cx, cy) || color
               ctx.fill()
 
               // Explored-but-out-of-vision: remembered terrain under a
@@ -740,12 +745,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
             ctx.imageSmoothingEnabled = false
             const decorSize = Math.min(Math.max(this.scale * this.arc * 1.7, 10), 72)
             if (decorSize >= 10) {
-              for (const {row} of order) {
+              for (const {row, cx, cy} of order) {
                 const img = this.spriteFor(row[2])
                 if (!img) continue
-                const {px, py} = this.project(row[4], row[5], row[6])
                 ctx.globalAlpha = this.visibleSet.has(row[0]) ? 1 : 0.55
-                ctx.drawImage(img, px - decorSize / 2, py - decorSize * 0.62, decorSize, decorSize)
+                ctx.drawImage(img, cx - decorSize / 2, cy - decorSize * 0.62, decorSize, decorSize)
               }
               ctx.globalAlpha = 1
             }
