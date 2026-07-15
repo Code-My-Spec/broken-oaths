@@ -1,0 +1,239 @@
+defmodule BrokenOathsWeb.GameLive.CityPanel do
+  @moduledoc """
+  Selected city details: name (renameable), size, food-to-growth
+  progress, the current build's progress, the production catalog, and
+  worked-tile assignment.
+
+  A presentational component mounted by `BrokenOathsWeb.GameLive.Play`,
+  which owns city selection, command dispatch, and error state — this
+  component never reads from `BrokenOaths.Game` itself and defines no
+  `handle_event/3` of its own. Every interactive element pushes a plain
+  DOM event with no `phx-target`, so it bubbles to `Play` exactly like
+  `GameLive.UnitPanel`'s pattern (none of Play's board doctrine changes:
+  no tile DOM, no component-owned state).
+
+  Assigns:
+
+    * `:id` - the DOM id for this component instance
+    * `:city` - the selected city, or `nil` when nothing is selected.
+      Shape: `id`, `name`, `tile_id`, `size`, `food`, `food_threshold`
+      (`nil` at the Stone Age cap), `production` (per-turn rate),
+      `queue` (`[%{id:, type:, banked:, cost:}]`, head = current),
+      `territory` (`[tile_id]`), `worked_tiles` (`[tile_id]`, excludes
+      the always-free center)
+    * `:assignable_tiles` - territory tiles Play has already filtered
+      to "not the center, not already worked, workable terrain" — this
+      component has no world/terrain access to compute that itself
+
+  The production catalog's costs and the size-1 Settler guard are read
+  straight from `BrokenOaths.Game.Production` (a pure, dependency-free
+  core module) rather than duplicated here — one source of truth for
+  what's buildable and what it costs.
+  """
+
+  use BrokenOathsWeb, :live_component
+
+  alias BrokenOaths.Game.Production
+
+  @catalog [:settler, :worker, :warrior]
+
+  def render(%{city: nil} = assigns) do
+    ~H"""
+    <div id={@id}></div>
+    """
+  end
+
+  def render(assigns) do
+    assigns =
+      assigns
+      |> assign(:assignable_tiles, Map.get(assigns, :assignable_tiles, []))
+      |> assign(:catalog, @catalog)
+
+    ~H"""
+    <div id={@id} data-test="city-panel" class="card bg-base-200 shadow-sm w-72">
+      <div class="card-body gap-3">
+        <.name_header city={@city} />
+
+        <div class="flex items-center gap-3 text-sm">
+          <span class="badge badge-neutral" data-test="city-size">{@city.size}</span>
+          <span data-test="city-food">
+            <.icon name="hero-cake" class="w-3 h-3" /> {@city.food}/{food_label(@city.food_threshold)}
+          </span>
+          <span class="opacity-60">+{@city.production}/turn</span>
+        </div>
+
+        <.current_production queue={@city.queue} />
+
+        <div class="divider my-0 text-xs opacity-60">Build</div>
+        <div class="flex flex-col gap-1">
+          <.catalog_option :for={type <- @catalog} type={type} city={@city} />
+        </div>
+
+        <div :if={length(@city.queue) > 1} class="divider my-0 text-xs opacity-60">Queue</div>
+        <.queue_item :for={item <- Enum.drop(@city.queue, 1)} item={item} city_id={@city.id} />
+
+        <div class="divider my-0 text-xs opacity-60">Worked Tiles</div>
+        <div class="flex flex-col gap-1 text-sm">
+          <div data-test={"city-worked-tile-#{@city.tile_id}"} class="flex items-center justify-between opacity-70">
+            <span>Tile {@city.tile_id} (center)</span>
+            <span class="badge badge-ghost badge-sm">Free</span>
+          </div>
+
+          <.worked_tile :for={tile_id <- @city.worked_tiles} tile_id={tile_id} city_id={@city.id} />
+
+          <.assignable_tile :for={tile_id <- @assignable_tiles} tile_id={tile_id} city_id={@city.id} />
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  attr :city, :map, required: true
+
+  defp name_header(assigns) do
+    ~H"""
+    <div class="flex items-center justify-between gap-2">
+      <h3 data-test="city-name" class="card-title text-base">{@city.name}</h3>
+    </div>
+
+    <form data-test="city-name-form" phx-submit="rename_city" class="flex gap-1">
+      <input
+        type="text"
+        name="city[name]"
+        value={@city.name}
+        class="input input-xs input-bordered flex-1"
+      />
+      <button type="submit" class="btn btn-xs">Rename</button>
+    </form>
+    """
+  end
+
+  attr :queue, :list, required: true
+
+  defp current_production(%{queue: []} = assigns) do
+    ~H"""
+    <div data-test="city-production-current" class="text-sm opacity-60">
+      Nothing queued
+    </div>
+    """
+  end
+
+  defp current_production(assigns) do
+    assigns = assign(assigns, :current, hd(assigns.queue))
+
+    ~H"""
+    <div class="flex flex-col gap-1">
+      <div data-test="city-production-current" class="text-sm font-medium">
+        {catalog_label(@current.type)} {@current.banked}/{@current.cost}
+      </div>
+      <progress
+        data-test="city-production-progress"
+        class="progress progress-primary w-full"
+        value={@current.banked}
+        max={@current.cost}
+      >
+      </progress>
+    </div>
+    """
+  end
+
+  attr :type, :atom, required: true
+  attr :city, :map, required: true
+
+  defp catalog_option(assigns) do
+    disabled? = Production.can_queue?(assigns.city, assigns.type) != :ok
+    assigns = assign(assigns, disabled?: disabled?, cost: Production.cost(assigns.type))
+
+    ~H"""
+    <div>
+      <button
+        type="button"
+        data-test={"production-option-#{@type}"}
+        data-disabled={to_string(@disabled?)}
+        disabled={@disabled?}
+        phx-click="queue_production"
+        phx-value-city_id={@city.id}
+        phx-value-item={@type}
+        class="btn btn-sm btn-outline justify-between w-full"
+      >
+        <span>{catalog_label(@type)}</span>
+        <span>{@cost}</span>
+      </button>
+      <p
+        :if={@disabled? and @type == :settler}
+        data-test="production-disabled-reason-settler"
+        class="text-xs text-warning"
+      >
+        Needs a second citizen to spare
+      </p>
+    </div>
+    """
+  end
+
+  attr :item, :map, required: true
+  attr :city_id, :any, required: true
+
+  defp queue_item(assigns) do
+    ~H"""
+    <div class="flex items-center justify-between text-sm">
+      <span>{catalog_label(@item.type)} ({@item.cost})</span>
+      <button
+        type="button"
+        phx-click="cancel_production_item"
+        phx-value-city_id={@city_id}
+        phx-value-item_id={@item.id}
+        class="btn btn-ghost btn-xs"
+      >
+        Cancel
+      </button>
+    </div>
+    """
+  end
+
+  attr :tile_id, :any, required: true
+  attr :city_id, :any, required: true
+
+  defp worked_tile(assigns) do
+    ~H"""
+    <div data-test={"city-worked-tile-#{@tile_id}"} class="flex items-center justify-between">
+      <span>Tile {@tile_id}</span>
+      <button
+        type="button"
+        phx-click="assign_worked_tile"
+        phx-value-city_id={@city_id}
+        phx-value-from_tile_id={@tile_id}
+        class="btn btn-ghost btn-xs"
+      >
+        Unwork
+      </button>
+    </div>
+    """
+  end
+
+  attr :tile_id, :any, required: true
+  attr :city_id, :any, required: true
+
+  defp assignable_tile(assigns) do
+    ~H"""
+    <div class="flex items-center justify-between opacity-70">
+      <span>Tile {@tile_id}</span>
+      <button
+        type="button"
+        phx-click="assign_worked_tile"
+        phx-value-city_id={@city_id}
+        phx-value-to_tile_id={@tile_id}
+        class="btn btn-ghost btn-xs"
+      >
+        Work
+      </button>
+    </div>
+    """
+  end
+
+  defp food_label(nil), do: "Capped"
+  defp food_label(threshold), do: threshold
+
+  defp catalog_label(:settler), do: "Settler"
+  defp catalog_label(:worker), do: "Worker"
+  defp catalog_label(:warrior), do: "Warrior"
+end

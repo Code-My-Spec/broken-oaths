@@ -94,6 +94,7 @@ const GlobeRender = {
     hills: "/images/game/decor/hills.png",
     woods: "/images/game/decor/woods.png",
     rainforest: "/images/game/decor/rainforest.png",
+    city: "/images/game/decor/city.png",
   },
 
   TERRAIN_TEXTURES: ["grassland", "plains", "desert", "tundra", "snow", "ocean",

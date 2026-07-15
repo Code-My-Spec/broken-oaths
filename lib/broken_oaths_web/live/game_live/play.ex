@@ -25,12 +25,29 @@ defmodule BrokenOathsWeb.GameLive.Play do
                            unit's remaining order path — pushed on queue, on
                            selection, and on every board refresh (empty when
                            the unit has no order)
+    * `game:cities`     — `%{cities: [%{id:, name:, tile_id:, size:}]}`, the
+                           player's own cities (never fog-filtered — a city
+                           is only ever seen by its owner here)
     * `globe3d:airspace`— `%{levels: %{tile_id => 1..3}, arc: float}` (reused
                            weather layer from `BrokenOaths.Worlds.Weather`)
 
-  Turn number, countdown, and the selected-unit's details are each their
-  own `liveview_component` (`GameLive.TurnBar`, `GameLive.UnitPanel|`)
-  mounted here as children — this view stays scoped to board state.
+  Turn number, countdown, and the selected-unit's/-city's details are each
+  their own `liveview_component` (`GameLive.TurnBar`, `GameLive.UnitPanel`,
+  `GameLive.CityPanel`) mounted here as children — this view stays scoped
+  to board state. Selecting a unit and selecting a city are mutually
+  exclusive (one side panel at a time): each clears the other.
+
+  ## City loop (stories 878-883)
+
+  Founding, production, worked-tile assignment, renaming, and worker
+  improvements are all `BrokenOaths.Game` commands dispatched the same
+  way orders are — this view holds no city logic of its own, just the
+  `:cities_changed`/`:improvements_changed` broadcasts that tell it to
+  re-pull `Game.player_cities/2` (mirroring `:units_changed` for units).
+  `GameLive.UnitPanel` grows a Found City action (settlers) and Build
+  Improvement actions (workers, gated by `Game.Improvement.allowed?/2`
+  against the unit's own tile) so both panels dispatch every city-loop
+  command; `GameLive.CityPanel` never reads `BrokenOaths.Game` itself.
 
   ## `BrokenOaths.Game` surface this view depends on
 
@@ -60,8 +77,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
   use BrokenOathsWeb, :live_view
 
   alias BrokenOaths.Game
+  alias BrokenOaths.Game.{Improvement, Yields}
   alias BrokenOaths.Worlds
-  alias BrokenOaths.Worlds.{Generator, Globe, Terrain, Weather}
+  alias BrokenOaths.Worlds.{Generator, Globe, Regions, Terrain, Weather}
 
   @default_scale 700
   @max_pitch 1.50
@@ -97,12 +115,19 @@ defmodule BrokenOathsWeb.GameLive.Play do
             turn_ends_at: Game.turn_ends_at(world),
             gold: Game.gold(world, user),
             units: [],
+            cities: [],
             visible: [],
             explored: [],
             selected_unit_id: nil,
             selected_unit: nil,
             selected_order: nil,
+            allowed_improvements: [],
             order_error: nil,
+            selected_city_id: nil,
+            selected_city: nil,
+            assignable_tiles: [],
+            city_error: nil,
+            improvement_error: nil,
             confirm_abandon?: false,
             yaw: yaw,
             pitch: pitch,
@@ -128,12 +153,101 @@ defmodule BrokenOathsWeb.GameLive.Play do
         selected_unit_id: unit_id,
         selected_unit: unit,
         selected_order: unit && unit.order,
-        order_error: nil
+        allowed_improvements: worker_allowed_improvements(socket.assigns.world, unit),
+        order_error: nil,
+        improvement_error: nil,
+        selected_city_id: nil,
+        selected_city: nil
       )
       |> push_event("game:selected", %{unit_id: unit_id})
       |> push_selected_path()
 
     {:noreply, socket}
+  end
+
+  # A left click on one of the player's own cities (see the board hook's
+  # `click/1`) opens the city panel — mutually exclusive with unit
+  # selection, same one-side-panel rule as `select_unit`.
+  def handle_event("select_city", %{"city_id" => city_id}, socket) do
+    %{world: world, cities: cities} = socket.assigns
+    city = Enum.find(cities, &(&1.id == city_id))
+
+    socket =
+      assign(socket,
+        selected_city_id: city_id,
+        selected_city: city,
+        assignable_tiles: assignable_tiles(world, city),
+        city_error: nil,
+        selected_unit_id: nil,
+        selected_unit: nil
+      )
+
+    {:noreply, socket}
+  end
+
+  # Founding trades the settler for a working size-1 city immediately —
+  # no turn boundary required (story 878). The settler's disappearance
+  # and the new city both arrive back through the :units_changed /
+  # :cities_changed broadcast this same call triggers.
+  def handle_event("found_city", %{"unit_id" => unit_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.found_city(world, user, unit_id) do
+      :ok -> {:noreply, assign(socket, city_error: nil)}
+      {:error, reason} -> {:noreply, assign(socket, city_error: city_error_message(reason))}
+    end
+  end
+
+  def handle_event("queue_production", %{"city_id" => city_id, "item" => item}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.queue_production(world, user, city_id, item) do
+      :ok -> {:noreply, assign(socket, city_error: nil)}
+      {:error, reason} -> {:noreply, assign(socket, city_error: city_error_message(reason))}
+    end
+  end
+
+  def handle_event("cancel_production_item", %{"city_id" => city_id, "item_id" => item_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+    item_id = parse_id(item_id)
+
+    case Game.cancel_production_item(world, user, city_id, item_id) do
+      :ok -> {:noreply, assign(socket, city_error: nil)}
+      {:error, reason} -> {:noreply, assign(socket, city_error: city_error_message(reason))}
+    end
+  end
+
+  # `from_tile_id`/`to_tile_id` are each optional (see `Game.assign_worked_tile/5`):
+  # a plain click, unlike a spec's render_hook, only ever supplies one of
+  # the two (unwork vs. work), so a missing key means nil, not an error.
+  def handle_event("assign_worked_tile", params, socket) do
+    %{world: world, user: user} = socket.assigns
+    city_id = parse_id(params["city_id"])
+    from_tile = parse_id(params["from_tile_id"])
+    to_tile = parse_id(params["to_tile_id"])
+
+    case Game.assign_worked_tile(world, user, city_id, from_tile, to_tile) do
+      :ok -> {:noreply, assign(socket, city_error: nil)}
+      {:error, reason} -> {:noreply, assign(socket, city_error: city_error_message(reason))}
+    end
+  end
+
+  def handle_event("rename_city", %{"city" => %{"name" => name}}, socket) do
+    %{world: world, user: user, selected_city_id: city_id} = socket.assigns
+
+    case Game.rename_city(world, user, city_id, name) do
+      :ok -> {:noreply, assign(socket, city_error: nil)}
+      {:error, reason} -> {:noreply, assign(socket, city_error: city_error_message(reason))}
+    end
+  end
+
+  def handle_event("start_improvement", %{"unit_id" => unit_id, "kind" => kind}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.start_improvement(world, user, unit_id, kind) do
+      :ok -> {:noreply, assign(socket, improvement_error: nil)}
+      {:error, reason} -> {:noreply, assign(socket, improvement_error: improvement_error_message(reason))}
+    end
   end
 
   # Right-clicks arrive as the clicked point on the unit sphere, not a
@@ -206,6 +320,32 @@ defmodule BrokenOathsWeb.GameLive.Play do
     {:noreply, refresh_board(socket)}
   end
 
+  # Founding, production, worked-tile assignment, and renaming all
+  # broadcast :cities_changed — re-pull cities the same way :units_changed
+  # re-pulls units, so the panel and the map stay live without a refresh.
+  def handle_info(:cities_changed, socket) do
+    {:noreply, refresh_board(socket)}
+  end
+
+  # A worker starting/advancing/finishing a dig broadcasts
+  # :improvements_changed — a completed improvement changes a city's
+  # worked-tile yields (production/food), so cities are re-pulled too.
+  def handle_info(:improvements_changed, socket) do
+    {:noreply, refresh_board(socket)}
+  end
+
+  # `Turn.tick/1` pairs every completed production item with its own
+  # `{:unit_spawned, spawn_event}` broadcast (see `WorldServer.
+  # materialize_spawns/2`) alongside the tick's `{:turn_advanced, turn}`
+  # — the same message batch this view already refreshes on. The new
+  # unit arrives through that refresh's `Game.units_visible_to/2` call,
+  # so this is a safe no-op today; it exists so an unhandled event never
+  # crashes the LiveView (a future "your Warrior is ready" toast would
+  # hook in here).
+  def handle_info({:unit_spawned, _spawn_event}, socket) do
+    {:noreply, socket}
+  end
+
   # -------------------------------------------------------------------
   # Helpers
   # -------------------------------------------------------------------
@@ -237,19 +377,30 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # re-fetches fog-filtered units + visibility and pushes the whole
   # board state down. Called at mount and on every turn boundary.
   defp refresh_board(socket) do
-    %{world: world, user: user, selected_unit_id: selected_unit_id} = socket.assigns
+    %{
+      world: world,
+      user: user,
+      selected_unit_id: selected_unit_id,
+      selected_city_id: selected_city_id
+    } = socket.assigns
 
     units = Game.units_visible_to(world, user)
+    cities = Game.player_cities(world, user)
     %{visible: visible, explored: explored} = Game.visibility(world, user)
     selected_unit = selected_unit_id && Enum.find(units, &(&1.id == selected_unit_id))
+    selected_city = selected_city_id && Enum.find(cities, &(&1.id == selected_city_id))
 
     socket
     |> assign(
       units: units,
+      cities: cities,
       visible: visible,
       explored: explored,
       selected_unit: selected_unit,
-      selected_order: selected_unit && selected_unit.order
+      selected_order: selected_unit && selected_unit.order,
+      allowed_improvements: worker_allowed_improvements(world, selected_unit),
+      selected_city: selected_city,
+      assignable_tiles: assignable_tiles(world, selected_city)
     )
     |> push_board_state()
     |> push_selected_path()
@@ -271,7 +422,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   defp push_board_state(socket) do
     %{mesh: mesh, terrain_map: terrain_map, world: world} = socket.assigns
-    %{units: units, visible: visible, explored: explored} = socket.assigns
+    %{units: units, cities: cities, visible: visible, explored: explored} = socket.assigns
 
     known = Enum.uniq(visible ++ explored)
     tiles = Enum.map(known, &tile_row(&1, mesh, terrain_map))
@@ -281,11 +432,16 @@ defmodule BrokenOathsWeb.GameLive.Play do
     |> push_event("game:window", %{tiles: tiles})
     |> push_event("game:visibility", %{visible: visible, explored: explored})
     |> push_event("game:units", %{units: units})
+    |> push_event("game:cities", %{cities: Enum.map(cities, &city_marker/1)})
     |> push_event("globe3d:airspace", %{
       levels: levels,
       arc: Float.round(1.1071 / mesh.frequency, 5)
     })
   end
+
+  # The board only needs enough to place and label a billboard —
+  # territory/queue/food stay in the CityPanel assign, not the client.
+  defp city_marker(city), do: Map.take(city, [:id, :name, :tile_id, :size])
 
   # Compact row for the client painter:
   # [id, color, decor, tex, cx, cy, cz, corner1x, corner1y, corner1z, ...]
@@ -326,6 +482,71 @@ defmodule BrokenOathsWeb.GameLive.Play do
   defp order_error_message(:impassable), do: "That terrain can't be crossed."
   defp order_error_message(:unreachable), do: "There's no path there."
   defp order_error_message(_other), do: "That order can't be queued."
+
+  # -------------------------------------------------------------------
+  # City loop helpers
+  # -------------------------------------------------------------------
+
+  # Which improvement kinds a worker could start on the tile it's
+  # standing on right now — same terrain gate `WorldServer` enforces
+  # (`Regions.tile_class/2` == :land, then `Improvement.allowed?/2`),
+  # computed here purely so `UnitPanel` only ever offers legal actions
+  # (story 882, criterion 7482: Farm is never offered on hills/forest).
+  defp worker_allowed_improvements(_world, nil), do: []
+  defp worker_allowed_improvements(_world, %{type: type}) when type != :worker, do: []
+
+  defp worker_allowed_improvements(world, %{tile_id: tile_id}) do
+    if Regions.tile_class(world, tile_id) == :land do
+      terrain = Regions.terrain(world, tile_id)
+      Enum.filter([:farm, :mine, :road], &Improvement.allowed?(&1, terrain))
+    else
+      []
+    end
+  end
+
+  # Territory tiles `CityPanel` may offer a "Work" action for: not the
+  # always-free center, not already worked, and workable terrain — the
+  # same gate `WorldServer.validate_assign/3` enforces. `CityPanel` has
+  # no world/terrain access of its own (purely presentational), so this
+  # is computed here whenever the selected city changes.
+  defp assignable_tiles(_world, nil), do: []
+
+  defp assignable_tiles(world, city) do
+    worked = MapSet.new(city.worked_tiles)
+
+    city.territory
+    |> Enum.reject(&(&1 == city.tile_id or MapSet.member?(worked, &1)))
+    |> Enum.filter(&Yields.workable?(Regions.terrain(world, &1)))
+  end
+
+  defp parse_id(nil), do: nil
+  defp parse_id(""), do: nil
+  defp parse_id(id) when is_integer(id), do: id
+  defp parse_id(id) when is_binary(id), do: String.to_integer(id)
+
+  defp city_error_message(:not_owner), do: "You don't control that city."
+  defp city_error_message(:not_settler), do: "Only a settler can found a city."
+  defp city_error_message(:invalid_terrain), do: "A city can't be founded there."
+  defp city_error_message(:too_close), do: "Too close to an existing city."
+  defp city_error_message(:invalid_item), do: "That can't be queued."
+  defp city_error_message(:size_one), do: "This city needs a second citizen first."
+  defp city_error_message(:not_found), do: "That item is no longer queued."
+  defp city_error_message(:invalid_name), do: "Enter a name for the city."
+  defp city_error_message(:not_worked), do: "That tile isn't currently worked."
+  defp city_error_message(:invalid_tile), do: "The city center can't be reassigned."
+  defp city_error_message(:not_territory), do: "That tile isn't part of the city."
+  defp city_error_message(:already_worked), do: "That tile already has a citizen."
+  defp city_error_message(_other), do: "That action can't be completed."
+
+  defp improvement_error_message(:not_owner), do: "You don't control that unit."
+  defp improvement_error_message(:not_worker), do: "Only a worker can build improvements."
+  defp improvement_error_message(:invalid_improvement), do: "That improvement isn't allowed there."
+  defp improvement_error_message(:invalid_terrain), do: "That terrain won't support that improvement."
+
+  defp improvement_error_message(:occupied_improvement),
+    do: "This tile already has a completed improvement."
+
+  defp improvement_error_message(_other), do: "That improvement can't be started."
 
   # -------------------------------------------------------------------
   # Render
@@ -392,12 +613,22 @@ defmodule BrokenOathsWeb.GameLive.Play do
           </div>
         </div>
 
-        <div
-          :if={@order_error}
-          class="alert alert-error absolute top-4 left-4 w-auto shadow-lg"
-          data-test="order-error"
-        >
-          <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@order_error}
+        <div class="absolute top-4 left-4 flex flex-col gap-2 items-start">
+          <div :if={@order_error} class="alert alert-error w-auto shadow-lg" data-test="order-error">
+            <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@order_error}
+          </div>
+
+          <div :if={@city_error} class="alert alert-error w-auto shadow-lg" data-test="city-error">
+            <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@city_error}
+          </div>
+
+          <div
+            :if={@improvement_error}
+            class="alert alert-error w-auto shadow-lg"
+            data-test="improvement-error"
+          >
+            <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@improvement_error}
+          </div>
         </div>
 
         <.live_component
@@ -406,6 +637,15 @@ defmodule BrokenOathsWeb.GameLive.Play do
           id="unit-panel"
           unit={@selected_unit}
           order={@selected_order}
+          allowed_improvements={@allowed_improvements}
+        />
+
+        <.live_component
+          :if={@selected_city}
+          module={BrokenOathsWeb.GameLive.CityPanel}
+          id="city-panel"
+          city={@selected_city}
+          assignable_tiles={@assignable_tiles}
         />
       </div>
 
@@ -430,6 +670,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
             this.tiles = []
             this.tileById = new Map()
             this.units = []
+            this.cities = []
             this.visibleSet = new Set()
             this.selectedId = null
             this.path = null
@@ -488,6 +729,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
               this.ensureLoop()
               this.draw()
             })
+            this.handleEvent("game:cities", ({cities}) => { this.cities = cities; this.draw() })
             this.handleEvent("game:selected", ({unit_id}) => { this.selectedId = unit_id; this.path = null; this.draw() })
             this.handleEvent("game:path", ({unit_id, tiles}) => {
               if (unit_id === this.selectedId) this.path = tiles
@@ -563,14 +805,19 @@ defmodule BrokenOathsWeb.GameLive.Play do
             return nearestTile
           },
 
-          // Left click: select the unit standing on the clicked tile
-          // (or clear the selection when the tile is empty).
+          // Left click: select the unit standing on the clicked tile: if
+          // none is there but one of my own cities is, select that
+          // instead (mutually exclusive side panels — see Play's
+          // moduledoc). A click on empty ground selects nothing.
           click(e) {
             const tile = this.hitTile(e)
             if (tile == null) return
 
             const unit = this.units.find((u) => u.tile_id === tile)
-            if (unit) this.pushEvent("select_unit", {unit_id: unit.id})
+            if (unit) { this.pushEvent("select_unit", {unit_id: unit.id}); return }
+
+            const city = this.cities.find((c) => c.tile_id === tile)
+            if (city) this.pushEvent("select_city", {city_id: city.id})
           },
 
           // Right click: queue the selected unit's move toward the clicked
@@ -686,6 +933,37 @@ defmodule BrokenOathsWeb.GameLive.Play do
                 GR.drawBillboard(ctx, img, cx, cy, decorSize)
               }
               ctx.globalAlpha = 1
+            }
+
+            // City billboards: player-owned settlements, drawn after
+            // decor (so they read as built ON the terrain) but before
+            // weather (so cloud cover still darkens the skyline) and
+            // before units (so a garrisoned unit renders on top of its
+            // city, not hidden beneath it). Deliberately larger than a
+            // decor sprite — a city is the main thing on its tile.
+            const citySize = Math.min(Math.max(this.scale * this.arc * 2.2, 16), 88)
+            if (citySize >= 10) {
+              for (const c of this.cities) {
+                const pos = this.center(c.tile_id)
+                if (!pos) continue
+                const {px, py, depth} = this.project(pos[0], pos[1], pos[2])
+                if (depth < 0.02) continue
+
+                const img = this.spriteFor("city")
+                if (img) {
+                  GR.drawBillboard(ctx, img, px, py, citySize)
+                } else {
+                  // Fallback programmer art — same "never block on an
+                  // asset request" rule the unit/decor layers follow.
+                  ctx.beginPath()
+                  ctx.arc(px, py, citySize * 0.18, 0, 2 * Math.PI)
+                  ctx.fillStyle = "#c9a227"
+                  ctx.fill()
+                  ctx.lineWidth = 2
+                  ctx.strokeStyle = "#1a1a1a"
+                  ctx.stroke()
+                }
+              }
             }
 
             // Weather: translucent cloud hexes one shell above known
