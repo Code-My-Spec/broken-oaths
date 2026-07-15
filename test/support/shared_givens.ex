@@ -31,6 +31,19 @@ defmodule BrokenOathsSpex.SharedGivens do
     {:ok, context |> Map.put(:other_user, user) |> Map.put(:other_conn, conn)}
   end
 
+  # A third player with their own session (`context.third_user` /
+  # `context.third_conn`) — for scenarios needing several civilizations
+  # at once (e.g. surrounding a single city with blockers).
+  register_given :third_registered_player, context do
+    user = Fixtures.user_fixture()
+
+    conn =
+      Phoenix.ConnTest.build_conn()
+      |> BrokenOathsTest.ConnCase.log_in_user(user)
+
+    {:ok, context |> Map.put(:third_user, user) |> Map.put(:third_conn, conn)}
+  end
+
   # A deterministic world (`context.world`) — fixture frequency, seed 424242.
   register_given :a_world, context do
     {:ok, Map.put(context, :world, Fixtures.world_fixture(%{seed: 424_242}))}
