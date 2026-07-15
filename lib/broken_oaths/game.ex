@@ -71,4 +71,75 @@ defmodule BrokenOaths.Game do
   @doc "Delete `user`'s civilization in `world` and free their region."
   @spec abandon_world(map(), map()) :: :ok
   def abandon_world(world, user), do: WorldServer.call(world, {:abandon, user})
+
+  # -------------------------------------------------------------------
+  # City loop (stories 878-883)
+  # -------------------------------------------------------------------
+
+  @doc """
+  Found a city on `unit_id`'s tile: the settler must be `user`'s, the
+  tile must be passable land at least 4 hexes from every existing
+  city. Consumes the settler and creates a working size-1 city
+  immediately — no turn boundary required.
+  """
+  @spec found_city(map(), map(), term()) ::
+          :ok | {:error, :not_owner | :not_settler | :invalid_terrain | :too_close}
+  def found_city(world, user, unit_id), do: WorldServer.call(world, {:found_city, user, unit_id})
+
+  @doc """
+  Append `type` (`:settler`, `:worker`, or `:warrior`) to `city_id`'s
+  production queue. A size-1 city cannot queue a Settler.
+  """
+  @spec queue_production(map(), map(), term(), atom() | String.t()) ::
+          :ok | {:error, :not_owner | :invalid_item | :size_one}
+  def queue_production(world, user, city_id, type),
+    do: WorldServer.call(world, {:queue_production, user, city_id, type})
+
+  @doc "Remove `item_id` from `city_id`'s queue, forfeiting any production already banked on it."
+  @spec cancel_production_item(map(), map(), term(), term()) ::
+          :ok | {:error, :not_owner | :not_found}
+  def cancel_production_item(world, user, city_id, item_id),
+    do: WorldServer.call(world, {:cancel_production_item, user, city_id, item_id})
+
+  @doc """
+  Reassign a citizen's worked tile: `from_tile`/`to_tile` are each
+  optionally `nil` (unassign only, assign an idle citizen only, or
+  both for an ordinary reassignment).
+  """
+  @spec assign_worked_tile(map(), map(), term(), term() | nil, term() | nil) ::
+          :ok
+          | {:error,
+             :not_owner | :not_worked | :invalid_tile | :not_territory | :already_worked | :invalid_terrain}
+  def assign_worked_tile(world, user, city_id, from_tile, to_tile),
+    do: WorldServer.call(world, {:assign_worked_tile, user, city_id, from_tile, to_tile})
+
+  @doc "Rename `city_id`. Persists immediately."
+  @spec rename_city(map(), map(), term(), String.t()) :: :ok | {:error, :not_owner | :invalid_name}
+  def rename_city(world, user, city_id, name),
+    do: WorldServer.call(world, {:rename_city, user, city_id, name})
+
+  @doc """
+  Start (or resume) building `kind` (`:farm`, `:mine`, or `:road`) on
+  `unit_id`'s tile — `unit_id` must be a `:worker` owned by `user`.
+  """
+  @spec start_improvement(map(), map(), term(), atom() | String.t()) ::
+          :ok
+          | {:error, :not_owner | :not_worker | :invalid_improvement | :invalid_terrain | :occupied_improvement}
+  def start_improvement(world, user, unit_id, kind),
+    do: WorldServer.call(world, {:start_improvement, user, unit_id, kind})
+
+  @doc "All of `user`'s cities in `world` (see `BrokenOaths.Game.WorldServer` for the shape)."
+  def player_cities(world, user), do: WorldServer.call(world, {:player_cities, user})
+
+  @doc "A tile's completed improvement (`nil | :farm | :mine | :road`)."
+  def tile_improvement(world, tile_id), do: WorldServer.call(world, {:tile_improvement, tile_id})
+
+  @doc """
+  Test-only: set a unit's HP directly. Story 881's healing rules need a
+  damaged unit to observe, and combat (the epic's only real damage
+  source) is future work — see `BrokenOathsSpex.Fixtures.set_unit_hp/3`.
+  """
+  @spec set_unit_hp_for_test(map(), term(), non_neg_integer()) :: :ok
+  def set_unit_hp_for_test(world, unit_id, hp),
+    do: WorldServer.call(world, {:set_unit_hp_for_test, unit_id, hp})
 end

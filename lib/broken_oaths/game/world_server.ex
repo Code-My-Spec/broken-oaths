@@ -36,7 +36,21 @@ defmodule BrokenOaths.Game.WorldServer do
 
   import Ecto.Query
 
-  alias BrokenOaths.Game.{Exploration, Order, Player, Spawner, Turn, Unit, Visibility}
+  alias BrokenOaths.Game.{
+    City,
+    Exploration,
+    Improvement,
+    Order,
+    Player,
+    Production,
+    ProductionItem,
+    Spawner,
+    Turn,
+    Unit,
+    Visibility,
+    Yields
+  }
+
   alias BrokenOaths.Repo
   alias BrokenOaths.Worlds
   alias BrokenOaths.Worlds.Regions
@@ -194,6 +208,87 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
+  def handle_call({:found_city, user, unit_id}, _from, state) do
+    case do_found_city(state, user, unit_id) do
+      {:ok, new_state} ->
+        broadcast(new_state.world.id, [:units_changed, :cities_changed])
+        {:reply, :ok, new_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:queue_production, user, city_id, type}, _from, state) do
+    case do_queue_production(state, user, city_id, type) do
+      {:ok, new_state} ->
+        broadcast(new_state.world.id, [:cities_changed])
+        {:reply, :ok, new_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:cancel_production_item, user, city_id, item_id}, _from, state) do
+    case do_cancel_production_item(state, user, city_id, item_id) do
+      {:ok, new_state} ->
+        broadcast(new_state.world.id, [:cities_changed])
+        {:reply, :ok, new_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:assign_worked_tile, user, city_id, from_tile, to_tile}, _from, state) do
+    case do_assign_worked_tile(state, user, city_id, from_tile, to_tile) do
+      {:ok, new_state} ->
+        broadcast(new_state.world.id, [:cities_changed])
+        {:reply, :ok, new_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:rename_city, user, city_id, name}, _from, state) do
+    case do_rename_city(state, user, city_id, name) do
+      {:ok, new_state} ->
+        broadcast(new_state.world.id, [:cities_changed])
+        {:reply, :ok, new_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:start_improvement, user, unit_id, kind}, _from, state) do
+    case do_start_improvement(state, user, unit_id, kind) do
+      {:ok, new_state} ->
+        broadcast(new_state.world.id, [:improvements_changed])
+        {:reply, :ok, new_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:player_cities, user}, _from, state) do
+    {:reply, player_cities(state, user), state}
+  end
+
+  def handle_call({:tile_improvement, tile_id}, _from, state) do
+    {:reply, tile_improvement_at(state, tile_id), state}
+  end
+
+  def handle_call({:set_unit_hp_for_test, unit_id, hp}, _from, state) do
+    Repo.update_all(from(u in Unit, where: u.id == ^unit_id), set: [hp: hp])
+    unit = Map.fetch!(state.units, unit_id)
+    new_state = %{state | units: Map.put(state.units, unit_id, %{unit | hp: hp})}
+    {:reply, :ok, new_state}
+  end
+
   def handle_call(:advance_turn, _from, state) do
     {:reply, :ok, run_tick(state)}
   end
@@ -233,6 +328,7 @@ defmodule BrokenOaths.Game.WorldServer do
 
   defp run_tick(state) do
     {ticked, events} = Turn.tick(state)
+    {events, ticked} = materialize_spawns(events, ticked)
     new_state = %{ticked | turn_started_at: DateTime.utc_now()}
 
     case persist_tick(state, new_state) do
@@ -251,6 +347,31 @@ defmodule BrokenOaths.Game.WorldServer do
 
   defp resync(state) do
     load_state(Worlds.get_world!(state.world.id))
+  end
+
+  # `Turn.tick/1` can never allocate a real, persisted unit id — a
+  # completed production item that found a landing tile comes back as
+  # a `{:unit_spawned, spawn_event}` intent instead. This is the one
+  # place that turns those intents into real `Unit` rows, folding each
+  # into `state.units` before `persist_tick` runs so the rest of the
+  # delta (and any later event in this same batch) sees it.
+  defp materialize_spawns(events, state) do
+    Enum.map_reduce(events, state, fn
+      {:unit_spawned, spawn_event}, acc_state ->
+        unit = insert_spawned_unit!(acc_state.world.id, spawn_event)
+
+        {{:unit_spawned, Map.put(spawn_event, :unit_id, unit.id)},
+         %{acc_state | units: Map.put(acc_state.units, unit.id, unit)}}
+
+      other_event, acc_state ->
+        {other_event, acc_state}
+    end)
+  end
+
+  defp insert_spawned_unit!(world_id, %{player_id: player_id, type: type, tile_id: tile_id}) do
+    stats = Production.unit_stats(type)
+    {:ok, unit} = insert_unit(world_id, player_id, type, tile_id, stats.hp, stats.movement)
+    unit_map(unit)
   end
 
   # -------------------------------------------------------------------
@@ -301,10 +422,22 @@ defmodule BrokenOaths.Game.WorldServer do
           })
           |> Repo.insert()
 
-        {:ok, lord} = insert_unit(state.world.id, player.id, :lord, spawn.lord_tile, 20, 2)
+        lord_stats = Production.unit_stats(:lord)
+
+        {:ok, lord} =
+          insert_unit(state.world.id, player.id, :lord, spawn.lord_tile, lord_stats.hp, lord_stats.movement)
+
+        settler_stats = Production.unit_stats(:settler)
 
         {:ok, settler} =
-          insert_unit(state.world.id, player.id, :settler, spawn.settler_tile, 10, 2)
+          insert_unit(
+            state.world.id,
+            player.id,
+            :settler,
+            spawn.settler_tile,
+            settler_stats.hp,
+            settler_stats.movement
+          )
 
         explored = Visibility.visible_tiles(state.world, [lord, settler])
 
@@ -352,16 +485,24 @@ defmodule BrokenOaths.Game.WorldServer do
         state
 
       player ->
+        # Cascades at the DB level (game_units, game_cities, and
+        # game_production_items all FK to game_players/game_cities with
+        # on_delete: :delete_all) — mirror it in memory so a re-founded
+        # city on the same tile isn't rejected by a stale in-memory
+        # unique-tile check. Improvements aren't player-owned
+        # (builder_unit_id nilifies instead) and outlive their builder.
         Player |> Repo.get!(player.id) |> Repo.delete!()
 
         unit_ids = for {id, u} <- state.units, u.player_id == player.id, do: id
+        city_ids = for {id, c} <- state.cities, c.player_id == player.id, do: id
 
         %{
           state
           | players: Map.delete(state.players, player.id),
             units: Map.drop(state.units, unit_ids),
             orders: Map.drop(state.orders, unit_ids),
-            explored: Map.delete(state.explored, player.id)
+            explored: Map.delete(state.explored, player.id),
+            cities: Map.drop(state.cities, city_ids)
         }
     end
   end
@@ -470,6 +611,271 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   # -------------------------------------------------------------------
+  # Found city
+  # -------------------------------------------------------------------
+
+  defp do_found_city(state, user, unit_id) do
+    player = find_player(state, user.id)
+    unit = Map.get(state.units, unit_id)
+
+    cond do
+      is_nil(player) or is_nil(unit) or unit.player_id != player.id ->
+        {:error, :not_owner}
+
+      unit.type != :settler ->
+        {:error, :not_settler}
+
+      true ->
+        case Production.validate_founding(state.world, Map.values(state.cities), unit.tile_id) do
+          {:error, reason} ->
+            {:error, reason}
+
+          :ok ->
+            {:ok, city} = persist_found_city!(state, player, unit)
+
+            new_state = %{
+              state
+              | cities: Map.put(state.cities, city.id, city),
+                units: Map.delete(state.units, unit_id),
+                orders: Map.delete(state.orders, unit_id)
+            }
+
+            {:ok, new_state}
+        end
+    end
+  end
+
+  # The settler is consumed and a working city stands in its place
+  # immediately (story 878, criterion 7463) — both writes happen in one
+  # transaction. The founding pop's worked-tile pick uses the exact
+  # same deterministic scoring growth uses later, computed in memory
+  # before insert since a size-1 city needs it from turn zero.
+  defp persist_found_city!(state, player, unit) do
+    territory =
+      state.world |> Production.founding_territory(unit.tile_id) |> MapSet.to_list() |> Enum.sort()
+
+    worked =
+      case Yields.pick_worked_tile(%{tile_id: unit.tile_id, territory: territory, worked_tiles: []}, state.world) do
+        nil -> []
+        tile -> [tile]
+      end
+
+    Repo.transaction(fn ->
+      {:ok, city} =
+        %City{}
+        |> City.changeset(%{
+          world_id: state.world.id,
+          player_id: player.id,
+          tile_id: unit.tile_id,
+          name: default_city_name(state, player),
+          size: 1,
+          food: 0,
+          territory: territory,
+          worked_tiles: worked
+        })
+        |> Repo.insert()
+
+      Unit |> Repo.get!(unit.id) |> Repo.delete!()
+
+      city_map(%{city | production_items: []})
+    end)
+  end
+
+  defp default_city_name(state, player) do
+    count = state.cities |> Map.values() |> Enum.count(&(&1.player_id == player.id))
+    "City #{count + 1}"
+  end
+
+  # -------------------------------------------------------------------
+  # Production queue
+  # -------------------------------------------------------------------
+
+  defp do_queue_production(state, user, city_id, type) do
+    with {:ok, city} <- owned_city(state, user, city_id),
+         {:ok, type} <- parse_item_type(type),
+         :ok <- Production.can_queue?(city, type) do
+      {:ok, item} =
+        %ProductionItem{}
+        |> ProductionItem.changeset(Map.put(Production.new_item(type), :city_id, city_id))
+        |> Repo.insert()
+
+      new_city = %{city | queue: city.queue ++ [queue_item_map(item)]}
+      {:ok, %{state | cities: Map.put(state.cities, city_id, new_city)}}
+    end
+  end
+
+  defp do_cancel_production_item(state, user, city_id, item_id) do
+    with {:ok, city} <- owned_city(state, user, city_id) do
+      if Enum.any?(city.queue, &(&1.id == item_id)) do
+        Repo.delete_all(from(p in ProductionItem, where: p.id == ^item_id))
+        new_city = %{city | queue: Enum.reject(city.queue, &(&1.id == item_id))}
+        {:ok, %{state | cities: Map.put(state.cities, city_id, new_city)}}
+      else
+        {:error, :not_found}
+      end
+    end
+  end
+
+  defp owned_city(state, user, city_id) do
+    player = find_player(state, user.id)
+    city = Map.get(state.cities, city_id)
+
+    if is_nil(player) or is_nil(city) or city.player_id != player.id do
+      {:error, :not_owner}
+    else
+      {:ok, city}
+    end
+  end
+
+  defp parse_item_type(type) when type in [:settler, :worker, :warrior], do: {:ok, type}
+  defp parse_item_type("settler"), do: {:ok, :settler}
+  defp parse_item_type("worker"), do: {:ok, :worker}
+  defp parse_item_type("warrior"), do: {:ok, :warrior}
+  defp parse_item_type(_other), do: {:error, :invalid_item}
+
+  # -------------------------------------------------------------------
+  # Worked tiles
+  # -------------------------------------------------------------------
+
+  # `from_tile`/`to_tile` are each optionally `nil`: unassigning alone
+  # drops a citizen to idle, assigning alone fills an open slot, and
+  # both together is the panel's ordinary reassignment.
+  defp do_assign_worked_tile(state, user, city_id, from_tile, to_tile) do
+    with {:ok, city} <- owned_city(state, user, city_id),
+         :ok <- validate_unassign(city, from_tile),
+         :ok <- validate_assign(state.world, city, to_tile) do
+      worked = city.worked_tiles |> maybe_remove(from_tile) |> maybe_add(to_tile)
+      persist_worked_tiles!(city_id, worked)
+      {:ok, %{state | cities: Map.put(state.cities, city_id, %{city | worked_tiles: worked})}}
+    end
+  end
+
+  defp maybe_remove(tiles, nil), do: tiles
+  defp maybe_remove(tiles, tile), do: List.delete(tiles, tile)
+
+  defp maybe_add(tiles, nil), do: tiles
+  defp maybe_add(tiles, tile), do: tiles ++ [tile]
+
+  defp validate_unassign(_city, nil), do: :ok
+
+  defp validate_unassign(city, tile) do
+    if tile in city.worked_tiles, do: :ok, else: {:error, :not_worked}
+  end
+
+  defp validate_assign(_world, _city, nil), do: :ok
+
+  defp validate_assign(world, city, tile) do
+    cond do
+      tile == city.tile_id -> {:error, :invalid_tile}
+      tile not in city.territory -> {:error, :not_territory}
+      tile in city.worked_tiles -> {:error, :already_worked}
+      not Yields.workable?(Regions.terrain(world, tile)) -> {:error, :invalid_terrain}
+      true -> :ok
+    end
+  end
+
+  defp persist_worked_tiles!(city_id, worked_tiles) do
+    Repo.update_all(from(c in City, where: c.id == ^city_id), set: [worked_tiles: worked_tiles])
+  end
+
+  # -------------------------------------------------------------------
+  # Rename city
+  # -------------------------------------------------------------------
+
+  defp do_rename_city(state, user, city_id, name) do
+    with {:ok, city} <- owned_city(state, user, city_id),
+         :ok <- validate_name(name) do
+      trimmed = String.trim(name)
+      Repo.update_all(from(c in City, where: c.id == ^city_id), set: [name: trimmed])
+      {:ok, %{state | cities: Map.put(state.cities, city_id, %{city | name: trimmed})}}
+    end
+  end
+
+  defp validate_name(name) when is_binary(name) do
+    trimmed = String.trim(name)
+    if trimmed != "" and String.length(trimmed) <= 100, do: :ok, else: {:error, :invalid_name}
+  end
+
+  defp validate_name(_other), do: {:error, :invalid_name}
+
+  # -------------------------------------------------------------------
+  # Improvements
+  # -------------------------------------------------------------------
+
+  defp do_start_improvement(state, user, unit_id, kind) do
+    with {:ok, unit} <- owned_worker(state, user, unit_id),
+         {:ok, kind} <- parse_kind(kind),
+         :ok <- validate_improvement_terrain(state.world, unit.tile_id, kind),
+         :ok <- validate_improvement_slot(state.improvements, unit.tile_id, kind) do
+      improvement = persist_start_improvement!(state, unit, kind)
+      {:ok, %{state | improvements: Map.put(state.improvements, unit.tile_id, improvement)}}
+    end
+  end
+
+  defp owned_worker(state, user, unit_id) do
+    player = find_player(state, user.id)
+    unit = Map.get(state.units, unit_id)
+
+    cond do
+      is_nil(player) or is_nil(unit) or unit.player_id != player.id -> {:error, :not_owner}
+      unit.type != :worker -> {:error, :not_worker}
+      true -> {:ok, unit}
+    end
+  end
+
+  defp parse_kind(kind) when kind in [:farm, :mine, :road], do: {:ok, kind}
+  defp parse_kind("farm"), do: {:ok, :farm}
+  defp parse_kind("mine"), do: {:ok, :mine}
+  defp parse_kind("road"), do: {:ok, :road}
+  defp parse_kind(_other), do: {:error, :invalid_improvement}
+
+  defp validate_improvement_terrain(world, tile_id, kind) do
+    cond do
+      Regions.tile_class(world, tile_id) != :land -> {:error, :invalid_terrain}
+      not Improvement.allowed?(kind, Regions.terrain(world, tile_id)) -> {:error, :invalid_terrain}
+      true -> :ok
+    end
+  end
+
+  # A completed improvement refuses any second dig. An in-progress one
+  # of the SAME kind just reattaches (any worker may resume a frozen
+  # dig — improvements aren't owned); a DIFFERENT kind already
+  # mid-build on this tile is refused rather than silently switched.
+  defp validate_improvement_slot(improvements, tile_id, kind) do
+    case Map.get(improvements, tile_id) do
+      nil -> :ok
+      %{status: :complete} -> {:error, :occupied_improvement}
+      %{status: :building, kind: ^kind} -> :ok
+      %{status: :building} -> {:error, :invalid_improvement}
+    end
+  end
+
+  defp persist_start_improvement!(state, unit, kind) do
+    case Repo.get_by(Improvement, world_id: state.world.id, tile_id: unit.tile_id) do
+      nil ->
+        {:ok, improvement} =
+          %Improvement{}
+          |> Improvement.changeset(%{
+            world_id: state.world.id,
+            tile_id: unit.tile_id,
+            kind: kind,
+            progress: 0,
+            status: :building,
+            builder_unit_id: unit.id
+          })
+          |> Repo.insert()
+
+        improvement_map(improvement)
+
+      existing ->
+        {:ok, improvement} =
+          existing |> Improvement.changeset(%{builder_unit_id: unit.id}) |> Repo.update()
+
+        improvement_map(improvement)
+    end
+  end
+
+  # -------------------------------------------------------------------
   # Reads
   # -------------------------------------------------------------------
 
@@ -540,6 +946,46 @@ defmodule BrokenOaths.Game.WorldServer do
   defp format_order(%{path: path, status: status}),
     do: %{target_tile: List.last(path), status: status, path: path}
 
+  defp player_cities(state, user) do
+    case find_player(state, user.id) do
+      nil ->
+        []
+
+      player ->
+        for {_id, city} <- state.cities,
+            city.player_id == player.id,
+            do: format_city(state, city)
+    end
+  end
+
+  # `production` is an informational per-turn RATE (flat base + worked
+  # production), separate from `queue`'s own `banked`/`cost` progress —
+  # useful for a "5/turn" readout alongside the current build's bar.
+  defp format_city(state, city) do
+    worked_production =
+      city |> Yields.worked_yields(state.world, state.improvements) |> Enum.map(& &1.production) |> Enum.sum()
+
+    %{
+      id: city.id,
+      name: city.name,
+      tile_id: city.tile_id,
+      size: city.size,
+      food: city.food,
+      food_threshold: Yields.threshold(city.size),
+      production: Production.flat_base() + worked_production,
+      queue: city.queue,
+      territory: city.territory,
+      worked_tiles: city.worked_tiles
+    }
+  end
+
+  defp tile_improvement_at(state, tile_id) do
+    case Map.get(state.improvements, tile_id) do
+      %{status: :complete, kind: kind} -> kind
+      _other -> nil
+    end
+  end
+
   # -------------------------------------------------------------------
   # Persistence — tick delta
   # -------------------------------------------------------------------
@@ -555,6 +1001,14 @@ defmodule BrokenOaths.Game.WorldServer do
           persist_unit_changes(old_state.units, new_state.units)
           persist_order_changes(old_state.orders, new_state.orders)
           persist_explored_changes(old_state.explored, new_state.explored)
+          persist_city_changes(old_state.cities, new_state.cities)
+          persist_production_item_changes(old_state.cities, new_state.cities)
+
+          persist_improvement_changes(
+            new_state.world.id,
+            old_state.improvements,
+            new_state.improvements
+          )
 
         :stale ->
           Repo.rollback(:stale)
@@ -569,7 +1023,63 @@ defmodule BrokenOaths.Game.WorldServer do
   defp persist_unit_changes(old_units, new_units) do
     for {id, unit} <- new_units, Map.get(old_units, id) != unit do
       Repo.update_all(from(u in Unit, where: u.id == ^id),
-        set: [tile_id: unit.tile_id, movement: unit.movement]
+        set: [tile_id: unit.tile_id, movement: unit.movement, hp: unit.hp]
+      )
+    end
+  end
+
+  # Newly founded/renamed/reassigned cities are already persisted
+  # immediately by their own command (see "Found city"/"Worked tiles"/
+  # "Rename city" above) — this only ever catches what the TICK itself
+  # changes: size, food, territory (growth), worked_tiles (a settler's
+  # pop cost un-working a tile).
+  defp persist_city_changes(old_cities, new_cities) do
+    for {id, city} <- new_cities, Map.get(old_cities, id) != city do
+      Repo.update_all(from(c in City, where: c.id == ^id),
+        set: [
+          size: city.size,
+          food: city.food,
+          territory: city.territory,
+          worked_tiles: city.worked_tiles
+        ]
+      )
+    end
+  end
+
+  # Items are only ever CREATED (queue_production) or DELETED
+  # (cancel_production_item, or consumed on completion) outside a
+  # tick's diff; here we only reconcile `banked` changing (accrual,
+  # overflow carry) and completed items disappearing from the queue.
+  defp persist_production_item_changes(old_cities, new_cities) do
+    old_items = queue_items_by_id(old_cities)
+    new_items = queue_items_by_id(new_cities)
+
+    for id <- Map.keys(old_items) -- Map.keys(new_items) do
+      Repo.delete_all(from(p in ProductionItem, where: p.id == ^id))
+    end
+
+    for {id, item} <- new_items, Map.get(old_items, id) != item do
+      Repo.update_all(from(p in ProductionItem, where: p.id == ^id), set: [banked: item.banked])
+    end
+  end
+
+  defp queue_items_by_id(cities) do
+    cities |> Map.values() |> Enum.flat_map(& &1.queue) |> Map.new(&{&1.id, &1})
+  end
+
+  # Starting/attaching an improvement is persisted immediately (see
+  # "Improvements" above) — this only reconciles what the tick itself
+  # advances: progress, completion, and a builder walking away.
+  defp persist_improvement_changes(world_id, old_improvements, new_improvements) do
+    for {tile_id, improvement} <- new_improvements,
+        Map.get(old_improvements, tile_id) != improvement do
+      Repo.update_all(
+        from(i in Improvement, where: i.world_id == ^world_id and i.tile_id == ^tile_id),
+        set: [
+          progress: improvement.progress,
+          status: improvement.status,
+          builder_unit_id: improvement.builder_unit_id
+        ]
       )
     end
   end
@@ -621,7 +1131,9 @@ defmodule BrokenOaths.Game.WorldServer do
       units: load_units(world.id),
       orders: load_orders(world.id),
       players: load_players(world.id),
-      explored: load_explored(world.id)
+      explored: load_explored(world.id),
+      cities: load_cities(world.id),
+      improvements: load_improvements(world.id)
     }
   end
 
@@ -660,6 +1172,21 @@ defmodule BrokenOaths.Game.WorldServer do
     |> Map.new(&{&1.player_id, MapSet.new(&1.explored)})
   end
 
+  defp load_cities(world_id) do
+    items_query = from(p in ProductionItem, order_by: p.id)
+
+    from(c in City, where: c.world_id == ^world_id)
+    |> Repo.all()
+    |> Repo.preload(production_items: items_query)
+    |> Map.new(&{&1.id, city_map(&1)})
+  end
+
+  defp load_improvements(world_id) do
+    from(i in Improvement, where: i.world_id == ^world_id)
+    |> Repo.all()
+    |> Map.new(&{&1.tile_id, improvement_map(&1)})
+  end
+
   defp player_map(%Player{} = p),
     do: %{id: p.id, user_id: p.user_id, region_id: p.region_id, gold: p.gold}
 
@@ -673,6 +1200,33 @@ defmodule BrokenOaths.Game.WorldServer do
       max_hp: u.max_hp,
       movement: u.movement,
       max_movement: u.max_movement
+    }
+  end
+
+  defp city_map(%City{} = c) do
+    %{
+      id: c.id,
+      player_id: c.player_id,
+      tile_id: c.tile_id,
+      name: c.name,
+      size: c.size,
+      food: c.food,
+      territory: c.territory,
+      worked_tiles: c.worked_tiles,
+      queue: Enum.map(c.production_items, &queue_item_map/1)
+    }
+  end
+
+  defp queue_item_map(%ProductionItem{} = item),
+    do: %{id: item.id, type: item.type, banked: item.banked, cost: item.cost}
+
+  defp improvement_map(%Improvement{} = i) do
+    %{
+      tile_id: i.tile_id,
+      kind: i.kind,
+      progress: i.progress,
+      status: i.status,
+      builder_unit_id: i.builder_unit_id
     }
   end
 end

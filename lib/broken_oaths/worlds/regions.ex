@@ -74,6 +74,26 @@ defmodule BrokenOaths.Worlds.Regions do
     |> Map.fetch!(:neighbors)
   end
 
+  @doc """
+  A single tile's full terrain descriptor (base/relief/feature) — the
+  finer-grained sibling of `tile_class/2`, needed anywhere yields are
+  computed (see `BrokenOaths.Game.Yields`). Same seed/frequency-derived,
+  cached status as `tile_class/2`.
+  """
+  @spec terrain(World.t(), tile_id) :: Terrain.t()
+  def terrain(world, tile_id) do
+    world
+    |> terrain_map()
+    |> Map.fetch!(tile_id)
+  end
+
+  defp terrain_map(world) do
+    cached(terrain_key(world), fn ->
+      mesh = Globe.get(world.frequency)
+      Generator.generate_terrain_map(world.seed, mesh)
+    end)
+  end
+
   # -------------------------------------------------------------------
   # Caching
   # -------------------------------------------------------------------
@@ -82,6 +102,8 @@ defmodule BrokenOaths.Worlds.Regions do
     do: {__MODULE__, :partition, @cache_version, world.seed, world.frequency}
 
   defp classes_key(world), do: {__MODULE__, :classes, @cache_version, world.seed, world.frequency}
+
+  defp terrain_key(world), do: {__MODULE__, :terrain, @cache_version, world.seed, world.frequency}
 
   defp cached(key, build) do
     case :persistent_term.get(key, nil) do

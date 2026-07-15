@@ -1,9 +1,15 @@
 defmodule BrokenOaths.Game.Unit do
   @moduledoc """
-  A unit on the board — type (lord/settler), owner, tile id, hp, movement points.
+  A unit on the board — type (lord/settler/warrior/worker), owner, tile
+  id, hp, movement points.
 
   One unit per hex is a hard rule enforced by the DB via a unique
   index on `(world_id, tile_id)`.
+
+  Per-type stats (starting hp/movement) live in
+  `BrokenOaths.Game.Production.unit_stats/1` alongside the rest of the
+  buildable catalog, not here — this schema only shapes and validates
+  whatever stats it's given.
   """
 
   use Ecto.Schema
@@ -12,7 +18,7 @@ defmodule BrokenOaths.Game.Unit do
   alias BrokenOaths.Game.Player
   alias BrokenOaths.Worlds.World
 
-  @type unit_type :: :lord | :settler
+  @type unit_type :: :lord | :settler | :warrior | :worker
 
   @type t :: %__MODULE__{
           id: integer() | nil,
@@ -31,7 +37,7 @@ defmodule BrokenOaths.Game.Unit do
         }
 
   schema "game_units" do
-    field :type, Ecto.Enum, values: [:lord, :settler]
+    field :type, Ecto.Enum, values: [:lord, :settler, :warrior, :worker]
     field :tile_id, :integer
     field :hp, :integer
     field :max_hp, :integer
