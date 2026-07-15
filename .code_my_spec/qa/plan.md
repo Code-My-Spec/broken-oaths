@@ -73,6 +73,18 @@ Then e.g. `BrokenOaths.Worlds.list_worlds()` to find world ids, or
 to locate storm tiles for weather QA. Prefer asserting through the UI;
 use iex to *find* things, not to *prove* things.
 
+**Never call `BrokenOaths.Game.*` from a separate `iex -S mix` /
+`mix run` process while the dev server is running.** Those functions
+route through a per-node `WorldServer` GenServer — a second BEAM node
+lazily starts its own competing instance for the same world, whose
+boot-time catch-up races the live server's turn writes (issue
+07ee50d1). The turn write is now optimistically guarded so the row can
+no longer be corrupted (the loser resyncs), but the rogue instance
+still ticks and burns writes. `Worlds.*` / `Globe` / `Weather` /
+`Regions` / `Terrain` calls are pure and safe. For unit/turn/order
+state, read the DB directly (`psql broken_oaths_dev`) or go through
+the browser.
+
 ## Seed Strategy
 
 Single Ecto repo (`BrokenOaths.Repo`, Postgres, database

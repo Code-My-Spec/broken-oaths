@@ -42,6 +42,26 @@ defmodule BrokenOaths.Worlds.Terrain do
   def water?(%__MODULE__{base: base}), do: base in [:ocean, :coast]
 
   @doc """
+  Which billboard decor sprite (if any) this terrain earns on a canvas
+  globe (ADR game-art-pipeline). Mountains dominate features; hills
+  yield to tree cover. Relief is decor's job, never the texture's.
+  """
+  def decor(nil), do: nil
+  def decor(%__MODULE__{relief: :mountains}), do: "mountain"
+  def decor(%__MODULE__{feature: :woods}), do: "woods"
+  def decor(%__MODULE__{feature: :rainforest}), do: "rainforest"
+  def decor(%__MODULE__{relief: :hills}), do: "hills"
+  def decor(%__MODULE__{}), do: nil
+
+  @doc """
+  Ground texture key for pattern fills: the feature's floor wins over
+  the base's. Keys name PNGs under priv/static/images/game/terrain/.
+  """
+  def texture(nil), do: "ocean"
+  def texture(%__MODULE__{feature: feature}) when not is_nil(feature), do: Atom.to_string(feature)
+  def texture(%__MODULE__{base: base}), do: Atom.to_string(base)
+
+  @doc """
   Display color: features overlay the base; relief still shades through
   (woods on hills render darker than woods on flats).
   """

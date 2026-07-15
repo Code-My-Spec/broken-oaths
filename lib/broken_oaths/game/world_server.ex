@@ -170,16 +170,24 @@ defmodule BrokenOaths.Game.WorldServer do
         # Orders execute immediately with whatever movement the unit has
         # left; the turn boundary only recharges and continues.
         moved = Turn.move_now(queued, unit_id)
-        persist_tick!(queued, moved)
-        broadcast(moved.world.id, [:units_changed])
 
-        remaining =
-          case Map.get(moved.orders, unit_id) do
-            %{path: rest} -> rest
-            nil -> []
-          end
+        case persist_tick(queued, moved) do
+          :ok ->
+            broadcast(moved.world.id, [:units_changed])
 
-        {:reply, {:ok, %{path: remaining}}, moved}
+            remaining =
+              case Map.get(moved.orders, unit_id) do
+                %{path: rest} -> rest
+                nil -> []
+              end
+
+            {:reply, {:ok, %{path: remaining}}, moved}
+
+          :stale ->
+            # A competing instance advanced the world under us — drop the
+            # move, resync, and let the player retry against fresh state.
+            {:reply, {:error, :stale}, resync(state)}
+        end
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -227,9 +235,22 @@ defmodule BrokenOaths.Game.WorldServer do
     {ticked, events} = Turn.tick(state)
     new_state = %{ticked | turn_started_at: DateTime.utc_now()}
 
-    persist_tick!(state, new_state)
-    broadcast(new_state.world.id, events)
-    new_state
+    case persist_tick(state, new_state) do
+      :ok ->
+        broadcast(new_state.world.id, events)
+        new_state
+
+      :stale ->
+        # Another WorldServer instance for this world (e.g. a second BEAM
+        # node running a mix script — issue 07ee50d1) advanced the turn
+        # first. Our write lost the optimistic race; discard in-memory
+        # state and resync from the row instead of clobbering it.
+        resync(state)
+    end
+  end
+
+  defp resync(state) do
+    load_state(Worlds.get_world!(state.world.id))
   end
 
   # -------------------------------------------------------------------
@@ -523,13 +544,26 @@ defmodule BrokenOaths.Game.WorldServer do
   # Persistence — tick delta
   # -------------------------------------------------------------------
 
-  defp persist_tick!(old_state, new_state) do
+  # Optimistically guarded: the world-turn write only lands if the row
+  # still holds the turn this state was loaded from. A competing
+  # WorldServer (second BEAM node) that advanced the row first makes
+  # this return :stale with NOTHING persisted — the caller resyncs.
+  defp persist_tick(old_state, new_state) do
     Repo.transaction(fn ->
-      persist_unit_changes(old_state.units, new_state.units)
-      persist_order_changes(old_state.orders, new_state.orders)
-      persist_explored_changes(old_state.explored, new_state.explored)
-      persist_world_turn(new_state)
+      case persist_world_turn(old_state.turn, new_state) do
+        :ok ->
+          persist_unit_changes(old_state.units, new_state.units)
+          persist_order_changes(old_state.orders, new_state.orders)
+          persist_explored_changes(old_state.explored, new_state.explored)
+
+        :stale ->
+          Repo.rollback(:stale)
+      end
     end)
+    |> case do
+      {:ok, _} -> :ok
+      {:error, :stale} -> :stale
+    end
   end
 
   defp persist_unit_changes(old_units, new_units) do
@@ -561,10 +595,14 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
-  defp persist_world_turn(state) do
-    Repo.update_all(from(w in World, where: w.id == ^state.world.id),
-      set: [turn: state.turn, turn_started_at: state.turn_started_at]
-    )
+  defp persist_world_turn(expected_turn, state) do
+    {count, _} =
+      Repo.update_all(
+        from(w in World, where: w.id == ^state.world.id and w.turn == ^expected_turn),
+        set: [turn: state.turn, turn_started_at: state.turn_started_at]
+      )
+
+    if count == 1, do: :ok, else: :stale
   end
 
   defp broadcast(world_id, events) do

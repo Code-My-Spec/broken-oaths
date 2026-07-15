@@ -234,10 +234,12 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       assert length(tiles) > 0
       assert length(tiles) <= tile_count
 
-      # Each row: [id, palette_index, cx, cy, cz, elevation | corner coords]
-      [id, pal, _cx, _cy, _cz, elevation | corners] = hd(tiles)
+      # Each row: [id, palette_index, decor, tex, cx, cy, cz, elevation | corners]
+      [id, pal, decor, tex, _cx, _cy, _cz, elevation | corners] = hd(tiles)
       assert is_integer(id) and id < tile_count
       assert pal >= 0 and pal < length(palette)
+      assert is_nil(decor) or is_binary(decor)
+      assert is_binary(tex)
       assert elevation >= 0.0 and elevation <= 1.0
       assert length(corners) in [15, 18]
 

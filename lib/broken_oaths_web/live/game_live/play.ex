@@ -298,30 +298,13 @@ defmodule BrokenOathsWeb.GameLive.Play do
     [
       tile.id,
       Terrain.color(terrain),
-      decor(terrain),
-      texture(terrain),
+      Terrain.decor(terrain),
+      Terrain.texture(terrain),
       round4(cx),
       round4(cy),
       round4(cz) | corners
     ]
   end
-
-  # Which billboard sprite (if any) a tile's relief/feature earns — the
-  # client learns decor from this push, never by re-deriving terrain
-  # (ADR game-art-pipeline). Mountains dominate features; hills yield
-  # to tree cover.
-  defp decor(nil), do: nil
-  defp decor(%{relief: :mountains}), do: "mountain"
-  defp decor(%{feature: :woods}), do: "woods"
-  defp decor(%{feature: :rainforest}), do: "rainforest"
-  defp decor(%{relief: :hills}), do: "hills"
-  defp decor(_terrain), do: nil
-
-  # Ground texture key: the feature's floor wins over the base's. Relief
-  # is decor's job (mountain/hills billboards), never the texture's.
-  defp texture(nil), do: "ocean"
-  defp texture(%{feature: feature}) when not is_nil(feature), do: Atom.to_string(feature)
-  defp texture(%{base: base}), do: Atom.to_string(base)
 
   defp round4(f), do: Float.round(f, 4)
 
@@ -454,36 +437,14 @@ defmodule BrokenOathsWeb.GameLive.Play do
             this.raf = null
             this.arc = 0.02
 
-            // Billboard sprites (ADR game-art-pipeline). Anything not yet
-            // loaded falls back to the original programmer art.
-            this.sprites = {}
-            for (const [key, path] of Object.entries({
-              lord: "/images/game/units/lord.png",
-              settler: "/images/game/units/settler.png",
-              mountain: "/images/game/decor/mountain.png",
-              hills: "/images/game/decor/hills.png",
-              woods: "/images/game/decor/woods.png",
-              rainforest: "/images/game/decor/rainforest.png",
-            })) {
-              const img = new Image()
-              img.onload = () => this.draw()
-              img.src = path
-              this.sprites[key] = img
-            }
-
-            // Ground textures: seamless tiles pattern-filled into tile
-            // polygons in screen space (canvas 2D can't perspective-map,
-            // but pattern fills read fine at game zoom). Flat terrain
-            // color remains the fallback until a texture loads.
-            this.terrainTex = {}
-            this.patterns = {}
-            for (const key of ["grassland", "plains", "desert", "tundra", "snow", "ocean",
-                               "coast", "woods", "rainforest", "marsh", "ice"]) {
-              const img = new Image()
-              img.onload = () => this.draw()
-              img.src = "/images/game/terrain/" + key + ".png"
-              this.terrainTex[key] = img
-            }
+            // Billboard sprites + ground textures via the shared render
+            // core (assets/js/globe_render.js — ADR game-art-pipeline).
+            // Anything not yet loaded falls back to programmer art.
+            const GR = window.GlobeRender
+            this.sprites = GR.loadSprites(() => this.draw())
+            this.terrainTex = GR.loadTerrainTextures(() => this.draw())
+            this.patterns = GR.patternPool(this.terrainTex)
+            this.CLOUD = GR.cloudFlat()
 
             const measure = () => {
               const r = this.el.getBoundingClientRect()
@@ -573,28 +534,17 @@ defmodule BrokenOathsWeb.GameLive.Play do
             }, {passive: false})
           },
 
+          view() {
+            return {yaw: this.yaw, pitch: this.pitch, scale: this.scale, cx: this.cx, cy: this.cy}
+          },
+
           unproject(sx, sy) {
-            const vx = (sx - this.cx) / this.scale
-            const vy = (this.cy - sy) / this.scale
-            const r2 = vx * vx + vy * vy
-            if (r2 > 1) return null
-            const vz = Math.sqrt(1 - r2)
-            const cyw = Math.cos(this.yaw), syw = Math.sin(this.yaw)
-            const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
-            return {
-              x: -syw * vx - sp * cyw * vy + cp * cyw * vz,
-              y: cyw * vx - sp * syw * vy + cp * syw * vz,
-              z: cp * vy + sp * vz
-            }
+            return window.GlobeRender.unproject(this.view(), sx, sy)
           },
 
           project(x, y, z) {
-            const cyw = Math.cos(this.yaw), syw = Math.sin(this.yaw)
-            const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
-            const depth = cp * cyw * x + cp * syw * y + sp * z
-            const px = this.cx + this.scale * (-syw * x + cyw * y)
-            const py = this.cy - this.scale * (-sp * cyw * x - sp * syw * y + cp * z)
-            return {px, py, depth}
+            const GR = window.GlobeRender
+            return GR.project(GR.rot(this.view()), x, y, z)
           },
 
           // Nearest tile to a screen point, by exact tile geometry —
@@ -642,21 +592,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
           },
 
           spriteFor(key) {
-            const img = key && this.sprites[key]
-            return img && img.complete && img.naturalWidth ? img : null
-          },
-
-          // Repeating ground pattern for a texture key, anchored to the
-          // tile's projected center so the texture travels with the tile
-          // through pans, zooms, and slides (screen-anchored patterns
-          // visibly swim under the globe). Null until loaded.
-          patternFor(ctx, key, px, py) {
-            const img = key && this.terrainTex[key]
-            if (!img || !img.complete || !img.naturalWidth) return null
-            if (!this.patterns[key]) this.patterns[key] = ctx.createPattern(img, "repeat")
-            const k = Math.max(this.scale / 1400, 0.25)
-            this.patterns[key].setTransform(new DOMMatrix([k, 0, 0, k, px, py]))
-            return this.patterns[key]
+            return window.GlobeRender.ready(key && this.sprites[key])
           },
 
           // Where a unit currently renders: mid-slide if animating,
@@ -700,6 +636,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
           draw() {
             const ctx = this.ctx
             if (!ctx) return
+            const GR = window.GlobeRender
             const dpr = this.dpr || 1
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
             ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
@@ -712,9 +649,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
             ctx.fillStyle = "#a8acb5"
             ctx.fill()
 
+            const R = GR.rot(this.view())
             const order = this.tiles
               .map((row) => {
-                const c = this.project(row[4], row[5], row[6])
+                const c = GR.project(R, row[4], row[5], row[6])
                 return {row, depth: c.depth, cx: c.px, cy: c.py}
               })
               .filter(({depth}) => depth > 0.02)
@@ -723,12 +661,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
             for (const {row, cx, cy} of order) {
               const [id, color] = row
               ctx.beginPath()
-              for (let i = 7; i < row.length; i += 3) {
-                const {px, py} = this.project(row[i], row[i + 1], row[i + 2])
-                if (i === 7) ctx.moveTo(px, py); else ctx.lineTo(px, py)
-              }
-              ctx.closePath()
-              ctx.fillStyle = this.patternFor(ctx, row[3], cx, cy) || color
+              GR.tracePolygon(ctx, R, row, 7)
+              ctx.fillStyle = this.patterns.for(ctx, row[3], this.scale, cx, cy) || color
               ctx.fill()
 
               // Explored-but-out-of-vision: remembered terrain under a
@@ -749,26 +683,21 @@ defmodule BrokenOathsWeb.GameLive.Play do
                 const img = this.spriteFor(row[2])
                 if (!img) continue
                 ctx.globalAlpha = this.visibleSet.has(row[0]) ? 1 : 0.55
-                ctx.drawImage(img, cx - decorSize / 2, cy - decorSize * 0.62, decorSize, decorSize)
+                GR.drawBillboard(ctx, img, cx, cy, decorSize)
               }
               ctx.globalAlpha = 1
             }
 
             // Weather: translucent cloud hexes one shell above known
-            // terrain (levels from the airspace push; palette mirrors
-            // Worlds.Weather). Deliberately translucent + tinted so it
-            // never reads as the flat opaque fog shroud.
-            const CLOUD = {1: "rgba(250,251,253,0.38)", 2: "rgba(240,244,249,0.62)", 3: "rgba(104,110,124,0.8)"}
+            // terrain (levels from the airspace push; palette from the
+            // shared render core). Deliberately translucent + tinted so
+            // it never reads as the flat opaque fog shroud.
             for (const {row} of order) {
               const lvl = this.airspace[row[0]]
               if (!lvl) continue
               ctx.beginPath()
-              for (let i = 7; i < row.length; i += 3) {
-                const {px, py} = this.project(row[i] * 1.035, row[i + 1] * 1.035, row[i + 2] * 1.035)
-                if (i === 7) ctx.moveTo(px, py); else ctx.lineTo(px, py)
-              }
-              ctx.closePath()
-              ctx.fillStyle = CLOUD[lvl]
+              GR.tracePolygon(ctx, R, row, 7, GR.CLOUD_ALT)
+              ctx.fillStyle = this.CLOUD[lvl]
               ctx.fill()
             }
 

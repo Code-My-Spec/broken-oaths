@@ -580,7 +580,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
             # window, tiles referencing them by index
             {rows, {rev_palette, _index}} =
               Enum.map_reduce(window, {[], %{}}, fn tile, {plist, pmap} ->
-                color = Terrain.color(Map.get(terrain_map, tile.id))
+                terrain = Map.get(terrain_map, tile.id)
+                color = Terrain.color(terrain)
 
                 {idx, plist, pmap} =
                   case pmap do
@@ -588,7 +589,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                     _ -> {map_size(pmap), [color | plist], Map.put(pmap, color, map_size(pmap))}
                   end
 
-                {tile_row(tile, idx, elevation_map), {plist, pmap}}
+                {tile_row(tile, idx, terrain, elevation_map), {plist, pmap}}
               end)
 
             %{palette: Enum.reverse(rev_palette), tiles: rows}
@@ -612,8 +613,10 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   end
 
   # Compact tile row for the vector-canvas renderer:
-  # [id, palette_index, cx, cy, cz, elevation, corner1x, corner1y, corner1z, ...]
-  defp tile_row(tile, palette_index, elevation_map) do
+  # [id, palette_index, decor, tex, cx, cy, cz, elevation, corner1x, ...]
+  # decor/tex mirror the game board's art keys (Terrain.decor/texture)
+  # so both canvas globes draw the same sprites and ground patterns.
+  defp tile_row(tile, palette_index, terrain, elevation_map) do
     {cx, cy, cz} = tile.center
 
     corners =
@@ -624,6 +627,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     [
       tile.id,
       palette_index,
+      Terrain.decor(terrain),
+      Terrain.texture(terrain),
       Float.round(cx, 4),
       Float.round(cy, 4),
       Float.round(cz, 4),
@@ -1283,21 +1288,19 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 }
               }
 
-              // World vector for a screen point (inverse view rotation).
+              // World vector for a screen point — shared render core.
               this.unproject = (sx, sy) => {
-                const vx = (sx - this.cx) / this.S
-                const vy = (this.cy - sy) / this.S
-                const r2 = vx * vx + vy * vy
-                if (r2 > 1) return null
-                const vz = Math.sqrt(1 - r2)
-                const cyw = Math.cos(this.yaw), syw = Math.sin(this.yaw)
-                const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
-                return {
-                  x: -syw * vx - sp * cyw * vy + cp * cyw * vz,
-                  y: cyw * vx - sp * syw * vy + cp * syw * vz,
-                  z: cp * vy + sp * vz
-                }
+                return window.GlobeRender.unproject(
+                  {yaw: this.yaw, pitch: this.pitch, scale: this.S, cx: this.cx, cy: this.cy},
+                  sx, sy
+                )
               }
+
+              // Art parity with the game board (issue dd5f2867): the same
+              // sprites and ground textures via the shared render core.
+              this.sprites = window.GlobeRender.loadSprites(() => this.schedule())
+              this.terrainTex = window.GlobeRender.loadTerrainTextures(() => this.schedule())
+              this.patterns = window.GlobeRender.patternPool(this.terrainTex)
 
               // Near mode, vector renderer: the windowed tiles as filled 2D
               // paths — crisp at any zoom, no DOM, no compositor limits.
@@ -1308,19 +1311,17 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
                 if (!tiles) return
 
+                const GR = window.GlobeRender
                 const k = this.pxScale
                 const S = this.S * k, ccx = this.cx * k, ccy = this.cy * k
-                const cyw = Math.cos(this.yaw), syw = Math.sin(this.yaw)
-                const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
-                // View-space z of a world point (backface test)
-                const vz = (x, y, z) => cp * cyw * x + cp * syw * y + sp * z
+                const R = GR.rot({yaw: this.yaw, pitch: this.pitch, scale: S, cx: ccx, cy: ccy})
                 const [sun_x, sun_y, sun_z] = this.sunVec()
 
                 // Painter's order (far first) so relief-lifted tiles at the
                 // rim overlap their lower neighbors correctly
                 const order = []
                 for (const row of tiles) {
-                  const z = vz(row[2], row[3], row[4])
+                  const z = GR.depth(R, row[4], row[5], row[6])
                   if (z > 0.02) order.push([z, row])
                 }
                 order.sort((a, b) => a[0] - b[0])
@@ -1328,11 +1329,11 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                 for (const [, row] of order) {
                   // Day/night: smoothstep across the terminator, plus a
                   // brightness accent for high ground
-                  const light = row[2] * sun_x + row[3] * sun_y + row[4] * sun_z
+                  const light = row[4] * sun_x + row[5] * sun_y + row[6] * sun_z
                   let t = (light + 0.15) / 0.3
                   t = t < 0 ? 0 : t > 1 ? 1 : t
                   t = t * t * (3 - 2 * t)
-                  const h = row[5]
+                  const h = row[7]
                   const relief = Math.max(h - 0.40, 0)
                   const f = 0.30 + t * (0.62 + relief * 0.55)
                   let idx = Math.round(((f - 0.30) / 0.85) * 15)
@@ -1343,21 +1344,49 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                   // as silhouette relief at the planet's rim)
                   const lift = 1 + relief * 0.04
 
+                  // Ground texture pattern (anchored to the projected tile
+                  // center, like the game board) with the flat shade as
+                  // fallback; day/night arrives as a darkness overlay so
+                  // the terminator survives the pattern fill.
+                  const c = GR.project(R, row[4], row[5], row[6])
+                  const pat = this.patterns.for(ctx, row[3], S, c.px, c.py)
+
                   ctx.beginPath()
-                  for (let i = 6; i < row.length; i += 3) {
-                    const x = row[i] * lift, y = row[i + 1] * lift, z = row[i + 2] * lift
-                    const px = ccx + S * (-syw * x + cyw * y)
-                    const py = ccy - S * (-sp * cyw * x - sp * syw * y + cp * z)
-                    if (i === 6) ctx.moveTo(px, py); else ctx.lineTo(px, py)
-                  }
-                  ctx.closePath()
-                  ctx.fillStyle = color
+                  GR.tracePolygon(ctx, R, row, 8, lift)
+                  ctx.fillStyle = pat || color
                   ctx.fill()
                   // Same-color stroke seals seams — slightly wider than a
                   // hairline to also cover relief-lift gaps at elevation steps
-                  ctx.strokeStyle = color
+                  ctx.strokeStyle = pat || color
                   ctx.lineWidth = Math.max(1.5, k)
                   ctx.stroke()
+
+                  if (pat) {
+                    const dark = Math.max(0, Math.min(1 - f, 0.75))
+                    if (dark > 0.02) {
+                      ctx.fillStyle = "rgba(8,12,26," + dark.toFixed(3) + ")"
+                      ctx.fill()
+                    }
+                  }
+                }
+
+                // Terrain decor billboards — art parity with the game
+                // board, dimmed through the night side, skipped below
+                // readability size.
+                ctx.imageSmoothingEnabled = false
+                const decorSize = Math.min(Math.max(S * this.tileArc * 1.7, 10 * k), 72 * k)
+                if (decorSize >= 10 * k) {
+                  for (const [, row] of order) {
+                    const img = GR.ready(row[2] && this.sprites[row[2]])
+                    if (!img) continue
+                    const light = row[4] * sun_x + row[5] * sun_y + row[6] * sun_z
+                    let t = (light + 0.15) / 0.3
+                    t = t < 0 ? 0 : t > 1 ? 1 : t
+                    const c = GR.project(R, row[4], row[5], row[6])
+                    ctx.globalAlpha = 0.45 + 0.55 * t
+                    GR.drawBillboard(ctx, img, c.px, c.py, decorSize)
+                  }
+                  ctx.globalAlpha = 1
                 }
 
                 // Airspace pass: cloud tiles as translucent hexes at
@@ -1372,7 +1401,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                   for (const [, row] of order) {
                     const lvl = this.airspace[row[0]]
                     if (!lvl) continue
-                    const light = row[2] * sun_x + row[3] * sun_y + row[4] * sun_z
+                    const light = row[4] * sun_x + row[5] * sun_y + row[6] * sun_z
                     let t = (light + 0.15) / 0.3
                     t = t < 0 ? 0 : t > 1 ? 1 : t
                     t = t * t * (3 - 2 * t)
@@ -1380,13 +1409,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                     const style = this.cloudShades[lvl][idx]
 
                     ctx.beginPath()
-                    for (let i = 6; i < row.length; i += 3) {
-                      const x = row[i] * A, y = row[i + 1] * A, z = row[i + 2] * A
-                      const px = ccx + S * (-syw * x + cyw * y)
-                      const py = ccy - S * (-sp * cyw * x - sp * syw * y + cp * z)
-                      if (i === 6) ctx.moveTo(px, py); else ctx.lineTo(px, py)
-                    }
-                    ctx.closePath()
+                    GR.tracePolygon(ctx, R, row, 8, A)
                     ctx.fillStyle = style
                     ctx.fill()
 
@@ -1405,13 +1428,12 @@ defmodule BrokenOathsWeb.WorldLive.Show do
                       const h = ((id + 1) * 2654435761 ^ bucket * 40503) >>> 0
                       if (h % 9 !== 0) continue
 
-                      const gx = ccx + S * (-syw * row[2] + cyw * row[3])
-                      const gy = ccy - S * (-sp * cyw * row[2] - sp * syw * row[3] + cp * row[4])
-                      const cx2 = ccx + S * A * (-syw * row[2] + cyw * row[3])
-                      const cy2 = ccy - S * A * (-sp * cyw * row[2] - sp * syw * row[3] + cp * row[4])
-                      const fx = ccx + S * (-syw * row[6] + cyw * row[7])
-                      const fy = ccy - S * (-sp * cyw * row[6] - sp * syw * row[7] + cp * row[8])
-                      const hr = Math.hypot(fx - gx, fy - gy)
+                      const g = GR.project(R, row[4], row[5], row[6])
+                      const c2 = GR.project(R, row[4] * A, row[5] * A, row[6] * A)
+                      const fc = GR.project(R, row[8], row[9], row[10])
+                      const gx = g.px, gy = g.py
+                      const cx2 = c2.px, cy2 = c2.py
+                      const hr = Math.hypot(fc.px - gx, fc.py - gy)
 
                       // Bolt: 4 jagged segments with per-strike jitter
                       ctx.beginPath()
@@ -1427,13 +1449,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
 
                       // Lit-from-within flash on the storm hex
                       ctx.beginPath()
-                      for (let i = 6; i < row.length; i += 3) {
-                        const x = row[i] * A, y = row[i + 1] * A, z = row[i + 2] * A
-                        const px = ccx + S * (-syw * x + cyw * y)
-                        const py = ccy - S * (-sp * cyw * x - sp * syw * y + cp * z)
-                        if (i === 6) ctx.moveTo(px, py); else ctx.lineTo(px, py)
-                      }
-                      ctx.closePath()
+                      GR.tracePolygon(ctx, R, row, 8, A)
                       ctx.fillStyle = "rgba(255,252,215,0.30)"
                       ctx.fill()
                     }
@@ -1447,24 +1463,19 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               this.drawSelection = () => {
                 const sel = this.selected
                 if (!sel) return
+                const GR = window.GlobeRender
                 const ctx = this.ctx
                 const k = this.pxScale
-                const S = this.S * k, ccx = this.cx * k, ccy = this.cy * k
-                const cyw = Math.cos(this.yaw), syw = Math.sin(this.yaw)
-                const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
+                const R = GR.rot({
+                  yaw: this.yaw, pitch: this.pitch,
+                  scale: this.S * k, cx: this.cx * k, cy: this.cy * k
+                })
 
                 const [cx0, cy0, cz0] = sel.center
-                if (cp * cyw * cx0 + cp * syw * cy0 + sp * cz0 <= 0.02) return
+                if (GR.depth(R, cx0, cy0, cz0) <= 0.02) return
 
-                const cs = sel.corners
                 ctx.beginPath()
-                for (let i = 0; i < cs.length; i += 3) {
-                  const x = cs[i], y = cs[i + 1], z = cs[i + 2]
-                  const px = ccx + S * (-syw * x + cyw * y)
-                  const py = ccy - S * (-sp * cyw * x - sp * syw * y + cp * z)
-                  if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
-                }
-                ctx.closePath()
+                GR.tracePolygon(ctx, R, sel.corners, 0)
                 ctx.strokeStyle = "#ffffff"
                 ctx.lineWidth = Math.max(2 * k, 2)
                 ctx.stroke()
