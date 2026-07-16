@@ -107,3 +107,16 @@ With the codemyspec plugin active, `mix test 2>&1 | tail -5` fails with
 tail, -5" — shell operators are passed to the task as literal args
 (hook rewrites the command). Plain `mix test` works. Cost several
 confusing failures; agents routinely pipe test output.
+
+## 12. Local MCP subsystem died while HTTP stayed healthy (severity: high)
+During a long QA batch (2026-07-16, codemyspec 1.5.38 via brew), every
+`mcp__plugin_codemyspec_local__*` call from every session began failing
+with `MCP error -32603: Internal error`, while the same beam's HTTP
+endpoints (/, /api/bootstrap/auth/status, /api/hooks/stop) kept
+answering 200/authenticated. Two independent Claude sessions confirmed
+the identical failure; `brew services restart codemyspec` fully
+restored MCP. Timing loosely correlated with heavy parallel MCP usage
+by QA sub-agents. Suggests an MCP-transport supervisor crashing without
+recovery (or giving up restarts) while the Phoenix endpoint supervisor
+stays up — needs its own restart strategy or a health surface that
+includes the MCP subsystem.
