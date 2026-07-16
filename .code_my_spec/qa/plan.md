@@ -73,6 +73,14 @@ Then e.g. `BrokenOaths.Worlds.list_worlds()` to find world ids, or
 to locate storm tiles for weather QA. Prefer asserting through the UI;
 use iex to *find* things, not to *prove* things.
 
+**During QA sessions: do not run `iex -S mix`, `mix run`, or
+`mix run -e` AT ALL — not even for "pure" reads.** Any mix invocation
+from a second shell can trigger a recompile that kills or wedges the
+running dev server (observed 2026-07-16: a "safe" `mix run -e` read
+took the server process down entirely mid-QA). Read state via
+`psql broken_oaths_dev` or the browser, full stop. The earlier,
+narrower warning below is kept for context:
+
 **Never call `BrokenOaths.Game.*` from a separate `iex -S mix` /
 `mix run` process while the dev server is running.** Those functions
 route through a per-node `WorldServer` GenServer — a second BEAM node
