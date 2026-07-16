@@ -110,4 +110,30 @@ defmodule BrokenOathsSpex.Fixtures do
   # sets HP directly and nothing else. Revisit/remove once a combat
   # story lands and can supply real damage.
   defdelegate set_unit_hp(world, unit_id, hp), to: BrokenOaths.Game, as: :set_unit_hp_for_test
+
+  # --- Barbarian camps (story 892): sanctioned narrow read ---
+  # A camp's existence, tile, hp, and warrior roster are spawn-time
+  # server decisions — exactly the same status as region identity
+  # above ("region math criteria have no UI surface to observe"). Fog
+  # of war is a HARD constraint here (criterion 7546): an undiscovered
+  # camp must never appear in a pushed payload or rendered HTML, so
+  # there is no way to observe placement/count criteria (7543, 7544,
+  # 7546) through the UI for camps a player hasn't scouted. This read
+  # exposes only the same kind of ground-truth server fact
+  # `region_partition`/`claimed_region` already expose.
+  #
+  # NEVER read this to assert what the player *sees* on screen — that
+  # comes exclusively from the "game:camps" push event (mirroring
+  # "game:cities"/"game:units") once a camp's tile is actually
+  # visible/explored through GameLive.Play. Only use it to (a) plan a
+  # `given_`/`when_` (e.g. "walk a unit next to this camp's tile so it
+  # becomes visible") or (b) assert spawn-time facts that have no UI
+  # surface by construction (counts, placement, "no new camps on a
+  # second founding").
+  #
+  # Expected shape: `%{id:, tile_id:, hp:, warriors: [%{id:, hp:,
+  # attack:, defense:}]}` — camp fields mirror the city marker
+  # (`id`/`tile_id`/`hp`); warriors nest inside their camp because
+  # story 892 only spawns them (roaming/AI is story 893).
+  defdelegate list_camps(world), to: BrokenOaths.Game, as: :list_camps
 end
