@@ -1,6 +1,9 @@
 # Qa Story Brief
 
-Story 873 — New Player Spawns in World.
+Story 873 — New Player Spawns in World. **Re-run** to confirm spawn/join/
+re-entry/multi-world/abandon behaviors still hold after the city-loop
+landed and units were HP-rescaled (Lord 150/150, Settler 50/50 — not the
+old 100/100).
 
 ## Tool
 
@@ -9,167 +12,189 @@ web
 ## Auth
 
 - Login URL: `http://localhost:4050/users/log-in`
-- Use the password form `#login_form_password` (not the magic-link form above it):
+- Use the password form `#login_form_password` (not the magic-link form
+  above it):
   - `input[name="user[email]"]`
   - `input[name="user[password]"]`
 - Primary QA account: `qa@broken-oaths.test` / `qa-password-123!`
-- Additional throwaway accounts are needed for multi-user scenarios (world-full,
-  membership cap, abandon-and-reclaim). Register them at
-  `http://localhost:4050/users/register` with any `name@example.test` email,
-  then read the confirmation/magic-link email from the dev mailbox at
-  `http://localhost:4050/dev/mailbox` (Swoosh local adapter — no real email
-  is sent). Set a password via the settings page, or just use the magic
-  link each time to log that throwaway user in.
-- Driven with the `vibium` CLI (bash), not the vibium MCP tools (not present
-  in this session): `vibium go <url>`, `vibium find <selector>`,
-  `vibium click <selector>`, `vibium fill <selector> <text>`,
-  `vibium screenshot` (always writes `~/Pictures/Vibium/screenshot.png` —
-  the path argument is broken; copy the file aside per scenario). If vibium
-  wedges: `pkill -f chrome-for-testing; pkill -x vibium; rm -f
-  ~/Library/Caches/vibium/vibium.sock`, then `vibium go` again (it lands on
-  `about:blank` after a restart — always re-navigate).
+- Throwaway accounts needed for the fill/cap/abandon-reclaim scenarios:
+  register at `http://localhost:4050/users/register` (email-only form,
+  `#registration_form`, field `input[name="user[email]"]`) — this sends a
+  login-instructions link, no password is set at registration. Read it
+  from the dev mailbox at `http://localhost:4050/dev/mailbox` (Swoosh
+  local adapter, no real email sent) and click the link to confirm +
+  log that user in.
+- Driven with the `vibium` CLI (bash), not MCP browser tools (not present
+  in this session): `vibium go <url>`, `vibium find <selector>`, `vibium
+  click <selector>`, `vibium fill <selector> <text>`, `vibium screenshot`
+  (always writes `~/Pictures/Vibium/screenshot.png` — the path argument
+  is broken; copy the file aside per scenario). Run with the sandbox
+  disabled (`dangerouslyDisableSandbox: true`) — the daemon socket lives
+  under `~/Library/Caches/vibium/`, outside the sandbox writable
+  allowlist. If vibium wedges: `pkill -f chrome-for-testing; pkill -x
+  vibium; rm -f ~/Library/Caches/vibium/vibium.sock`, then `vibium go`
+  again (lands on `about:blank` after a restart — always re-navigate).
 
 ## Seeds
 
     mix run priv/repo/qa_seeds.exs
 
-Idempotent. Creates/confirms:
+Idempotent — safe to re-run, reuses existing records. No new seeds are
+required for this re-run; use current DB state (confirmed via psql
+before writing this brief):
 
-- QA user `qa@broken-oaths.test` / `qa-password-123!`.
-- **QA World** (world id 6, seed 424242, frequency 54, ~29,162 tiles,
-  ~104 spawnable regions) — the main world for spawn/gold/units/resume
-  scenarios. Too large to fill by hand.
-- **QA World (Fill Test)** (world id 10, seed 111222, frequency 8, 642
-  tiles) — resolves to **exactly two** spawnable regions, both verified
-  crash-safe (see Setup Notes below for why that verification mattered).
-  Added for this story so "world just filled up" and
-  abandon-and-reclaim are testable by hand: two throwaway joins fill it
-  completely.
-
-For the three-world membership cap, use QA World (id 6), QA World (Fill
-Test) (id 10, after it's already full is fine — membership cap doesn't
-require an open region), and one of the pre-existing worlds already on
-`/play` (Emerald Wilds, Verdant Expanse, Golden Steppes, Jade Wilds, or
-"JAMES IS A BOSS" — all frequency 54, all with plenty of open regions).
-No need to seed a fourth fixture.
+- QA user (user_id 1, `qa@broken-oaths.test`) is currently a member of
+  **world 6** ("QA World", player_id 1, lord unit 1 @ tile 7214, settler
+  unit 2 @ tile 21635, gold 50, no city) and **world 10** ("QA World
+  (Fill Test)", player_id 7, lord unit 13 @ tile 581, settler unit 14 @
+  tile 575, gold 50, no city). **Do not abandon or found a city in world
+  6** — later QA sessions (878-883) need that civilization intact.
+- World 10 (frequency 8, exactly 2 spawnable regions: 0 and 1) is
+  **already completely full** as of this session: region 0 held by QA
+  user (player 7), region 1 held by `throwaway1@example.test` (user 3,
+  player 3). This is convenient — the "world just filled up" scenario
+  can be exercised immediately against a genuinely full world without
+  needing to fill it by hand first.
+- Other active worlds with plenty of open regions (frequency 54 each):
+  id 1 Jade Wilds, id 2 Golden Steppes, id 3 JAMES IS A BOSS, id 4
+  Verdant Expanse, id 5 Emerald Wilds. `throwaway2@example.test` (user
+  4) is already a member of worlds 4, 5, 6 (previously used for cap
+  testing) — don't reuse that account for the cap test this run, it's
+  already at the 3-world ceiling with no headroom to demonstrate a
+  *successful* 3rd join. Use the QA user (currently at 2 memberships)
+  for the cap test instead.
+- World 7 "QA World (Full Test)" is archived (deliberate Spawner-crash
+  repro) — do not reactivate it.
 
 ## What To Test
 
-- **Registered player picks a world and spawns** — log in as
-  `qa@broken-oaths.test`, go to `/play`, confirm QA World (id 6) shows a
-  `[data-test='join-world-6']` button. Click it. Expect redirect to
-  `/play/6` and a rendered board (canvas + turn bar + gold badge).
+- **Cap test (criterion 7437, "fourth world join refused")** — as
+  `qa@broken-oaths.test` (2 memberships: worlds 6, 10), go to `/play`,
+  click `[data-test='join-world-1']` (Jade Wilds) — expect success,
+  redirect to `/play/1`, fresh Lord+Settler spawn (3rd membership).
+  Return to `/play`, click `[data-test='join-world-2']` (Golden
+  Steppes) — expect **no navigation**, `[data-test='join-error']`
+  rendering a message containing "three". Verify via psql no
+  `game_players` row exists for `user_id=1, world_id=2`, and that the
+  three existing memberships (6, 10, 1) are untouched.
 
-- **Spawn delivers a Lord and a Settler on workable land** — on `/play/6`
-  after spawning, open the unit panel (`GameLive.UnitPanel`,
-  `data-test='unit-panel'`) and confirm two units are listed with type
-  labels "Lord" and "Settler" (text labels only — no crown icon exists in
-  the current UI; the story text mentions a crown icon but the
-  implementation renders a text label instead — note this as an
-  observation, not a failure, per team lead guidance). Screenshot the
-  board and the unit panel.
+- **Fill / graceful-full test (criterion 7413)** — register + confirm a
+  throwaway account (e.g. `qa873-fillb@broken-oaths.test`). Log in as
+  them, go to `/play`. World 10 should render
+  `[data-test='world-full-10']` ("Full" badge) with **no** join button,
+  since both its regions are already claimed. Screenshot. This
+  demonstrates the picker fails gracefully (no crash, no button to even
+  attempt the join) against a full world. Also try navigating directly
+  to `http://localhost:4050/play/10` as this non-member — expect a
+  bounce back to `/play` (per `GameLive.Play.mount/3`'s
+  `claimed_region == nil` redirect), not a crash or a spawn.
 
-- **Fresh spawn shows 50 gold** — on the same first spawn, confirm the
-  gold badge `[data-test='player-gold']` reads `50`.
+- **Abandon test (criterion 7439, "abandoning wipes the civilization and
+  reopens the region")** — log back in as `qa@broken-oaths.test`, go to
+  `/play/10` (Enter). Click `[data-test='abandon-world']` — expect a
+  DaisyUI confirmation modal (not a native JS confirm), `Cancel` and
+  `[data-test='abandon-confirm']` ("Abandon Forever"). Click `Cancel`
+  first, confirm modal closes with no change (still on `/play/10`,
+  units still present). Click abandon again, then
+  `abandon-confirm`. Expect redirect to `/play`. Verify via psql: the
+  `game_players` row for `user_id=1, world_id=10` and its `game_units`
+  rows (cascade delete) are gone. On `/play`, world 10 should now show
+  `[data-test='join-world-10']` ("Join") for the QA user, not "Enter".
 
-- **Re-entering a joined world never re-spawns** — from `/play`, click
-  `[data-test='join-world-6']` again (button now reads "Enter" once
-  you're a member). Confirm no error, and confirm gold/units are
-  unchanged from the first spawn (re-check `player-gold` and
-  `unit-panel` counts — should still be exactly 2 units and 50 gold,
-  not 4 units / 100 gold).
+- **Fresh-claim test (criterion 7440, "abandoned region is a fresh start
+  for its next claimant") + registered-player-spawns (7412) + spawn
+  stats (7417, 7418)** — log back in as `qa873-fillb@broken-oaths.test`
+  (the throwaway from the fill test, which failed to join earlier). Go
+  to `/play` — world 10 should no longer show "Full"; it should show
+  `[data-test='join-world-10']`. Click it — expect success, redirect to
+  `/play/10`. Screenshot the board and
+  `[data-test='unit-panel']`. Confirm:
+  - Two units present, `[data-test='unit-type']` reading "Lord" and
+    "Settler" (text labels — no crown icon in the current UI; note as
+    observation only, not a defect, matching earlier QA guidance).
+  - `[data-test='unit-hp']` reads "HP 150/150" for the Lord and "HP
+    50/50" for the Settler (HP-rescale sanity — criteria implied by the
+    story's pre-city substrate, verify the new numbers, not the old
+    100/100).
+  - `[data-test='player-gold']` reads `50`.
+  - Spawn tile terrain is workable land (not ocean/mountain) — confirm
+    via psql `terrain` lookup for the new lord/settler `tile_id`s (see
+    Setup Notes for how) or via the sidebar/tile info if exposed.
+  - Via psql: the new `game_players`/`game_units` rows are fresh
+    (new ids, not reusing QA user's old player_id 7 / unit ids 13-14),
+    gold is exactly 50, and no leftover orders/improvements reference
+    the old player.
 
-- **Returning player resumes where their civilization is** — navigate
-  away (e.g. to `/play`) and back to `/play/6`. Confirm the board loads
-  centered on the same units (camera is computed once at spawn from the
-  unit centroid — screenshot before/after to eyeball that the view
-  didn't reset to a different hemisphere).
+- **Re-entry never re-spawns (criterion 7414) + resume (criterion
+  7415)** — as `qa@broken-oaths.test`, from `/play` click
+  `[data-test='join-world-6']` (now labeled "Enter"). Confirm redirect
+  to `/play/6`, and via UI + psql that the SAME units appear (lord unit
+  id 1 @ tile 7214, settler unit id 2 @ tile 21635 — or wherever they've
+  since moved if orders were queued in a prior session; the point is
+  **same unit ids**, not a fresh pair), gold still 50 (no city built,
+  so no accrued income to complicate the check), HP still 150/150 /
+  50/50. Screenshot. Then navigate to `/play` and back to `/play/6` —
+  screenshot again and confirm the camera/board renders the same
+  location (units at the same tiles, not reset to a different
+  hemisphere) — camera is computed once from the unit centroid at
+  mount, so this is really "same units visible" not a pixel-perfect
+  camera diff.
 
-- **Playing in two worlds at once** — join QA World (Fill Test, id 10) as
-  the same `qa@broken-oaths.test` user (this claims one of world 10's two
-  spawnable regions). Confirm both `/play/6` and `/play/10` are
-  independently reachable, each showing its own gold/units, and that
-  `/play` shows "Your civilization" badges plus "Enter" on both.
+- **Multi-world isolation (criterion 7416)** — as `qa@broken-oaths.test`,
+  on `/play/1` (the Jade Wilds civ joined during the cap test), select
+  a unit (left-click) and queue a movement order (right-click an
+  adjacent land tile) if the board interaction allows it in the time
+  available. Snapshot `game_units`/`game_orders` for world 6 via psql
+  immediately before and after this interaction — confirm zero rows
+  changed for world 6. If queuing an order proves fiddly against the
+  canvas board within a reasonable time-box, a plain snapshot-diff
+  across worlds 1/6/10 (confirm units/gold in each are exactly what
+  psql shows independently, with no cross-contamination) is acceptable
+  evidence — note which approach was used.
 
-- **Picking a world that just filled up fails gracefully** — register a
-  throwaway user and have them claim world 10's second (last) spawnable
-  region. Now register and confirm a third throwaway user, log in as
-  them, go to `/play`, and confirm world 10 shows
-  `[data-test='world-full-10']` ("Full") instead of a join button. If a
-  join is still attempted (e.g. by racing a stale picker view — reload
-  then click quickly, or use two browser sessions), confirm
-  `[data-test='join-error']` renders "That world just filled up — pick
-  another." and the throwaway user has no region in world 10 afterward
-  (they should not appear on `/play/10`, and `/play/10` should redirect
-  them to `/play` if they try navigating there directly, per
-  `GameLive.Play.mount/3`'s `claimed_region == nil` bounce).
+- **HP rescale sanity** — already covered above (both the world-1 fresh
+  spawn during the cap test and the world-10 fresh-claim spawn), plus
+  the world-6 re-entry check. No separate pass needed; call out
+  explicitly in the scenario record.
 
-- **A fourth world join is refused at the cap** — using a throwaway user,
-  join three distinct worlds (QA World id 6, QA World Fill Test id 10 —
-  membership counts even if world 10 is already full from a prior
-  scenario, since the cap counts memberships not open slots — and one
-  of the other pre-existing frequency-54 worlds). Attempt to join a
-  fourth. Confirm `[data-test='join-error']` renders a message
-  containing "three" (`"You can only play in three worlds at once."`)
-  and that the three existing memberships are untouched (still show
-  "Enter" on `/play`).
-
-- **Abandoning wipes the civilization and reopens the region** — on
-  `/play/6` (or `/play/10`), click `[data-test='abandon-world']`. Confirm
-  a confirmation modal appears (not a native JS confirm — a DaisyUI
-  modal with `Cancel` and `[data-test='abandon-confirm']` "Abandon
-  Forever"). Click Cancel first and confirm the modal closes with no
-  change. Repeat and click `abandon-confirm` this time. Confirm redirect
-  to `/play`, and that the world no longer shows "Your civilization" /
-  "Enter" for this user — it shows "Join" again (or "Full" if someone
-  else already reclaimed it).
-
-- **An abandoned region is a fresh start for its next claimant** — this
-  is cleanest on world 10 (two regions, easy to fully observe): after
-  one owning user abandons their region, confirm `/play` no longer shows
-  `world-full-10` (assuming the other region is still free, or abandon
-  both to fully reopen it), and that a different throwaway user can
-  click `join-world-10` and spawn cleanly (fresh 2 units, 50 gold, no
-  leftover state from the previous owner).
+- **Registered player picks a world and spawns (criterion 7412)** —
+  exercised end-to-end by the cap test's world-1 join and the
+  fresh-claim world-10 join above. Call it out explicitly in the
+  scenario record rather than re-doing it separately.
 
 ## Result Path
 
 Findings are filed via `create_issue` as discovered (not written to a
 result file); the QA run concludes with one `submit_qa_result` call
-against task id `963c164a-a200-4c2a-8f31-3aff45cba7b8`. Screenshots go in
-`.code_my_spec/qa/873/screenshots/`.
+against task id `fa927cec-92fd-4775-8363-316a40a0325f`. Screenshots go
+in `.code_my_spec/qa/873/screenshots/`.
 
 ## Setup Notes
 
-- The app was 500ing on every routed path except `/health`/`/up` at the
-  start of this session (stale `_build/dev` after an out-of-band config
-  compile, matching the plan's documented "System Issues" entry). The
-  team lead restarted the server; routes are confirmed 200/302 as of
-  writing. If this recurs mid-run, message the team lead rather than
-  restarting it directly.
-- **Critical bug found and fixed-around during brief-writing** (issue
-  `6b8a69f3-d401-4cb7-b45f-ad3ceaf414e6`): the first version of the
-  fill-test fixture (frequency 5) crashed `Spawner.central_land_tiles/2`
-  with a `KeyError`, which crashed `world_full?/1`, which took down the
-  *entire* `/play` picker for every user and every world the moment that
-  world was `status: "active"`. Root cause: a `:land` tile fully
-  enclosed by same-region `:mountain` tiles has no BFS path to the
-  region boundary. Frequency 5-6 reproduced this on every seed tried;
-  frequency 7-8 did not (spot-checked ten seeds each via a per-region
-  dry-run probe). The broken world (id 7, "QA World (Full Test)",
-  frequency 5, seed 500555) is left in the DB `status: "archived"` as a
-  standing repro case for the fix — **do not reactivate it**, it will
-  immediately re-break `/play`. The safe replacement is QA World (Fill
-  Test), id 10, frequency 8, seed 111222.
-- The vibium daemon failed to start under the default sandbox (socket
-  path is under `~/Library/Caches/vibium/`, not in the sandbox's
-  writable allowlist). All vibium commands in this session ran with the
-  sandbox disabled for that reason.
-- `/play/:id` (`BrokenOathsWeb.GameLive.Play`) is the actual "board" this
-  story is about — gold, abandon, and the unit panel all live there. The
-  QA plan's `?mode=classic` / `toggle_sidebar` detail applies to the
-  separate `/worlds/:id` (`WorldLive.Show`) globe-viewer feature, not
-  this one; don't conflate the two when testing.
-- The canvas board has no tile DOM (per plan). Verification here relies
-  on the DOM chrome (turn bar, gold badge, unit panel, join/abandon
-  buttons/modal) and screenshots, not on tile-level pixel assertions.
+- This is a re-run of a previously-passing QA session (see prior
+  `brief.md` git history / prior screenshots in this directory) — the
+  goal is to confirm the same behaviors after the city-loop landed and
+  units were HP-rescaled, not to re-derive the flow from scratch.
+- `psql broken_oaths_dev` requires the sandbox disabled
+  (`dangerouslyDisableSandbox: true`) per the QA plan.
+- Never call `BrokenOaths.Game.*` from a separate `iex -S mix` process
+  while the dev server is running (competing `WorldServer` GenServer
+  risk). Use psql for raw table reads and the browser/UI for anything
+  that requires the live `Game` context (join, abandon, world-full
+  checks) — the UI's Full/Join badges are the authoritative "is this
+  world full" signal, not an iex call.
+- Terrain lookup for a tile id: `psql broken_oaths_dev` has no terrain
+  table (terrain is computed from `worlds.seed` + `worlds.frequency` via
+  `BrokenOaths.Worlds.Generator`/`Terrain`, which are pure and iex-safe)
+  — if a UI terrain label isn't visible, it's acceptable to note "not
+  ocean/mountain, per successful non-crashing spawn" as inference rather
+  than blocking on a terrain readout, since `Game.join_world/2` already
+  guarantees workable land by construction (spawn tile selection lives
+  in `Spawner.central_land_tiles/2`).
+- The dev server is already running at `http://localhost:4050` — do not
+  restart it, do not run `mix phx.server`, do not run
+  `mix compile`/`mix format` (shared `_build/dev`, causes a
+  config-reload 500 outage across every route).
+- Turn boundary is 60s wall-clock in dev — movement orders won't
+  resolve instantly; the isolation test only needs the order to be
+  *queued* (a `game_orders` row written), not resolved.

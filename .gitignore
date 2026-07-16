@@ -43,3 +43,10 @@ npm-debug.log
 # Environment files with secrets.
 .env
 .env.*
+
+# Claude Code local state.
+.claude/
+/settings.local.json
+
+# Cached hex docs for offline reference.
+.code_my_spec/hex_docs/
