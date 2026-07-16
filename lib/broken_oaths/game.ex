@@ -95,6 +95,12 @@ defmodule BrokenOaths.Game do
   def queue_production(world, user, city_id, type),
     do: WorldServer.call(world, {:queue_production, user, city_id, type})
 
+  @doc "Move a queued item one slot toward the head — free, progress stays with the item."
+  @spec reorder_production_item(map(), map(), term(), term()) ::
+          :ok | {:error, :not_owner | :not_found | :invalid_item}
+  def reorder_production_item(world, user, city_id, item_id),
+    do: WorldServer.call(world, {:reorder_production_item, user, city_id, item_id})
+
   @doc "Remove `item_id` from `city_id`'s queue, forfeiting any production already banked on it."
   @spec cancel_production_item(map(), map(), term(), term()) ::
           :ok | {:error, :not_owner | :not_found}
@@ -109,12 +115,18 @@ defmodule BrokenOaths.Game do
   @spec assign_worked_tile(map(), map(), term(), term() | nil, term() | nil) ::
           :ok
           | {:error,
-             :not_owner | :not_worked | :invalid_tile | :not_territory | :already_worked | :invalid_terrain}
+             :not_owner
+             | :not_worked
+             | :invalid_tile
+             | :not_territory
+             | :already_worked
+             | :invalid_terrain}
   def assign_worked_tile(world, user, city_id, from_tile, to_tile),
     do: WorldServer.call(world, {:assign_worked_tile, user, city_id, from_tile, to_tile})
 
   @doc "Rename `city_id`. Persists immediately."
-  @spec rename_city(map(), map(), term(), String.t()) :: :ok | {:error, :not_owner | :invalid_name}
+  @spec rename_city(map(), map(), term(), String.t()) ::
+          :ok | {:error, :not_owner | :invalid_name}
   def rename_city(world, user, city_id, name),
     do: WorldServer.call(world, {:rename_city, user, city_id, name})
 
@@ -124,7 +136,12 @@ defmodule BrokenOaths.Game do
   """
   @spec start_improvement(map(), map(), term(), atom() | String.t()) ::
           :ok
-          | {:error, :not_owner | :not_worker | :invalid_improvement | :invalid_terrain | :occupied_improvement}
+          | {:error,
+             :not_owner
+             | :not_worker
+             | :invalid_improvement
+             | :invalid_terrain
+             | :occupied_improvement}
   def start_improvement(world, user, unit_id, kind),
     do: WorldServer.call(world, {:start_improvement, user, unit_id, kind})
 

@@ -6,10 +6,10 @@ defmodule BrokenOaths.Game.ProductionItem do
   accrues into it each turn and, once `banked >= cost`, resolves it into
   a spawned unit.
 
-  Reordering the queue is free (story 879); this schema has no explicit
-  position column because items are only ever appended at the tail or
-  removed by id — the auto-increment id already gives a stable FIFO
-  order without one.
+  Reordering the queue is free (story 879): items carry an explicit
+  `position` (lowest = current/head), appended at max+1 and swapped by
+  `WorldServer.do_reorder_production_item/4`. Item identity (and its
+  banked progress) never moves — only positions swap.
   """
 
   use Ecto.Schema
@@ -33,6 +33,7 @@ defmodule BrokenOaths.Game.ProductionItem do
   schema "game_production_items" do
     field :type, Ecto.Enum, values: [:settler, :worker, :warrior]
     field :banked, :integer, default: 0
+    field :position, :integer
     field :cost, :integer
 
     belongs_to :city, City
@@ -43,8 +44,8 @@ defmodule BrokenOaths.Game.ProductionItem do
   @doc false
   def changeset(item, attrs) do
     item
-    |> cast(attrs, [:city_id, :type, :banked, :cost])
-    |> validate_required([:city_id, :type, :banked, :cost])
+    |> cast(attrs, [:city_id, :type, :banked, :cost, :position])
+    |> validate_required([:city_id, :type, :banked, :cost, :position])
     |> validate_number(:banked, greater_than_or_equal_to: 0)
     |> validate_number(:cost, greater_than: 0)
     |> assoc_constraint(:city)

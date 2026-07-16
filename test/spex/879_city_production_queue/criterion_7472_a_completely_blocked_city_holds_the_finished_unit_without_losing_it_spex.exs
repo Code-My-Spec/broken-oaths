@@ -20,12 +20,18 @@ defmodule BrokenOathsSpex.Story879.Criterion7472Spex do
 
   spex "a completely blocked city holds the finished unit without losing it" do
     scenario "every tile around the city is occupied when production completes" do
-      given_(:a_world)
       given_(:registered_player)
       given_(:second_registered_player)
       given_(:third_registered_player)
 
       given_ "a city whose tile and every adjacent land tile are occupied", context do
+        # Bespoke world: this scenario needs THREE concurrent players, but
+        # the shared fixture world (seed 424242, frequency 8) has exactly
+        # TWO spawnable regions — the third join is geometrically
+        # impossible there (issue 7509b3e6; verified by Regions.spawnable
+        # scan). Frequency 9 / seed 1 deterministically yields three.
+        context = Map.put(context, :world, Fixtures.world_fixture(%{seed: 1, frequency: 9}))
+
         {:ok, join_live, _html} = live(context.conn, ~p"/play")
         join_live |> element("[data-test='join-world-#{context.world.id}']") |> render_click()
         {:ok, play_live, _html} = live(context.conn, ~p"/play/#{context.world.id}")
@@ -74,19 +80,32 @@ defmodule BrokenOathsSpex.Story879.Criterion7472Spex do
         third_play_live |> element("[data-test='join-world-#{context.world.id}']") |> render_click()
         {:ok, third_play_live, _html} = live(context.third_conn, ~p"/play/#{context.world.id}")
 
-        [n1, n2, n3, n4] = neighbors
+        # Block EVERY land neighbor with the other two players' units —
+        # the narrow spot on this world may have 1..4 land neighbors,
+        # and four blocker units are available (two per player).
+        assert length(neighbors) <= 4
 
         units2 = Fixtures.player_units(context.world, context.other_user)
         [settler2 | _] = for u <- units2, u.type == :settler, do: u
         [lord2 | _] = for u <- units2, u.type == :lord, do: u
-        walk.(other_play_live, context.world, context.other_user, settler2, n1)
-        walk.(other_play_live, context.world, context.other_user, lord2, n2)
 
         units3 = Fixtures.player_units(context.world, context.third_user)
         [settler3 | _] = for u <- units3, u.type == :settler, do: u
         [lord3 | _] = for u <- units3, u.type == :lord, do: u
-        walk.(third_play_live, context.world, context.third_user, settler3, n3)
-        walk.(third_play_live, context.world, context.third_user, lord3, n4)
+
+        blockers = [
+          {other_play_live, context.other_user, settler2},
+          {other_play_live, context.other_user, lord2},
+          {third_play_live, context.third_user, settler3},
+          {third_play_live, context.third_user, lord3}
+        ]
+
+        Enum.zip(neighbors, blockers)
+        |> Enum.each(fn {target, {plive, user, unit}} ->
+          walk.(plive, context.world, user, unit, target)
+        end)
+
+        n1 = hd(neighbors)
 
         render_hook(play_live, "queue_production", %{"city_id" => city.id, "item" => "warrior"})
 

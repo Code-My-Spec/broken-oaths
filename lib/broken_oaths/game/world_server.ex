@@ -230,6 +230,17 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
+  def handle_call({:reorder_production_item, user, city_id, item_id}, _from, state) do
+    case do_reorder_production_item(state, user, city_id, item_id) do
+      {:ok, new_state} ->
+        broadcast(new_state.world.id, [:cities_changed])
+        {:reply, :ok, new_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   def handle_call({:cancel_production_item, user, city_id, item_id}, _from, state) do
     case do_cancel_production_item(state, user, city_id, item_id) do
       {:ok, new_state} ->
@@ -425,7 +436,14 @@ defmodule BrokenOaths.Game.WorldServer do
         lord_stats = Production.unit_stats(:lord)
 
         {:ok, lord} =
-          insert_unit(state.world.id, player.id, :lord, spawn.lord_tile, lord_stats.hp, lord_stats.movement)
+          insert_unit(
+            state.world.id,
+            player.id,
+            :lord,
+            spawn.lord_tile,
+            lord_stats.hp,
+            lord_stats.movement
+          )
 
         settler_stats = Production.unit_stats(:settler)
 
@@ -652,10 +670,16 @@ defmodule BrokenOaths.Game.WorldServer do
   # before insert since a size-1 city needs it from turn zero.
   defp persist_found_city!(state, player, unit) do
     territory =
-      state.world |> Production.founding_territory(unit.tile_id) |> MapSet.to_list() |> Enum.sort()
+      state.world
+      |> Production.founding_territory(unit.tile_id)
+      |> MapSet.to_list()
+      |> Enum.sort()
 
     worked =
-      case Yields.pick_worked_tile(%{tile_id: unit.tile_id, territory: territory, worked_tiles: []}, state.world) do
+      case Yields.pick_worked_tile(
+             %{tile_id: unit.tile_id, territory: territory, worked_tiles: []},
+             state.world
+           ) do
         nil -> []
         tile -> [tile]
       end
@@ -694,13 +718,58 @@ defmodule BrokenOaths.Game.WorldServer do
     with {:ok, city} <- owned_city(state, user, city_id),
          {:ok, type} <- parse_item_type(type),
          :ok <- Production.can_queue?(city, type) do
+      next_position =
+        city.queue |> Enum.map(&Map.get(&1, :position, 0)) |> Enum.max(fn -> 0 end) |> Kernel.+(1)
+
       {:ok, item} =
         %ProductionItem{}
-        |> ProductionItem.changeset(Map.put(Production.new_item(type), :city_id, city_id))
+        |> ProductionItem.changeset(
+          Production.new_item(type)
+          |> Map.put(:city_id, city_id)
+          |> Map.put(:position, next_position)
+        )
         |> Repo.insert()
 
       new_city = %{city | queue: city.queue ++ [queue_item_map(item)]}
       {:ok, %{state | cities: Map.put(state.cities, city_id, new_city)}}
+    end
+  end
+
+  # Move a queued item one slot toward the head by swapping positions
+  # with its predecessor. The head (current) item can't move; item
+  # identity — and its banked progress — stays put, only order changes.
+  defp do_reorder_production_item(state, user, city_id, item_id) do
+    with {:ok, city} <- owned_city(state, user, city_id) do
+      case Enum.find_index(city.queue, &(&1.id == item_id)) do
+        nil ->
+          {:error, :not_found}
+
+        0 ->
+          {:error, :invalid_item}
+
+        idx ->
+          above = Enum.at(city.queue, idx - 1)
+          item = Enum.at(city.queue, idx)
+
+          Repo.update_all(from(p in ProductionItem, where: p.id == ^item.id),
+            set: [position: above.position]
+          )
+
+          Repo.update_all(from(p in ProductionItem, where: p.id == ^above.id),
+            set: [position: item.position]
+          )
+
+          swapped = %{item | position: above.position}
+          swapped_above = %{above | position: item.position}
+
+          new_queue =
+            city.queue
+            |> List.replace_at(idx - 1, swapped)
+            |> List.replace_at(idx, swapped_above)
+
+          new_city = %{city | queue: new_queue}
+          {:ok, %{state | cities: Map.put(state.cities, city_id, new_city)}}
+      end
     end
   end
 
@@ -831,9 +900,14 @@ defmodule BrokenOaths.Game.WorldServer do
 
   defp validate_improvement_terrain(world, tile_id, kind) do
     cond do
-      Regions.tile_class(world, tile_id) != :land -> {:error, :invalid_terrain}
-      not Improvement.allowed?(kind, Regions.terrain(world, tile_id)) -> {:error, :invalid_terrain}
-      true -> :ok
+      Regions.tile_class(world, tile_id) != :land ->
+        {:error, :invalid_terrain}
+
+      not Improvement.allowed?(kind, Regions.terrain(world, tile_id)) ->
+        {:error, :invalid_terrain}
+
+      true ->
+        :ok
     end
   end
 
@@ -963,7 +1037,10 @@ defmodule BrokenOaths.Game.WorldServer do
   # useful for a "5/turn" readout alongside the current build's bar.
   defp format_city(state, city) do
     worked_production =
-      city |> Yields.worked_yields(state.world, state.improvements) |> Enum.map(& &1.production) |> Enum.sum()
+      city
+      |> Yields.worked_yields(state.world, state.improvements)
+      |> Enum.map(& &1.production)
+      |> Enum.sum()
 
     %{
       id: city.id,
@@ -1059,7 +1136,9 @@ defmodule BrokenOaths.Game.WorldServer do
     end
 
     for {id, item} <- new_items, Map.get(old_items, id) != item do
-      Repo.update_all(from(p in ProductionItem, where: p.id == ^id), set: [banked: item.banked])
+      Repo.update_all(from(p in ProductionItem, where: p.id == ^id),
+        set: [banked: item.banked, position: Map.get(item, :position, 0)]
+      )
     end
   end
 
@@ -1173,7 +1252,7 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   defp load_cities(world_id) do
-    items_query = from(p in ProductionItem, order_by: p.id)
+    items_query = from(p in ProductionItem, order_by: [p.position, p.id])
 
     from(c in City, where: c.world_id == ^world_id)
     |> Repo.all()
@@ -1218,7 +1297,13 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   defp queue_item_map(%ProductionItem{} = item),
-    do: %{id: item.id, type: item.type, banked: item.banked, cost: item.cost}
+    do: %{
+      id: item.id,
+      type: item.type,
+      banked: item.banked,
+      cost: item.cost,
+      position: item.position
+    }
 
   defp improvement_map(%Improvement{} = i) do
     %{

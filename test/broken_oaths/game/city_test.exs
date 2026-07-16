@@ -110,7 +110,7 @@ defmodule BrokenOaths.Game.CityTest do
 
     {:ok, _item} =
       %ProductionItem{}
-      |> ProductionItem.changeset(%{city_id: city.id, type: :warrior, banked: 0, cost: 40})
+      |> ProductionItem.changeset(%{city_id: city.id, type: :warrior, banked: 0, cost: 40, position: 1})
       |> Repo.insert()
 
     reloaded = City |> Repo.get!(city.id) |> Repo.preload(:production_items)

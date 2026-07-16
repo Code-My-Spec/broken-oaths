@@ -62,7 +62,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
           <span class="opacity-60">+{@city.production}/turn</span>
         </div>
 
-        <.current_production queue={@city.queue} />
+        <.current_production queue={@city.queue} city_id={@city.id} />
 
         <div class="divider my-0 text-xs opacity-60">Build</div>
         <div class="flex flex-col gap-1">
@@ -74,7 +74,10 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
 
         <div class="divider my-0 text-xs opacity-60">Worked Tiles</div>
         <div class="flex flex-col gap-1 text-sm">
-          <div data-test={"city-worked-tile-#{@city.tile_id}"} class="flex items-center justify-between opacity-70">
+          <div
+            data-test={"city-worked-tile-#{@city.tile_id}"}
+            class="flex items-center justify-between opacity-70"
+          >
             <span>Tile {@city.tile_id} (center)</span>
             <span class="badge badge-ghost badge-sm">Free</span>
           </div>
@@ -109,6 +112,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
   end
 
   attr :queue, :list, required: true
+  attr :city_id, :any, required: true
 
   defp current_production(%{queue: []} = assigns) do
     ~H"""
@@ -123,8 +127,23 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
 
     ~H"""
     <div class="flex flex-col gap-1">
-      <div data-test="city-production-current" class="text-sm font-medium">
-        {catalog_label(@current.type)} {@current.banked}/{@current.cost}
+      <div class="flex items-center justify-between">
+        <div data-test="city-production-current" class="text-sm font-medium">
+          {catalog_label(@current.type)} {@current.banked}/{@current.cost}
+        </div>
+        <%!-- Abandoning mid-build is a real choice (story 879: it
+             forfeits the invested production), so it gets a real
+             button — QA issue e5c751b4. --%>
+        <button
+          type="button"
+          data-test="cancel-current-production"
+          phx-click="cancel_production_item"
+          phx-value-city_id={@city_id}
+          phx-value-item_id={@current.id}
+          class="btn btn-ghost btn-xs text-error"
+        >
+          Abandon
+        </button>
       </div>
       <progress
         data-test="city-production-progress"
@@ -175,17 +194,33 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
 
   defp queue_item(assigns) do
     ~H"""
-    <div class="flex items-center justify-between text-sm">
+    <div data-test={"queue-item-#{@item.id}"} class="flex items-center justify-between text-sm">
       <span>{catalog_label(@item.type)} ({@item.cost})</span>
-      <button
-        type="button"
-        phx-click="cancel_production_item"
-        phx-value-city_id={@city_id}
-        phx-value-item_id={@item.id}
-        class="btn btn-ghost btn-xs"
-      >
-        Cancel
-      </button>
+      <div class="flex items-center gap-1">
+        <%!-- Free reordering (story 879) — one slot toward the head
+             per click; progress stays with the item. --%>
+        <button
+          type="button"
+          data-test={"queue-move-up-#{@item.id}"}
+          phx-click="reorder_production_item"
+          phx-value-city_id={@city_id}
+          phx-value-item_id={@item.id}
+          class="btn btn-ghost btn-xs"
+          title="Move up"
+        >
+          ↑
+        </button>
+        <button
+          type="button"
+          data-test={"queue-cancel-#{@item.id}"}
+          phx-click="cancel_production_item"
+          phx-value-city_id={@city_id}
+          phx-value-item_id={@item.id}
+          class="btn btn-ghost btn-xs"
+        >
+          Cancel
+        </button>
+      </div>
     </div>
     """
   end
@@ -215,7 +250,10 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
 
   defp assignable_tile(assigns) do
     ~H"""
-    <div class="flex items-center justify-between opacity-70">
+    <div
+      data-test={"city-assignable-tile-#{@tile_id}"}
+      class="flex items-center justify-between opacity-70"
+    >
       <span>Tile {@tile_id}</span>
       <button
         type="button"

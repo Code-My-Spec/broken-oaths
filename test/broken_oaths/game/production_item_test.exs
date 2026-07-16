@@ -32,7 +32,7 @@ defmodule BrokenOaths.Game.ProductionItemTest do
   end
 
   defp valid_attrs do
-    %{city_id: city_fixture().id, type: :warrior, banked: 0, cost: 40}
+    %{city_id: city_fixture().id, type: :warrior, banked: 0, cost: 40, position: 1}
   end
 
   test "changeset with valid attrs is valid" do

@@ -227,6 +227,19 @@ defmodule BrokenOathsWeb.GameLive.Play do
     end
   end
 
+  def handle_event(
+        "reorder_production_item",
+        %{"city_id" => city_id, "item_id" => item_id},
+        socket
+      ) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.reorder_production_item(world, user, parse_id(city_id), parse_id(item_id)) do
+      :ok -> {:noreply, assign(socket, city_error: nil)}
+      {:error, reason} -> {:noreply, assign(socket, city_error: city_error_message(reason))}
+    end
+  end
+
   # `from_tile_id`/`to_tile_id` are each optional (see `Game.assign_worked_tile/5`):
   # a plain click, unlike a spec's render_hook, only ever supplies one of
   # the two (unwork vs. work), so a missing key means nil, not an error.
