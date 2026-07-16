@@ -62,6 +62,23 @@ defmodule BrokenOaths.Game do
   def queue_move(world, user, unit_id, to_tile),
     do: WorldServer.call(world, {:queue_move, user, unit_id, to_tile})
 
+  @doc """
+  Order `unit_id` to attack `target_unit_id`: adjacent, hostile
+  (barbarian) targets only — see `BrokenOaths.Game.Combat` for the
+  legality rules and damage math. Resolves immediately, like
+  `queue_move/4`, and spends all of the attacker's remaining movement.
+  """
+  @spec attack(map(), map(), term(), term()) ::
+          {:ok, %{damage_dealt: pos_integer(), damage_taken: pos_integer()}}
+          | {:error,
+             :not_owner
+             | :invalid_target
+             | :out_of_movement
+             | :not_adjacent
+             | :not_hostile}
+  def attack(world, user, unit_id, target_unit_id),
+    do: WorldServer.call(world, {:attack, user, unit_id, target_unit_id})
+
   @doc "Run one deterministic turn tick — exactly what the 60s timer fires."
   def advance_turn(world), do: WorldServer.call(world, :advance_turn)
 

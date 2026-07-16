@@ -43,6 +43,9 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
       <div class="card-body gap-2">
         <h3 data-test="unit-type" class="card-title text-base">
           {unit_type_label(@unit.type)}
+          <span :if={@unit.type == :lord} data-test="unit-crown">
+            <.icon name="hero-trophy-solid" class="size-4 text-warning" />
+          </span>
         </h3>
         <p data-test="unit-hp" class="text-sm">
           HP {@unit.hp}/{@unit.max_hp}

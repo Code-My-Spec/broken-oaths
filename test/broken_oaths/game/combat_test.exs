@@ -1,0 +1,223 @@
+defmodule BrokenOaths.Game.CombatTest do
+  use ExUnit.Case, async: true
+
+  alias BrokenOaths.Game.Combat
+
+  # Same unit() shape/defaults as turn_test.exs, plus player_id/type
+  # defaults suited to combat fixtures.
+  defp unit(id, opts \\ []) do
+    max_hp = Keyword.get(opts, :max_hp, 100)
+    max_movement = Keyword.get(opts, :max_movement, 1)
+
+    %{
+      id: id,
+      player_id: Keyword.get(opts, :player_id, 1),
+      type: Keyword.get(opts, :type, :warrior),
+      tile_id: Keyword.get(opts, :tile_id, id),
+      hp: Keyword.get(opts, :hp, max_hp),
+      max_hp: max_hp,
+      movement: Keyword.get(opts, :movement, max_movement),
+      max_movement: max_movement
+    }
+  end
+
+  # The Civ VI curve, computed independently of Combat's own constants
+  # — the spec these tests check Combat against, not a copy of its
+  # implementation.
+  defp expected_band(striking_strength, resisting_strength) do
+    base = 30 * :math.exp(0.04 * (striking_strength - resisting_strength))
+    {round(base * 0.75), round(base * 1.25)}
+  end
+
+  describe "base_strength/1" do
+    test "matches the design doc's per-type table" do
+      assert Combat.base_strength(:lord) == 12
+      assert Combat.base_strength(:warrior) == 10
+      assert Combat.base_strength(:settler) == 0
+      assert Combat.base_strength(:worker) == 0
+    end
+  end
+
+  describe "effective_strength/2" do
+    test "a full-HP unit fights at its plain base strength" do
+      assert Combat.effective_strength(unit(1, hp: 100, max_hp: 100)) == 10.0
+    end
+
+    test "a unit at 0 HP fights at half strength — the wounded floor" do
+      assert Combat.effective_strength(unit(1, hp: 0, max_hp: 100)) == 5.0
+    end
+
+    test "criterion 7575's exact figure: a warrior at 20/100 HP fights at strength 6" do
+      assert Combat.effective_strength(unit(1, hp: 20, max_hp: 100)) == 6.0
+    end
+
+    test "the lord's aura adds +2 strength before the wounded penalty scales it" do
+      full = unit(1, type: :warrior, hp: 100, max_hp: 100)
+      assert Combat.effective_strength(full, true) == 12.0
+
+      # At 20/100 HP (0.6x), the aura is folded in BEFORE scaling:
+      # (10 + 2) * 0.6 = 7.2 — not 6.0 (aura ignored) or 6.5 (a raw +2
+      # tacked on after scaling the base alone). No spec asserts a
+      # wounded+aura'd unit (see this module's moduledoc for the
+      # judgment call); this test pins the chosen behavior.
+      wounded = unit(1, type: :warrior, hp: 20, max_hp: 100)
+      assert_in_delta Combat.effective_strength(wounded, true), 7.2, 1.0e-9
+    end
+
+    test "the lord itself carries innate strength 12 with no self-aura" do
+      lord = unit(1, type: :lord, hp: 150, max_hp: 150)
+      assert Combat.effective_strength(lord) == 12.0
+    end
+  end
+
+  describe "resolve/3 — the Civ VI damage curve" do
+    test "equal strength always lands within the ±25% band around 30 base damage" do
+      {lo, hi} = expected_band(10, 10)
+      a = unit(1, hp: 100, max_hp: 100)
+      d = unit(2, hp: 100, max_hp: 100, player_id: nil)
+
+      for seed <- 1..50 do
+        %{damage_to_defender: dealt, damage_to_attacker: taken} =
+          Combat.resolve(a, d, seed: {:equal, seed})
+
+        assert dealt in lo..hi
+        assert taken in lo..hi
+      end
+    end
+
+    test "a weaker attacker (10) still lands a hit on a stronger defender (12), within its band" do
+      {lo, hi} = expected_band(10, 12)
+      {counter_lo, counter_hi} = expected_band(12, 10)
+
+      a = unit(1, type: :warrior, hp: 100, max_hp: 100)
+      d = unit(2, type: :lord, hp: 150, max_hp: 150, player_id: nil)
+
+      for seed <- 1..100 do
+        %{damage_to_defender: dealt, damage_to_attacker: taken} =
+          Combat.resolve(a, d, seed: {:asymmetric, seed})
+
+        assert dealt in lo..hi
+        assert taken in counter_lo..counter_hi
+      end
+    end
+
+    test "criterion 7541's exact band: an aura'd strength-12 attacker vs a strength-12 defender lands harder than unaura'd strength-10 would" do
+      {lo, hi} = expected_band(12, 12)
+
+      a = unit(1, type: :warrior, hp: 100, max_hp: 100)
+      d = unit(2, type: :lord, hp: 150, max_hp: 150, player_id: nil)
+
+      for seed <- 1..100 do
+        dealt =
+          Combat.resolve(a, d, seed: {:aura, seed}, attacker_aura?: true).damage_to_defender
+
+        assert dealt in lo..hi
+      end
+    end
+
+    test "the roll is deterministic: the same seed always reproduces the same exchange" do
+      a = unit(1)
+      d = unit(2, player_id: nil)
+
+      first = Combat.resolve(a, d, seed: "fixed-seed")
+      second = Combat.resolve(a, d, seed: "fixed-seed")
+
+      assert first == second
+    end
+
+    test "different seeds vary the outcome across a wide sample" do
+      a = unit(1)
+      d = unit(2, player_id: nil)
+
+      outcomes =
+        for seed <- 1..30, into: MapSet.new() do
+          Combat.resolve(a, d, seed: seed).damage_to_defender
+        end
+
+      assert MapSet.size(outcomes) > 1
+    end
+
+    test "a dying defender still lands its counter-blow, computed from its pre-combat strength" do
+      a = unit(1, hp: 100, max_hp: 100)
+      dying = unit(2, hp: 1, max_hp: 100, player_id: nil)
+      full_hp = %{dying | hp: 100}
+
+      dying_result = Combat.resolve(a, dying, seed: "same")
+      full_hp_result = Combat.resolve(a, full_hp, seed: "same")
+
+      # A near-dead defender is weaker (its own wounded strength deals
+      # less), never zero — the counter-blow always lands.
+      assert dying_result.damage_to_attacker > 0
+      assert dying_result.damage_to_attacker < full_hp_result.damage_to_attacker
+    end
+  end
+
+  describe "camp_damage/2" do
+    test "a strength-10 Warrior deals 10 flat damage, no roll" do
+      assert Combat.camp_damage(unit(1, type: :warrior, hp: 100, max_hp: 100)) == 10
+    end
+
+    test "a strength-12 Lord deals 12 flat damage" do
+      assert Combat.camp_damage(unit(1, type: :lord, hp: 150, max_hp: 150)) == 12
+    end
+
+    test "a wounded attacker deals proportionally less camp damage" do
+      wounded = unit(1, type: :warrior, hp: 20, max_hp: 100)
+      assert Combat.camp_damage(wounded) == 6
+    end
+
+    test "the lord's aura raises camp damage the same way it raises combat strength" do
+      assert Combat.camp_damage(unit(1, type: :warrior, hp: 100, max_hp: 100), true) == 12
+    end
+  end
+
+  describe "hostile?/2" do
+    test "a unit with a real owning player is never a legal target — no Stone Age PvP" do
+      attacker = unit(1, player_id: 1)
+      other_player = unit(2, player_id: 2)
+      refute Combat.hostile?(attacker, other_player)
+    end
+
+    test "a unit's own side is never hostile to itself" do
+      attacker = unit(1, player_id: 1)
+      same_player = unit(2, player_id: 1)
+      refute Combat.hostile?(attacker, same_player)
+    end
+
+    test "a nil-owned unit is the barbarian seam — hostile" do
+      attacker = unit(1, player_id: 1)
+      barbarian = unit(2, player_id: nil)
+      assert Combat.hostile?(attacker, barbarian)
+    end
+  end
+
+  describe "validate_attack/3" do
+    test "refuses an attacker with no movement left" do
+      a = unit(1, movement: 0, tile_id: 1)
+      d = unit(2, tile_id: 2, player_id: nil)
+
+      assert Combat.validate_attack(a, d, [2]) == {:error, :out_of_movement}
+    end
+
+    test "refuses a defender on a non-adjacent tile" do
+      a = unit(1, tile_id: 1)
+      d = unit(2, tile_id: 99, player_id: nil)
+
+      assert Combat.validate_attack(a, d, [2, 3, 4]) == {:error, :not_adjacent}
+    end
+
+    test "refuses an adjacent, in-movement attack on a real player's unit" do
+      a = unit(1, tile_id: 1, player_id: 1)
+      d = unit(2, tile_id: 2, player_id: 2)
+
+      assert Combat.validate_attack(a, d, [2]) == {:error, :not_hostile}
+    end
+
+    test "allows an adjacent, in-movement attack on a hostile (nil-owned) unit" do
+      a = unit(1, tile_id: 1, player_id: 1)
+      d = unit(2, tile_id: 2, player_id: nil)
+
+      assert Combat.validate_attack(a, d, [2]) == :ok
+    end
+  end
+end

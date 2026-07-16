@@ -54,8 +54,17 @@ defmodule BrokenOaths.Game.Turn do
           progress: non_neg_integer(),
           status: :building | :complete,
           builder_unit_id: unit_id | nil
-        }}
+        }},
+        pending_heirs: %{player_id => non_neg_integer()}
       }
+
+  `pending_heirs` (story 896) is read defensively via
+  `Map.get(state, :pending_heirs, %{})` — a scheduled-heir arrival turn
+  per player, written by `WorldServer`'s combat handler on a lord's
+  death, resolved by this module's own "heir succession" tick phase.
+  It's the one field in this contract every other functional-core
+  module (and most of this module's own tests, built before it
+  existed) can safely omit; nothing breaks if it's absent.
 
   `unit_id`, `player_id`, and `city_id` are opaque keys (Ecto primary
   keys in production); `tile_id` is a `Worlds.Globe` mesh tile id.
@@ -94,6 +103,18 @@ defmodule BrokenOaths.Game.Turn do
     6. healing -- a unit that spent no movement this tick heals: 15 HP
        garrisoned on its own city's tile, 10 HP anywhere else in its
        owner's territory, 0 outside it.
+    7. heir succession -- any player whose lord died (scheduled by
+       `BrokenOaths.Game.WorldServer`'s combat handler into
+       `state.pending_heirs`, `%{player_id => arrival_turn}`, not part
+       of this module's own canonical state contract above — read
+       defensively via `Map.get(state, :pending_heirs, %{})` since most
+       of this module's own tests build a state map without that key)
+       whose `arrival_turn` has now passed gets a fresh Lord at their
+       capital (their oldest city, by id) this tick, plus a
+       `{:lineage_continued, user_id, message}` event so only that
+       player is notified (story 896, criterion 7573). A player with no
+       surviving city simply never gets their heir back — an edge case
+       no story covers.
 
   Cities are always processed in ascending id order within a phase, so
   contested outcomes (two cities eligible for the same growth tile, two
@@ -146,7 +167,9 @@ defmodule BrokenOaths.Game.Turn do
         }
 
   @type event ::
-          {:turn_advanced, non_neg_integer()} | {:unit_spawned, Production.spawn_event()}
+          {:turn_advanced, non_neg_integer()}
+          | {:unit_spawned, Production.spawn_event()}
+          | {:lineage_continued, term(), String.t()}
 
   @doc """
   Advance the world by one turn: reset movement, resolve every pending
@@ -172,6 +195,7 @@ defmodule BrokenOaths.Game.Turn do
       |> accrue_production()
 
     {state, spawn_events} = resolve_completions(state)
+    {state, heir_events} = resolve_heirs(state, new_turn)
 
     new_state =
       state
@@ -181,7 +205,8 @@ defmodule BrokenOaths.Game.Turn do
       |> refresh_explored()
       |> Map.put(:turn, new_turn)
 
-    events = [{:turn_advanced, new_turn} | Enum.map(spawn_events, &{:unit_spawned, &1})]
+    events =
+      [{:turn_advanced, new_turn} | Enum.map(spawn_events, &{:unit_spawned, &1})] ++ heir_events
 
     {new_state, events}
   end
@@ -455,6 +480,44 @@ defmodule BrokenOaths.Game.Turn do
       Enum.any?(owned, &(unit.tile_id in &1.territory)) -> 10
       true -> 0
     end
+  end
+
+  # -------------------------------------------------------------------
+  # Heir succession
+  # -------------------------------------------------------------------
+
+  defp resolve_heirs(state, new_turn) do
+    state = Map.put_new(state, :pending_heirs, %{})
+
+    due =
+      for {player_id, arrival_turn} <- state.pending_heirs, new_turn >= arrival_turn do
+        player_id
+      end
+
+    Enum.reduce(due, {state, []}, &resolve_heir/2)
+  end
+
+  defp resolve_heir(player_id, {state, events}) do
+    state = %{state | pending_heirs: Map.delete(state.pending_heirs, player_id)}
+
+    case capital_city(state.cities, player_id) do
+      nil ->
+        {state, events}
+
+      city ->
+        spawn_event = %{player_id: player_id, type: :lord, tile_id: city.tile_id}
+        user_id = Map.fetch!(state.players, player_id).user_id
+        message = "Your lord has fallen, but the line endures — a new lord takes the throne."
+
+        {state, events ++ [{:unit_spawned, spawn_event}, {:lineage_continued, user_id, message}]}
+    end
+  end
+
+  defp capital_city(cities, player_id) do
+    cities
+    |> Map.values()
+    |> Enum.filter(&(&1.player_id == player_id))
+    |> Enum.min_by(& &1.id, fn -> nil end)
   end
 
   # -------------------------------------------------------------------

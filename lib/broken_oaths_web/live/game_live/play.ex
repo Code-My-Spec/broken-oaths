@@ -123,6 +123,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
             selected_order: nil,
             allowed_improvements: [],
             order_error: nil,
+            combat_error: nil,
             selected_city_id: nil,
             selected_city: nil,
             assignable_tiles: [],
@@ -304,6 +305,28 @@ defmodule BrokenOathsWeb.GameLive.Play do
     end
   end
 
+  # Resolves immediately, like queue_move — the result carries this
+  # turn's damage_dealt/damage_taken (story 891, criterion 7540), which
+  # this handler pushes straight back to the attacker's own view rather
+  # than waiting on the broadcast every other mutation relies on
+  # (mirroring queue_move's direct "game:path" push above).
+  def handle_event("attack", %{"unit_id" => unit_id, "target_unit_id" => target_unit_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.attack(world, user, parse_id(unit_id), parse_id(target_unit_id)) do
+      {:ok, %{damage_dealt: dealt, damage_taken: taken}} ->
+        socket =
+          socket
+          |> assign(combat_error: nil)
+          |> push_event("game:combat", %{damage_dealt: dealt, damage_taken: taken})
+
+        {:noreply, socket}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, combat_error: combat_error_message(reason))}
+    end
+  end
+
   def handle_event("abandon_world", _params, socket) do
     {:noreply, assign(socket, confirm_abandon?: true)}
   end
@@ -370,6 +393,18 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # hook in here).
   def handle_info({:unit_spawned, _spawn_event}, socket) do
     {:noreply, socket}
+  end
+
+  # `Turn.tick/1`'s heir-succession phase (story 896, criterion 7573)
+  # broadcasts this world-wide, same as every other tick event — every
+  # connected player's view receives it and only the one whose lord
+  # just got a successor pushes the notification.
+  def handle_info({:lineage_continued, user_id, message}, socket) do
+    if user_id == socket.assigns.user.id do
+      {:noreply, push_event(socket, "game:lineage", %{message: message})}
+    else
+      {:noreply, socket}
+    end
   end
 
   # -------------------------------------------------------------------
@@ -509,6 +544,16 @@ defmodule BrokenOathsWeb.GameLive.Play do
   defp order_error_message(:unreachable), do: "There's no path there."
   defp order_error_message(_other), do: "That order can't be queued."
 
+  defp combat_error_message(:not_owner), do: "You don't control that unit."
+  defp combat_error_message(:invalid_target), do: "That target no longer exists."
+  defp combat_error_message(:out_of_movement), do: "That unit has no movement left to attack."
+  defp combat_error_message(:not_adjacent), do: "That target is out of range."
+
+  defp combat_error_message(:not_hostile),
+    do: "Stone Age players cannot fight each other — only barbarians can be attacked."
+
+  defp combat_error_message(_other), do: "That attack can't be ordered."
+
   # -------------------------------------------------------------------
   # City loop helpers
   # -------------------------------------------------------------------
@@ -646,6 +691,14 @@ defmodule BrokenOathsWeb.GameLive.Play do
         <div class="absolute top-4 left-4 flex flex-col gap-2 items-start">
           <div :if={@order_error} class="alert alert-error w-auto shadow-lg" data-test="order-error">
             <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@order_error}
+          </div>
+
+          <div
+            :if={@combat_error}
+            class="alert alert-error w-auto shadow-lg"
+            data-test="combat-error"
+          >
+            <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@combat_error}
           </div>
 
           <div :if={@city_error} class="alert alert-error w-auto shadow-lg" data-test="city-error">

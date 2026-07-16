@@ -38,6 +38,7 @@ defmodule BrokenOaths.Game.WorldServer do
 
   alias BrokenOaths.Game.{
     City,
+    Combat,
     Exploration,
     Improvement,
     Order,
@@ -200,6 +201,23 @@ defmodule BrokenOaths.Game.WorldServer do
           :stale ->
             # A competing instance advanced the world under us — drop the
             # move, resync, and let the player retry against fresh state.
+            {:reply, {:error, :stale}, resync(state)}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:attack, user, unit_id, target_unit_id}, _from, state) do
+    case do_attack(state, user, unit_id, target_unit_id) do
+      {:ok, result, new_state} ->
+        case persist_tick(state, new_state) do
+          :ok ->
+            broadcast(new_state.world.id, [:units_changed])
+            {:reply, {:ok, result}, new_state}
+
+          :stale ->
             {:reply, {:error, :stale}, resync(state)}
         end
 
@@ -627,6 +645,100 @@ defmodule BrokenOaths.Game.WorldServer do
         bfs_loop(world, occupied, queue, visited, to)
     end
   end
+
+  # -------------------------------------------------------------------
+  # Attack
+  # -------------------------------------------------------------------
+
+  # Resolves like a move order: immediately, against whatever movement
+  # the attacker has left right now (see `Combat`'s moduledoc for the
+  # damage math and target-legality rules this delegates to).
+  defp do_attack(state, user, unit_id, target_unit_id) do
+    player = find_player(state, user.id)
+    attacker = Map.get(state.units, unit_id)
+    defender = Map.get(state.units, target_unit_id)
+
+    cond do
+      is_nil(player) or is_nil(attacker) or attacker.player_id != player.id ->
+        {:error, :not_owner}
+
+      is_nil(defender) ->
+        {:error, :invalid_target}
+
+      true ->
+        adjacent_tile_ids = Regions.adjacent_tiles(state.world, attacker.tile_id)
+
+        case Combat.validate_attack(attacker, defender, adjacent_tile_ids) do
+          :ok ->
+            {result, new_state} = resolve_attack(state, attacker, defender)
+            {:ok, result, new_state}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
+
+  defp resolve_attack(state, attacker, defender) do
+    seed = {state.world.seed, state.turn, attacker.id, defender.id}
+
+    %{damage_to_defender: dealt, damage_to_attacker: taken} =
+      Combat.resolve(attacker, defender,
+        seed: seed,
+        attacker_aura?: lord_adjacent?(state, attacker),
+        defender_aura?: lord_adjacent?(state, defender)
+      )
+
+    new_attacker = %{attacker | hp: max(attacker.hp - taken, 0), movement: 0}
+    new_defender = %{defender | hp: max(defender.hp - dealt, 0)}
+
+    units =
+      state.units
+      |> apply_combat_unit(attacker.id, new_attacker)
+      |> apply_combat_unit(defender.id, new_defender)
+
+    state =
+      state
+      |> schedule_heir_if_lord_fell(attacker, new_attacker)
+      |> schedule_heir_if_lord_fell(defender, new_defender)
+
+    {%{damage_dealt: dealt, damage_taken: taken}, %{state | units: units}}
+  end
+
+  defp apply_combat_unit(units, id, %{hp: 0}), do: Map.delete(units, id)
+  defp apply_combat_unit(units, id, unit), do: Map.put(units, id, unit)
+
+  # A living unit of the SAME player standing next door — dead units
+  # are already gone from `state.units`, so presence alone means
+  # living, and a lord's own tile is never its own neighbor, so this
+  # never accidentally self-buffs the lord.
+  defp lord_adjacent?(state, unit) do
+    adjacent_tile_ids = Regions.adjacent_tiles(state.world, unit.tile_id)
+
+    state.units
+    |> Map.values()
+    |> Enum.any?(
+      &(&1.type == :lord and &1.player_id == unit.player_id and &1.tile_id in adjacent_tile_ids)
+    )
+  end
+
+  # Schedules the heir 10 turn boundaries out (story 896, criterion
+  # 7573) — kept only in memory (`state.pending_heirs`), never
+  # persisted to the DB. Known, narrow limitation: a `WorldServer`
+  # restart mid-wait drops the pending heir; nothing in the current
+  # schema tracks scheduled future spawns the way `Order`/`Improvement`
+  # do, and no spec exercises a restart during the wait. `Turn.tick/1`
+  # resolves this map every boundary (see its "Heir succession" phase).
+  defp schedule_heir_if_lord_fell(state, %{type: :lord, player_id: player_id}, %{hp: 0}) do
+    pending_heirs =
+      state
+      |> Map.get(:pending_heirs, %{})
+      |> Map.put(player_id, state.turn + 10)
+
+    Map.put(state, :pending_heirs, pending_heirs)
+  end
+
+  defp schedule_heir_if_lord_fell(state, _original, _new), do: state
 
   # -------------------------------------------------------------------
   # Found city
@@ -1097,7 +1209,17 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
+  # A unit missing from `new_units` that was present in `old_units` was
+  # destroyed this delta (combat, currently the only path that removes
+  # a unit outside of `found_city`'s own dedicated delete) — swept from
+  # the DB here rather than left as a zombie row. `found_city` still
+  # deletes its consumed settler immediately, in its own transaction,
+  # same as before; this only ever catches removals this generic diff
+  # would otherwise silently miss.
   defp persist_unit_changes(old_units, new_units) do
+    removed_ids = Map.keys(old_units) -- Map.keys(new_units)
+    if removed_ids != [], do: Repo.delete_all(from(u in Unit, where: u.id in ^removed_ids))
+
     for {id, unit} <- new_units, Map.get(old_units, id) != unit do
       Repo.update_all(from(u in Unit, where: u.id == ^id),
         set: [tile_id: unit.tile_id, movement: unit.movement, hp: unit.hp]
@@ -1212,7 +1334,10 @@ defmodule BrokenOaths.Game.WorldServer do
       players: load_players(world.id),
       explored: load_explored(world.id),
       cities: load_cities(world.id),
-      improvements: load_improvements(world.id)
+      improvements: load_improvements(world.id),
+      # Not persisted — see `schedule_heir_if_lord_fell/3`'s doc for the
+      # known, narrow restart limitation this implies.
+      pending_heirs: %{}
     }
   end
 
