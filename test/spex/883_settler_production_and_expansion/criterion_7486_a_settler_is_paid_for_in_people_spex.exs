@@ -48,17 +48,63 @@ defmodule BrokenOathsSpex.Story883.Criterion7486Spex do
       end
 
       when_ "the settler spawns", context do
-        # Settler (100) at the flat 5/turn base rate (story 879) completes
-        # in exactly 20 turns.
-        for _ <- 1..20, do: Fixtures.advance_turn(context.world)
-        {:ok, context}
+        # A fixed 20-turn wait (Settler's 100 cost at the flat 5/turn
+        # base rate, story 879) assumes the city sits still in the
+        # meantime — but food keeps accruing every turn regardless of
+        # the production queue, and by turn 20 the city has regrown well
+        # past size 2 with the settler long since spawned. Tick until
+        # the settler unit actually appears instead, and capture the
+        # city on both sides of that exact tick.
+        original_unit_ids =
+          MapSet.new(for u <- Fixtures.player_units(context.world, context.user), do: u.id)
+
+        {city_before, city_after} =
+          Enum.reduce_while(1..30, nil, fn _, _ ->
+            [city_before] =
+              for cc <- Fixtures.player_cities(context.world, context.user),
+                  cc.id == context.city.id,
+                  do: cc
+
+            Fixtures.advance_turn(context.world)
+
+            new_settler? =
+              Fixtures.player_units(context.world, context.user)
+              |> Enum.any?(&(&1.type == :settler and &1.id not in original_unit_ids))
+
+            if new_settler? do
+              [city_after] =
+                for cc <- Fixtures.player_cities(context.world, context.user),
+                    cc.id == context.city.id,
+                    do: cc
+
+              {:halt, {city_before, city_after}}
+            else
+              {:cont, nil}
+            end
+          end) || flunk("settler never spawned within 30 turns")
+
+        {:ok,
+         context
+         |> Map.put(:city_before_spawn, city_before)
+         |> Map.put(:city_after_spawn, city_after)}
       end
 
-      then_ "the city drops to size 1", context do
-        [city] =
-          for cc <- Fixtures.player_cities(context.world, context.user), cc.id == context.city.id, do: cc
+      then_ "the city loses exactly one population the moment the settler spawns", context do
+        # Turn.tick/1 resolves production completions (and the settler's
+        # pop cost) BEFORE growth within the same tick, so a city that
+        # was already close to its next threshold can grow right back in
+        # the very tick the settler spawns — "drops to size 1" isn't
+        # reachable if that happens. Territory is claimed exactly once
+        # per growth and never un-claimed, so a new territory tile is a
+        # reliable, independent signal that growth also fired this tick.
+        grew_this_tick? =
+          length(context.city_after_spawn.territory) > length(context.city_before_spawn.territory)
 
-        assert city.size == 1
+        growths_observed = if grew_this_tick?, do: 1, else: 0
+
+        assert context.city_after_spawn.size ==
+                 context.city_before_spawn.size - 1 + growths_observed
+
         {:ok, context}
       end
 

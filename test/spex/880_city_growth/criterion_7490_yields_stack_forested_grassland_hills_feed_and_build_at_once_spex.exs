@@ -142,22 +142,19 @@ defmodule BrokenOathsSpex.Story880.Criterion7490Spex do
           "to_tile_id" => nil
         })
 
-        [baseline] = for cc <- Fixtures.player_cities(context.world, context.user), cc.id == city.id, do: cc
-        [baseline_item | _] = baseline.queue
-        Fixtures.advance_turn(context.world)
-
-        [after_unassigned] =
-          for cc <- Fixtures.player_cities(context.world, context.user), cc.id == city.id, do: cc
-
-        [after_item | _] = after_unassigned.queue
-
+        # The "without desert tile" baseline is measured fresh in `when_`,
+        # immediately adjacent to the "with desert tile" step, rather than
+        # here — the snow given_ below shares this world's turn clock (its
+        # settler walk can burn up to 30 more turns), long enough for this
+        # city to grow and auto-assign other worked tiles in between. A
+        # baseline captured this early would go stale by the time `when_`
+        # reuses it, isolating desert_tile's yield against the WRONG
+        # "everything else" state.
         {:ok,
          context
          |> Map.put(:play_live_desert, play_live)
          |> Map.put(:city_desert, city)
-         |> Map.put(:desert_tile, desert_tile)
-         |> Map.put(:desert_baseline_food, after_unassigned.food - baseline.food)
-         |> Map.put(:desert_baseline_prod, after_item.banked - baseline_item.banked)}
+         |> Map.put(:desert_tile, desert_tile)}
       end
 
       given_ "a city center founded directly on snow", context do
@@ -220,6 +217,18 @@ defmodule BrokenOathsSpex.Story880.Criterion7490Spex do
           "to_tile_id" => context.hw_tile
         })
 
+        # The desert and snow givens' settler walks share `context.world`'s
+        # turn clock (each waits up to 30 turns), so by the time we get
+        # here the desert city's single queued warrior may have long since
+        # completed and left an empty queue. Re-queue right before each
+        # snapshot — a no-op tail append if the original item is still
+        # banking, a fresh current item if it wasn't — so there's always a
+        # "current" item to measure this turn's banked delta against.
+        render_hook(context.play_live_hw, "queue_production", %{
+          "city_id" => context.city_hw.id,
+          "item" => "warrior"
+        })
+
         [before_hw] =
           for cc <- Fixtures.player_cities(context.world_hw, context.user_hw),
               cc.id == context.city_hw.id,
@@ -234,6 +243,34 @@ defmodule BrokenOathsSpex.Story880.Criterion7490Spex do
               do: cc
 
         [after_hw_item | _] = after_hw.queue
+
+        render_hook(context.play_live_desert, "queue_production", %{
+          "city_id" => context.city_desert.id,
+          "item" => "warrior"
+        })
+
+        # Fresh "without desert tile" baseline, taken immediately adjacent
+        # to the "with desert tile" measurement below (see the given_
+        # block's note on why a baseline captured back then would be
+        # stale by now).
+        [desert_baseline] =
+          for cc <- Fixtures.player_cities(context.world, context.user),
+              cc.id == context.city_desert.id,
+              do: cc
+
+        [desert_baseline_item | _] = desert_baseline.queue
+        Fixtures.advance_turn(context.world)
+
+        [desert_after_baseline] =
+          for cc <- Fixtures.player_cities(context.world, context.user),
+              cc.id == context.city_desert.id,
+              do: cc
+
+        [desert_after_baseline_item | _] = desert_after_baseline.queue
+        desert_baseline_food = desert_after_baseline.food - desert_baseline.food
+
+        desert_baseline_prod =
+          desert_after_baseline_item.banked - desert_baseline_item.banked
 
         render_hook(context.play_live_desert, "assign_worked_tile", %{
           "city_id" => context.city_desert.id,
@@ -265,11 +302,11 @@ defmodule BrokenOathsSpex.Story880.Criterion7490Spex do
          )
          |> Map.put(
            :desert_food_delta,
-           after_desert.food - before_desert.food - context.desert_baseline_food
+           after_desert.food - before_desert.food - desert_baseline_food
          )
          |> Map.put(
            :desert_prod_delta,
-           after_desert_item.banked - before_desert_item.banked - context.desert_baseline_prod
+           after_desert_item.banked - before_desert_item.banked - desert_baseline_prod
          )}
       end
 

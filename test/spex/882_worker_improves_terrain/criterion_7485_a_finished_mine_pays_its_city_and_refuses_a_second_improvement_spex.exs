@@ -79,6 +79,26 @@ defmodule BrokenOathsSpex.Story882.Criterion7485Spex do
           "to_tile_id" => hills_tile
         })
 
+        render_hook(play_live, "select_unit", %{"unit_id" => worker.id})
+        render_hook(play_live, "start_improvement", %{"unit_id" => worker.id, "kind" => "mine"})
+
+        # Take the "raw" (unimproved) baseline as late as possible —
+        # immediately adjacent to the mine's own completion below —
+        # rather than back when the tile was first assigned: any gap
+        # gives the city room to grow and auto-assign another worked
+        # tile, which would inflate BOTH measurements unevenly and
+        # corrupt the isolation. Mine duration is 5 turns
+        # (`Improvement.duration/1`); advance to progress 3 first so
+        # the very next tick (still "building" — completion needs
+        # progress >= 5) is unimproved and adjacent to completion.
+        for _ <- 1..3, do: Fixtures.advance_turn(world)
+
+        # The single "worker" queued at founding completed well within
+        # that 12-turn wait (flat-5 base alone is enough), leaving the
+        # queue empty — re-queue so there's a current item to bank this
+        # turn's production delta against.
+        render_hook(play_live, "queue_production", %{"city_id" => city.id, "item" => "warrior"})
+
         [before] = for cc <- Fixtures.player_cities(world, context.user), cc.id == city.id, do: cc
         [before_item | _] = before.queue
         Fixtures.advance_turn(world)
@@ -86,9 +106,12 @@ defmodule BrokenOathsSpex.Story882.Criterion7485Spex do
         [after_raw_item | _] = after_raw.queue
         raw_delta = after_raw_item.banked - before_item.banked
 
-        render_hook(play_live, "select_unit", %{"unit_id" => worker.id})
-        render_hook(play_live, "start_improvement", %{"unit_id" => worker.id, "kind" => "mine"})
-        for _ <- 1..5, do: Fixtures.advance_turn(world)
+        # One more tick completes the mine — `Turn.tick/1` advances
+        # improvement progress BEFORE accruing production in the same
+        # tick, so this turn's own banked delta would already reflect
+        # the finished mine. Let it complete here; `when_` measures the
+        # mine's steady, fully-complete contribution on the tick after.
+        Fixtures.advance_turn(world)
 
         {:ok,
          context
@@ -101,6 +124,15 @@ defmodule BrokenOathsSpex.Story882.Criterion7485Spex do
       end
 
       when_ "the next boundary's yields accrue", context do
+        # The warrior queued for the raw-delta baseline may itself have
+        # completed during the 5 turns spent building the mine — re-queue
+        # again so this measurement also has a current item to bank
+        # against.
+        render_hook(context.play_live, "queue_production", %{
+          "city_id" => context.city.id,
+          "item" => "warrior"
+        })
+
         [before] =
           for cc <- Fixtures.player_cities(context.world_hw, context.user),
               cc.id == context.city.id,

@@ -38,9 +38,20 @@ defmodule BrokenOathsSpex.Story882.Criterion7482Spex do
 
         land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
 
+        # The player's Lord spawns adjacent to the city and never moves in
+        # this spec — a candidate tile the worker is about to be ordered
+        # to walk onto must not already be permanently held by it (or any
+        # other standing unit), or the queued move silently blocks and the
+        # worker never leaves the city tile.
+        occupied_by_others =
+          for u <- Fixtures.player_units(context.world, context.user),
+              u.id != worker.id,
+              do: u.tile_id
+
         flat_farmland =
           Fixtures.adjacent_tiles(context.world, city.tile_id)
           |> Enum.filter(land?)
+          |> Enum.reject(&(&1 in occupied_by_others))
           |> Enum.find(fn t ->
             terrain = Fixtures.tile_terrain(context.world, t)
             terrain.relief == :flat and terrain.feature == nil and terrain.base in [:grassland, :plains]
@@ -49,6 +60,7 @@ defmodule BrokenOathsSpex.Story882.Criterion7482Spex do
         forested_tile =
           Fixtures.adjacent_tiles(context.world, city.tile_id)
           |> Enum.filter(land?)
+          |> Enum.reject(&(&1 in occupied_by_others))
           |> Enum.find(fn t -> Fixtures.tile_terrain(context.world, t).feature == :woods end)
 
         render_hook(play_live, "queue_move", %{"unit_id" => worker.id, "to_tile" => flat_farmland})

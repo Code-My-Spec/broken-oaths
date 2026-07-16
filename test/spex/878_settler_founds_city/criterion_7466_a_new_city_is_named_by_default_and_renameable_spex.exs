@@ -42,8 +42,12 @@ defmodule BrokenOathsSpex.Story878.Criterion7466Spex do
       end
 
       then_ "the city shows a default name", context do
-        assert has_element?(context.play_live, "[data-test='city-name']")
-        refute has_element?(context.play_live, "[data-test='city-name']", "")
+        # `has_element?/3`'s text filter is a substring check (`=~`), so an
+        # empty-string filter matches ANY element's content and can never
+        # refute — it isn't a "non-blank" assertion. Anchor to the actual
+        # default name the founding given_ observed instead.
+        assert has_element?(context.play_live, "[data-test='city-name']", context.city.name)
+        refute context.city.name in [nil, ""]
         {:ok, context}
       end
 

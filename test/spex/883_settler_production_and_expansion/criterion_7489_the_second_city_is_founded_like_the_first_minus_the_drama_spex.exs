@@ -91,8 +91,20 @@ defmodule BrokenOathsSpex.Story883.Criterion7489Spex do
       end
 
       when_ "it founds a second city", context do
+        # By now the settler has spent up to ~20 turns producing plus
+        # another ~15 marching 4+ hexes, all the while city1 kept
+        # accruing food and growing on its own — a stale "city1 is still
+        # size 1" assumption from back when the settler was queued
+        # doesn't survive that. `found_city` is itself a synchronous
+        # action with no turn tick, though, so city1's state immediately
+        # before it is the right anchor: "nothing else changes" means
+        # this action changes NOTHING about it, whatever size it has
+        # organically reached by now.
+        [city1_before] =
+          for cc <- Fixtures.player_cities(context.world, context.user), cc.id == context.city1.id, do: cc
+
         render_hook(context.play_live, "found_city", %{"unit_id" => context.settler.id})
-        {:ok, context}
+        {:ok, Map.put(context, :city1_before_founding, city1_before)}
       end
 
       then_ "the founding follows the same terrain and spacing rules as the first", context do
@@ -114,7 +126,11 @@ defmodule BrokenOathsSpex.Story883.Criterion7489Spex do
         assert length(cities) == 2
 
         [city1] = for c <- cities, c.id == context.city1.id, do: c
-        assert city1.size == 1
+        # `found_city` doesn't tick the turn clock, so city1 — whatever
+        # size/food/territory it had organically grown to by the time
+        # the second city was founded — must be byte-for-byte identical
+        # immediately after.
+        assert city1 == context.city1_before_founding
 
         {:ok, context}
       end

@@ -153,10 +153,17 @@ defmodule BrokenOathsSpex.Story882.Criterion7483Spex do
         no_op_delta = before_assign.food - baseline.food
         farmed_delta = after_assign.food - after_baseline.food
 
-        # A completed farm adds +2 food (canonical yields table); the
-        # first delta is the no-op baseline (unassigned, so 0).
-        assert no_op_delta == 0
-        assert farmed_delta >= 2
+        # This city sat idle while the second player's given_ spent up to
+        # ~40 turns producing and walking its own worker (sharing this
+        # world's turn clock) — plenty of time for city1 to have grown and
+        # auto-assigned other worked tiles beyond the one turned unassigned
+        # here. `no_op_delta` is therefore the CITY's current steady
+        # per-turn income (center + whatever else it's grown to work), not
+        # zero. Isolate the farm tile's own contribution the same way
+        # criterion 7490 does: the marginal difference between the two
+        # back-to-back per-turn deltas, taken immediately adjacent so
+        # nothing else about the city changes in between.
+        assert farmed_delta - no_op_delta >= 2
         {:ok, context}
       end
 

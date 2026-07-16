@@ -47,8 +47,19 @@ defmodule BrokenOathsSpex.Story881.Criterion7480Spex do
 
         land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
 
-        # A home tile: any owned territory tile that isn't the city center.
-        home_tile = Enum.find(city.territory, &(&1 != city.tile_id))
+        # A completed warrior's landing tile is always the city center or
+        # one of its land neighbors (`Production.landing_tile/3`), so all
+        # three already stand somewhere inside the fresh 7-tile founding
+        # ring — no assumption about WHICH neighbor is free survives the
+        # Lord unit (spawned adjacent to the city) and the other two
+        # warriors also occupying ring tiles. Classify roles from where
+        # each unit actually landed instead of commanding it to a
+        # pre-picked tile that may already be taken: the one standing on
+        # the city center is the garrison, one of the two remaining
+        # (already resting on a non-center territory tile) is home as-is,
+        # and only the last one is walked out past the ring.
+        {[garrison_warrior], [home_warrior, abroad_warrior]} =
+          Enum.split_with([w1, w2, w3], &(&1.tile_id == city.tile_id))
 
         # Outside any territory: walk out past the founding ring.
         ring2 =
@@ -60,34 +71,31 @@ defmodule BrokenOathsSpex.Story881.Criterion7480Spex do
 
         [abroad_tile | _] = ring2
 
-        walk = fn unit, target ->
-          render_hook(play_live, "queue_move", %{"unit_id" => unit.id, "to_tile" => target})
+        render_hook(play_live, "queue_move", %{"unit_id" => abroad_warrior.id, "to_tile" => abroad_tile})
 
-          Enum.reduce_while(1..10, :ok, fn _, :ok ->
-            [u] = for uu <- Fixtures.player_units(context.world, context.user), uu.id == unit.id, do: uu
+        Enum.reduce_while(1..10, :ok, fn _, :ok ->
+          [u] =
+            for uu <- Fixtures.player_units(context.world, context.user),
+                uu.id == abroad_warrior.id,
+                do: uu
 
-            if u.tile_id == target do
-              {:halt, :ok}
-            else
-              Fixtures.advance_turn(context.world)
-              {:cont, :ok}
-            end
-          end)
-        end
+          if u.tile_id == abroad_tile do
+            {:halt, :ok}
+          else
+            Fixtures.advance_turn(context.world)
+            {:cont, :ok}
+          end
+        end)
 
-        walk.(w1, home_tile)
-        walk.(w2, city.tile_id)
-        walk.(w3, abroad_tile)
-
-        Fixtures.set_unit_hp(context.world, w1.id, 50)
-        Fixtures.set_unit_hp(context.world, w2.id, 50)
-        Fixtures.set_unit_hp(context.world, w3.id, 50)
+        Fixtures.set_unit_hp(context.world, home_warrior.id, 50)
+        Fixtures.set_unit_hp(context.world, garrison_warrior.id, 50)
+        Fixtures.set_unit_hp(context.world, abroad_warrior.id, 50)
 
         {:ok,
          context
-         |> Map.put(:home_warrior, w1)
-         |> Map.put(:garrison_warrior, w2)
-         |> Map.put(:abroad_warrior, w3)}
+         |> Map.put(:home_warrior, home_warrior)
+         |> Map.put(:garrison_warrior, garrison_warrior)
+         |> Map.put(:abroad_warrior, abroad_warrior)}
       end
 
       when_ "a turn boundary passes with none of them moving", context do

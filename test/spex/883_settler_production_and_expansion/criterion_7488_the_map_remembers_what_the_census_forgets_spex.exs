@@ -54,26 +54,89 @@ defmodule BrokenOathsSpex.Story883.Criterion7488Spex do
          |> Map.put(:territory_before, territory_before)}
       end
 
-      when_ "it completes a settler and drops to size 1", context do
-        for _ <- 1..20, do: Fixtures.advance_turn(context.world)
-        {:ok, context}
+      when_ "it completes a settler", context do
+        # A fixed 20-turn wait assumes the city sits at exactly size 1
+        # once the settler spawns — but food keeps accruing regardless
+        # of the production queue, and by turn 20 the city has regrown
+        # well past that. Tick until the settler unit actually appears,
+        # and capture the city on both sides of that exact tick so the
+        # "then_" steps below measure the CHANGE the settler caused, not
+        # an absolute size/worked-tile count that a later regrowth can
+        # move past.
+        original_unit_ids =
+          MapSet.new(for u <- Fixtures.player_units(context.world, context.user), do: u.id)
+
+        {city_before, city_after} =
+          Enum.reduce_while(1..30, nil, fn _, _ ->
+            [city_before] =
+              for cc <- Fixtures.player_cities(context.world, context.user),
+                  cc.id == context.city.id,
+                  do: cc
+
+            Fixtures.advance_turn(context.world)
+
+            new_settler? =
+              Fixtures.player_units(context.world, context.user)
+              |> Enum.any?(&(&1.type == :settler and &1.id not in original_unit_ids))
+
+            if new_settler? do
+              [city_after] =
+                for cc <- Fixtures.player_cities(context.world, context.user),
+                    cc.id == context.city.id,
+                    do: cc
+
+              {:halt, {city_before, city_after}}
+            else
+              {:cont, nil}
+            end
+          end) || flunk("settler never spawned within 30 turns")
+
+        {:ok,
+         context
+         |> Map.put(:city_before_spawn, city_before)
+         |> Map.put(:city_after_spawn, city_after)}
       end
 
-      then_ "it still claims all eight tiles", context do
-        [city] =
-          for cc <- Fixtures.player_cities(context.world, context.user), cc.id == context.city.id, do: cc
-
-        assert city.size == 1
+      then_ "no claimed tile is ever lost", context do
+        # The territory captured back when the city first reached size 2
+        # remains a subset forever (territory is permanent, story 883) —
+        # growth since then may have claimed MORE tiles, but never fewer.
+        # Across the exact tick the settler spawns, territory can only
+        # stay the same or gain one tile (a same-tick regrowth); it can
+        # never shrink.
         assert length(context.territory_before) == 8
-        assert MapSet.new(city.territory) == MapSet.new(context.territory_before)
+
+        assert MapSet.subset?(
+                 MapSet.new(context.territory_before),
+                 MapSet.new(context.city_before_spawn.territory)
+               )
+
+        assert length(context.city_after_spawn.territory) in
+                 [length(context.city_before_spawn.territory),
+                  length(context.city_before_spawn.territory) + 1]
+
+        assert MapSet.subset?(
+                 MapSet.new(context.city_before_spawn.territory),
+                 MapSet.new(context.city_after_spawn.territory)
+               )
+
         {:ok, context}
       end
 
-      then_ "only one worked tile remains beyond the free center", context do
-        [city] =
-          for cc <- Fixtures.player_cities(context.world, context.user), cc.id == context.city.id, do: cc
+      then_ "the settler's population cost un-works exactly one tile", context do
+        # Territory only grows on a genuine growth event (`claim_growth_tile`
+        # appends exactly one tile), so the territory-length delta across
+        # this tick is a reliable, independent signal for whether a
+        # same-tick regrowth also ran `assign_new_citizen` and re-worked a
+        # tile — net worked_tiles change is -1 (the settler's cost) plus
+        # that signal.
+        growths_observed =
+          length(context.city_after_spawn.territory) -
+            length(context.city_before_spawn.territory)
 
-        assert length(city.worked_tiles) == 1
+        assert length(context.city_after_spawn.worked_tiles) ==
+                 length(context.city_before_spawn.worked_tiles) - 1 + growths_observed
+
         {:ok, context}
       end
     end
