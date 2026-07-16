@@ -1,8 +1,11 @@
 defmodule BrokenOathsWeb.PageControllerTest do
   use BrokenOathsTest.ConnCase
 
-  test "GET / redirects into the game", %{conn: conn} do
+  test "GET / renders the landing page", %{conn: conn} do
     conn = get(conn, ~p"/")
-    assert redirected_to(conn) == ~p"/play"
+    response = html_response(conn, 200)
+    assert response =~ "Broken Oaths"
+    assert response =~ "Play free"
+    assert response =~ ~s|href="/play"|
   end
 end
