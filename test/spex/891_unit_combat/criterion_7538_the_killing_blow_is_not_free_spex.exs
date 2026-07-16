@@ -26,7 +26,7 @@ defmodule BrokenOathsSpex.Story891.Criterion7538Spex do
 
   alias BrokenOathsSpex.Fixtures
 
-  spex "the killing blow is not free" do
+  spex "the killing blow is not free", fail_on_error_logs: false do
     scenario "a lethal hit still costs the attacker HP" do
       given_(:a_world)
       given_(:registered_player)
@@ -129,16 +129,15 @@ defmodule BrokenOathsSpex.Story891.Criterion7538Spex do
       end
 
       when_ "my warrior attacks and destroys it", context do
-        render_hook(context.play_live, "attack", %{
-          "unit_id" => to_string(context.warrior.id),
-          "target_unit_id" => to_string(context.barbarian.id)
-        })
-
-        {:ok, context}
+        result = attempt_attack(context.play_live, context.warrior.id, context.barbarian.id)
+        {:ok, Map.put(context, :attack_result, result)}
       end
 
       then_ "my warrior still takes the barbarian's counter-damage computed from pre-combat stats",
             context do
+        assert context.attack_result == :ok,
+               "the \"attack\" event crashed the LiveView (no handler implemented yet)"
+
         [warrior] =
           for u <- Fixtures.player_units(context.world, context.user),
               u.id == context.warrior.id,
@@ -154,5 +153,41 @@ defmodule BrokenOathsSpex.Story891.Criterion7538Spex do
         {:ok, context}
       end
     end
+  end
+  # The "attack" event has no handler yet, so calling it crashes the
+  # LiveView (`FunctionClauseError` in `handle_event/3`) — expected
+  # until `Game.Combat` lands. That crash reaches this (linked) test
+  # process as a genuine process EXIT signal, not a value `render_hook`
+  # itself raises — plain `try/rescue`/`catch :exit` around the call
+  # does not intercept it. Trapping exits around the call converts it
+  # into an ordinary `{:EXIT, pid, reason}` message instead, so the RED
+  # here is a clean `then_` assertion failure instead of an uncaught
+  # process EXIT taking down the whole test.
+  defp attempt_attack(live_view, unit_id, target_unit_id) do
+    original_trap = Process.flag(:trap_exit, true)
+
+    result =
+      try do
+        render_hook(live_view, "attack", %{
+          "unit_id" => to_string(unit_id),
+          "target_unit_id" => to_string(target_unit_id)
+        })
+
+        :ok
+      rescue
+        _ -> :crashed
+      catch
+        :exit, _ -> :crashed
+      end
+
+    result =
+      receive do
+        {:EXIT, _pid, _reason} -> :crashed
+      after
+        100 -> result
+      end
+
+    Process.flag(:trap_exit, original_trap)
+    result
   end
 end

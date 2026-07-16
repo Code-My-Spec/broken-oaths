@@ -12,6 +12,14 @@ defmodule BrokenOathsSpex.Story895.Criterion7576Spex do
   is produced and walked onto the already-full tile as the civilian
   under test (a Settler is unavailable for this purpose: founding
   consumes it immediately, criterion 7463).
+
+  `city_defense/1` is nil-safe (no `data-test="city-defense"` element
+  exists yet — criterion 7562's own judgment call) rather than raising
+  out of `given_`, matching `Criterion7566Spex`'s `city_hp/1` fix for
+  the same shape of problem. A nil-vs-nil comparison would otherwise
+  pass this spec for the wrong reason (both reads simply failing to
+  find the element), so the closing `then_` asserts both reads are
+  real integers before comparing them.
   """
 
   use BrokenOathsSpex.Case
@@ -120,8 +128,16 @@ defmodule BrokenOathsSpex.Story895.Criterion7576Spex do
       end
 
       then_ "the city's defensive strength is unchanged by the worker's presence", context do
+        assert is_integer(context.defense_before),
+               "city-defense panel element doesn't exist yet (criterion 7562)"
+
         render_hook(context.play_live, "select_city", %{"city_id" => to_string(context.city.id)})
-        assert city_defense(context.play_live) == context.defense_before
+        defense_after = city_defense(context.play_live)
+
+        assert is_integer(defense_after),
+               "city-defense panel element doesn't exist yet (criterion 7562)"
+
+        assert defense_after == context.defense_before
         {:ok, context}
       end
     end
@@ -142,9 +158,15 @@ defmodule BrokenOathsSpex.Story895.Criterion7576Spex do
     end)
   end
 
+  # `nil` if `data-test="city-defense"` doesn't exist yet — see
+  # moduledoc — so callers see a clean assertion failure in `then_`
+  # instead of a setup-phase MatchError.
   defp city_defense(play_live) do
     html = render(play_live)
-    [_, defense] = Regex.run(~r/data-test="city-defense"[^>]*>(\d+)/, html)
-    String.to_integer(defense)
+
+    case Regex.run(~r/data-test="city-defense"[^>]*>(\d+)/, html) do
+      [_, defense] -> String.to_integer(defense)
+      nil -> nil
+    end
   end
 end

@@ -35,7 +35,7 @@ defmodule BrokenOathsSpex.Story891.Criterion7575Spex do
 
   alias BrokenOathsSpex.Fixtures
 
-  spex "a dying warrior swings soft" do
+  spex "a dying warrior swings soft", fail_on_error_logs: false do
     scenario "a wounded warrior's attack lands softer than a fresh one's" do
       given_(:a_world)
       given_(:registered_player)
@@ -153,21 +153,30 @@ defmodule BrokenOathsSpex.Story891.Criterion7575Spex do
       end
 
       when_ "both combats resolve", context do
-        render_hook(context.play_live, "attack", %{
-          "unit_id" => to_string(context.fresh_warrior.id),
-          "target_unit_id" => to_string(context.fresh_barbarian.id)
-        })
+        fresh_result =
+          attempt_attack(context.play_live, context.fresh_warrior.id, context.fresh_barbarian.id)
 
-        render_hook(context.play_live, "attack", %{
-          "unit_id" => to_string(context.wounded_warrior.id),
-          "target_unit_id" => to_string(context.wounded_barbarian.id)
-        })
+        wounded_result =
+          attempt_attack(
+            context.play_live,
+            context.wounded_warrior.id,
+            context.wounded_barbarian.id
+          )
 
-        {:ok, context}
+        {:ok,
+         context
+         |> Map.put(:fresh_attack_result, fresh_result)
+         |> Map.put(:wounded_attack_result, wounded_result)}
       end
 
       then_ "the wounded warrior's damage comes from a visibly lower band than the fresh warrior's (roughly strength 6 versus strength 10)",
             context do
+        assert context.fresh_attack_result == :ok,
+               "the \"attack\" event crashed the LiveView (no handler implemented yet)"
+
+        assert context.wounded_attack_result == :ok,
+               "the \"attack\" event crashed the LiveView (no handler implemented yet)"
+
         [fresh_barbarian] =
           for u <- Fixtures.player_units(context.world, context.other_user),
               u.id == context.fresh_barbarian.id,
@@ -206,5 +215,42 @@ defmodule BrokenOathsSpex.Story891.Criterion7575Spex do
         {:cont, :ok}
       end
     end)
+  end
+
+  # The "attack" event has no handler yet, so calling it crashes the
+  # LiveView (`FunctionClauseError` in `handle_event/3`) — expected
+  # until `Game.Combat` lands. That crash reaches this (linked) test
+  # process as a genuine process EXIT signal, not a value `render_hook`
+  # itself raises — plain `try/rescue`/`catch :exit` around the call
+  # does not intercept it. Trapping exits around the call converts it
+  # into an ordinary `{:EXIT, pid, reason}` message instead, so the RED
+  # here is a clean `then_` assertion failure instead of an uncaught
+  # process EXIT taking down the whole test.
+  defp attempt_attack(live_view, unit_id, target_unit_id) do
+    original_trap = Process.flag(:trap_exit, true)
+
+    result =
+      try do
+        render_hook(live_view, "attack", %{
+          "unit_id" => to_string(unit_id),
+          "target_unit_id" => to_string(target_unit_id)
+        })
+
+        :ok
+      rescue
+        _ -> :crashed
+      catch
+        :exit, _ -> :crashed
+      end
+
+    result =
+      receive do
+        {:EXIT, _pid, _reason} -> :crashed
+      after
+        100 -> result
+      end
+
+    Process.flag(:trap_exit, original_trap)
+    result
   end
 end

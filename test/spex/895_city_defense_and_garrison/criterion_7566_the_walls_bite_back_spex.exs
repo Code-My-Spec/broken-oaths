@@ -22,6 +22,16 @@ defmodule BrokenOathsSpex.Story895.Criterion7566Spex do
 
   Barbarian-fixture note: see `BrokenOathsSpex.Story891.Criterion7533Spex`'s
   moduledoc — "the barbarian" is a second real player's warrior.
+
+  No `"target_city_id"` clause exists in `GameLive.Play.handle_event/3`
+  yet (story 891's `"attack"` hook only recognizes
+  `"target_unit_id"`), so driving it against a city crashes the
+  LiveView until `Game.Combat` grows a city-target arm.
+  `attempt_attack/2` traps that crash the same way
+  `Criterion7533Spex.attempt_attack/3` does, so the RED here is a
+  clean `then_` assertion failure instead of an uncaught process
+  EXIT; `fail_on_error_logs: false` accepts the resulting GenServer
+  crash log for the same reason.
   """
 
   use BrokenOathsSpex.Case
@@ -30,7 +40,7 @@ defmodule BrokenOathsSpex.Story895.Criterion7566Spex do
 
   alias BrokenOathsSpex.Fixtures
 
-  spex "the walls bite back" do
+  spex "the walls bite back", fail_on_error_logs: false do
     scenario "a barbarian attacking a garrisoned city takes damage back" do
       given_(:a_world)
       given_(:registered_player)
@@ -158,15 +168,19 @@ defmodule BrokenOathsSpex.Story895.Criterion7566Spex do
       end
 
       when_ "the barbarian attacks my city", context do
-        render_hook(context.other_play_live, "attack", %{
-          "unit_id" => to_string(context.barbarian.id),
-          "target_city_id" => to_string(context.city.id)
-        })
+        result =
+          attempt_attack(context.other_play_live, %{
+            "unit_id" => to_string(context.barbarian.id),
+            "target_city_id" => to_string(context.city.id)
+          })
 
-        {:ok, context}
+        {:ok, Map.put(context, :attack_result, result)}
       end
 
       then_ "my city loses HP", context do
+        assert context.attack_result == :ok,
+               "the \"attack\" event crashed the LiveView (no city-target handler implemented yet)"
+
         assert city_hp(context.play_live) < context.city_hp0
         {:ok, context}
       end
@@ -184,10 +198,42 @@ defmodule BrokenOathsSpex.Story895.Criterion7566Spex do
   end
 
   # Re-renders the (already-selected) city panel and extracts the
-  # integer shown in `data-test="city-hp"`.
+  # integer shown in `data-test="city-hp"` — `nil` if that element
+  # doesn't exist yet (`GameLive.CityPanel` doesn't render city HP
+  # until this story lands), so callers see a clean comparison
+  # failure in `then_` instead of a setup-phase MatchError.
   defp city_hp(play_live) do
     html = render(play_live)
-    [_, hp] = Regex.run(~r/data-test="city-hp"[^>]*>(\d+)/, html)
-    String.to_integer(hp)
+
+    case Regex.run(~r/data-test="city-hp"[^>]*>(\d+)/, html) do
+      [_, hp] -> String.to_integer(hp)
+      nil -> nil
+    end
+  end
+
+  # See moduledoc — traps the expected crash from driving the
+  # not-yet-implemented city-target "attack" event.
+  defp attempt_attack(live_view, payload) do
+    original_trap = Process.flag(:trap_exit, true)
+
+    result =
+      try do
+        render_hook(live_view, "attack", payload)
+        :ok
+      rescue
+        _ -> :crashed
+      catch
+        :exit, _ -> :crashed
+      end
+
+    result =
+      receive do
+        {:EXIT, _pid, _reason} -> :crashed
+      after
+        100 -> result
+      end
+
+    Process.flag(:trap_exit, original_trap)
+    result
   end
 end

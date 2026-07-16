@@ -12,6 +12,13 @@ defmodule BrokenOathsSpex.Story895.Criterion7567Spex do
   healing, except here the damage itself comes through the real
   attack surface rather than a fixture, since `Game.CityDefense` has
   no equivalent HP-setting escape hatch).
+
+  No `"target_city_id"` clause exists in `GameLive.Play.handle_event/3`
+  yet, so driving the setup hit crashes the LiveView until
+  `Game.Combat` grows a city-target arm; `attempt_attack/2` traps
+  that the same way `Criterion7533Spex.attempt_attack/3` and
+  `Criterion7566Spex.attempt_attack/2` do. `fail_on_error_logs: false`
+  accepts the resulting GenServer crash log for the same reason.
   """
 
   use BrokenOathsSpex.Case
@@ -20,7 +27,7 @@ defmodule BrokenOathsSpex.Story895.Criterion7567Spex do
 
   alias BrokenOathsSpex.Fixtures
 
-  spex "quiet nights mend walls" do
+  spex "quiet nights mend walls", fail_on_error_logs: false do
     scenario "an unattacked city regains exactly 5 HP at the next boundary" do
       given_(:a_world)
       given_(:registered_player)
@@ -105,7 +112,7 @@ defmodule BrokenOathsSpex.Story895.Criterion7567Spex do
               u.id == barbarian.id,
               do: u
 
-        render_hook(other_play_live, "attack", %{
+        attempt_attack(other_play_live, %{
           "unit_id" => to_string(barbarian.id),
           "target_city_id" => to_string(city.id)
         })
@@ -126,15 +133,48 @@ defmodule BrokenOathsSpex.Story895.Criterion7567Spex do
       end
 
       then_ "the city regains exactly 5 HP", context do
+        assert is_integer(context.hp_after_hit),
+               "no \"city-hp\" panel element rendered yet (GameLive.CityPanel doesn't show city HP until this story lands)"
+
         assert city_hp(context.play_live) == context.hp_after_hit + 5
         {:ok, context}
       end
     end
   end
 
+  # `nil` if `data-test="city-hp"` doesn't exist yet — see moduledoc.
   defp city_hp(play_live) do
     html = render(play_live)
-    [_, hp] = Regex.run(~r/data-test="city-hp"[^>]*>(\d+)/, html)
-    String.to_integer(hp)
+
+    case Regex.run(~r/data-test="city-hp"[^>]*>(\d+)/, html) do
+      [_, hp] -> String.to_integer(hp)
+      nil -> nil
+    end
+  end
+
+  # See moduledoc — traps the expected crash from driving the
+  # not-yet-implemented city-target "attack" event.
+  defp attempt_attack(live_view, payload) do
+    original_trap = Process.flag(:trap_exit, true)
+
+    result =
+      try do
+        render_hook(live_view, "attack", payload)
+        :ok
+      rescue
+        _ -> :crashed
+      catch
+        :exit, _ -> :crashed
+      end
+
+    result =
+      receive do
+        {:EXIT, _pid, _reason} -> :crashed
+      after
+        100 -> result
+      end
+
+    Process.flag(:trap_exit, original_trap)
+    result
   end
 end
