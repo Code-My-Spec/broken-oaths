@@ -79,8 +79,12 @@ defmodule BrokenOathsSpex.Story892.Criterion7545Spex do
       when_ "the lord marches to the camp's doorstep", context do
         {x, y, z} = Fixtures.tile_center(context.world, context.land_neighbor)
 
+        # Raw integer, not a string: unlike "found_city", the
+        # "queue_move" handler never runs `unit_id` through
+        # `Play.parse_id/1`, so a stringified id reads as
+        # `:not_owner` and the march never queues at all.
         render_hook(context.play_live, "queue_move", %{
-          "unit_id" => to_string(context.scout.id),
+          "unit_id" => context.scout.id,
           "to_point" => [x, y, z]
         })
 

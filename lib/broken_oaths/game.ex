@@ -165,6 +165,24 @@ defmodule BrokenOaths.Game do
   @doc "All of `user`'s cities in `world` (see `BrokenOaths.Game.WorldServer` for the shape)."
   def player_cities(world, user), do: WorldServer.call(world, {:player_cities, user})
 
+  @doc """
+  Every barbarian camp in `world`, unfiltered ground truth (never
+  fog-filtered) — see `BrokenOathsSpex.Fixtures.list_camps/1`'s doc for
+  why this sanctioned, no-UI-surface read exists (same status as
+  `Worlds.Regions.partition/1`). Never call this to decide what a
+  player sees; use `camps_visible_to/2` for that.
+  """
+  def list_camps(world), do: WorldServer.call(world, :list_camps)
+
+  @doc """
+  Barbarian camps `user` currently knows about — inside their own
+  claimed region (immediate, no scouting required) or already
+  explored. The fog-filtered surface `GameLive.Play` pushes as
+  "game:camps" (story 892, criterion 7546 — a HARD constraint: a camp
+  outside both sets never appears here).
+  """
+  def camps_visible_to(world, user), do: WorldServer.call(world, {:camps_visible_to, user})
+
   @doc "A tile's completed improvement (`nil | :farm | :mine | :road`)."
   def tile_improvement(world, tile_id), do: WorldServer.call(world, {:tile_improvement, tile_id})
 
@@ -176,4 +194,31 @@ defmodule BrokenOaths.Game do
   @spec set_unit_hp_for_test(map(), term(), non_neg_integer()) :: :ok
   def set_unit_hp_for_test(world, unit_id, hp),
     do: WorldServer.call(world, {:set_unit_hp_for_test, unit_id, hp})
+
+  @doc """
+  Test-only: place a real, ownerless barbarian warrior directly on
+  `tile_id` — see `BrokenOaths.Game.WorldServer`'s
+  `:spawn_barbarian_for_test` handler for the same documented,
+  narrow-exception status `set_unit_hp_for_test/3` already has. Returns
+  the spawned unit's map (`id`, `tile_id`, `hp`, ...).
+  """
+  @spec spawn_barbarian_for_test(map(), term()) :: map()
+  def spawn_barbarian_for_test(world, tile_id),
+    do: WorldServer.call(world, {:spawn_barbarian_for_test, tile_id})
+
+  @doc """
+  Test-only: resolve an attack FROM a barbarian (no owning player/session
+  exists to drive this through `attack/4`) — see
+  `BrokenOaths.Game.WorldServer`'s `:resolve_barbarian_attack_for_test`
+  handler for the same documented, narrow-exception status
+  `spawn_barbarian_for_test/2` has.
+  """
+  @spec resolve_barbarian_attack_for_test(map(), term(), term()) ::
+          {:ok, %{damage_dealt: pos_integer(), damage_taken: pos_integer()}} | {:error, atom()}
+  def resolve_barbarian_attack_for_test(world, attacker_unit_id, target_unit_id),
+    do:
+      WorldServer.call(
+        world,
+        {:resolve_barbarian_attack_for_test, attacker_unit_id, target_unit_id}
+      )
 end

@@ -10,10 +10,8 @@ defmodule BrokenOathsSpex.Story896.Criterion7571Spex do
   story) establish for an adjacent lord.
 
   Barbarian-fixture note: see `BrokenOathsSpex.Story891.Criterion7533Spex`'s
-  moduledoc — "the barbarian" here is mechanically a second real
-  player's warrior, produced and walked into place through the
-  ordinary `GameLive.Play` surface (documented stand-in for story 892,
-  `Game.Camps`, which doesn't exist yet).
+  moduledoc — the barbarian is a real, ownerless unit placed via
+  `Fixtures.spawn_barbarian/2`.
 
   KNOWN LIMITATION (statistical): same overlapping-band caveat as
   criterion 7541/7570 — the strength-10 band (~18-31) and strength-12
@@ -41,7 +39,6 @@ defmodule BrokenOathsSpex.Story896.Criterion7571Spex do
     scenario "the warrior's damage comes from the strength-10 band when the lord is two hexes away" do
       given_(:a_world)
       given_(:registered_player)
-      given_(:second_registered_player)
 
       given_ "my warrior stands 2 hexes from my lord and fights a barbarian", context do
         {:ok, join_live, _html} = live(context.conn, "/play")
@@ -63,36 +60,10 @@ defmodule BrokenOathsSpex.Story896.Criterion7571Spex do
           "item" => "warrior"
         })
 
-        {:ok, other_join_live, _html} = live(context.other_conn, "/play")
-
-        other_join_live
-        |> element("[data-test='join-world-#{context.world.id}']")
-        |> render_click()
-
-        {:ok, other_play_live, _html} = live(context.other_conn, "/play/#{context.world.id}")
-
-        [other_settler | _] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.type == :settler,
-              do: u
-
-        render_hook(other_play_live, "found_city", %{"unit_id" => to_string(other_settler.id)})
-        [other_city] = Fixtures.player_cities(context.world, context.other_user)
-
-        render_hook(other_play_live, "queue_production", %{
-          "city_id" => to_string(other_city.id),
-          "item" => "warrior"
-        })
-
         for _ <- 1..8, do: Fixtures.advance_turn(context.world)
 
         [warrior] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :warrior, do: u
-
-        [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.type == :warrior,
-              do: u
 
         [lord] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
@@ -106,12 +77,7 @@ defmodule BrokenOathsSpex.Story896.Criterion7571Spex do
           |> Enum.filter(land?)
           |> Enum.reject(&(&1 in my_occupied))
 
-        walk_to(context.world, other_play_live, context.other_user, barbarian.id, barbarian_target)
-
-        [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.id == barbarian.id,
-              do: u
+        barbarian = Fixtures.spawn_barbarian(context.world, barbarian_target)
 
         # Distance-2 ring: grow one hop past my warrior's own neighbors
         # (ring 1), then drop ring 1 itself and the warrior's own tile
@@ -133,11 +99,6 @@ defmodule BrokenOathsSpex.Story896.Criterion7571Spex do
 
         walk_to(context.world, play_live, context.user, lord.id, lord_target)
 
-        [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.id == barbarian.id,
-              do: u
-
         {:ok,
          context
          |> Map.put(:play_live, play_live)
@@ -157,7 +118,7 @@ defmodule BrokenOathsSpex.Story896.Criterion7571Spex do
 
       then_ "no +2 bonus applies", context do
         [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
+          for u <- Fixtures.visible_units(context.world, context.user),
               u.id == context.barbarian.id,
               do: u
 

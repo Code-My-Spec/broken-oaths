@@ -37,6 +37,8 @@ defmodule BrokenOaths.Game.WorldServer do
   import Ecto.Query
 
   alias BrokenOaths.Game.{
+    Camp,
+    Camps,
     City,
     Combat,
     Exploration,
@@ -229,7 +231,18 @@ defmodule BrokenOaths.Game.WorldServer do
   def handle_call({:found_city, user, unit_id}, _from, state) do
     case do_found_city(state, user, unit_id) do
       {:ok, new_state} ->
-        broadcast(new_state.world.id, [:units_changed, :cities_changed])
+        # A single event, not both — every `handle_info` clause below
+        # (`:units_changed`/`:cities_changed`/`:improvements_changed`)
+        # calls the same unconditional `refresh_board/1`, so founding
+        # (which changes both units — the consumed settler — and
+        # cities at once) only needs to say so once. Two identical
+        # broadcasts would double-push every "game:*" event for the
+        # same instant, and for a fog-gated one like "game:camps" (see
+        # `GameLive.Play`), a spec's own single drain right after
+        # founding leaves the second copy sitting in the mailbox as a
+        # stale message ahead of every later turn's push — corrupting
+        # exact per-turn assertions (story 892, criteria 7547-7550).
+        broadcast(new_state.world.id, [:cities_changed])
         {:reply, :ok, new_state}
 
       {:error, reason} ->
@@ -307,6 +320,17 @@ defmodule BrokenOaths.Game.WorldServer do
     {:reply, player_cities(state, user), state}
   end
 
+  # Ground truth, unfiltered — see `BrokenOathsSpex.Fixtures.list_camps/1`'s
+  # doc for why this is a sanctioned exception to the fog-filtered board
+  # surface (region math has the same status).
+  def handle_call(:list_camps, _from, state) do
+    {:reply, Enum.map(Map.values(state.camps), &format_camp(&1, state)), state}
+  end
+
+  def handle_call({:camps_visible_to, user}, _from, state) do
+    {:reply, visible_camps(state, user), state}
+  end
+
   def handle_call({:tile_improvement, tile_id}, _from, state) do
     {:reply, tile_improvement_at(state, tile_id), state}
   end
@@ -316,6 +340,50 @@ defmodule BrokenOaths.Game.WorldServer do
     unit = Map.fetch!(state.units, unit_id)
     new_state = %{state | units: Map.put(state.units, unit_id, %{unit | hp: hp})}
     {:reply, :ok, new_state}
+  end
+
+  # Test-only: place a real, ownerless barbarian warrior directly on
+  # `tile_id` — no camp, no cadence, no waiting for movement. Story 893
+  # (barbarian roaming/AI) doesn't exist yet, so this is the sanctioned
+  # way a spec gets a real `Combat.hostile?/2`-recognized target without
+  # marching a camp-spawned one into place turn by turn; same narrow,
+  # documented-bridge status as `:set_unit_hp_for_test` above.
+  def handle_call({:spawn_barbarian_for_test, tile_id}, _from, state) do
+    stats = Production.unit_stats(:barbarian_warrior)
+    {:ok, unit} = insert_unit(state.world.id, nil, :barbarian_warrior, tile_id, stats.hp, stats.movement)
+    unit_data = unit_map(unit)
+    new_state = %{state | units: Map.put(state.units, unit.id, unit_data)}
+    {:reply, unit_data, new_state}
+  end
+
+  # Test-only: resolve an attack FROM a barbarian, bypassing the
+  # player-ownership check `do_attack/4` requires (a barbarian has no
+  # owning player/session to drive it through the ordinary "attack"
+  # event). Story 893 (barbarian AI) is what will drive this for real;
+  # until then this reuses the exact same validate+resolve pipeline
+  # `do_attack/4` uses, same narrow, documented-bridge status as
+  # `:spawn_barbarian_for_test` above.
+  def handle_call({:resolve_barbarian_attack_for_test, attacker_id, target_id}, _from, state) do
+    attacker = Map.fetch!(state.units, attacker_id)
+    defender = Map.fetch!(state.units, target_id)
+    adjacent_tile_ids = Regions.adjacent_tiles(state.world, attacker.tile_id)
+
+    case Combat.validate_attack(attacker, defender, adjacent_tile_ids) do
+      :ok ->
+        {result, new_state} = resolve_attack(state, attacker, defender)
+
+        case persist_tick(state, new_state) do
+          :ok ->
+            broadcast(new_state.world.id, [:units_changed])
+            {:reply, {:ok, result}, new_state}
+
+          :stale ->
+            {:reply, {:error, :stale}, resync(state)}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call(:advance_turn, _from, state) do
@@ -397,9 +465,10 @@ defmodule BrokenOaths.Game.WorldServer do
     end)
   end
 
-  defp insert_spawned_unit!(world_id, %{player_id: player_id, type: type, tile_id: tile_id}) do
+  defp insert_spawned_unit!(world_id, %{player_id: player_id, type: type, tile_id: tile_id} = event) do
     stats = Production.unit_stats(type)
-    {:ok, unit} = insert_unit(world_id, player_id, type, tile_id, stats.hp, stats.movement)
+    camp_id = Map.get(event, :camp_id)
+    {:ok, unit} = insert_unit(world_id, player_id, type, tile_id, stats.hp, stats.movement, camp_id)
     unit_map(unit)
   end
 
@@ -492,11 +561,12 @@ defmodule BrokenOaths.Game.WorldServer do
     result
   end
 
-  defp insert_unit(world_id, player_id, type, tile_id, hp, movement) do
+  defp insert_unit(world_id, player_id, type, tile_id, hp, movement, camp_id \\ nil) do
     %Unit{}
     |> Unit.changeset(%{
       world_id: world_id,
       player_id: player_id,
+      camp_id: camp_id,
       type: type,
       tile_id: tile_id,
       hp: hp,
@@ -761,6 +831,7 @@ defmodule BrokenOaths.Game.WorldServer do
             {:error, reason}
 
           :ok ->
+            first_founding? = not Enum.any?(state.cities, fn {_id, c} -> c.player_id == player.id end)
             {:ok, city} = persist_found_city!(state, player, unit)
 
             new_state = %{
@@ -770,9 +841,42 @@ defmodule BrokenOaths.Game.WorldServer do
                 orders: Map.delete(state.orders, unit_id)
             }
 
+            new_state =
+              if first_founding?,
+                do: spawn_wilderness_camps(new_state, player, unit.tile_id),
+                else: new_state
+
             {:ok, new_state}
         end
     end
+  end
+
+  # Story 892: a player's FIRST city (never a second, third, ...) seeds
+  # the wilderness around it — see `Camps.place_wilderness/6`'s doc for
+  # the near/far split. Placement is pure and deterministic; this is
+  # just the imperative shell turning its tile picks into real,
+  # immediately persisted `Camp` rows (same "persist right away, tick
+  # only diffs later" pattern `persist_found_city!/3` already uses for
+  # the city itself).
+  defp spawn_wilderness_camps(state, player, city_tile_id) do
+    home_region = player_region_tiles(state.world, player.region_id)
+    explored = Map.get(state.explored, player.id, MapSet.new())
+    occupied = state.units |> Map.values() |> Enum.map(& &1.tile_id) |> MapSet.new()
+    seed = {state.world.seed, city_tile_id}
+
+    tiles = Camps.place_wilderness(state.world, city_tile_id, home_region, explored, occupied, seed)
+    camps = Enum.map(tiles, &persist_camp!(state.world.id, &1))
+
+    %{state | camps: Enum.reduce(camps, Map.get(state, :camps, %{}), &Map.put(&2, &1.id, &1))}
+  end
+
+  defp persist_camp!(world_id, tile_id) do
+    {:ok, camp} =
+      %Camp{}
+      |> Camp.changeset(%{world_id: world_id, tile_id: tile_id, hp: Camp.max_hp(), spawn_counter: 0})
+      |> Repo.insert()
+
+    camp_map(camp)
   end
 
   # The settler is consumed and a working city stands in its place
@@ -1175,6 +1279,49 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
+  # Fog filter for camps (story 892, criterion 7546 — HARD constraint):
+  # a camp is known the moment it's inside the player's own claimed
+  # region (immediately, no scouting needed — the region-boundary bias
+  # criterion 7543 relies on) OR once its tile enters the player's
+  # ordinary explored set (the ONLY way a far camp is ever revealed —
+  # criterion 7545). Never the raw `state.camps` — that's
+  # `Fixtures.list_camps/1`'s sanctioned, ground-truth-only status.
+  defp visible_camps(state, user) do
+    case find_player(state, user.id) do
+      nil ->
+        []
+
+      player ->
+        home = player_region_tiles(state.world, player.region_id)
+        explored = Map.get(state.explored, player.id, MapSet.new())
+
+        state.camps
+        |> Map.values()
+        |> Enum.filter(&(MapSet.member?(home, &1.tile_id) or MapSet.member?(explored, &1.tile_id)))
+        |> Enum.map(&format_camp(&1, state))
+    end
+  end
+
+  defp player_region_tiles(world, region_id) do
+    world |> Regions.partition() |> Map.fetch!(:regions) |> Map.fetch!(region_id) |> MapSet.new()
+  end
+
+  # `warriors` nests the camp's own spawned units (matched by
+  # `camp_id`, never by tile — a second warrior can land on an
+  # adjacent tile, not the camp's own) — attack/defense both read off
+  # `Combat.base_strength/1` rather than a second hardcoded 15, so the
+  # combat curve and this display can never drift apart.
+  defp format_camp(camp, state) do
+    strength = Combat.base_strength(:barbarian_warrior)
+
+    warriors =
+      for {_id, unit} <- state.units, Map.get(unit, :camp_id) == camp.id do
+        %{id: unit.id, tile_id: unit.tile_id, hp: unit.hp, attack: strength, defense: strength}
+      end
+
+    %{id: camp.id, tile_id: camp.tile_id, hp: camp.hp, warriors: warriors}
+  end
+
   # -------------------------------------------------------------------
   # Persistence — tick delta
   # -------------------------------------------------------------------
@@ -1192,6 +1339,7 @@ defmodule BrokenOaths.Game.WorldServer do
           persist_explored_changes(old_state.explored, new_state.explored)
           persist_city_changes(old_state.cities, new_state.cities)
           persist_production_item_changes(old_state.cities, new_state.cities)
+          persist_camp_changes(Map.get(old_state, :camps, %{}), Map.get(new_state, :camps, %{}))
 
           persist_improvement_changes(
             new_state.world.id,
@@ -1268,6 +1416,18 @@ defmodule BrokenOaths.Game.WorldServer do
     cities |> Map.values() |> Enum.flat_map(& &1.queue) |> Map.new(&{&1.id, &1})
   end
 
+  # New camps are persisted immediately at founding (see
+  # `spawn_wilderness_camps/3`) — this only reconciles what the tick
+  # itself advances: `spawn_counter` (every camp, every tick) and,
+  # eventually, `hp`/`destroyed_at` once a future story can damage one.
+  defp persist_camp_changes(old_camps, new_camps) do
+    for {id, camp} <- new_camps, Map.get(old_camps, id) != camp do
+      Repo.update_all(from(c in Camp, where: c.id == ^id),
+        set: [hp: camp.hp, spawn_counter: camp.spawn_counter, destroyed_at: camp.destroyed_at]
+      )
+    end
+  end
+
   # Starting/attaching an improvement is persisted immediately (see
   # "Improvements" above) — this only reconciles what the tick itself
   # advances: progress, completion, and a builder walking away.
@@ -1335,6 +1495,7 @@ defmodule BrokenOaths.Game.WorldServer do
       explored: load_explored(world.id),
       cities: load_cities(world.id),
       improvements: load_improvements(world.id),
+      camps: load_camps(world.id),
       # Not persisted — see `schedule_heir_if_lord_fell/3`'s doc for the
       # known, narrow restart limitation this implies.
       pending_heirs: %{}
@@ -1391,6 +1552,12 @@ defmodule BrokenOaths.Game.WorldServer do
     |> Map.new(&{&1.tile_id, improvement_map(&1)})
   end
 
+  defp load_camps(world_id) do
+    from(c in Camp, where: c.world_id == ^world_id)
+    |> Repo.all()
+    |> Map.new(&{&1.id, camp_map(&1)})
+  end
+
   defp player_map(%Player{} = p),
     do: %{id: p.id, user_id: p.user_id, region_id: p.region_id, gold: p.gold}
 
@@ -1398,6 +1565,7 @@ defmodule BrokenOaths.Game.WorldServer do
     %{
       id: u.id,
       player_id: u.player_id,
+      camp_id: u.camp_id,
       type: u.type,
       tile_id: u.tile_id,
       hp: u.hp,
@@ -1438,5 +1606,9 @@ defmodule BrokenOaths.Game.WorldServer do
       status: i.status,
       builder_unit_id: i.builder_unit_id
     }
+  end
+
+  defp camp_map(%Camp{} = c) do
+    %{id: c.id, tile_id: c.tile_id, hp: c.hp, spawn_counter: c.spawn_counter, destroyed_at: c.destroyed_at}
   end
 end

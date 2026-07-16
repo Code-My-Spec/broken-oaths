@@ -80,9 +80,29 @@ defmodule BrokenOathsSpex.Story892.Criterion7544Spex do
 
         land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
 
-        ring4 =
-          Enum.reduce(1..4, {[context.city1.tile_id], MapSet.new([context.city1.tile_id])}, fn
-            _, {frontier, seen} ->
+        # Wilderness camps (this criterion's own subject) can have real
+        # ownerless warriors standing anywhere by now — dozens of turns
+        # have passed waiting for growth and settler production. A
+        # target tile a warrior occupies would interrupt the settler's
+        # move one hex short (Turn's dynamic collision check), never
+        # reaching the founding distance; ground-truth camp/warrior
+        # tiles (the same sanctioned read criterion 7543 uses) are
+        # excluded so this stays a test of "no new camps," not a flake
+        # on wilderness placement.
+        barbarian_tiles =
+          context.world
+          |> Fixtures.list_camps()
+          |> Enum.flat_map(fn camp -> [camp.tile_id | Enum.map(camp.warriors, & &1.tile_id)] end)
+          |> MapSet.new()
+
+        # Candidates from 4 hexes out through 10 (cumulative, not a
+        # single ring) — a wider pool than the plain "exactly 4"
+        # criterion 7489 could rely on before real barbarians existed,
+        # since one warrior standing at the city's own doorstep can
+        # block every exit at a single fixed depth.
+        rings =
+          Enum.reduce(1..10, {[context.city1.tile_id], MapSet.new([context.city1.tile_id]), %{}}, fn
+            depth, {frontier, seen, by_depth} ->
               next =
                 frontier
                 |> Enum.flat_map(&Fixtures.adjacent_tiles(context.world, &1))
@@ -90,16 +110,37 @@ defmodule BrokenOathsSpex.Story892.Criterion7544Spex do
                 |> Enum.reject(&MapSet.member?(seen, &1))
                 |> Enum.filter(land?)
 
-              {next, MapSet.union(seen, MapSet.new(next))}
+              by_depth = if depth >= 4, do: Map.put(by_depth, depth, next), else: by_depth
+              {next, MapSet.union(seen, MapSet.new(next)), by_depth}
           end)
-          |> elem(0)
+          |> elem(2)
 
-        [target | _] = ring4
+        candidates =
+          4..10
+          |> Enum.flat_map(&Map.get(rings, &1, []))
+          |> Enum.reject(&MapSet.member?(barbarian_tiles, &1))
 
-        render_hook(context.play_live, "queue_move", %{
-          "unit_id" => to_string(new_settler.id),
-          "to_tile" => target
-        })
+        # A tile clear of barbarians can still be UNREACHABLE if one
+        # blocks the only route to it (`WorldServer`'s BFS pathfinding
+        # treats any occupied tile as impassable, not just as a
+        # destination) — try candidates in order (nearest first) until
+        # one actually queues a path, rather than assuming the first
+        # is walkable. `queue_move`'s `unit_id` — unlike `found_city`'s
+        # — is never run through `Play.parse_id/1`, so it must be the
+        # raw integer (same as criterion 7489's own working pattern),
+        # not a string.
+        target =
+          Enum.find(candidates, fn candidate ->
+            render_hook(context.play_live, "queue_move", %{
+              "unit_id" => new_settler.id,
+              "to_tile" => candidate
+            })
+
+            not has_element?(context.play_live, "[data-test='order-error']")
+          end)
+
+        refute target == nil,
+               "no land tile 4-10 hexes out had a walkable path (all blocked by barbarians?)"
 
         Enum.reduce_while(1..15, :ok, fn _, :ok ->
           [s] =
@@ -135,7 +176,20 @@ defmodule BrokenOathsSpex.Story892.Criterion7544Spex do
         # criterion 7543), so this comparison isn't vacuously "0 == 0".
         assert length(context.camps_after_first) >= 5
 
-        assert camps_after_second == context.camps_after_first
+        # Identity (id/tile_id/hp), not full structural equality: this
+        # given_ chain (borrowed from criterion 7489's "grow, produce a
+        # settler, march it, found" sequence) burns 20+ turns waiting
+        # for settler production — well past the 3-turn spawn cadence
+        # criteria 7546/7547/7548/7549 establish as real, required
+        # behavior. A below-cap camp legitimately gaining warriors in
+        # that window is correct, not "punishment" for the second
+        # founding; comparing warriors here would make this criterion
+        # fail EVERY time the cadence fires correctly. "No additional
+        # camps spawn" means the SET of camps is unchanged — same ids,
+        # same tiles, same hp — which this asserts precisely.
+        second_identity = Enum.map(camps_after_second, &Map.take(&1, [:id, :tile_id, :hp]))
+        first_identity = Enum.map(context.camps_after_first, &Map.take(&1, [:id, :tile_id, :hp]))
+        assert MapSet.new(second_identity) == MapSet.new(first_identity)
         {:ok, context}
       end
 

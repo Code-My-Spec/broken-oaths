@@ -35,7 +35,7 @@ defmodule BrokenOaths.Game.Production do
 
   @type tile_id :: non_neg_integer()
   @type buildable :: :settler | :worker | :warrior
-  @type unit_type :: :lord | :settler | :warrior | :worker
+  @type unit_type :: :lord | :settler | :warrior | :worker | :barbarian_warrior
 
   @type queue_item :: %{
           optional(:id) => term(),
@@ -65,7 +65,8 @@ defmodule BrokenOaths.Game.Production do
     lord: %{hp: 150, movement: 2},
     settler: %{hp: 50, movement: 2},
     warrior: %{hp: 100, movement: 1},
-    worker: %{hp: 10, movement: 2}
+    worker: %{hp: 10, movement: 2},
+    barbarian_warrior: %{hp: 120, movement: 1}
   }
 
   @doc "The buildable catalog: `%{settler: 100, worker: 60, warrior: 40}`."

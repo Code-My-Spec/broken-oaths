@@ -85,9 +85,21 @@ defmodule BrokenOathsSpex.Story892.Criterion7550Spex do
 
         land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
 
-        ring4 =
-          Enum.reduce(1..4, {[context.city1.tile_id], MapSet.new([context.city1.tile_id])}, fn
-            _, {frontier, seen} ->
+        # Wilderness camps (story 892) can have real ownerless warriors
+        # standing anywhere by now — dozens of turns have passed
+        # waiting for growth and settler production; ground-truth
+        # camp/warrior tiles (the same sanctioned read criterion 7543
+        # uses) are excluded from candidates so a warrior at the
+        # city's doorstep can't block every exit.
+        barbarian_tiles =
+          context.world
+          |> Fixtures.list_camps()
+          |> Enum.flat_map(fn camp -> [camp.tile_id | Enum.map(camp.warriors, & &1.tile_id)] end)
+          |> MapSet.new()
+
+        rings =
+          Enum.reduce(1..10, {[context.city1.tile_id], MapSet.new([context.city1.tile_id]), %{}}, fn
+            depth, {frontier, seen, by_depth} ->
               next =
                 frontier
                 |> Enum.flat_map(&Fixtures.adjacent_tiles(context.world, &1))
@@ -95,16 +107,34 @@ defmodule BrokenOathsSpex.Story892.Criterion7550Spex do
                 |> Enum.reject(&MapSet.member?(seen, &1))
                 |> Enum.filter(land?)
 
-              {next, MapSet.union(seen, MapSet.new(next))}
+              by_depth = if depth >= 4, do: Map.put(by_depth, depth, next), else: by_depth
+              {next, MapSet.union(seen, MapSet.new(next)), by_depth}
           end)
-          |> elem(0)
+          |> elem(2)
 
-        [target | _] = ring4
+        candidates =
+          4..10
+          |> Enum.flat_map(&Map.get(rings, &1, []))
+          |> Enum.reject(&MapSet.member?(barbarian_tiles, &1))
 
-        render_hook(context.play_live, "queue_move", %{
-          "unit_id" => to_string(new_settler.id),
-          "to_tile" => target
-        })
+        # Try candidates in order (nearest first) until one actually
+        # queues a path — a tile clear of barbarians can still be
+        # unreachable if one blocks the only route to it. Raw integer
+        # for `unit_id`: unlike "found_city", "queue_move" never runs
+        # it through `Play.parse_id/1`, so a stringified id reads as
+        # `:not_owner` and the march never queues at all.
+        target =
+          Enum.find(candidates, fn candidate ->
+            render_hook(context.play_live, "queue_move", %{
+              "unit_id" => new_settler.id,
+              "to_tile" => candidate
+            })
+
+            not has_element?(context.play_live, "[data-test='order-error']")
+          end)
+
+        refute target == nil,
+               "no land tile 4-10 hexes out had a walkable path (all blocked by barbarians?)"
 
         Enum.reduce_while(1..15, :ok, fn _, :ok ->
           [s] =

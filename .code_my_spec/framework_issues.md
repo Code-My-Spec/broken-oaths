@@ -120,3 +120,13 @@ by QA sub-agents. Suggests an MCP-transport supervisor crashing without
 recovery (or giving up restarts) while the Phoenix endpoint supervisor
 stays up — needs its own restart strategy or a health surface that
 includes the MCP subsystem.
+
+## 13. Stop hook demands green suite during spec-first red phase (2026-07-16)
+
+The generic exunit stop hook fires on every agent while red BDD specs
+await implementation (spec-first workflow). It cannot distinguish
+"red by design, requirement Satisfied" from regressions, so every
+subagent writing red specs gets blocked at stop and must be told to
+ignore it. Scope the hook to exclude test/spex of stories whose
+bdd_specs_exist requirement is satisfied but implementation
+requirements are not, or honor the CodeMySpec evaluation as authority.

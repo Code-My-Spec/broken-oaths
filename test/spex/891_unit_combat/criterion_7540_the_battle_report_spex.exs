@@ -5,10 +5,8 @@ defmodule BrokenOathsSpex.Story891.Criterion7540Spex do
   dealt and damage taken.
 
   Barbarian-fixture note: see `BrokenOathsSpex.Story891.Criterion7533Spex`'s
-  moduledoc — "the barbarian" here is mechanically a second real
-  player's warrior, produced and walked into place through the
-  ordinary `GameLive.Play` surface (documented stand-in for story 892,
-  `Game.Camps`, which doesn't exist yet).
+  moduledoc — the barbarian is a real, ownerless unit placed via
+  `Fixtures.spawn_barbarian/2`.
 
   Per the board doctrine (canvas board has no tile DOM), the combat
   result is expected to travel the same way every other board fact
@@ -29,7 +27,6 @@ defmodule BrokenOathsSpex.Story891.Criterion7540Spex do
     scenario "the attacker sees damage dealt and damage taken" do
       given_(:a_world)
       given_(:registered_player)
-      given_(:second_registered_player)
 
       given_ "my warrior attacks a barbarian", context do
         {:ok, join_live, _html} = live(context.conn, "/play")
@@ -47,36 +44,10 @@ defmodule BrokenOathsSpex.Story891.Criterion7540Spex do
         [city] = Fixtures.player_cities(context.world, context.user)
         render_hook(play_live, "queue_production", %{"city_id" => city.id, "item" => "warrior"})
 
-        {:ok, other_join_live, _html} = live(context.other_conn, "/play")
-
-        other_join_live
-        |> element("[data-test='join-world-#{context.world.id}']")
-        |> render_click()
-
-        {:ok, other_play_live, _html} = live(context.other_conn, "/play/#{context.world.id}")
-
-        [other_settler | _] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.type == :settler,
-              do: u
-
-        render_hook(other_play_live, "found_city", %{"unit_id" => other_settler.id})
-        [other_city] = Fixtures.player_cities(context.world, context.other_user)
-
-        render_hook(other_play_live, "queue_production", %{
-          "city_id" => other_city.id,
-          "item" => "warrior"
-        })
-
         for _ <- 1..8, do: Fixtures.advance_turn(context.world)
 
         [warrior] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :warrior, do: u
-
-        [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.type == :warrior,
-              do: u
 
         [lord] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
@@ -90,29 +61,7 @@ defmodule BrokenOathsSpex.Story891.Criterion7540Spex do
           |> Enum.filter(land?)
           |> Enum.reject(&(&1 in my_occupied))
 
-        render_hook(other_play_live, "queue_move", %{
-          "unit_id" => barbarian.id,
-          "to_tile" => target
-        })
-
-        Enum.reduce_while(1..40, :ok, fn _, :ok ->
-          [b] =
-            for u <- Fixtures.player_units(context.world, context.other_user),
-                u.id == barbarian.id,
-                do: u
-
-          if b.tile_id == target do
-            {:halt, :ok}
-          else
-            Fixtures.advance_turn(context.world)
-            {:cont, :ok}
-          end
-        end)
-
-        [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.id == barbarian.id,
-              do: u
+        barbarian = Fixtures.spawn_barbarian(context.world, target)
 
         {:ok,
          context

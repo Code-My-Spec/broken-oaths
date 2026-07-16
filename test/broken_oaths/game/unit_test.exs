@@ -44,13 +44,12 @@ defmodule BrokenOaths.Game.UnitTest do
     assert changeset.valid?
   end
 
-  test "changeset requires all fields" do
+  test "changeset requires all fields except player_id and camp_id" do
     changeset = Unit.changeset(%Unit{}, %{})
     refute changeset.valid?
 
     assert %{
              world_id: ["can't be blank"],
-             player_id: ["can't be blank"],
              type: ["can't be blank"],
              tile_id: ["can't be blank"],
              hp: ["can't be blank"],
@@ -58,6 +57,15 @@ defmodule BrokenOaths.Game.UnitTest do
              movement: ["can't be blank"],
              max_movement: ["can't be blank"]
            } = errors_on(changeset)
+
+    refute Map.has_key?(errors_on(changeset), :player_id)
+    refute Map.has_key?(errors_on(changeset), :camp_id)
+  end
+
+  test "player_id is nullable — a barbarian warrior has no owner" do
+    attrs = %{valid_attrs() | player_id: nil, type: :barbarian_warrior}
+    changeset = Unit.changeset(%Unit{}, attrs)
+    assert changeset.valid?
   end
 
   test "type must be lord or settler" do

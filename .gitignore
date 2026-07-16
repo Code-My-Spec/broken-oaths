@@ -50,3 +50,6 @@ npm-debug.log
 
 # Cached hex docs for offline reference.
 .code_my_spec/hex_docs/
+
+# SexySpex runtime artifact.
+/spex_failures.jsonl

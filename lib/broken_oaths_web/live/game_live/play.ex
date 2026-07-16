@@ -28,6 +28,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
     * `game:cities`     — `%{cities: [%{id:, name:, tile_id:, size:}]}`, the
                            player's own cities (never fog-filtered — a city
                            is only ever seen by its owner here)
+    * `game:camps`      — `%{camps: [%{id:, tile_id:, hp:, warriors: [...]}]}`,
+                           barbarian camps (story 892), fog-filtered by
+                           `Game.camps_visible_to/2` — see that function's
+                           doc for the "own region OR explored" rule; a camp
+                           outside both never appears here (criterion 7546,
+                           a HARD constraint)
     * `globe3d:airspace`— `%{levels: %{tile_id => 1..3}, arc: float}` (reused
                            weather layer from `BrokenOaths.Worlds.Weather`)
 
@@ -84,6 +90,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
   @default_scale 700
   @max_pitch 1.50
 
+  # Story 892, criterion 7550 — shown once, on a player's first
+  # founding only. Exact wording from `.code_my_spec/stories/stone_age.md`
+  # §2.1 (the trigger itself was deferred from story 878 to here).
+  @barbarian_warning "Your city attracts attention. Barbarian camps are forming in the wilderness."
+
   # -------------------------------------------------------------------
   # Mount
   # -------------------------------------------------------------------
@@ -116,6 +127,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
             gold: Game.gold(world, user),
             units: [],
             cities: [],
+            camps: [],
             visible: [],
             explored: [],
             selected_unit_id: nil,
@@ -201,8 +213,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
     %{world: world, user: user} = socket.assigns
 
     case Game.found_city(world, user, parse_id(unit_id)) do
-      :ok -> {:noreply, assign(socket, city_error: nil)}
-      {:error, reason} -> {:noreply, assign(socket, city_error: city_error_message(reason))}
+      :ok ->
+        {:noreply, socket |> assign(city_error: nil) |> maybe_flash_barbarian_warning()}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, city_error: city_error_message(reason))}
     end
   end
 
@@ -434,6 +449,29 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   defp clamp(z), do: max(-1.0, min(1.0, z))
 
+  # "First founding" is read back from the real surface (a player's own
+  # city count) rather than threading a flag through `Game.found_city/3`'s
+  # return value — founding always adds exactly one city, so having
+  # exactly one right after a successful founding IS "this was the
+  # first" (story 892, criterion 7550: shown once, never on a second or
+  # later founding).
+  # Flash assigns persist for the life of the LiveView connection, not
+  # just the render right after `put_flash/3` — a second (or later)
+  # founding on this same connection would otherwise still show the
+  # first founding's warning, since nothing else in this view ever
+  # clears it. A non-first founding explicitly clears it instead of
+  # merely skipping the `put_flash` call (story 892, criterion 7550:
+  # "does not repeat").
+  defp maybe_flash_barbarian_warning(socket) do
+    %{world: world, user: user} = socket.assigns
+
+    if length(Game.player_cities(world, user)) == 1 do
+      put_flash(socket, :info, @barbarian_warning)
+    else
+      clear_flash(socket, :info)
+    end
+  end
+
   # Single source of truth for "what does this player currently know":
   # re-fetches fog-filtered units + visibility and pushes the whole
   # board state down. Called at mount and on every turn boundary.
@@ -447,6 +485,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
     units = Game.units_visible_to(world, user)
     cities = Game.player_cities(world, user)
+    camps = Game.camps_visible_to(world, user)
     %{visible: visible, explored: explored} = Game.visibility(world, user)
     selected_unit = selected_unit_id && Enum.find(units, &(&1.id == selected_unit_id))
     selected_city = selected_city_id && Enum.find(cities, &(&1.id == selected_city_id))
@@ -455,6 +494,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
     |> assign(
       units: units,
       cities: cities,
+      camps: camps,
       visible: visible,
       explored: explored,
       selected_unit: selected_unit,
@@ -483,7 +523,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   defp push_board_state(socket) do
     %{mesh: mesh, terrain_map: terrain_map, world: world} = socket.assigns
-    %{units: units, cities: cities, visible: visible, explored: explored} = socket.assigns
+    %{units: units, cities: cities, camps: camps, visible: visible, explored: explored} = socket.assigns
 
     known = Enum.uniq(visible ++ explored)
     tiles = Enum.map(known, &tile_row(&1, mesh, terrain_map))
@@ -494,11 +534,27 @@ defmodule BrokenOathsWeb.GameLive.Play do
     |> push_event("game:visibility", %{visible: visible, explored: explored})
     |> push_event("game:units", %{units: units})
     |> push_event("game:cities", %{cities: Enum.map(cities, &city_marker/1)})
+    |> push_camps(camps)
     |> push_event("globe3d:airspace", %{
       levels: levels,
       arc: Float.round(1.1071 / mesh.frequency, 5)
     })
   end
+
+  # A no-camps push is a no-op for the client (nothing was ever known,
+  # nothing to paint) — unlike "game:cities"/"game:units", skipped
+  # rather than sent unconditionally. Every mount pushes SOME board
+  # state even before the player's ever acted (a returning player
+  # reloading mid-game), and camps genuinely are empty right up until
+  # a first founding reveals any (story 892) — sending that empty
+  # payload anyway would sit in a spec's mailbox ahead of the first
+  # MEANINGFUL "game:camps" push, and `assert_push_event` matches
+  # whichever arrives first (story 892 criteria 7543/7545/etc. assert
+  # the push immediately after the action that reveals a camp, with no
+  # prior drain — the same one-shot idiom `game:cities`/`game:units`
+  # already use elsewhere).
+  defp push_camps(socket, []), do: socket
+  defp push_camps(socket, camps), do: push_event(socket, "game:camps", %{camps: camps})
 
   # The board only needs enough to place and label a billboard —
   # territory/queue/food stay in the CityPanel assign, not the client.
@@ -630,6 +686,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
   def render(assigns) do
     ~H"""
     <div class="flex flex-col h-[calc(100vh-64px)]">
+      <Layouts.flash_group flash={@flash} />
+
       <div class="flex items-center gap-3 px-4 py-2 bg-base-200 border-b border-base-300 flex-wrap">
         <.live_component
           module={BrokenOathsWeb.GameLive.TurnBar}

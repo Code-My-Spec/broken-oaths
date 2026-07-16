@@ -6,10 +6,8 @@ defmodule BrokenOathsSpex.Story891.Criterion7535Spex do
   attacker's remaining movement.
 
   Barbarian-fixture note: see `BrokenOathsSpex.Story891.Criterion7533Spex`'s
-  moduledoc — "the barbarian" here is mechanically a second real
-  player's warrior, produced and walked into place through the
-  ordinary `GameLive.Play` surface. This is a documented, temporary
-  stand-in for story 892 (`Game.Camps`), which doesn't exist yet.
+  moduledoc — the barbarian is a real, ownerless unit placed via
+  `Fixtures.spawn_barbarian/2`.
 
   "Before any turn boundary passes" is asserted by reading HP right
   after the attack `render_hook`, with no intervening
@@ -26,7 +24,6 @@ defmodule BrokenOathsSpex.Story891.Criterion7535Spex do
     scenario "damage and movement change immediately, before any boundary" do
       given_(:a_world)
       given_(:registered_player)
-      given_(:second_registered_player)
 
       given_ "my warrior has movement remaining and stands adjacent to a barbarian", context do
         {:ok, join_live, _html} = live(context.conn, "/play")
@@ -44,36 +41,10 @@ defmodule BrokenOathsSpex.Story891.Criterion7535Spex do
         [city] = Fixtures.player_cities(context.world, context.user)
         render_hook(play_live, "queue_production", %{"city_id" => city.id, "item" => "warrior"})
 
-        {:ok, other_join_live, _html} = live(context.other_conn, "/play")
-
-        other_join_live
-        |> element("[data-test='join-world-#{context.world.id}']")
-        |> render_click()
-
-        {:ok, other_play_live, _html} = live(context.other_conn, "/play/#{context.world.id}")
-
-        [other_settler | _] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.type == :settler,
-              do: u
-
-        render_hook(other_play_live, "found_city", %{"unit_id" => other_settler.id})
-        [other_city] = Fixtures.player_cities(context.world, context.other_user)
-
-        render_hook(other_play_live, "queue_production", %{
-          "city_id" => other_city.id,
-          "item" => "warrior"
-        })
-
         for _ <- 1..8, do: Fixtures.advance_turn(context.world)
 
         [warrior] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :warrior, do: u
-
-        [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.type == :warrior,
-              do: u
 
         [lord] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
@@ -87,29 +58,7 @@ defmodule BrokenOathsSpex.Story891.Criterion7535Spex do
           |> Enum.filter(land?)
           |> Enum.reject(&(&1 in my_occupied))
 
-        render_hook(other_play_live, "queue_move", %{
-          "unit_id" => barbarian.id,
-          "to_tile" => target
-        })
-
-        Enum.reduce_while(1..40, :ok, fn _, :ok ->
-          [b] =
-            for u <- Fixtures.player_units(context.world, context.other_user),
-                u.id == barbarian.id,
-                do: u
-
-          if b.tile_id == target do
-            {:halt, :ok}
-          else
-            Fixtures.advance_turn(context.world)
-            {:cont, :ok}
-          end
-        end)
-
-        [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.id == barbarian.id,
-              do: u
+        barbarian = Fixtures.spawn_barbarian(context.world, target)
 
         # My own warrior never moved, so its movement is still full —
         # the criterion's "movement remaining" precondition.
@@ -138,7 +87,7 @@ defmodule BrokenOathsSpex.Story891.Criterion7535Spex do
               do: u
 
         [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
+          for u <- Fixtures.visible_units(context.world, context.user),
               u.id == context.barbarian.id,
               do: u
 

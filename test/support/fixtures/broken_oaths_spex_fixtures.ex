@@ -58,6 +58,13 @@ defmodule BrokenOathsSpex.Fixtures do
   defdelegate player_units(world, user), to: BrokenOaths.Game, as: :player_units
   defdelegate adjacent_tiles(world, tile_id), to: BrokenOaths.Worlds.Regions, as: :adjacent_tiles
 
+  # The fog-filtered "everything user can currently see" read (own units
+  # always, another's — including a barbarian's — only while visible).
+  # Same sanctioned status as `player_units/2`; needed once a barbarian
+  # is a real, ownerless unit rather than a second player's, so a spec
+  # can re-read its post-combat HP without a player of its own to ask.
+  defdelegate visible_units(world, user), to: BrokenOaths.Game, as: :units_visible_to
+
   # A tile's unit-sphere center — what the client sends when the player
   # right-clicks the globe (fog targets have no id client-side, so
   # orders travel as points). Seed-derived geometry, read-only.
@@ -111,6 +118,24 @@ defmodule BrokenOathsSpex.Fixtures do
   # story lands and can supply real damage.
   defdelegate set_unit_hp(world, unit_id, hp), to: BrokenOaths.Game, as: :set_unit_hp_for_test
 
+  # Deliberate, narrow exception to "read-only" above, same status as
+  # `set_unit_hp/3`: story 892 (`Game.Camps`) spawns real barbarians on
+  # its own 3-turn cadence at camp-chosen tiles, which no combat spec
+  # can steer to an exact adjacency/range for a scenario. This inserts
+  # a real, ownerless `Game.Unit` (`type: :barbarian_warrior`,
+  # `player_id: nil` — the same seam `Game.Combat.hostile?/2` already
+  # recognizes for a camp-spawned one) directly on `tile_id`, with no
+  # camp, cadence, or march involved. Returns the spawned unit's map.
+  defdelegate spawn_barbarian(world, tile_id), to: BrokenOaths.Game, as: :spawn_barbarian_for_test
+
+  # Story 893 (barbarian roaming/AI) doesn't exist yet, so a barbarian
+  # has no owning player/session to drive an "attack" event through
+  # `GameLive.Play` — this resolves an attack FROM `attacker_id`
+  # directly, the same narrow-exception status as `spawn_barbarian/2`.
+  defdelegate resolve_barbarian_attack(world, attacker_id, target_id),
+    to: BrokenOaths.Game,
+    as: :resolve_barbarian_attack_for_test
+
   # --- Barbarian camps (story 892): sanctioned narrow read ---
   # A camp's existence, tile, hp, and warrior roster are spawn-time
   # server decisions — exactly the same status as region identity
@@ -131,9 +156,11 @@ defmodule BrokenOathsSpex.Fixtures do
   # surface by construction (counts, placement, "no new camps on a
   # second founding").
   #
-  # Expected shape: `%{id:, tile_id:, hp:, warriors: [%{id:, hp:,
-  # attack:, defense:}]}` — camp fields mirror the city marker
+  # Expected shape: `%{id:, tile_id:, hp:, warriors: [%{id:, tile_id:,
+  # hp:, attack:, defense:}]}` — camp fields mirror the city marker
   # (`id`/`tile_id`/`hp`); warriors nest inside their camp because
-  # story 892 only spawns them (roaming/AI is story 893).
+  # story 892 only spawns them (roaming/AI is story 893). A warrior's
+  # own `tile_id` is exposed so a spec can route a unit's path around
+  # one without waiting on fog-filtered visibility.
   defdelegate list_camps(world), to: BrokenOaths.Game, as: :list_camps
 end

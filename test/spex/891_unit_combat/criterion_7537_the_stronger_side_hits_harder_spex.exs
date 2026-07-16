@@ -9,20 +9,10 @@ defmodule BrokenOathsSpex.Story891.Criterion7537Spex do
   stronger band (~27 to 46) in return.
 
   Barbarian-fixture note: see `BrokenOathsSpex.Story891.Criterion7533Spex`'s
-  moduledoc — "the barbarian" here is mechanically a second real
-  player's warrior, produced and walked into place through the
-  ordinary `GameLive.Play` surface (documented stand-in for story 892,
-  `Game.Camps`, which doesn't exist yet).
-
-  KNOWN LIMITATION: these damage bands assume the defender's strength
-  is 15 (the barbarian-Warrior stat from
-  `.code_my_spec/spec/broken_oaths/game/camps.spec.md`) against the
-  player-Warrior's strength 10. The stand-in above is an ordinary
-  second-player Warrior with no hostility/faction marker, so if the
-  eventual `Game.Combat` derives strength purely from unit type (both
-  sides are plain `:warrior`s here), this spec may stay red even after
-  combat lands, until this fixture is swapped for a real
-  Camps-spawned barbarian. Revisit then.
+  moduledoc — the barbarian is a real, ownerless `:barbarian_warrior`
+  unit placed via `Fixtures.spawn_barbarian/2`, whose strength (15) is
+  `Game.Combat.base_strength(:barbarian_warrior)` — the same value
+  these damage bands were derived from.
   """
 
   use BrokenOathsSpex.Case
@@ -35,7 +25,6 @@ defmodule BrokenOathsSpex.Story891.Criterion7537Spex do
     scenario "a weaker attacker still lands a hit, but takes the heavier one back" do
       given_(:a_world)
       given_(:registered_player)
-      given_(:second_registered_player)
 
       given_ "my warrior (strength 10) attacks a barbarian warrior (strength 15)", context do
         {:ok, join_live, _html} = live(context.conn, "/play")
@@ -53,41 +42,23 @@ defmodule BrokenOathsSpex.Story891.Criterion7537Spex do
         [city] = Fixtures.player_cities(context.world, context.user)
         render_hook(play_live, "queue_production", %{"city_id" => city.id, "item" => "warrior"})
 
-        {:ok, other_join_live, _html} = live(context.other_conn, "/play")
-
-        other_join_live
-        |> element("[data-test='join-world-#{context.world.id}']")
-        |> render_click()
-
-        {:ok, other_play_live, _html} = live(context.other_conn, "/play/#{context.world.id}")
-
-        [other_settler | _] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.type == :settler,
-              do: u
-
-        render_hook(other_play_live, "found_city", %{"unit_id" => other_settler.id})
-        [other_city] = Fixtures.player_cities(context.world, context.other_user)
-
-        render_hook(other_play_live, "queue_production", %{
-          "city_id" => other_city.id,
-          "item" => "warrior"
-        })
-
         for _ <- 1..8, do: Fixtures.advance_turn(context.world)
 
         [warrior] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :warrior, do: u
 
-        [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.type == :warrior,
-              do: u
-
         [lord] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
 
         land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
+
+        # This criterion asserts the plain, no-aura strength-10 band —
+        # spawn placement gives no guarantee the lord DOESN'T land
+        # adjacent to the warrior, which would silently add its +2
+        # aura and push the roll into (or past) the strength-12 band.
+        # Move it out of range first if it does.
+        lord = ensure_lord_away(context.world, play_live, context.user, lord, warrior.tile_id, city.tile_id)
+
         my_occupied = [city.tile_id, lord.tile_id, warrior.tile_id]
 
         [target | _] =
@@ -96,29 +67,7 @@ defmodule BrokenOathsSpex.Story891.Criterion7537Spex do
           |> Enum.filter(land?)
           |> Enum.reject(&(&1 in my_occupied))
 
-        render_hook(other_play_live, "queue_move", %{
-          "unit_id" => barbarian.id,
-          "to_tile" => target
-        })
-
-        Enum.reduce_while(1..40, :ok, fn _, :ok ->
-          [b] =
-            for u <- Fixtures.player_units(context.world, context.other_user),
-                u.id == barbarian.id,
-                do: u
-
-          if b.tile_id == target do
-            {:halt, :ok}
-          else
-            Fixtures.advance_turn(context.world)
-            {:cont, :ok}
-          end
-        end)
-
-        [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.id == barbarian.id,
-              do: u
+        barbarian = Fixtures.spawn_barbarian(context.world, target)
 
         {:ok,
          context
@@ -145,7 +94,7 @@ defmodule BrokenOathsSpex.Story891.Criterion7537Spex do
               do: u
 
         [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
+          for u <- Fixtures.visible_units(context.world, context.user),
               u.id == context.barbarian.id,
               do: u
 
@@ -158,6 +107,44 @@ defmodule BrokenOathsSpex.Story891.Criterion7537Spex do
       end
     end
   end
+  # If `lord` already stands adjacent to `avoid_tile`, walks it to a
+  # free land tile two hexes out and returns the lord's up-to-date
+  # unit map; otherwise returns `lord` unchanged. See this spec's
+  # moduledoc note on why an unplanned aura would corrupt the
+  # no-aura band this criterion asserts.
+  defp ensure_lord_away(world, live_view, user, lord, avoid_tile, city_tile) do
+    ring1 = world |> Fixtures.adjacent_tiles(avoid_tile) |> MapSet.new()
+
+    if MapSet.member?(ring1, lord.tile_id) do
+      land? = fn t -> Fixtures.tile_class(world, t) == :land end
+
+      [safe_tile | _] =
+        ring1
+        |> Enum.flat_map(&Fixtures.adjacent_tiles(world, &1))
+        |> Enum.uniq()
+        |> Enum.reject(&(MapSet.member?(ring1, &1) or &1 in [avoid_tile, city_tile, lord.tile_id]))
+        |> Enum.filter(land?)
+
+      render_hook(live_view, "queue_move", %{"unit_id" => lord.id, "to_tile" => safe_tile})
+
+      Enum.reduce_while(1..10, :ok, fn _, :ok ->
+        [l] = for u <- Fixtures.player_units(world, user), u.id == lord.id, do: u
+
+        if l.tile_id == safe_tile do
+          {:halt, :ok}
+        else
+          Fixtures.advance_turn(world)
+          {:cont, :ok}
+        end
+      end)
+
+      [l] = for u <- Fixtures.player_units(world, user), u.id == lord.id, do: u
+      l
+    else
+      lord
+    end
+  end
+
   # The "attack" event has no handler yet, so calling it crashes the
   # LiveView (`FunctionClauseError` in `handle_event/3`) — expected
   # until `Game.Combat` lands. That crash reaches this (linked) test

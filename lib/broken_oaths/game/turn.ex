@@ -55,7 +55,14 @@ defmodule BrokenOaths.Game.Turn do
           status: :building | :complete,
           builder_unit_id: unit_id | nil
         }},
-        pending_heirs: %{player_id => non_neg_integer()}
+        pending_heirs: %{player_id => non_neg_integer()},
+        camps: %{camp_id => %{
+          id: camp_id,
+          tile_id: tile_id,
+          hp: non_neg_integer(),
+          spawn_counter: non_neg_integer(),
+          destroyed_at: term() | nil
+        }}
       }
 
   `pending_heirs` (story 896) is read defensively via
@@ -65,6 +72,15 @@ defmodule BrokenOaths.Game.Turn do
   It's the one field in this contract every other functional-core
   module (and most of this module's own tests, built before it
   existed) can safely omit; nothing breaks if it's absent.
+
+  `camps` (story 892) is read the same defensive way, via
+  `Map.get(state, :camps, %{})` — every barbarian camp on the board,
+  written once at a player's first founding (`WorldServer`, not this
+  module) and advanced every tick by this module's own "camp spawn
+  loop" phase. A unit belonging to a camp (a barbarian warrior) carries
+  the camp's id as `camp_id` in its own map, read the same defensive
+  way (`Map.get(unit, :camp_id)`) since ordinary player units never set
+  it.
 
   `unit_id`, `player_id`, and `city_id` are opaque keys (Ecto primary
   keys in production); `tile_id` is a `Worlds.Globe` mesh tile id.
@@ -98,6 +114,16 @@ defmodule BrokenOaths.Game.Turn do
        completed item with nowhere to land simply waits. Successful
        spawns come back as `{:unit_spawned, spawn_event}` events --
        this module never allocates a real unit id itself.
+    3b. camp spawn loop (story 892) -- `Camps.advance/2` per camp,
+       threading the SAME "claimed this tick" occupied-tile set city
+       completions just built (a camp spawn can't land on a tile a
+       city completion claimed this same tick, and vice versa). A
+       ready camp below its 2-warrior cap with a free landing tile
+       (its own tile, else an adjacent land tile) spawns one barbarian
+       warrior -- also a `{:unit_spawned, spawn_event}` event, now
+       carrying `camp_id` -- and resets its counter via
+       `Camps.spawned/1`; blocked or above-cap camps just keep
+       counting.
     4. food accrual -- `Yields.accrue_food/3`.
     5. growth -- `Yields.grow/3`, at most once per city per tick.
     6. healing -- a unit that spent no movement this tick heals: 15 HP
@@ -121,10 +147,12 @@ defmodule BrokenOaths.Game.Turn do
   production completions racing for a tile) resolve deterministically.
   """
 
+  alias BrokenOaths.Game.Camps
   alias BrokenOaths.Game.Improvement
   alias BrokenOaths.Game.Production
   alias BrokenOaths.Game.Visibility
   alias BrokenOaths.Game.Yields
+  alias BrokenOaths.Worlds.Regions
 
   @type unit_id :: term()
   @type player_id :: term()
@@ -155,6 +183,9 @@ defmodule BrokenOaths.Game.Turn do
           builder_unit_id: unit_id() | nil
         }
 
+  @type camp_id :: term()
+  @type camp :: Camps.camp()
+
   @type state :: %{
           world: BrokenOaths.Worlds.World.t(),
           turn: non_neg_integer(),
@@ -163,7 +194,8 @@ defmodule BrokenOaths.Game.Turn do
           players: %{player_id() => player()},
           explored: %{player_id() => MapSet.t(tile_id())},
           cities: %{city_id() => city()},
-          improvements: %{tile_id() => improvement()}
+          improvements: %{tile_id() => improvement()},
+          camps: %{camp_id() => camp()}
         }
 
   @type event ::
@@ -194,7 +226,8 @@ defmodule BrokenOaths.Game.Turn do
       |> advance_improvements()
       |> accrue_production()
 
-    {state, spawn_events} = resolve_completions(state)
+    {state, spawn_events, occupied} = resolve_completions(state)
+    {state, camp_events} = resolve_camp_spawns(state, occupied)
     {state, heir_events} = resolve_heirs(state, new_turn)
 
     new_state =
@@ -206,7 +239,10 @@ defmodule BrokenOaths.Game.Turn do
       |> Map.put(:turn, new_turn)
 
     events =
-      [{:turn_advanced, new_turn} | Enum.map(spawn_events, &{:unit_spawned, &1})] ++ heir_events
+      [
+        {:turn_advanced, new_turn}
+        | Enum.map(spawn_events ++ camp_events, &{:unit_spawned, &1})
+      ] ++ heir_events
 
     {new_state, events}
   end
@@ -405,10 +441,10 @@ defmodule BrokenOaths.Game.Turn do
     occupied = Map.new(state.units, fn {_id, unit} -> {unit.tile_id, true} end)
     ids = state.cities |> Map.keys() |> Enum.sort()
 
-    {cities, events, _occupied} =
+    {cities, events, occupied} =
       Enum.reduce(ids, {state.cities, [], occupied}, &resolve_city_completion(state.world, &1, &2))
 
-    {%{state | cities: cities}, events}
+    {%{state | cities: cities}, events, occupied}
   end
 
   defp resolve_city_completion(world, id, {cities, events, occupied}) do
@@ -418,6 +454,72 @@ defmodule BrokenOaths.Game.Turn do
 
     {Map.put(cities, id, new_city), events ++ city_events, Map.merge(occupied, newly_occupied)}
   end
+
+  # -------------------------------------------------------------------
+  # Camp spawn loop (story 892)
+  # -------------------------------------------------------------------
+
+  # Reuses the SAME occupied-tile thread `resolve_completions/1` just
+  # built (see that function's doc) so a camp spawn can't land on a
+  # tile a city completion claimed this same tick, and vice versa.
+  defp resolve_camp_spawns(state, occupied) do
+    state = Map.put_new(state, :camps, %{})
+    ids = state.camps |> Map.keys() |> Enum.sort()
+    alive = camp_alive_counts(state.units)
+
+    {camps, events, _occupied} =
+      Enum.reduce(ids, {state.camps, [], occupied}, fn id, acc ->
+        resolve_camp_spawn(state.world, id, Map.get(alive, id, 0), acc)
+      end)
+
+    {%{state | camps: camps}, events}
+  end
+
+  # Ordinary units never set :camp_id — read defensively, the same way
+  # `pending_heirs` reads unfamiliar keys elsewhere in this module.
+  defp camp_alive_counts(units) do
+    Enum.reduce(units, %{}, fn {_id, unit}, counts ->
+      case Map.get(unit, :camp_id) do
+        nil -> counts
+        camp_id -> Map.update(counts, camp_id, 1, &(&1 + 1))
+      end
+    end)
+  end
+
+  defp resolve_camp_spawn(world, id, alive_count, {camps, events, occupied}) do
+    camp = Map.fetch!(camps, id)
+    {advanced, ready?} = Camps.advance(camp, alive_count)
+
+    if ready? do
+      place_camp_warrior(world, advanced, camps, events, occupied)
+    else
+      {Map.put(camps, id, advanced), events, occupied}
+    end
+  end
+
+  defp place_camp_warrior(world, camp, camps, events, occupied) do
+    case camp_landing_tile(world, camp, occupied) do
+      nil ->
+        {Map.put(camps, camp.id, camp), events, occupied}
+
+      tile ->
+        event = %{player_id: nil, type: :barbarian_warrior, tile_id: tile, camp_id: camp.id}
+        spawned = Camps.spawned(camp)
+        {Map.put(camps, camp.id, spawned), [event | events], Map.put(occupied, tile, true)}
+    end
+  end
+
+  # A camp's own tile first, then its adjacent land tiles (sorted for
+  # determinism) — mirrors `Production`'s city landing-tile pick, so a
+  # second warrior lands beside the first rather than failing to spawn.
+  defp camp_landing_tile(world, camp, occupied) do
+    candidates =
+      [camp.tile_id | world |> Regions.adjacent_tiles(camp.tile_id) |> Enum.filter(&land?(world, &1)) |> Enum.sort()]
+
+    Enum.find(candidates, &(not Map.has_key?(occupied, &1)))
+  end
+
+  defp land?(world, tile_id), do: Regions.tile_class(world, tile_id) == :land
 
   # -------------------------------------------------------------------
   # Food accrual and growth

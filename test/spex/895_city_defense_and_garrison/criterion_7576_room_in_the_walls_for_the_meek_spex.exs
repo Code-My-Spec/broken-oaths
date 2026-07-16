@@ -20,6 +20,20 @@ defmodule BrokenOathsSpex.Story895.Criterion7576Spex do
   pass this spec for the wrong reason (both reads simply failing to
   find the element), so the closing `then_` asserts both reads are
   real integers before comparing them.
+
+  Garrison-stacking precondition note: `game_units` still carries a
+  hard `unique_index(:world_id, :tile_id)` (see `Game.Unit`'s
+  moduledoc) and no `CityDefense`/garrison logic exists in `lib/` yet,
+  so `garrison!/4`'s three `queue_move` calls in the `given_` step
+  can't actually co-locate more than one warrior on the city tile —
+  each subsequent warrior's move is refused and it silently stays put
+  (`garrison!/4` doesn't itself assert success). Driving the worker
+  onto that tile afterward is then refused for the same underlying
+  reason, which the first `then_` used to report as a bare, unexplained
+  `refute has_element?(... "order-error")` failure. It now asserts the
+  three-warrior precondition explicitly first, so the RED here reads
+  as "criterion 7563's garrison stacking isn't implemented yet" rather
+  than a mysterious civilian-specific refusal.
   """
 
   use BrokenOathsSpex.Case
@@ -118,6 +132,14 @@ defmodule BrokenOathsSpex.Story895.Criterion7576Spex do
       end
 
       then_ "the worker settles onto the tile without being refused", context do
+        garrisoned =
+          context.world
+          |> Fixtures.player_units(context.user)
+          |> Enum.count(&(&1.type == :warrior and &1.tile_id == context.city.tile_id))
+
+        assert garrisoned == 3,
+               "garrison stacking (criterion 7563) isn't implemented yet — only #{garrisoned} of 3 warriors actually reached the city tile, so civilian sharing can't be exercised yet"
+
         refute has_element?(context.play_live, "[data-test='order-error']")
 
         [worker] =

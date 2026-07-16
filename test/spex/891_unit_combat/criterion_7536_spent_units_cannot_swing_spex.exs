@@ -6,15 +6,14 @@ defmodule BrokenOathsSpex.Story891.Criterion7536Spex do
   attack succeeds once the next turn boundary recharges movement.
 
   Barbarian-fixture note: see `BrokenOathsSpex.Story891.Criterion7533Spex`'s
-  moduledoc — "the barbarian" here is mechanically a second real
-  player's warrior, produced and walked into place through the
-  ordinary `GameLive.Play` surface. This is a documented, temporary
-  stand-in for story 892 (`Game.Camps`), which doesn't exist yet.
+  moduledoc — the barbarian is a real, ownerless unit placed via
+  `Fixtures.spawn_barbarian/2`, at the two-hexes-out tile directly (no
+  march needed for an ownerless unit).
 
-  My warrior's 0 movement is real, spent movement: the barbarian is
-  walked to a tile two hexes out, then my own warrior spends its one
-  point of movement closing the final hex — landing it adjacent with
-  nothing left, exactly like any other move consumes movement.
+  My warrior's 0 movement is real, spent movement: it spends its one
+  point of movement closing the final hex to the barbarian's doorstep —
+  landing it adjacent with nothing left, exactly like any other move
+  consumes movement.
   """
 
   use BrokenOathsSpex.Case
@@ -27,7 +26,6 @@ defmodule BrokenOathsSpex.Story891.Criterion7536Spex do
     scenario "an out-of-movement attacker is refused, then succeeds after recharge" do
       given_(:a_world)
       given_(:registered_player)
-      given_(:second_registered_player)
 
       given_ "my warrior has 0 movement remaining and stands adjacent to a barbarian", context do
         {:ok, join_live, _html} = live(context.conn, "/play")
@@ -45,36 +43,10 @@ defmodule BrokenOathsSpex.Story891.Criterion7536Spex do
         [city] = Fixtures.player_cities(context.world, context.user)
         render_hook(play_live, "queue_production", %{"city_id" => city.id, "item" => "warrior"})
 
-        {:ok, other_join_live, _html} = live(context.other_conn, "/play")
-
-        other_join_live
-        |> element("[data-test='join-world-#{context.world.id}']")
-        |> render_click()
-
-        {:ok, other_play_live, _html} = live(context.other_conn, "/play/#{context.world.id}")
-
-        [other_settler | _] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.type == :settler,
-              do: u
-
-        render_hook(other_play_live, "found_city", %{"unit_id" => other_settler.id})
-        [other_city] = Fixtures.player_cities(context.world, context.other_user)
-
-        render_hook(other_play_live, "queue_production", %{
-          "city_id" => other_city.id,
-          "item" => "warrior"
-        })
-
         for _ <- 1..8, do: Fixtures.advance_turn(context.world)
 
         [warrior] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :warrior, do: u
-
-        [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.type == :warrior,
-              do: u
 
         [lord] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
@@ -96,40 +68,23 @@ defmodule BrokenOathsSpex.Story891.Criterion7536Spex do
           |> Enum.reject(&(&1 == warrior.tile_id))
           |> Enum.reject(&(&1 in my_occupied))
 
-        [barbarian_target | _] = depth2
+        # For each depth-2 candidate, the hex that bridges my warrior's
+        # tile and it — the one hex my warrior itself will walk to
+        # close the gap and spend its only movement point. `depth1`
+        # alone (unlike `depth2`) was never filtered against
+        # `my_occupied` — my own lord can easily be standing on one of
+        # my warrior's OTHER neighbors, so the first depth-2 candidate
+        # isn't guaranteed to have a free bridge; try each until one
+        # does.
+        {barbarian_target, bridge} =
+          Enum.find_value(depth2, fn candidate ->
+            case Enum.filter(depth1, &(candidate in Fixtures.adjacent_tiles(context.world, &1) and &1 not in my_occupied)) do
+              [bridge | _] -> {candidate, bridge}
+              [] -> nil
+            end
+          end)
 
-        # The hex that bridges my warrior's tile and the barbarian's
-        # two-away tile — the one hex my warrior itself will walk to
-        # close the gap and spend its only movement point.
-        [bridge | _] =
-          Enum.filter(
-            depth1,
-            &(barbarian_target in Fixtures.adjacent_tiles(context.world, &1))
-          )
-
-        render_hook(other_play_live, "queue_move", %{
-          "unit_id" => barbarian.id,
-          "to_tile" => barbarian_target
-        })
-
-        Enum.reduce_while(1..40, :ok, fn _, :ok ->
-          [b] =
-            for u <- Fixtures.player_units(context.world, context.other_user),
-                u.id == barbarian.id,
-                do: u
-
-          if b.tile_id == barbarian_target do
-            {:halt, :ok}
-          else
-            Fixtures.advance_turn(context.world)
-            {:cont, :ok}
-          end
-        end)
-
-        [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.id == barbarian.id,
-              do: u
+        barbarian = Fixtures.spawn_barbarian(context.world, barbarian_target)
 
         # My warrior's own single hex of movement, spent closing the
         # gap — a real move, not a fixture trick, leaving it adjacent
@@ -165,7 +120,7 @@ defmodule BrokenOathsSpex.Story891.Criterion7536Spex do
               do: u
 
         [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
+          for u <- Fixtures.visible_units(context.world, context.user),
               u.id == context.barbarian.id,
               do: u
 
@@ -190,7 +145,7 @@ defmodule BrokenOathsSpex.Story891.Criterion7536Spex do
               do: u
 
         [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
+          for u <- Fixtures.visible_units(context.world, context.user),
               u.id == context.barbarian.id,
               do: u
 

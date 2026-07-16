@@ -1,7 +1,14 @@
 defmodule BrokenOaths.Game.Unit do
   @moduledoc """
-  A unit on the board — type (lord/settler/warrior/worker), owner, tile
-  id, hp, movement points.
+  A unit on the board — type (lord/settler/warrior/worker/barbarian
+  warrior), owner, tile id, hp, movement points.
+
+  `player_id` is nullable: a barbarian warrior (`type: :barbarian_warrior`,
+  spawned by `BrokenOaths.Game.Camps`, story 892) has no owning player —
+  the seam `BrokenOaths.Game.Combat.hostile?/2` recognizes — and instead
+  carries `camp_id`, the camp that spawned it (used to cap "alive
+  warriors per camp" at 2). An ordinary player-owned unit always sets
+  `player_id` and leaves `camp_id` nil; the two are never both set.
 
   One unit per hex is a hard rule enforced by the DB via a unique
   index on `(world_id, tile_id)`.
@@ -15,10 +22,11 @@ defmodule BrokenOaths.Game.Unit do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias BrokenOaths.Game.Camp
   alias BrokenOaths.Game.Player
   alias BrokenOaths.Worlds.World
 
-  @type unit_type :: :lord | :settler | :warrior | :worker
+  @type unit_type :: :lord | :settler | :warrior | :worker | :barbarian_warrior
 
   @type t :: %__MODULE__{
           id: integer() | nil,
@@ -30,14 +38,16 @@ defmodule BrokenOaths.Game.Unit do
           max_movement: integer() | nil,
           world_id: integer() | nil,
           player_id: integer() | nil,
+          camp_id: integer() | nil,
           world: World.t() | Ecto.Association.NotLoaded.t(),
-          player: Player.t() | Ecto.Association.NotLoaded.t(),
+          player: Player.t() | Ecto.Association.NotLoaded.t() | nil,
+          camp: Camp.t() | Ecto.Association.NotLoaded.t() | nil,
           inserted_at: NaiveDateTime.t() | nil,
           updated_at: NaiveDateTime.t() | nil
         }
 
   schema "game_units" do
-    field :type, Ecto.Enum, values: [:lord, :settler, :warrior, :worker]
+    field :type, Ecto.Enum, values: [:lord, :settler, :warrior, :worker, :barbarian_warrior]
     field :tile_id, :integer
     field :hp, :integer
     field :max_hp, :integer
@@ -46,6 +56,7 @@ defmodule BrokenOaths.Game.Unit do
 
     belongs_to :world, World
     belongs_to :player, Player
+    belongs_to :camp, Camp
 
     timestamps()
   end
@@ -56,6 +67,7 @@ defmodule BrokenOaths.Game.Unit do
     |> cast(attrs, [
       :world_id,
       :player_id,
+      :camp_id,
       :type,
       :tile_id,
       :hp,
@@ -65,7 +77,6 @@ defmodule BrokenOaths.Game.Unit do
     ])
     |> validate_required([
       :world_id,
-      :player_id,
       :type,
       :tile_id,
       :hp,
@@ -81,6 +92,7 @@ defmodule BrokenOaths.Game.Unit do
     |> validate_movement_within_max()
     |> assoc_constraint(:world)
     |> assoc_constraint(:player)
+    |> assoc_constraint(:camp)
     |> unique_constraint([:world_id, :tile_id], name: :game_units_world_id_tile_id_index)
   end
 

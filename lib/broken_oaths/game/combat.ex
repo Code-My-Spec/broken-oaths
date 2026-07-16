@@ -48,19 +48,19 @@ defmodule BrokenOaths.Game.Combat do
 
   ## Target legality
 
-  `hostile?/2` is the seam for barbarian identity. No faction/hostility
-  concept exists anywhere in the schema yet (`Game.Unit.player_id` is a
-  required FK to a real `Game.Player` — see story 892, `Game.Camps`,
-  not yet implemented): every unit today belongs to a real player, so
-  nothing currently qualifies as hostile, and `validate_attack/3`
-  refuses every cross-player attack ("no Stone Age PvP" — story 891,
-  criterion 7542). The expected future shape is a barbarian-owned unit
-  carrying a `nil` `player_id`; `hostile?/2` already recognizes that
-  without further changes once `Game.Camps` can produce one.
+  `hostile?/2` is the seam for barbarian identity: a unit with a `nil`
+  `player_id` (`Game.Camps`, story 892 — a camp-spawned warrior, or a
+  test-spawned one via `WorldServer`'s `:spawn_barbarian_for_test`) is
+  hostile to everyone, and everyone is hostile to it — checked on
+  EITHER side of the pairing, so a barbarian can both be attacked by a
+  player and (once story 893 gives it a way to act) attack one back.
+  Two real players are never hostile to each other ("no Stone Age PvP"
+  — story 891, criterion 7542): `validate_attack/3` refuses every
+  cross-player attack where neither side is a barbarian.
   """
 
   @type tile_id :: non_neg_integer()
-  @type unit_type :: :lord | :settler | :warrior | :worker
+  @type unit_type :: :lord | :settler | :warrior | :worker | :barbarian_warrior
 
   @type unit :: %{
           id: term(),
@@ -80,7 +80,7 @@ defmodule BrokenOaths.Game.Combat do
 
   @type refusal :: :out_of_movement | :not_adjacent | :not_hostile
 
-  @base_strength %{lord: 12, warrior: 10, settler: 0, worker: 0}
+  @base_strength %{lord: 12, warrior: 10, settler: 0, worker: 0, barbarian_warrior: 15}
   @lord_aura_bonus 2
   @base_damage 30
   @damage_scale 0.04
@@ -164,8 +164,9 @@ defmodule BrokenOaths.Game.Combat do
     end
   end
 
-  @doc "Whether `defender` is a legal (barbarian) attack target — see this module's doc."
+  @doc "Whether `attacker` and `defender` are legal (barbarian) combatants — see this module's doc."
   @spec hostile?(unit(), unit()) :: boolean()
+  def hostile?(%{player_id: nil}, _defender), do: true
   def hostile?(_attacker, %{player_id: nil}), do: true
   def hostile?(_attacker, _defender), do: false
 
