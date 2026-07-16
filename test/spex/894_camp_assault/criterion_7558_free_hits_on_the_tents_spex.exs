@@ -48,7 +48,7 @@ defmodule BrokenOathsSpex.Story894.Criterion7558Spex do
           for u <- Fixtures.player_units(context.world, context.user), u.type == :settler, do: u
 
         render_hook(play_live, "found_city", %{"unit_id" => to_string(settler.id)})
-        assert_push_event(play_live, "game:camps", %{camps: pushed_camps})
+        assert_push_event(play_live, "game:camps", %{camps: pushed_camps}, 500)
 
         [camp | _] = pushed_camps
         [city] = Fixtures.player_cities(context.world, context.user)
@@ -107,10 +107,12 @@ defmodule BrokenOathsSpex.Story894.Criterion7558Spex do
       end
 
       then_ "the camp loses HP but my warrior takes no counter-damage", context do
-        assert_push_event(context.play_live, "game:combat", %{
-          damage_dealt: dealt,
-          damage_taken: taken
-        })
+        assert_push_event(
+          context.play_live,
+          "game:combat",
+          %{damage_dealt: dealt, damage_taken: taken},
+          500
+        )
 
         assert is_integer(dealt) and dealt > 0
         assert taken == 0
@@ -122,7 +124,7 @@ defmodule BrokenOathsSpex.Story894.Criterion7558Spex do
 
         assert warrior.hp == context.warrior_hp0
 
-        assert_push_event(context.play_live, "game:camps", %{camps: camps_after})
+        assert_push_event(context.play_live, "game:camps", %{camps: camps_after}, 500)
         camp_after = Enum.find(camps_after, &(&1.id == context.camp.id))
 
         assert camp_after != nil

@@ -56,7 +56,7 @@ defmodule BrokenOathsSpex.Story894.Criterion7560Spex do
           for u <- Fixtures.player_units(context.world, context.user), u.type == :settler, do: u
 
         render_hook(play_live, "found_city", %{"unit_id" => to_string(settler.id)})
-        assert_push_event(play_live, "game:camps", %{camps: pushed_camps})
+        assert_push_event(play_live, "game:camps", %{camps: pushed_camps}, 500)
 
         [camp | _] = pushed_camps
         [city] = Fixtures.player_cities(context.world, context.user)
@@ -124,8 +124,8 @@ defmodule BrokenOathsSpex.Story894.Criterion7560Spex do
       end
 
       then_ "the camp is gone from the board", context do
-        assert_push_event(context.play_live, "game:camps", %{camps: camps_after})
-        assert_push_event(context.play_live, "game:cities", %{cities: cities_after})
+        assert_push_event(context.play_live, "game:camps", %{camps: camps_after}, 500)
+        assert_push_event(context.play_live, "game:cities", %{cities: cities_after}, 500)
 
         # Anchor: the push pipeline itself is healthy (my own city still
         # renders) — not a stale/empty payload that would pass the

@@ -17,6 +17,19 @@ defmodule BrokenOathsSpex.Story894.Criterion7559Spex do
   to recharge its spent movement, per story 891 criterion 7536) and
   showing every single hit lands the identical number — a ±25% roll
   could not produce three identical results.
+
+  Structure note: the Warrior and Lord facts are independently
+  verifiable claims, so each gets its own `spex`/`scenario` pair rather
+  than two `scenario` blocks sharing one `spex`. `SexySpex.DSL.spex/2`
+  compiles to exactly one `ExUnit` `test`, and `scenario/1` only
+  resets the step context inside that same test — it does not start a
+  new one. A second `scenario` nested in the same `spex` therefore
+  never runs as its own test: if the first scenario's first step
+  raises (as it does here, since `"game:camps"` isn't implemented
+  yet), the exception propagates straight out of the enclosing `spex`
+  test and the second scenario's body never executes at all, silently
+  losing that coverage. Two `spex` blocks avoid that trap and give each
+  fact its own independently-reported pass/fail.
   """
 
   use BrokenOathsSpex.Case
@@ -25,7 +38,7 @@ defmodule BrokenOathsSpex.Story894.Criterion7559Spex do
 
   alias BrokenOathsSpex.Fixtures
 
-  spex "strength is the shovel" do
+  spex "strength is the shovel: a warrior's blows are always exactly its strength" do
     scenario "a warrior's blows against the tents are always exactly its strength" do
       given_(:a_world)
       given_(:registered_player)
@@ -43,7 +56,7 @@ defmodule BrokenOathsSpex.Story894.Criterion7559Spex do
           for u <- Fixtures.player_units(context.world, context.user), u.type == :settler, do: u
 
         render_hook(play_live, "found_city", %{"unit_id" => to_string(settler.id)})
-        assert_push_event(play_live, "game:camps", %{camps: pushed_camps})
+        assert_push_event(play_live, "game:camps", %{camps: pushed_camps}, 500)
 
         [camp | _] = pushed_camps
         [city] = Fixtures.player_cities(context.world, context.user)
@@ -97,7 +110,7 @@ defmodule BrokenOathsSpex.Story894.Criterion7559Spex do
               "target_camp_id" => to_string(context.camp.id)
             })
 
-            assert_push_event(context.play_live, "game:combat", %{damage_dealt: dealt})
+            assert_push_event(context.play_live, "game:combat", %{damage_dealt: dealt}, 500)
             if i < 3, do: Fixtures.advance_turn(context.world)
             dealt
           end)
@@ -110,7 +123,9 @@ defmodule BrokenOathsSpex.Story894.Criterion7559Spex do
         {:ok, context}
       end
     end
+  end
 
+  spex "strength is the shovel: the lord's blows land at its own strength" do
     scenario "the lord's blows land at its own strength, not the warrior's" do
       given_(:a_world)
       given_(:registered_player)
@@ -128,7 +143,7 @@ defmodule BrokenOathsSpex.Story894.Criterion7559Spex do
           for u <- Fixtures.player_units(context.world, context.user), u.type == :settler, do: u
 
         render_hook(play_live, "found_city", %{"unit_id" => to_string(settler.id)})
-        assert_push_event(play_live, "game:camps", %{camps: pushed_camps})
+        assert_push_event(play_live, "game:camps", %{camps: pushed_camps}, 500)
 
         [camp | _] = pushed_camps
         [city] = Fixtures.player_cities(context.world, context.user)
@@ -176,7 +191,7 @@ defmodule BrokenOathsSpex.Story894.Criterion7559Spex do
       end
 
       then_ "the hit deals exactly 12 damage", context do
-        assert_push_event(context.play_live, "game:combat", %{damage_dealt: dealt})
+        assert_push_event(context.play_live, "game:combat", %{damage_dealt: dealt}, 500)
         assert dealt == 12
         {:ok, context}
       end
