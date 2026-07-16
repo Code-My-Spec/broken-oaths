@@ -42,4 +42,4 @@ Stack: **Elixir + Phoenix + LiveView**, PostgreSQL, canvas 2D. Build tools: **Cl
 
 Next up: barbarians, combat, and the tech tree. Then the vassalization mechanics that are the whole point.
 
-Demo: https://uat.broken-oaths.com. Free to play.
+Demo: https://broken-oaths.com. Free to play.
