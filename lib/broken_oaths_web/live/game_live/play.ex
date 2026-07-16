@@ -145,6 +145,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # -------------------------------------------------------------------
 
   def handle_event("select_unit", %{"unit_id" => unit_id}, socket) do
+    unit_id = parse_id(unit_id)
     unit = Enum.find(socket.assigns.units, &(&1.id == unit_id))
 
     socket =
@@ -170,6 +171,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # selection, same one-side-panel rule as `select_unit`.
   def handle_event("select_city", %{"city_id" => city_id}, socket) do
     %{world: world, cities: cities} = socket.assigns
+    city_id = parse_id(city_id)
     city = Enum.find(cities, &(&1.id == city_id))
 
     socket =
@@ -189,10 +191,15 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # no turn boundary required (story 878). The settler's disappearance
   # and the new city both arrive back through the :units_changed /
   # :cities_changed broadcast this same call triggers.
+  # phx-value-* params arrive as STRINGS from real DOM buttons but as
+  # native integers from specs' render_hook — every id must go through
+  # parse_id/1 before touching Game's integer-keyed state (QA issues
+  # 1574d956 / a1c8741d: the Found City and production catalog buttons
+  # were dead because these three handlers skipped the parse).
   def handle_event("found_city", %{"unit_id" => unit_id}, socket) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.found_city(world, user, unit_id) do
+    case Game.found_city(world, user, parse_id(unit_id)) do
       :ok -> {:noreply, assign(socket, city_error: nil)}
       {:error, reason} -> {:noreply, assign(socket, city_error: city_error_message(reason))}
     end
@@ -201,17 +208,20 @@ defmodule BrokenOathsWeb.GameLive.Play do
   def handle_event("queue_production", %{"city_id" => city_id, "item" => item}, socket) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.queue_production(world, user, city_id, item) do
+    case Game.queue_production(world, user, parse_id(city_id), item) do
       :ok -> {:noreply, assign(socket, city_error: nil)}
       {:error, reason} -> {:noreply, assign(socket, city_error: city_error_message(reason))}
     end
   end
 
-  def handle_event("cancel_production_item", %{"city_id" => city_id, "item_id" => item_id}, socket) do
+  def handle_event(
+        "cancel_production_item",
+        %{"city_id" => city_id, "item_id" => item_id},
+        socket
+      ) do
     %{world: world, user: user} = socket.assigns
-    item_id = parse_id(item_id)
 
-    case Game.cancel_production_item(world, user, city_id, item_id) do
+    case Game.cancel_production_item(world, user, parse_id(city_id), parse_id(item_id)) do
       :ok -> {:noreply, assign(socket, city_error: nil)}
       {:error, reason} -> {:noreply, assign(socket, city_error: city_error_message(reason))}
     end
@@ -244,9 +254,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
   def handle_event("start_improvement", %{"unit_id" => unit_id, "kind" => kind}, socket) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.start_improvement(world, user, unit_id, kind) do
-      :ok -> {:noreply, assign(socket, improvement_error: nil)}
-      {:error, reason} -> {:noreply, assign(socket, improvement_error: improvement_error_message(reason))}
+    case Game.start_improvement(world, user, parse_id(unit_id), kind) do
+      :ok ->
+        {:noreply, assign(socket, improvement_error: nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, improvement_error: improvement_error_message(reason))}
     end
   end
 
@@ -540,8 +553,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   defp improvement_error_message(:not_owner), do: "You don't control that unit."
   defp improvement_error_message(:not_worker), do: "Only a worker can build improvements."
-  defp improvement_error_message(:invalid_improvement), do: "That improvement isn't allowed there."
-  defp improvement_error_message(:invalid_terrain), do: "That terrain won't support that improvement."
+
+  defp improvement_error_message(:invalid_improvement),
+    do: "That improvement isn't allowed there."
+
+  defp improvement_error_message(:invalid_terrain),
+    do: "That terrain won't support that improvement."
 
   defp improvement_error_message(:occupied_improvement),
     do: "This tile already has a completed improvement."

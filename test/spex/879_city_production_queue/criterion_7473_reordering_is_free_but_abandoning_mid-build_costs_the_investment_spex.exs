@@ -32,7 +32,8 @@ defmodule BrokenOathsSpex.Story879.Criterion7473Spex do
         render_hook(play_live, "found_city", %{"unit_id" => settler.id})
         [city] = Fixtures.player_cities(context.world, context.user)
 
-        render_hook(play_live, "queue_production", %{"city_id" => city.id, "item" => "settler"})
+        # String id on purpose: real phx-value-* params are strings (QA issue a1c8741d).
+        render_hook(play_live, "queue_production", %{"city_id" => to_string(city.id), "item" => "settler"})
         render_hook(play_live, "queue_production", %{"city_id" => city.id, "item" => "warrior"})
 
         # Flat 5/turn (story 879's own scope) reaches 60 in exactly 12 turns.

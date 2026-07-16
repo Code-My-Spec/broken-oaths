@@ -30,7 +30,8 @@ defmodule BrokenOathsSpex.Story878.Criterion7461Spex do
         [settler | _] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :settler, do: u
 
-        render_hook(context.play_live, "found_city", %{"unit_id" => settler.id})
+        # String id on purpose: real phx-value-* params are strings (QA issue 1574d956).
+        render_hook(context.play_live, "found_city", %{"unit_id" => to_string(settler.id)})
         {:ok, Map.put(context, :settler, settler)}
       end
 
