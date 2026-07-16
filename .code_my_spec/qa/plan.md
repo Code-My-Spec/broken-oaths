@@ -149,7 +149,11 @@ compiles), the running server starts returning 500 on every routed path
 with "You must restart your server after changing configuration files"
 — while `/health` still answers 200 (it's an endpoint plug ahead of the
 router, so it masks the failure from naive monitoring). Workaround:
-`pkill -f "mix phx.server"` and restart. Status: open — recurred three
+kill by port, NEVER by pattern — `kill $(lsof -ti :4050)` — then
+restart. A broad `pkill -f "mix phx.server"` matches every Phoenix
+project's dev server on the machine (observed 2026-07-16: our server
+was SIGTERM'd as collateral from exactly such a pkill, likely from a
+session working on a different project). Status: open — recurred three
 times in one session.
 
 ### Vibium screenshot path argument is ignored
