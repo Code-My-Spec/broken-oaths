@@ -89,6 +89,8 @@
 
 ### 3.1 Barbarian Camps Spawn After First City
 
+> ✅ Imported to CodeMySpec 2026-07-16 — story 892 "Barbarian Camps Spawn" (batch 3). Camp destruction mechanics live in story 894.
+
 **As a** player  
 **I want to** barbarian camps to spawn after I found my first city  
 **So that** I face a meaningful PvE challenge that requires me to develop my civilization before expanding
@@ -108,6 +110,8 @@
 
 ### 3.2 Barbarian Unit Behavior
 
+> ✅ Imported to CodeMySpec 2026-07-16 — story 893 "Barbarian Behavior" (batch 3). City-attack resolution moved to story 895; unit-vs-unit resolution to story 891.
+
 **As a** player  
 **I want to** understand how barbarians move and attack  
 **So that** I can defend my cities and plan my expansion
@@ -126,6 +130,8 @@
 - Defeating barbarians gives small gold reward (10 gold per kill)
 
 ### 3.3 Defending Against Barbarians in Cities
+
+> ✅ Imported to CodeMySpec 2026-07-16 — story 895 "City Defense and Garrison" (batch 3), merged with §10.3.
 
 **As a** player  
 **I want to** use my cities as defensive positions  
@@ -147,6 +153,8 @@
 ## 4. Military Units
 
 ### 4.1 Lord Unit - Permanent Leader
+
+> ✅ Imported to CodeMySpec 2026-07-16 — story 896 "Lord Leads the Fight" (batch 3), combat slice only. Spawn/stats/healing shipped in batches 1-2; lord-death consequences stay deferred to vassalization.
 
 **As a** player  
 **I want to** control a powerful lord unit  
@@ -413,6 +421,8 @@
 
 ### 10.1 Unit Attacks Unit
 
+> ✅ Imported to CodeMySpec 2026-07-16 — story 891 "Unit Combat" (batch 3).
+
 **As a** player  
 **I want to** attack barbarian units  
 **So that** I can defend my territory and clear threats
@@ -430,6 +440,8 @@
 - Lord bonus applies if lord is adjacent to attacking unit (+2 strength)
 
 ### 10.2 Unit Attacks Barbarian Camp
+
+> ✅ Imported to CodeMySpec 2026-07-16 — story 894 "Camp Assault" (batch 3).
 
 **As a** player  
 **I want to** destroy barbarian camps  
@@ -449,6 +461,8 @@
 - Can build city or improvements on former camp hex
 
 ### 10.3 Barbarian Attacks City
+
+> ✅ Imported to CodeMySpec 2026-07-16 — story 895 "City Defense and Garrison" (batch 3), merged with §3.3.
 
 **As a** player  
 **I want to** see how barbarians attack my cities  
