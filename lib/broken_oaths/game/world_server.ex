@@ -1147,7 +1147,18 @@ defmodule BrokenOaths.Game.WorldServer do
   defp spawn_wilderness_camps(state, player, city_tile_id) do
     home_region = player_region_tiles(state.world, player.region_id)
     explored = Map.get(state.explored, player.id, MapSet.new())
-    occupied = state.units |> Map.values() |> Enum.map(& &1.tile_id) |> MapSet.new()
+    # Units, existing camps (any player's founding may already have
+    # placed some — game_camps carries a world+tile unique index), and
+    # cities all block placement.
+    occupied =
+      [
+        state.units |> Map.values() |> Enum.map(& &1.tile_id),
+        state |> Map.get(:camps, %{}) |> Map.values() |> Enum.map(& &1.tile_id),
+        state |> Map.get(:cities, %{}) |> Map.values() |> Enum.map(& &1.tile_id)
+      ]
+      |> List.flatten()
+      |> MapSet.new()
+
     seed = {state.world.seed, city_tile_id}
 
     tiles = Camps.place_wilderness(state.world, city_tile_id, home_region, explored, occupied, seed)

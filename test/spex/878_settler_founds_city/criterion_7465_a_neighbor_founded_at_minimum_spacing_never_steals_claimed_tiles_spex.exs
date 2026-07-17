@@ -56,6 +56,14 @@ defmodule BrokenOathsSpex.Story878.Criterion7465Spex do
         render_hook(play_live, "found_city", %{"unit_id" => settler.id})
         [city] = Fixtures.player_cities(context.world, context.user)
 
+        # This criterion is about territory claims at minimum spacing,
+        # not about surviving the wilderness: the first founding now
+        # spawns real camps (story 892) whose tiles and warriors can
+        # occupy or endanger every qualifying founding position for the
+        # second player. Clear them all (sentinel matches no camp) so
+        # the geometric search below stays deterministic.
+        Fixtures.isolate_camp(context.world, -1)
+
         Enum.reduce_while(1..40, :ok, fn _, :ok ->
           [c] = for cc <- Fixtures.player_cities(context.world, context.user), cc.id == city.id, do: cc
 
