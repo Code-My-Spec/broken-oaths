@@ -25,6 +25,28 @@ defmodule BrokenOaths.Integrations do
     end
   end
 
+  @doc """
+  Completes the OAuth code exchange for the SOCIAL LOGIN flow — no scope
+  yet, because the user may not exist. Returns the normalized provider
+  user and token; the caller finds-or-registers the user and then
+  persists the integration via `save_integration/4`.
+  """
+  def handle_login_callback(provider, params, session_params) do
+    with {:ok, provider_mod} <- fetch_provider(provider),
+         config = provider_mod.config() |> Keyword.put(:session_params, session_params),
+         strategy = provider_mod.strategy(),
+         {:ok, %{token: token} = result} <- strategy.callback(config, params),
+         {:ok, normalized} <- provider_mod.normalize_user(Map.get(result, :user) || %{}) do
+      {:ok, %{user: normalized, token: token}}
+    end
+  end
+
+  @doc "Persists a token obtained by `handle_login_callback/3` under the (now known) user's scope."
+  def save_integration(%Scope{} = scope, provider, token, normalized_user) do
+    attrs = build_integration_attrs(token, normalized_user)
+    IntegrationRepository.upsert_integration(scope, provider, attrs)
+  end
+
   def handle_callback(%Scope{} = scope, provider, params, session_params, opts \\ []) do
     with {:ok, provider_mod} <- fetch_provider(provider),
          config =

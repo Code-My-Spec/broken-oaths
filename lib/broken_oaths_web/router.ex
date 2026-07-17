@@ -79,10 +79,20 @@ defmodule BrokenOathsWeb.Router do
     post "/users/update-password", UserSessionController, :update_password
   end
 
+  # Social login entry + shared OAuth callback — both must work for
+  # unauthenticated visitors (the callback serves the login flow too;
+  # it guards the integration flow itself when no user is present).
+  scope "/integrations/oauth", BrokenOathsWeb do
+    pipe_through :browser
+    get "/login/:provider", IntegrationsController, :login
+    get "/callback/:provider", IntegrationsController, :callback
+    # The redirect URI shape registered in the Google Cloud console.
+    get "/:provider/callback", IntegrationsController, :callback
+  end
+
   scope "/integrations/oauth", BrokenOathsWeb do
     pipe_through [:browser, :require_authenticated_user]
     get "/:provider", IntegrationsController, :request
-    get "/callback/:provider", IntegrationsController, :callback
   end
 
   scope "/", BrokenOathsWeb do

@@ -11,6 +11,9 @@ defmodule BrokenOathsWeb.Application do
       [
         BrokenOathsWeb.Telemetry,
         BrokenOaths.Repo,
+        # Cloak vault for encrypted OAuth token columns — without it
+        # every Encrypted.Binary write raises Ecto.ChangeError.
+        BrokenOaths.Vault,
         {DNSCluster, query: Application.get_env(:broken_oaths, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: BrokenOaths.PubSub},
         # One WorldServer per active game world, lazily started and

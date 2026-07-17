@@ -35,6 +35,29 @@ defmodule BrokenOathsWeb.UserLive.Login do
           </div>
         </div>
 
+        <.link
+          href={~p"/integrations/oauth/login/google"}
+          class="btn btn-outline w-full"
+          data-test="login-with-google"
+        >
+          <svg class="size-4" viewBox="0 0 24 24" aria-hidden="true"><path
+              fill="#4285F4"
+              d="M23.5 12.3c0-.9-.1-1.5-.3-2.2H12v4.1h6.5c-.1 1.1-.8 2.7-2.4 3.8l3.6 2.8c2.2-2 3.8-5 3.8-8.5z"
+            /><path
+              fill="#34A853"
+              d="M12 24c3.2 0 6-1.1 7.9-2.9l-3.6-2.8c-1 .7-2.4 1.2-4.3 1.2-3.3 0-6.1-2.2-7.1-5.2L1.2 17C3.1 21.1 7.2 24 12 24z"
+            /><path
+              fill="#FBBC05"
+              d="M4.9 14.3c-.3-.8-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.2 6.9C.4 8.5 0 10.2 0 12s.4 3.5 1.2 5.1l3.7-2.8z"
+            /><path
+              fill="#EA4335"
+              d="M12 4.6c2.3 0 3.9 1 4.8 1.9l3.2-3.2C18 1.3 15.2 0 12 0 7.2 0 3.1 2.9 1.2 6.9L4.9 9.7c1-2.9 3.8-5.1 7.1-5.1z"
+            /></svg>
+          Continue with Google
+        </.link>
+
+        <div class="divider">or</div>
+
         <.form
           :let={f}
           for={@form}

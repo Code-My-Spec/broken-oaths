@@ -80,6 +80,28 @@ defmodule BrokenOaths.Users do
     |> Repo.insert()
   end
 
+  @doc """
+  Finds or registers a user from a social-login provider's normalized
+  profile. The provider verified the email, so a newly created account
+  arrives confirmed — no magic-link round trip.
+
+  Returns `{:ok, user, :existing | :registered}`.
+  """
+  def find_or_register_oauth_user(%{email: email}) when is_binary(email) and email != "" do
+    case get_user_by_email(email) do
+      nil ->
+        with {:ok, user} <- register_user(%{email: email}),
+             {:ok, user} <- user |> User.confirm_changeset() |> Repo.update() do
+          {:ok, user, :registered}
+        end
+
+      %User{} = user ->
+        {:ok, user, :existing}
+    end
+  end
+
+  def find_or_register_oauth_user(_normalized), do: {:error, :missing_email}
+
   ## Settings
 
   @doc """

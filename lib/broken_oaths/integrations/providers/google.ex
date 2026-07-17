@@ -16,7 +16,9 @@ defmodule BrokenOaths.Integrations.Providers.Google do
 
   @behaviour BrokenOaths.Integrations.Providers.Behaviour
 
-  @callback_path "/integrations/oauth/callback/google"
+  # Must byte-match a redirect URI registered in the Google Cloud
+  # console (currently https://broken-oaths.com/integrations/oauth/google/callback).
+  @callback_path "/integrations/oauth/google/callback"
 
   @impl true
   def config do
