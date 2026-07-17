@@ -133,6 +133,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
             units: [],
             cities: [],
             camps: [],
+            improvements: [],
+            selected_tile: nil,
             visible: [],
             explored: [],
             selected_unit_id: nil,
@@ -176,12 +178,43 @@ defmodule BrokenOathsWeb.GameLive.Play do
         order_error: nil,
         improvement_error: nil,
         selected_city_id: nil,
-        selected_city: nil
+        selected_city: nil,
+        selected_tile: nil
       )
       |> push_event("game:selected", %{unit_id: unit_id})
       |> push_selected_path()
 
     {:noreply, socket}
+  end
+
+  # A left click on open ground (no unit, no owned city — the board
+  # hook's `click/1` fallthrough) opens a small tile panel: terrain,
+  # base yields, and any known improvement. Mutually exclusive with the
+  # unit/city panels, same one-side-panel rule. Only known tiles ever
+  # reach the client, so no fog check is needed here beyond membership
+  # in the pushed window.
+  def handle_event("select_tile", %{"tile_id" => tile_id}, socket) do
+    %{world: world, improvements: improvements} = socket.assigns
+    tile_id = parse_id(tile_id)
+    terrain = Regions.terrain(world, tile_id)
+    yields = Yields.tile_yield(terrain)
+    improvement = Enum.find(improvements, &(&1.tile_id == tile_id))
+
+    {:noreply,
+     assign(socket,
+       selected_tile: %{
+         id: tile_id,
+         terrain: terrain_label(terrain),
+         food: yields.food,
+         production: yields.production,
+         improvement: improvement
+       },
+       selected_unit_id: nil,
+       selected_unit: nil,
+       selected_order: nil,
+       selected_city_id: nil,
+       selected_city: nil
+     )}
   end
 
   # A left click on one of the player's own cities (see the board hook's
@@ -199,7 +232,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
         assignable_tiles: assignable_tiles(world, city),
         city_error: nil,
         selected_unit_id: nil,
-        selected_unit: nil
+        selected_unit: nil,
+        selected_tile: nil
       )
 
     {:noreply, socket}
@@ -557,6 +591,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
     units = Game.units_visible_to(world, user)
     cities = Game.player_cities(world, user)
     camps = Game.camps_visible_to(world, user)
+    improvements = Game.improvements_visible_to(world, user)
     %{visible: visible, explored: explored} = Game.visibility(world, user)
     selected_unit = selected_unit_id && Enum.find(units, &(&1.id == selected_unit_id))
     selected_city = selected_city_id && Enum.find(cities, &(&1.id == selected_city_id))
@@ -567,6 +602,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
       units: units,
       cities: cities,
       camps: camps,
+      improvements: improvements,
       visible: visible,
       explored: explored,
       selected_unit: selected_unit,
@@ -596,6 +632,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   defp push_board_state(socket) do
     %{mesh: mesh, terrain_map: terrain_map, world: world} = socket.assigns
     %{units: units, cities: cities, camps: camps, visible: visible, explored: explored} = socket.assigns
+    improvements = Map.get(socket.assigns, :improvements, [])
 
     known = Enum.uniq(visible ++ explored)
     tiles = Enum.map(known, &tile_row(&1, mesh, terrain_map))
@@ -607,6 +644,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
     |> push_event("game:units", %{units: units})
     |> push_event("game:cities", %{cities: Enum.map(cities, &city_marker/1)})
     |> push_camps(camps)
+    |> push_improvements(improvements)
     |> push_event("globe3d:airspace", %{
       levels: levels,
       arc: Float.round(1.1071 / mesh.frequency, 5)
@@ -628,9 +666,34 @@ defmodule BrokenOathsWeb.GameLive.Play do
   defp push_camps(socket, []), do: socket
   defp push_camps(socket, camps), do: push_event(socket, "game:camps", %{camps: camps})
 
+  # Same skip-when-empty idiom as camps, for the same mailbox reason.
+  defp push_improvements(socket, []), do: socket
+
+  defp push_improvements(socket, improvements),
+    do: push_event(socket, "game:improvements", %{improvements: improvements})
+
   # The board only needs enough to place and label a billboard —
   # territory/queue/food stay in the CityPanel assign, not the client.
   defp city_marker(city), do: Map.take(city, [:id, :name, :tile_id, :size])
+
+  # "Grassland Hills · Woods" — base, then relief when not flat, then
+  # feature when present.
+  defp terrain_label(%Terrain{base: base, relief: relief, feature: feature}) do
+    [base, relief != :flat && relief, feature]
+    |> Enum.filter(& &1)
+    |> Enum.map_join(" · ", &(&1 |> to_string() |> String.capitalize()))
+  end
+
+  defp terrain_label(_), do: "Unknown"
+
+  defp improvement_summary(%{kind: kind, status: :complete}),
+    do: "#{kind |> to_string() |> String.capitalize()} (complete)"
+
+  defp improvement_summary(%{kind: kind, status: :pillaged}),
+    do: "#{kind |> to_string() |> String.capitalize()} (pillaged — a worker repairs it in 1 turn)"
+
+  defp improvement_summary(%{kind: kind, status: :building, progress: progress}),
+    do: "#{kind |> to_string() |> String.capitalize()} under construction (#{progress} banked)"
 
   # Compact row for the client painter:
   # [id, color, decor, tex, cx, cy, cz, corner1x, corner1y, corner1z, ...]
@@ -846,6 +909,22 @@ defmodule BrokenOathsWeb.GameLive.Play do
           </div>
         </div>
 
+        <div
+          :if={@selected_tile}
+          class="card bg-base-200/95 shadow-xl w-64"
+          data-test="tile-panel"
+        >
+          <div class="card-body p-4 gap-1">
+            <h3 class="card-title text-sm" data-test="tile-terrain">{@selected_tile.terrain}</h3>
+            <p class="text-xs opacity-80" data-test="tile-yields">
+              +{@selected_tile.food} food · +{@selected_tile.production} production
+            </p>
+            <p :if={@selected_tile.improvement} class="text-xs" data-test="tile-improvement">
+              {improvement_summary(@selected_tile.improvement)}
+            </p>
+          </div>
+        </div>
+
         <.live_component
           :if={@selected_unit}
           module={BrokenOathsWeb.GameLive.UnitPanel}
@@ -886,6 +965,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
             this.tileById = new Map()
             this.units = []
             this.cities = []
+            this.camps = []
+            this.improvements = []
             this.visibleSet = new Set()
             this.selectedId = null
             this.path = null
@@ -945,6 +1026,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
               this.draw()
             })
             this.handleEvent("game:cities", ({cities}) => { this.cities = cities; this.draw() })
+            this.handleEvent("game:camps", ({camps}) => { this.camps = camps; this.draw() })
+            this.handleEvent("game:improvements", ({improvements}) => { this.improvements = improvements; this.draw() })
             this.handleEvent("game:selected", ({unit_id}) => { this.selectedId = unit_id; this.path = null; this.draw() })
             this.handleEvent("game:path", ({unit_id, tiles}) => {
               if (unit_id === this.selectedId) this.path = tiles
@@ -1032,7 +1115,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
             if (unit) { this.pushEvent("select_unit", {unit_id: unit.id}); return }
 
             const city = this.cities.find((c) => c.tile_id === tile)
-            if (city) this.pushEvent("select_city", {city_id: city.id})
+            if (city) { this.pushEvent("select_city", {city_id: city.id}); return }
+
+            // Open ground: show the tile's own info (terrain, yields,
+            // improvement) — but only for tiles the player knows, which
+            // is all the client ever has.
+            this.pushEvent("select_tile", {tile_id: tile})
           },
 
           // Right click: queue the selected unit's move toward the clicked
@@ -1150,6 +1238,42 @@ defmodule BrokenOathsWeb.GameLive.Play do
               ctx.globalAlpha = 1
             }
 
+            // Improvement billboards (farms, mines): built ON the
+            // terrain like decor, below cities/units. Pillaged ones
+            // render half-faded — visibly wrecked, visibly repairable.
+            const impSize = Math.min(Math.max(this.scale * this.arc * 1.6, 10), 68)
+            if (impSize >= 10) {
+              for (const imp of this.improvements) {
+                if (imp.status === "building") continue
+                const pos = this.center(imp.tile_id)
+                if (!pos) continue
+                const {px, py, depth} = this.project(pos[0], pos[1], pos[2])
+                if (depth < 0.02) continue
+                const img = this.spriteFor(imp.kind)
+                if (!img) continue
+                ctx.globalAlpha = imp.status === "pillaged" ? 0.4 : (this.visibleSet.has(imp.tile_id) ? 1 : 0.55)
+                GR.drawBillboard(ctx, img, px, py, impSize)
+                ctx.globalAlpha = 1
+              }
+            }
+
+            // Barbarian camp billboards — hostile landmarks, same layer
+            // rules as improvements (under cities and units).
+            const campSize = Math.min(Math.max(this.scale * this.arc * 1.9, 12), 76)
+            if (campSize >= 10) {
+              for (const c of this.camps) {
+                const pos = this.center(c.tile_id)
+                if (!pos) continue
+                const {px, py, depth} = this.project(pos[0], pos[1], pos[2])
+                if (depth < 0.02) continue
+                const img = this.spriteFor("camp")
+                if (!img) continue
+                ctx.globalAlpha = this.visibleSet.has(c.tile_id) ? 1 : 0.55
+                GR.drawBillboard(ctx, img, px, py, campSize)
+                ctx.globalAlpha = 1
+              }
+            }
+
             // City billboards: player-owned settlements, drawn after
             // decor (so they read as built ON the terrain) but before
             // weather (so cloud cover still darkens the skyline) and
@@ -1201,8 +1325,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
               if (!pos) continue
               const {px, py, depth} = this.project(pos[0], pos[1], pos[2])
               if (depth < 0.02) continue
-              const color = u.type === "lord" ? "#f5c542" : "#42a5f5"
-              const img = this.spriteFor(u.type)
+              const barbarian = u.type === "barbarian_warrior"
+              const color = barbarian ? "#b91c1c" : (u.type === "lord" ? "#f5c542" : "#42a5f5")
+              const img = this.spriteFor(barbarian ? "barbarian" : u.type)
               const ringR = img ? unitSize * 0.45 : 8
 
               // A unit with a pending path pulses — the "I'm on the move"

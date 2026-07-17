@@ -211,6 +211,13 @@ defmodule BrokenOaths.Game do
   """
   def camps_visible_to(world, user), do: WorldServer.call(world, {:camps_visible_to, user})
 
+  @doc """
+  Improvements on tiles the player knows (home region or explored) —
+  same fog rule as `camps_visible_to/2`.
+  """
+  def improvements_visible_to(world, user),
+    do: WorldServer.call(world, {:improvements_visible_to, user})
+
   @doc "A tile's completed improvement (`nil | :farm | :mine | :road`)."
   def tile_improvement(world, tile_id), do: WorldServer.call(world, {:tile_improvement, tile_id})
 

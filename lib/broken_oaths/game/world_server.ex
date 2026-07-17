@@ -383,6 +383,10 @@ defmodule BrokenOaths.Game.WorldServer do
     {:reply, tile_improvement_at(state, tile_id), state}
   end
 
+  def handle_call({:improvements_visible_to, user}, _from, state) do
+    {:reply, visible_improvements(state, user), state}
+  end
+
   def handle_call({:set_unit_hp_for_test, unit_id, hp}, _from, state) do
     Repo.update_all(from(u in Unit, where: u.id == ^unit_id), set: [hp: hp])
     unit = Map.fetch!(state.units, unit_id)
@@ -1715,6 +1719,25 @@ defmodule BrokenOaths.Game.WorldServer do
     case Map.get(state.improvements, tile_id) do
       %{status: :complete, kind: kind} -> kind
       _other -> nil
+    end
+  end
+
+  # Improvements follow the same fog rule as camps below: a player sees
+  # a tile's improvement only in their home region or once the tile is
+  # explored — hidden tiles never leak their contents over the wire.
+  defp visible_improvements(state, user) do
+    case find_player(state, user.id) do
+      nil ->
+        []
+
+      player ->
+        home = player_region_tiles(state.world, player.region_id)
+        explored = Map.get(state.explored, player.id, MapSet.new())
+
+        for {tile_id, imp} <- state.improvements,
+            MapSet.member?(home, tile_id) or MapSet.member?(explored, tile_id) do
+          %{tile_id: tile_id, kind: imp.kind, status: imp.status, progress: imp.progress}
+        end
     end
   end
 
