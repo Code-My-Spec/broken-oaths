@@ -22,6 +22,27 @@ defmodule BrokenOathsSpex.Story894.Criterion7558Spex do
   immediately on founding the first city (story 892, criterion 7543)
   — no march through fog is needed here, unlike story 892's discovery
   criteria.
+
+  Setup-hardening (not in the original contract): the warrior used to
+  WALK to the camp's doorstep via `queue_move` + a 40-turn wait loop.
+  `Fixtures.relocate_unit/3` places it instantly instead (the same
+  narrow, documented-bridge status story 893's restructured criteria
+  already established) — and since relocation never touches
+  `movement` (unlike a real `queue_move`, which always spends it
+  arriving), the extra turn boundary the old version needed just to
+  recharge before attacking is no longer necessary either. `clear_tile/2`
+  evicts any real, camp-driven squatter already sitting on the
+  warrior's target tile.
+
+  Also fixed (not a restructuring change, a genuine pre-existing bug in
+  this spec): `queue_production` and each of the setup's 8 production-wait
+  `advance_turn` calls broadcast their own fresh "game:camps" push
+  (`refresh_board/1` fires on `:cities_changed` and `{:turn_advanced, _}`
+  alike) — left undrained, the `then_` block's own `assert_push_event`
+  matched the STALE, pre-attack push instead of the fresh post-attack
+  one (the exact same "first-match-in-mailbox" hazard already documented
+  and fixed across story 893's restructured criteria), making
+  `camp_after.hp` read as unchanged even though the attack landed.
   """
 
   use BrokenOathsSpex.Case
@@ -54,7 +75,20 @@ defmodule BrokenOathsSpex.Story894.Criterion7558Spex do
         [city] = Fixtures.player_cities(context.world, context.user)
         render_hook(play_live, "queue_production", %{"city_id" => city.id, "item" => "warrior"})
 
-        for _ <- 1..8, do: Fixtures.advance_turn(context.world)
+        # `queue_production` broadcasts `:cities_changed`, and every
+        # `advance_turn` broadcasts `{:turn_advanced, _}` — both trigger
+        # `refresh_board/1`, which pushes a FRESH "game:camps" every
+        # time. `assert_push_event` always matches the FIRST matching
+        # message still in the mailbox, so leaving these nine pushes
+        # undrained would make the `then_` block's own `assert_push_event`
+        # see the camp's UNDAMAGED, pre-attack state from here instead
+        # of the fresh state its own attack produces.
+        assert_push_event(play_live, "game:camps", %{camps: _}, 500)
+
+        for _ <- 1..8 do
+          Fixtures.advance_turn(context.world)
+          assert_push_event(play_live, "game:camps", %{camps: _}, 500)
+        end
 
         [warrior] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :warrior, do: u
@@ -71,20 +105,8 @@ defmodule BrokenOathsSpex.Story894.Criterion7558Spex do
           |> Enum.filter(land?)
           |> Enum.reject(&(&1 in my_occupied))
 
-        render_hook(play_live, "queue_move", %{"unit_id" => warrior.id, "to_tile" => target})
-
-        Enum.reduce_while(1..40, :ok, fn _, :ok ->
-          [w] =
-            for u <- Fixtures.player_units(context.world, context.user), u.id == warrior.id,
-              do: u
-
-          if w.tile_id == target do
-            {:halt, :ok}
-          else
-            Fixtures.advance_turn(context.world)
-            {:cont, :ok}
-          end
-        end)
+        clear_tile(context.world, target)
+        :ok = Fixtures.relocate_unit(context.world, warrior.id, target)
 
         [warrior] =
           for u <- Fixtures.player_units(context.world, context.user), u.id == warrior.id, do: u
@@ -132,5 +154,28 @@ defmodule BrokenOathsSpex.Story894.Criterion7558Spex do
         {:ok, context}
       end
     end
+  end
+
+  # Deliberate, narrow exception, same status as story 893's restructured
+  # criteria (see criterion 7556's own `clear_tile/2`): a real, active
+  # camp may have already spawned a warrior of its own onto a tile this
+  # criterion needs to place something ELSE on exactly — relocate it out
+  # of the way first. A no-op if `tile_id` is already clear.
+  defp clear_tile(world, tile_id) do
+    occupant =
+      world
+      |> Fixtures.list_camps()
+      |> Enum.flat_map(& &1.warriors)
+      |> Enum.find(&(&1.tile_id == tile_id))
+
+    if occupant do
+      parking =
+        Fixtures.adjacent_tiles(world, tile_id)
+        |> Enum.filter(&(Fixtures.tile_class(world, &1) == :land and &1 != tile_id))
+
+      Enum.find_value(parking, fn t -> Fixtures.relocate_unit(world, occupant.id, t) == :ok end)
+    end
+
+    :ok
   end
 end

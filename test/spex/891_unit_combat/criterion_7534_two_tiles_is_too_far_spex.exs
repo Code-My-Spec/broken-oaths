@@ -7,9 +7,20 @@ defmodule BrokenOathsSpex.Story891.Criterion7534Spex do
 
   Barbarian-fixture note: see `BrokenOathsSpex.Story891.Criterion7533Spex`'s
   moduledoc — "the barbarian" here is mechanically a second real
-  player's warrior, produced and walked into place through the
-  ordinary `GameLive.Play` surface. This is a documented, temporary
-  stand-in for story 892 (`Game.Camps`), which doesn't exist yet.
+  player's warrior, produced through the ordinary `GameLive.Play`
+  surface. This is a documented, temporary stand-in for story 892
+  (`Game.Camps`), which doesn't exist yet.
+
+  Setup-hardening (not in the original contract): the stand-in warrior
+  used to be WALKED into place via `queue_move` + a turn-boundary wait
+  loop. Now that story 892/893 seed real, roaming camps the moment
+  EITHER player founds their first city, that multi-turn march (however
+  short — two hexes) is exposed to a real, correctly-aggressive
+  barbarian actually finding and killing it before this scenario's own
+  setup even finishes, which has nothing to do with what this criterion
+  tests (range refusal). `Fixtures.relocate_unit/3` places it directly
+  — same instant, no-march status `Fixtures.spawn_barbarian/2` already
+  has for the barbarian identity itself in criterion 7533.
   """
 
   use BrokenOathsSpex.Case
@@ -93,24 +104,7 @@ defmodule BrokenOathsSpex.Story891.Criterion7534Spex do
 
         [target | _] = depth2
 
-        render_hook(other_play_live, "queue_move", %{
-          "unit_id" => barbarian.id,
-          "to_tile" => target
-        })
-
-        Enum.reduce_while(1..40, :ok, fn _, :ok ->
-          [b] =
-            for u <- Fixtures.player_units(context.world, context.other_user),
-                u.id == barbarian.id,
-                do: u
-
-          if b.tile_id == target do
-            {:halt, :ok}
-          else
-            Fixtures.advance_turn(context.world)
-            {:cont, :ok}
-          end
-        end)
+        :ok = Fixtures.relocate_unit(context.world, barbarian.id, target)
 
         [barbarian] =
           for u <- Fixtures.player_units(context.world, context.other_user),

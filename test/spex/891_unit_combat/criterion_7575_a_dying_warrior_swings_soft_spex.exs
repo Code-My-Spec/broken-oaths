@@ -25,6 +25,15 @@ defmodule BrokenOathsSpex.Story891.Criterion7575Spex do
   "a visibly lower band" — a same-scenario relative comparison
   (wounded < fresh) — plus the individual bands as a secondary sanity
   check.
+
+  Setup-hardening (not in the original contract): `ensure_lord_away/6`
+  used to WALK the lord clear via `queue_move` + a turn-boundary wait
+  loop when it landed too close. Now that story 892/893 seed real,
+  roaming camps at first founding, that march (however short) is
+  exposed to a real, correctly-aggressive barbarian actually finding
+  and killing the lord before this scenario's own setup even finishes
+  — nothing to do with what this criterion tests (wounded-vs-fresh
+  damage bands). `Fixtures.relocate_unit/3` places it directly instead.
   """
 
   use BrokenOathsSpex.Case
@@ -163,7 +172,7 @@ defmodule BrokenOathsSpex.Story891.Criterion7575Spex do
   # returns the lord's up-to-date unit map; otherwise returns `lord`
   # unchanged. See this spec's moduledoc note on why an unplanned aura
   # would corrupt the plain-strength bands this criterion asserts.
-  defp ensure_lord_away(world, live_view, user, lord, avoid_tiles, city_tile) do
+  defp ensure_lord_away(world, _live_view, user, lord, avoid_tiles, city_tile) do
     danger =
       avoid_tiles
       |> Enum.flat_map(&[&1 | Fixtures.adjacent_tiles(world, &1)])
@@ -179,19 +188,7 @@ defmodule BrokenOathsSpex.Story891.Criterion7575Spex do
         |> Enum.reject(&(MapSet.member?(danger, &1) or &1 in [city_tile, lord.tile_id]))
         |> Enum.filter(land?)
 
-      render_hook(live_view, "queue_move", %{"unit_id" => lord.id, "to_tile" => safe_tile})
-
-      Enum.reduce_while(1..10, :ok, fn _, :ok ->
-        [l] = for u <- Fixtures.player_units(world, user), u.id == lord.id, do: u
-
-        if l.tile_id == safe_tile do
-          {:halt, :ok}
-        else
-          Fixtures.advance_turn(world)
-          {:cont, :ok}
-        end
-      end)
-
+      :ok = Fixtures.relocate_unit(world, lord.id, safe_tile)
       [l] = for u <- Fixtures.player_units(world, user), u.id == lord.id, do: u
       l
     else

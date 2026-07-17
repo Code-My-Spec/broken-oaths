@@ -10,6 +10,15 @@ defmodule BrokenOathsSpex.Story891.Criterion7542Spex do
   substitution, no documented workaround. This is deliberately the
   one criterion in this story that is NOT affected by story 892
   (`Game.Camps`) being unimplemented.
+
+  Setup-hardening (not in the original contract): the second player's
+  warrior used to be WALKED into place via `queue_move` + a turn-boundary
+  wait loop. Now that story 892/893 seed real, roaming camps the moment
+  EITHER player founds their first city, that march is exposed to a
+  real, correctly-aggressive barbarian actually finding and killing it
+  before this scenario's own setup even finishes — nothing to do with
+  what this criterion tests (cross-player attack refusal).
+  `Fixtures.relocate_unit/3` places it directly instead.
   """
 
   use BrokenOathsSpex.Case
@@ -83,24 +92,7 @@ defmodule BrokenOathsSpex.Story891.Criterion7542Spex do
           |> Enum.filter(land?)
           |> Enum.reject(&(&1 in my_occupied))
 
-        render_hook(other_play_live, "queue_move", %{
-          "unit_id" => other_warrior.id,
-          "to_tile" => target
-        })
-
-        Enum.reduce_while(1..40, :ok, fn _, :ok ->
-          [o] =
-            for u <- Fixtures.player_units(context.world, context.other_user),
-                u.id == other_warrior.id,
-                do: u
-
-          if o.tile_id == target do
-            {:halt, :ok}
-          else
-            Fixtures.advance_turn(context.world)
-            {:cont, :ok}
-          end
-        end)
+        :ok = Fixtures.relocate_unit(context.world, other_warrior.id, target)
 
         [other_warrior] =
           for u <- Fixtures.player_units(context.world, context.other_user),

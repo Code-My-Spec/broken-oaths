@@ -78,6 +78,8 @@ defmodule BrokenOaths.Game.Combat do
           damage_to_attacker: pos_integer()
         }
 
+  @type camp :: %{id: term(), tile_id: tile_id(), hp: non_neg_integer(), destroyed_at: term() | nil}
+
   @type refusal :: :out_of_movement | :not_adjacent | :not_hostile
 
   @base_strength %{lord: 12, warrior: 10, settler: 0, worker: 0, barbarian_warrior: 15}
@@ -169,6 +171,23 @@ defmodule BrokenOaths.Game.Combat do
   def hostile?(%{player_id: nil}, _defender), do: true
   def hostile?(_attacker, %{player_id: nil}), do: true
   def hostile?(_attacker, _defender), do: false
+
+  @doc """
+  Whether `attacker` may legally attack `camp` right now: movement
+  left, camp on an adjacent tile. Every camp is a legal target while it
+  stands (no `hostile?/2`-style ownership check — a camp has no
+  player_id to compare) — the caller looks the camp up by id and
+  refuses `:invalid_target` before ever reaching here if it's already
+  destroyed.
+  """
+  @spec validate_camp_attack(unit(), camp(), [tile_id()]) :: :ok | {:error, refusal()}
+  def validate_camp_attack(attacker, camp, adjacent_tile_ids) do
+    cond do
+      attacker.movement <= 0 -> {:error, :out_of_movement}
+      camp.tile_id not in adjacent_tile_ids -> {:error, :not_adjacent}
+      true -> :ok
+    end
+  end
 
   # A deterministic roll in [0.75, 1.25] for `seed` (any term). Hashed
   # into a 3-integer state via `:erlang.phash2/2` — the same shape

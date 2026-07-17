@@ -17,6 +17,19 @@ defmodule BrokenOathsSpex.Story892.Criterion7544Spex do
   mirrors story 883's own second-founding criterion (7489) — same
   pattern, reused here because this criterion needs the exact same
   legitimate second founding, just checking a different outcome.
+
+  Setup-hardening (not in the original contract): the settler used to
+  WALK to its founding tile over a turn-boundary wait loop (up to 15
+  more turns on top of the ~80 already spent growing/producing) — the
+  settler-tile candidate is still validated as reachable via a real
+  `queue_move` probe (unchanged: this still refuses an unreachable
+  pocket, not just a barbarian-occupied one), but once a walkable
+  target is confirmed, `Fixtures.relocate_unit/3` places the settler
+  there directly instead of spending another turn-boundary's worth of
+  exposure walking it, since story 893's barbarian AI (real, roaming
+  warriors, this criterion's own subject) can still find and kill an
+  undefended settler mid-march — nothing to do with what's being
+  tested here (camp count after a second founding).
   """
 
   use BrokenOathsSpex.Case
@@ -142,19 +155,7 @@ defmodule BrokenOathsSpex.Story892.Criterion7544Spex do
         refute target == nil,
                "no land tile 4-10 hexes out had a walkable path (all blocked by barbarians?)"
 
-        Enum.reduce_while(1..15, :ok, fn _, :ok ->
-          [s] =
-            for u <- Fixtures.player_units(context.world, context.user),
-                u.id == new_settler.id,
-                do: u
-
-          if s.tile_id == target do
-            {:halt, :ok}
-          else
-            Fixtures.advance_turn(context.world)
-            {:cont, :ok}
-          end
-        end)
+        :ok = Fixtures.relocate_unit(context.world, new_settler.id, target)
 
         [settler] =
           for u <- Fixtures.player_units(context.world, context.user),

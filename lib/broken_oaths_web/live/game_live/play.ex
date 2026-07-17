@@ -303,8 +303,16 @@ defmodule BrokenOathsWeb.GameLive.Play do
     handle_event("queue_move", %{"unit_id" => unit_id, "to_tile" => to_tile}, socket)
   end
 
+  # phx-value-* params arrive as STRINGS from real DOM buttons but as
+  # native integers from specs' render_hook — every id must go through
+  # parse_id/1 before touching Game's integer-keyed state (same QA
+  # issue class documented on found_city/2 above; queue_move had the
+  # identical gap — a string unit_id silently failed as :not_owner,
+  # since `Map.get(state.units, unit_id)` never matches an integer key
+  # against a string).
   def handle_event("queue_move", %{"unit_id" => unit_id, "to_tile" => to_tile}, socket) do
     %{world: world, user: user} = socket.assigns
+    unit_id = parse_id(unit_id)
 
     case Game.queue_move(world, user, unit_id, to_tile) do
       {:ok, %{path: path}} ->
@@ -342,6 +350,28 @@ defmodule BrokenOathsWeb.GameLive.Play do
     end
   end
 
+  # Story 894: attacking a barbarian camp reuses the "attack" hook, with
+  # `target_camp_id` instead of `target_unit_id` (a camp is not a
+  # `Game.Unit`) — same immediate-resolution, direct-push shape as the
+  # unit-target clause above. `damage_taken` is always 0 (camps never
+  # counter-attack, see `Game.Combat.camp_damage/2`).
+  def handle_event("attack", %{"unit_id" => unit_id, "target_camp_id" => target_camp_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.attack_camp(world, user, parse_id(unit_id), parse_id(target_camp_id)) do
+      {:ok, %{damage_dealt: dealt, damage_taken: taken}} ->
+        socket =
+          socket
+          |> assign(combat_error: nil)
+          |> push_event("game:combat", %{damage_dealt: dealt, damage_taken: taken})
+
+        {:noreply, socket}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, combat_error: combat_error_message(reason))}
+    end
+  end
+
   def handle_event("abandon_world", _params, socket) do
     {:noreply, assign(socket, confirm_abandon?: true)}
   end
@@ -363,15 +393,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # WorldServer broadcasts this after every boundary — connected players
   # see the new turn and any resolved moves with no refresh (story 874).
   def handle_info({:turn_advanced, turn}, socket) do
-    %{world: world, user: user} = socket.assigns
+    %{world: world} = socket.assigns
 
     socket =
       socket
-      |> assign(
-        turn: turn,
-        turn_ends_at: Game.turn_ends_at(world),
-        gold: Game.gold(world, user)
-      )
+      |> assign(turn: turn, turn_ends_at: Game.turn_ends_at(world))
       |> refresh_board()
 
     {:noreply, socket}
@@ -473,8 +499,13 @@ defmodule BrokenOathsWeb.GameLive.Play do
   end
 
   # Single source of truth for "what does this player currently know":
-  # re-fetches fog-filtered units + visibility and pushes the whole
-  # board state down. Called at mount and on every turn boundary.
+  # re-fetches fog-filtered units + visibility + gold and pushes the
+  # whole board state down. Called at mount, on every turn boundary,
+  # and on every `:units_changed` broadcast — including the ones an
+  # "attack"/"attack_camp" bounty or camp-destroy reward fires, so the
+  # gold badge never lags behind a combat-driven change (story 893/894
+  # criteria 7557/7560; before either existed, nothing but a turn
+  # boundary could ever change gold, so this refresh never needed it).
   defp refresh_board(socket) do
     %{
       world: world,
@@ -492,6 +523,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
     socket
     |> assign(
+      gold: Game.gold(world, user),
       units: units,
       cities: cities,
       camps: camps,

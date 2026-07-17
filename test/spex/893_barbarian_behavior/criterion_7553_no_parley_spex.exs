@@ -11,12 +11,24 @@ defmodule BrokenOathsSpex.Story893.Criterion7553Spex do
 
   Adjacency-at-spawn, not adjacency-by-chase: rather than predicting
   which tile a hunting barbarian will step onto (ambiguous — several
-  tiles can be equally "1 hex closer"), the player's lord is walked
-  onto a land tile adjacent to the CAMP first. A freshly spawned
-  warrior appears on its camp's own tile (the same spawn-location
-  assumption criterion 7551 documents), so the moment it spawns it is
-  already adjacent to the lord — a deterministic setup for "adjacent
-  at the boundary" that needs no guess about pathing.
+  tiles can be equally "1 hex closer"), the player's lord stands on a
+  land tile adjacent to the CAMP, and the warrior is placed directly on
+  the camp's own tile (the same spawn-location assumption criterion
+  7551 documents for a natural spawn) — a deterministic setup for
+  "adjacent at the boundary" that needs no guess about pathing.
+
+  Setup-hardening (not in the original contract): the lord used to WALK
+  to the camp's doorstep via `queue_move` + a turn-boundary wait loop,
+  then wait up to 12 MORE turns for the camp's natural 3-turn spawn
+  cadence to produce a warrior — exposing an escort-less lord right at
+  a live camp's doorstep for potentially dozens of turns, which is
+  exactly the kind of encounter this criterion wants to observe
+  DETERMINISTICALLY, not by accident before the scenario's own setup
+  finishes. `Fixtures.relocate_unit/3` places the lord at the doorstep
+  instantly; `Fixtures.spawn_barbarian/3` (tied to the same REAL,
+  revealed camp, so `Turn`'s barbarian AI loop drives it for real —
+  see criterion 7551's moduledoc) places the warrior directly, and the
+  whole scenario resolves in a single `advance_turn`.
 
   This story owns only the barbarian's decision to attack on sight —
   actual damage-exchange math is story 891's (`Game.Combat`). The
@@ -60,11 +72,10 @@ defmodule BrokenOathsSpex.Story893.Criterion7553Spex do
          |> Map.put(:play_live, play_live)
          |> Map.put(:city, city)
          |> Map.put(:camp_id, camp.id)
-         |> Map.put(:camp_tile, camp.tile_id)
-         |> Map.put(:camp_warrior_baseline_ids, MapSet.new(camp.warriors, & &1.id))}
+         |> Map.put(:camp_tile, camp.tile_id)}
       end
 
-      given_ "the player's lord marches to the camp's doorstep, before any barbarian exists",
+      given_ "the player's lord stands at the camp's doorstep and a warrior stands on the camp",
              context do
         land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
 
@@ -77,49 +88,16 @@ defmodule BrokenOathsSpex.Story893.Criterion7553Spex do
         [lord] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
 
-        render_hook(context.play_live, "queue_move", %{
-          "unit_id" => to_string(lord.id),
-          "to_tile" => doorstep
-        })
-
-        Enum.reduce_while(1..40, :ok, fn _, :ok ->
-          [l] = for u <- Fixtures.player_units(context.world, context.user), u.id == lord.id, do: u
-
-          if l.tile_id == doorstep do
-            {:halt, :ok}
-          else
-            Fixtures.advance_turn(context.world)
-            {:cont, :ok}
-          end
-        end)
+        :ok = Fixtures.relocate_unit(context.world, lord.id, doorstep)
 
         [lord] =
           for u <- Fixtures.player_units(context.world, context.user), u.id == lord.id, do: u
 
-        {:ok, Map.put(context, :lord, lord)}
-      end
+        warrior = Fixtures.spawn_barbarian(context.world, context.camp_tile, context.camp_id)
 
-      given_ "a barbarian warrior spawns right next to the lord", context do
-        {warrior, lord} =
-          Enum.reduce_while(1..12, {nil, context.lord}, fn _turn, {_warrior, lord} ->
-            Fixtures.advance_turn(context.world)
-            assert_push_event(context.play_live, "game:camps", %{camps: camps}, 500)
-            camp = Enum.find(camps, &(&1.id == context.camp_id))
-
-            new_warrior =
-              Enum.find(camp.warriors, &(&1.id not in context.camp_warrior_baseline_ids))
-
-            [fresh_lord] =
-              for u <- Fixtures.player_units(context.world, context.user),
-                  u.id == lord.id,
-                  do: u
-
-            if new_warrior, do: {:halt, {new_warrior, fresh_lord}}, else: {:cont, {nil, fresh_lord}}
-          end)
-
-        # Anchor: the deterministic setup actually holds — the fresh
-        # spawn really is adjacent to the lord, not a coincidence the
-        # rest of the spec is quietly relying on.
+        # Anchor: the deterministic setup actually holds — the warrior
+        # really is adjacent to the lord, not a coincidence the rest of
+        # the spec is quietly relying on.
         assert warrior.tile_id in Fixtures.adjacent_tiles(context.world, lord.tile_id)
 
         {:ok, context |> Map.put(:barbarian, warrior) |> Map.put(:lord, lord) |> Map.put(:lord_hp0, lord.hp)}

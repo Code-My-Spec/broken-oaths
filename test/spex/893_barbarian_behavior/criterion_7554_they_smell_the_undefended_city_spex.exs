@@ -41,8 +41,41 @@ defmodule BrokenOathsSpex.Story893.Criterion7554Spex do
   the project's precedent of flagging this kind of statistical/
   geometric caveat rather than silently assuming it away.
 
-  Inferred, not-yet-implemented shape: as in criterion 7551, this
-  assumes each pushed warrior gains a `tile_id` field.
+  Setup-hardening (not in the original contract): the new settler and
+  the lord used to WALK to their respective targets via `queue_move` +
+  turn-boundary wait loops (up to 30 turns each), and the barbarian
+  used to wait up to 12 MORE turns for the camp's natural spawn cadence
+  — exposing an undefended settler and an escort-less lord right next
+  to a live camp for potentially dozens of turns, which is exactly the
+  kind of encounter this criterion wants to observe DETERMINISTICALLY
+  (a controlled tie between two candidate targets), not risk losing to
+  an unrelated ambush before its own setup even finishes.
+  `Fixtures.relocate_unit/3` places both instantly; `Fixtures.
+  spawn_barbarian/3` (tied to the same REAL, revealed camp, so `Turn`'s
+  barbarian AI loop drives it for real — see criterion 7551's
+  moduledoc) places the warrior directly on the camp's own tile — the
+  same spawn-location a natural cadence would most commonly produce.
+  Growing the first city to size 2 and banking a settler's production
+  still take real turns (no shortcut exists for city-loop mechanics),
+  but neither city1 nor its citizens are exposed anywhere near the
+  target camp during that wait.
+
+  KNOWN LIMITATION (geometric, rare): the barbarian's step-toward
+  pathing (`BarbarianAI.step_toward/4`) refuses to route THROUGH a
+  tile another unit currently holds — correct, load-bearing behavior
+  (a barbarian never walks through an occupied hex) — but this world
+  has 1-6 OTHER real camps besides the one this criterion tracks, each
+  independently roaming by the time city1 finishes growing and
+  producing. On the rare run where one of those unrelated warriors
+  happens to sit on the single shortest-path hex between the tracked
+  barbarian and city2, the tracked barbarian's first step detours
+  around it instead of landing exactly one hex closer that specific
+  boundary — confirmed by direct inspection to still be correctly
+  TARGETING the undefended city (never the lord) even on a detour step;
+  only the "exactly one hex closer, this one boundary" distance
+  bookkeeping is thrown off. Same caveat class as the "most mutually
+  divergent" note above — verified rare (roughly 1 in 5-6 runs during
+  investigation) but not eliminated.
   """
 
   use BrokenOathsSpex.Case
@@ -80,8 +113,7 @@ defmodule BrokenOathsSpex.Story893.Criterion7554Spex do
          |> Map.put(:play_live, play_live)
          |> Map.put(:city1, city1)
          |> Map.put(:camp_id, camp.id)
-         |> Map.put(:camp_tile, camp.tile_id)
-         |> Map.put(:camp_warrior_baseline_ids, MapSet.new(camp.warriors, & &1.id))}
+         |> Map.put(:camp_tile, camp.tile_id)}
       end
 
       given_ "a second, undefended city and the player's lord sit two hexes from the camp, in different directions",
@@ -104,8 +136,25 @@ defmodule BrokenOathsSpex.Story893.Criterion7554Spex do
 
         {city_target, lord_target} = most_divergent_pair(context.world, ring2)
 
+        # The lord first, and BEFORE any turn passes: once it's standing
+        # on `lord_target`, nothing else can ever land there (one unit
+        # per hex), so there's no later occupancy race to retry against
+        # — unlike the settler below, which doesn't exist until city1
+        # finishes producing it, dozens of turns from now.
+        [lord] =
+          for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
+
+        :ok = Fixtures.relocate_unit(context.world, lord.id, lord_target)
+        [lord] = for u <- Fixtures.player_units(context.world, context.user), u.id == lord.id, do: u
+
         # Grow the first city to size 2 (settlers need size >= 2),
-        # produce a settler, march it out to `city_target`, found there.
+        # produce a settler, place it directly on `city_target`, found
+        # there. Every tick pushes a fresh "game:camps" once any camp
+        # exists (it does, from turn 1) — draining each one as it comes
+        # (rather than letting dozens pile up in the mailbox) is what
+        # keeps the LATER `assert_push_event` calls in this scenario
+        # from matching a stale, empty-warriors snapshot from early in
+        # this wait instead of the current one.
         Enum.reduce_while(1..60, :ok, fn _, :ok ->
           [c] =
             for cc <- Fixtures.player_cities(context.world, context.user),
@@ -116,68 +165,42 @@ defmodule BrokenOathsSpex.Story893.Criterion7554Spex do
             {:halt, :ok}
           else
             Fixtures.advance_turn(context.world)
+            assert_push_event(context.play_live, "game:camps", %{camps: _}, 500)
             {:cont, :ok}
           end
         end)
 
+        # `queue_production`/`found_city` each broadcast `:cities_changed`
+        # too (not just a tick's own `:turn_advanced`), which ALSO
+        # triggers a "game:camps" push — one more stale message to
+        # drain right after each, same reasoning as the tick loops.
         render_hook(context.play_live, "queue_production", %{
           "city_id" => to_string(context.city1.id),
           "item" => "settler"
         })
 
-        for _ <- 1..20, do: Fixtures.advance_turn(context.world)
+        assert_push_event(context.play_live, "game:camps", %{camps: _}, 500)
+
+        for _ <- 1..20 do
+          Fixtures.advance_turn(context.world)
+          assert_push_event(context.play_live, "game:camps", %{camps: _}, 500)
+        end
 
         [new_settler] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :settler, do: u
 
-        render_hook(context.play_live, "queue_move", %{
-          "unit_id" => to_string(new_settler.id),
-          "to_tile" => city_target
-        })
-
-        Enum.reduce_while(1..30, :ok, fn _, :ok ->
-          [s] =
-            for u <- Fixtures.player_units(context.world, context.user),
-                u.id == new_settler.id,
-                do: u
-
-          if s.tile_id == city_target do
-            {:halt, :ok}
-          else
-            Fixtures.advance_turn(context.world)
-            {:cont, :ok}
-          end
-        end)
-
+        # `city_target` has had ~80 turns of real, roaming barbarian
+        # traffic to wander through by now (unlike the lord's own spot,
+        # claimed before any of that started) — retry the relocate a
+        # few boundaries if something is momentarily standing on it,
+        # rather than assuming it's still free.
+        :ok = relocate_when_free(context.world, context.play_live, new_settler.id, city_target)
         render_hook(context.play_live, "found_city", %{"unit_id" => to_string(new_settler.id)})
+        assert_push_event(context.play_live, "game:camps", %{camps: _}, 500)
 
         [city2] =
           for c <- Fixtures.player_cities(context.world, context.user), c.id != context.city1.id,
             do: c
-
-        # Walk the lord to the divergent target — never onto the
-        # city's own tile, or it would garrison it and break the
-        # "undefended" precondition.
-        [lord] =
-          for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
-
-        render_hook(context.play_live, "queue_move", %{
-          "unit_id" => to_string(lord.id),
-          "to_tile" => lord_target
-        })
-
-        Enum.reduce_while(1..30, :ok, fn _, :ok ->
-          [l] = for u <- Fixtures.player_units(context.world, context.user), u.id == lord.id, do: u
-
-          if l.tile_id == lord_target do
-            {:halt, :ok}
-          else
-            Fixtures.advance_turn(context.world)
-            {:cont, :ok}
-          end
-        end)
-
-        [lord] = for u <- Fixtures.player_units(context.world, context.user), u.id == lord.id, do: u
 
         # Anchor: the city really is undefended (no unit garrisoned on
         # its own tile) and both candidates really did land at the
@@ -189,19 +212,43 @@ defmodule BrokenOathsSpex.Story893.Criterion7554Spex do
         {:ok, context |> Map.put(:city2, city2) |> Map.put(:lord, lord)}
       end
 
-      given_ "a barbarian warrior has spawned at the camp", context do
-        warrior =
-          Enum.reduce_while(1..12, nil, fn _turn, _acc ->
-            Fixtures.advance_turn(context.world)
-            assert_push_event(context.play_live, "game:camps", %{camps: camps}, 500)
-            camp = Enum.find(camps, &(&1.id == context.camp_id))
+      given_ "a barbarian warrior stands at the camp", context do
+        # The camp's own tile (and possibly an adjacent one) may already
+        # hold a warrior — this camp's own natural spawn cadence, or
+        # another camp's entirely (this world has 1-6 more) wandering
+        # through — after the ~80 turns city1 spent growing and banking
+        # a settler above. Pick whichever candidate tile is actually
+        # free across EVERY camp's warriors, not just this one's.
+        land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
 
-            new_warrior =
-              Enum.find(camp.warriors, &(&1.id not in context.camp_warrior_baseline_ids))
+        already_occupied =
+          context.world
+          |> Fixtures.list_camps()
+          |> Enum.flat_map(& &1.warriors)
+          |> MapSet.new(& &1.tile_id)
 
-            if new_warrior, do: {:halt, new_warrior}, else: {:cont, nil}
-          end)
+        # The camp's own tile is 2 hexes from both `city_target` and
+        # `lord_target` by construction, but a FALLBACK candidate (only
+        # reached if the camp's own tile is already held) is merely
+        # ADJACENT to camp — anywhere from 1 to 3 hexes from either
+        # target depending on direction. Landing exactly 1 hex from the
+        # city would make the barbarian hold on arrival (already
+        # adjacent — city-tile entry is story 895's job), not step
+        # toward it, so candidates within 1 hex of either real target
+        # are excluded to keep this criterion's actual precondition (a
+        # target that's in range but not yet adjacent) intact.
+        too_close = fn t ->
+          land_distance(context.world, t, context.city2.tile_id, 3) == 1 or
+            land_distance(context.world, t, context.lord.tile_id, 3) == 1
+        end
 
+        [spawn_tile | _] =
+          [context.camp_tile | Fixtures.adjacent_tiles(context.world, context.camp_tile)]
+          |> Enum.filter(land?)
+          |> Enum.reject(&MapSet.member?(already_occupied, &1))
+          |> Enum.reject(too_close)
+
+        warrior = Fixtures.spawn_barbarian(context.world, spawn_tile, context.camp_id)
         {:ok, Map.put(context, :barbarian, warrior)}
       end
 
@@ -239,6 +286,28 @@ defmodule BrokenOathsSpex.Story893.Criterion7554Spex do
 
         {:ok, context}
       end
+    end
+  end
+
+  # `Fixtures.relocate_unit/3`, retried across a few turn boundaries if
+  # the target is momentarily held by a roaming barbarian — much
+  # smaller exposure than the multi-turn march this replaces, since the
+  # unit being placed doesn't exist (or doesn't need to be anywhere in
+  # particular) until right before this call. Drains each retry's own
+  # "game:camps" push (same reasoning as the wait loops above) so it
+  # never piles up stale messages ahead of a later assertion either.
+  defp relocate_when_free(world, play_live, unit_id, tile_id, retries \\ 10)
+  defp relocate_when_free(_world, _play_live, _unit_id, _tile_id, 0), do: {:error, :occupied}
+
+  defp relocate_when_free(world, play_live, unit_id, tile_id, retries) do
+    case Fixtures.relocate_unit(world, unit_id, tile_id) do
+      :ok ->
+        :ok
+
+      {:error, :occupied} ->
+        Fixtures.advance_turn(world)
+        assert_push_event(play_live, "game:camps", %{camps: _}, 500)
+        relocate_when_free(world, play_live, unit_id, tile_id, retries - 1)
     end
   end
 

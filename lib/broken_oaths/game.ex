@@ -79,6 +79,20 @@ defmodule BrokenOaths.Game do
   def attack(world, user, unit_id, target_unit_id),
     do: WorldServer.call(world, {:attack, user, unit_id, target_unit_id})
 
+  @doc """
+  Order `unit_id` to attack `camp_id` (story 894): adjacent, not yet
+  destroyed camps only. Flat damage (`Game.Combat.camp_damage/2`, no
+  counter) — resolves immediately, like `attack/4`. A camp reduced to 0
+  HP is destroyed: `user` is paid `Game.Camps.destroy_reward/0` gold,
+  the camp stops spawning and disappears from `camps_visible_to/2`, and
+  its former tile is ordinary land again.
+  """
+  @spec attack_camp(map(), map(), term(), term()) ::
+          {:ok, %{damage_dealt: pos_integer(), damage_taken: 0}}
+          | {:error, :not_owner | :invalid_target | :out_of_movement | :not_adjacent}
+  def attack_camp(world, user, unit_id, camp_id),
+    do: WorldServer.call(world, {:attack_camp, user, unit_id, camp_id})
+
   @doc "Run one deterministic turn tick — exactly what the 60s timer fires."
   def advance_turn(world), do: WorldServer.call(world, :advance_turn)
 
@@ -196,15 +210,59 @@ defmodule BrokenOaths.Game do
     do: WorldServer.call(world, {:set_unit_hp_for_test, unit_id, hp})
 
   @doc """
-  Test-only: place a real, ownerless barbarian warrior directly on
-  `tile_id` — see `BrokenOaths.Game.WorldServer`'s
-  `:spawn_barbarian_for_test` handler for the same documented,
-  narrow-exception status `set_unit_hp_for_test/3` already has. Returns
-  the spawned unit's map (`id`, `tile_id`, `hp`, ...).
+  Test-only: instantly restore `unit_id`'s movement to its own max,
+  bypassing the turn boundary that would normally do it — see
+  `BrokenOaths.Game.WorldServer`'s `:recharge_unit_for_test` handler for
+  the same documented, narrow-exception status.
   """
-  @spec spawn_barbarian_for_test(map(), term()) :: map()
-  def spawn_barbarian_for_test(world, tile_id),
-    do: WorldServer.call(world, {:spawn_barbarian_for_test, tile_id})
+  @spec recharge_unit_for_test(map(), term()) :: :ok
+  def recharge_unit_for_test(world, unit_id),
+    do: WorldServer.call(world, {:recharge_unit_for_test, unit_id})
+
+  @doc """
+  Test-only: place a real barbarian warrior directly on `tile_id` — see
+  `BrokenOaths.Game.WorldServer`'s `:spawn_barbarian_for_test` handler
+  for the same documented, narrow-exception status `set_unit_hp_for_test/3`
+  already has. `camp_id` (nil by default — ownerless, no AI, story 891's
+  original behavior) ties the warrior to a REAL camp so story 893's
+  barbarian AI drives it for real from the next boundary. Returns the
+  spawned unit's map (`id`, `tile_id`, `hp`, ...).
+  """
+  @spec spawn_barbarian_for_test(map(), term(), term()) :: map()
+  def spawn_barbarian_for_test(world, tile_id, camp_id \\ nil),
+    do: WorldServer.call(world, {:spawn_barbarian_for_test, tile_id, camp_id})
+
+  @doc """
+  Test-only: instantly relocate `unit_id` to `tile_id`, bypassing
+  movement/pathing/turn boundaries — see `BrokenOaths.Game.WorldServer`'s
+  `:relocate_unit_for_test` handler for the same documented,
+  narrow-exception status. `:ok` or `{:error, :occupied}`.
+  """
+  @spec relocate_unit_for_test(map(), term(), term()) :: :ok | {:error, :occupied}
+  def relocate_unit_for_test(world, unit_id, tile_id),
+    do: WorldServer.call(world, {:relocate_unit_for_test, unit_id, tile_id})
+
+  @doc """
+  Test-only: instantly place a COMPLETE improvement of `kind` on
+  `tile_id`, bypassing the real build — see `BrokenOaths.Game.WorldServer`'s
+  `:complete_improvement_for_test` handler for the same documented,
+  narrow-exception status. Returns the improvement's map (`tile_id`,
+  `kind`, `progress`, `status`, `builder_unit_id`).
+  """
+  @spec complete_improvement_for_test(map(), term(), atom()) :: map()
+  def complete_improvement_for_test(world, tile_id, kind),
+    do: WorldServer.call(world, {:complete_improvement_for_test, tile_id, kind})
+
+  @doc """
+  Test-only: move a barbarian directly onto `tile_id`, applying
+  `Turn`'s own pillage-on-entry rule as a single isolated write rather
+  than a full tick boundary — see `BrokenOaths.Game.WorldServer`'s
+  `:move_barbarian_for_test` handler for the same documented,
+  narrow-exception status. `:ok` or `{:error, :occupied}`.
+  """
+  @spec move_barbarian_for_test(map(), term(), term()) :: :ok | {:error, :occupied}
+  def move_barbarian_for_test(world, barbarian_id, tile_id),
+    do: WorldServer.call(world, {:move_barbarian_for_test, barbarian_id, tile_id})
 
   @doc """
   Test-only: resolve an attack FROM a barbarian (no owning player/session

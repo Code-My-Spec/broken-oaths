@@ -119,6 +119,16 @@ defmodule BrokenOathsSpex.Fixtures do
   defdelegate set_unit_hp(world, unit_id, hp), to: BrokenOaths.Game, as: :set_unit_hp_for_test
 
   # Deliberate, narrow exception to "read-only" above, same status as
+  # `set_unit_hp/3`: instantly restores a unit's movement to its own
+  # max, bypassing the turn boundary that would normally do it. A
+  # scenario needing the SAME unit to attack repeatedly (story 894
+  # criterion 7559) has to recharge its spent movement between swings,
+  # but a real turn boundary exposes it to a full tick's worth of
+  # unrelated barbarian AI activity — including outright death, which
+  # no post-hoc HP fixture can undo.
+  defdelegate recharge_unit(world, unit_id), to: BrokenOaths.Game, as: :recharge_unit_for_test
+
+  # Deliberate, narrow exception to "read-only" above, same status as
   # `set_unit_hp/3`: story 892 (`Game.Camps`) spawns real barbarians on
   # its own 3-turn cadence at camp-chosen tiles, which no combat spec
   # can steer to an exact adjacency/range for a scenario. This inserts
@@ -127,6 +137,52 @@ defmodule BrokenOathsSpex.Fixtures do
   # recognizes for a camp-spawned one) directly on `tile_id`, with no
   # camp, cadence, or march involved. Returns the spawned unit's map.
   defdelegate spawn_barbarian(world, tile_id), to: BrokenOaths.Game, as: :spawn_barbarian_for_test
+
+  # Same bridge, extended for story 893 (barbarian AI): pass a REAL
+  # camp's id (from `list_camps/1`/the "game:camps" push) and the
+  # placed warrior is indistinguishable from one that camp spawned
+  # naturally — `Turn`'s barbarian AI loop drives it for real (moves,
+  # attacks, pillages, roams) from the very next `advance_turn`, at
+  # whatever exact tile the spec chose, with no long march through a
+  # live hostile world needed to get either side into position.
+  defdelegate spawn_barbarian(world, tile_id, camp_id), to: BrokenOaths.Game, as: :spawn_barbarian_for_test
+
+  # Deliberate, narrow exception to "read-only" above, same status as
+  # `spawn_barbarian/2`: instantly relocates ANY of the player's own
+  # units to `tile_id`, bypassing movement points, pathing, and turn
+  # boundaries. A scenario needing a unit at a specific (possibly
+  # distant) spot — e.g. adjacent to a real, naturally-placed camp —
+  # no longer marches it there over dozens of turns exposed to a live
+  # hostile world just to get it into position; `:ok` or
+  # `{:error, :occupied}`.
+  defdelegate relocate_unit(world, unit_id, tile_id), to: BrokenOaths.Game, as: :relocate_unit_for_test
+
+  # Deliberate, narrow exception to "read-only" above, same status as
+  # `relocate_unit/3`: instantly places a COMPLETE improvement of
+  # `kind` on `tile_id`, bypassing the real build (a worker standing
+  # still for `Improvement.duration/1` real turns). A scenario whose
+  # SUBJECT is what happens to an ALREADY-FINISHED improvement (e.g.
+  # pillage, story 893 criterion 7556) no longer needs a worker exposed
+  # to a live, spawning camp for the several turns a real build would
+  # otherwise take just to get one to exist. Returns the improvement's
+  # map (`tile_id`, `kind`, `progress`, `status`, `builder_unit_id`).
+  defdelegate complete_improvement(world, tile_id, kind),
+    to: BrokenOaths.Game,
+    as: :complete_improvement_for_test
+
+  # Deliberate, narrow exception to "read-only" above, same status as
+  # `complete_improvement/3`: moves a barbarian directly onto `tile_id`,
+  # applying pillage-on-entry as a single isolated write rather than a
+  # full tick boundary. A scenario whose SUBJECT is what happens WHEN a
+  # barbarian enters a tile with a completed improvement (story 893
+  # criterion 7556) doesn't need the AI's own path-finding to get it
+  # there (already covered elsewhere, criteria 7551/7554) — routing
+  # arrival through a real multi-camp tick made the scenario hostage to
+  # every OTHER camp's own same-tick spawn/movement cadence landing on
+  # the exact tile needed clear. `:ok` or `{:error, :occupied}`.
+  defdelegate move_barbarian(world, barbarian_id, tile_id),
+    to: BrokenOaths.Game,
+    as: :move_barbarian_for_test
 
   # Story 893 (barbarian roaming/AI) doesn't exist yet, so a barbarian
   # has no owning player/session to drive an "attack" event through

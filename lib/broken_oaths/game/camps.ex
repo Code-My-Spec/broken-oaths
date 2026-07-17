@@ -73,6 +73,11 @@ defmodule BrokenOaths.Game.Camps do
   @far_count 4..6
   @ring_min 8
   @ring_max 15
+  @destroy_reward 30
+
+  @doc "Gold paid to the destroying player when a camp is reduced to 0 HP (story 894)."
+  @spec destroy_reward() :: pos_integer()
+  def destroy_reward, do: @destroy_reward
 
   # -------------------------------------------------------------------
   # Placement

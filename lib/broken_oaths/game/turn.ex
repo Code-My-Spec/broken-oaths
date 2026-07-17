@@ -124,6 +124,20 @@ defmodule BrokenOaths.Game.Turn do
        carrying `camp_id` -- and resets its counter via
        `Camps.spawned/1`; blocked or above-cap camps just keep
        counting.
+    3c. barbarian AI loop (story 893) -- every EXISTING camp-spawned
+       warrior (`Map.get(unit, :camp_id)` set; a warrior spawned earlier
+       THIS SAME tick by phase 3b is not in `state.units` yet and
+       simply waits for the next boundary) gets exactly one decision
+       from `BarbarianAI.decide/6`: attack an adjacent player unit
+       (`Combat.resolve/3`, same simultaneous-exchange math a player's
+       own attack uses -- a barbarian dying pays its killer's owner
+       `BarbarianAI.bounty_gold/0`, and a lord dying schedules an heir
+       exactly like `WorldServer`'s own combat handler does), step one
+       hex toward the nearest in-range target, or roam near its camp.
+       Entering a tile with a `:complete` improvement pillages it
+       (`Improvement.pillage/1`). Warriors resolve in ascending unit id
+       order, threading the tick's occupied-tile set so two barbarians
+       never collide.
     4. food accrual -- `Yields.accrue_food/3`.
     5. growth -- `Yields.grow/3`, at most once per city per tick.
     6. healing -- a unit that spent no movement this tick heals: 15 HP
@@ -147,7 +161,9 @@ defmodule BrokenOaths.Game.Turn do
   production completions racing for a tile) resolve deterministically.
   """
 
+  alias BrokenOaths.Game.BarbarianAI
   alias BrokenOaths.Game.Camps
+  alias BrokenOaths.Game.Combat
   alias BrokenOaths.Game.Improvement
   alias BrokenOaths.Game.Production
   alias BrokenOaths.Game.Visibility
@@ -227,11 +243,13 @@ defmodule BrokenOaths.Game.Turn do
       |> accrue_production()
 
     {state, spawn_events, occupied} = resolve_completions(state)
-    {state, camp_events} = resolve_camp_spawns(state, occupied)
+    {state, camp_events, occupied} = resolve_camp_spawns(state, occupied)
+    state = resolve_barbarian_ai(state, occupied, new_turn)
     {state, heir_events} = resolve_heirs(state, new_turn)
 
     new_state =
       state
+      |> clear_orphaned_builders()
       |> accrue_food()
       |> grow_cities()
       |> heal_units()
@@ -419,6 +437,35 @@ defmodule BrokenOaths.Game.Turn do
     end
   end
 
+  # `advance_improvements/1` (above) already clears a builder that's
+  # gone or walked away — but only as of the START of this tick. Combat
+  # (story 893's barbarian AI loop, or a player's own "attack") can
+  # kill a unit LATER in this SAME tick, after `advance_improvements`
+  # already ran; if that unit was mid-build, its improvement still
+  # carries a `builder_unit_id` pointing at a row `persist_unit_changes`
+  # is about to delete, and the FIRST subsequent write to that
+  # improvement (progress banked this same tick, say) would violate the
+  # `game_improvements` table's own foreign key. A final sweep right
+  # before persistence — cheap, only ever a no-op unless combat just
+  # happened — keeps this consistent regardless of which combat path
+  # did the killing.
+  defp clear_orphaned_builders(state) do
+    improvements =
+      Map.new(state.improvements, fn
+        {tile_id, %{builder_unit_id: id} = improvement} when not is_nil(id) ->
+          if Map.has_key?(state.units, id) do
+            {tile_id, improvement}
+          else
+            {tile_id, %{improvement | builder_unit_id: nil}}
+          end
+
+        {tile_id, improvement} ->
+          {tile_id, improvement}
+      end)
+
+    %{state | improvements: improvements}
+  end
+
   # -------------------------------------------------------------------
   # Production: accrual, completion, spawn placement
   # -------------------------------------------------------------------
@@ -461,18 +508,22 @@ defmodule BrokenOaths.Game.Turn do
 
   # Reuses the SAME occupied-tile thread `resolve_completions/1` just
   # built (see that function's doc) so a camp spawn can't land on a
-  # tile a city completion claimed this same tick, and vice versa.
+  # tile a city completion claimed this same tick, and vice versa. The
+  # updated set is returned too — `resolve_barbarian_ai/3` starts from
+  # it, so a warrior placed THIS tick by either loop (not yet in
+  # `state.units` — see `tick/1`'s doc) still reserves its tile against
+  # an already-existing barbarian roaming or hunting onto it.
   defp resolve_camp_spawns(state, occupied) do
     state = Map.put_new(state, :camps, %{})
     ids = state.camps |> Map.keys() |> Enum.sort()
     alive = camp_alive_counts(state.units)
 
-    {camps, events, _occupied} =
+    {camps, events, occupied} =
       Enum.reduce(ids, {state.camps, [], occupied}, fn id, acc ->
         resolve_camp_spawn(state.world, id, Map.get(alive, id, 0), acc)
       end)
 
-    {%{state | camps: camps}, events}
+    {%{state | camps: camps}, events, occupied}
   end
 
   # Ordinary units never set :camp_id — read defensively, the same way
@@ -520,6 +571,164 @@ defmodule BrokenOaths.Game.Turn do
   end
 
   defp land?(world, tile_id), do: Regions.tile_class(world, tile_id) == :land
+
+  # -------------------------------------------------------------------
+  # Barbarian AI loop (story 893)
+  # -------------------------------------------------------------------
+
+  # Every EXISTING camp-spawned warrior gets one `BarbarianAI.decide/6`
+  # call, resolved in ascending unit id order (same determinism rule as
+  # every other phase in this module) while threading the occupied-tile
+  # set so two barbarians in the same tick never step on each other. A
+  # warrior this SAME tick's camp-spawn phase just placed isn't in
+  # `state.units` yet (see `tick/1`'s doc) and is silently skipped — it
+  # gets its first decision next boundary — but `spawn_occupied` (that
+  # same phase's own occupied-tile thread) still reserves its tile, so
+  # an already-existing barbarian can't roam or hunt onto it either.
+  defp resolve_barbarian_ai(state, spawn_occupied, new_turn) do
+    ids = for {id, unit} <- state.units, Map.get(unit, :camp_id), do: id
+    occupied = MapSet.new(Map.keys(spawn_occupied))
+
+    {state, _occupied} =
+      Enum.reduce(Enum.sort(ids), {state, occupied}, &resolve_barbarian(&1, new_turn, &2))
+
+    state
+  end
+
+  defp resolve_barbarian(id, new_turn, {state, occupied}) do
+    case Map.get(state.units, id) do
+      nil ->
+        {state, occupied}
+
+      barbarian ->
+        camp_tile = camp_tile_for(state.camps, Map.get(barbarian, :camp_id))
+        seed = {state.world.seed, state.turn, id}
+
+        decision =
+          BarbarianAI.decide(
+            state.world,
+            barbarian,
+            camp_tile,
+            Map.values(state.units),
+            Map.values(state.cities),
+            occupied: occupied,
+            seed: seed
+          )
+
+        apply_barbarian_decision(decision, state, occupied, barbarian, new_turn)
+    end
+  end
+
+  defp camp_tile_for(_camps, nil), do: nil
+  defp camp_tile_for(camps, camp_id), do: camps |> Map.get(camp_id) |> then(&(&1 && &1.tile_id))
+
+  # Defensive: `BarbarianAI.decide/6` is handed `occupied` precisely to
+  # keep it from choosing a currently-held tile, but a second, unrelated
+  # player's own queued order can still claim a tile between when a
+  # barbarian's decision was computed and when it's applied here (both
+  # read the SAME pre-phase snapshot). Re-checking right before writing
+  # the position is the one place this can be caught for certain — the
+  # DB's own unique index on `(world_id, tile_id)` would otherwise raise
+  # mid-transaction. A blocked barbarian simply holds this boundary.
+  defp apply_barbarian_decision({:move, tile}, state, occupied, barbarian, _new_turn) do
+    if MapSet.member?(occupied, tile) do
+      {state, occupied}
+    else
+      moved = %{barbarian | tile_id: tile, movement: 0}
+
+      new_state = %{
+        state
+        | units: Map.put(state.units, barbarian.id, moved),
+          improvements: maybe_pillage(state.improvements, tile)
+      }
+
+      new_occupied = occupied |> MapSet.delete(barbarian.tile_id) |> MapSet.put(tile)
+      {new_state, new_occupied}
+    end
+  end
+
+  defp apply_barbarian_decision(:hold, state, occupied, _barbarian, _new_turn), do: {state, occupied}
+
+  defp apply_barbarian_decision({:attack, target_id}, state, occupied, barbarian, new_turn) do
+    case Map.get(state.units, target_id) do
+      nil ->
+        {state, occupied}
+
+      target ->
+        new_state = resolve_barbarian_attack(state, barbarian, target, new_turn)
+
+        new_occupied =
+          occupied
+          |> vacate_if_gone(barbarian.tile_id, barbarian.id, new_state.units)
+          |> vacate_if_gone(target.tile_id, target.id, new_state.units)
+
+        {new_state, new_occupied}
+    end
+  end
+
+  defp vacate_if_gone(occupied, tile_id, unit_id, units) do
+    if Map.has_key?(units, unit_id), do: occupied, else: MapSet.delete(occupied, tile_id)
+  end
+
+  defp maybe_pillage(improvements, tile_id) do
+    case Map.get(improvements, tile_id) do
+      nil -> improvements
+      improvement -> Map.put(improvements, tile_id, Improvement.pillage(improvement))
+    end
+  end
+
+  # Simultaneous exchange, same math a player's own attack uses
+  # (`WorldServer.resolve_attack/3`) — a dying defender still lands its
+  # counter-blow. A barbarian that dies here pays its killer's owner
+  # the bounty; a lord that dies here schedules an heir exactly like a
+  # player-initiated kill would.
+  defp resolve_barbarian_attack(state, barbarian, target, new_turn) do
+    seed = {state.world.seed, state.turn, barbarian.id, target.id}
+
+    %{damage_to_defender: dealt, damage_to_attacker: taken} =
+      Combat.resolve(barbarian, target, seed: seed, defender_aura?: lord_adjacent?(state, target))
+
+    new_barbarian = %{barbarian | hp: max(barbarian.hp - taken, 0), movement: 0}
+    new_target = %{target | hp: max(target.hp - dealt, 0)}
+
+    units =
+      state.units
+      |> apply_combat_unit(barbarian.id, new_barbarian)
+      |> apply_combat_unit(target.id, new_target)
+
+    %{state | units: units}
+    |> schedule_heir_if_lord_fell(target, new_target, new_turn)
+    |> pay_bounty_if_barbarian_fell(new_barbarian, target)
+  end
+
+  defp apply_combat_unit(units, id, %{hp: 0}), do: Map.delete(units, id)
+  defp apply_combat_unit(units, id, unit), do: Map.put(units, id, unit)
+
+  defp pay_bounty_if_barbarian_fell(state, %{hp: 0}, %{player_id: payee_id}) when not is_nil(payee_id) do
+    update_in(state.players[payee_id].gold, &(&1 + BarbarianAI.bounty_gold()))
+  end
+
+  defp pay_bounty_if_barbarian_fell(state, _barbarian, _target), do: state
+
+  defp schedule_heir_if_lord_fell(state, %{type: :lord, player_id: player_id}, %{hp: 0}, new_turn) do
+    pending_heirs = state |> Map.get(:pending_heirs, %{}) |> Map.put(player_id, new_turn + 10)
+    Map.put(state, :pending_heirs, pending_heirs)
+  end
+
+  defp schedule_heir_if_lord_fell(state, _original, _new, _new_turn), do: state
+
+  # A living unit of the SAME player standing next door — mirrors
+  # `WorldServer.lord_adjacent?/2` (dead units are already gone from
+  # `state.units`, so presence alone means living).
+  defp lord_adjacent?(state, unit) do
+    adjacent_tile_ids = Regions.adjacent_tiles(state.world, unit.tile_id)
+
+    state.units
+    |> Map.values()
+    |> Enum.any?(
+      &(&1.type == :lord and &1.player_id == unit.player_id and &1.tile_id in adjacent_tile_ids)
+    )
+  end
 
   # -------------------------------------------------------------------
   # Food accrual and growth

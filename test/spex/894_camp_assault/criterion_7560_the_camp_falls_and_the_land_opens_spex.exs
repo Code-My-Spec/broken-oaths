@@ -29,6 +29,28 @@ defmodule BrokenOathsSpex.Story894.Criterion7560Spex do
   for an in-region camp, which would fail the scenario for a reason
   unrelated to this criterion. Both paths are gated by the same "is
   this hex ordinary land" fact, so the Worker path stands in for both.
+
+  Setup-hardening (not in the original contract): both the warrior and
+  the worker used to WALK to their targets via `queue_move` + 40-turn
+  wait loops. `Fixtures.relocate_unit/3` places them instantly instead
+  (the same narrow, documented-bridge status story 893's restructured
+  criteria already established); `clear_tile/2` evicts any real,
+  camp-driven squatter already sitting on a target tile.
+
+  Recharging BETWEEN the warrior's TEN strikes is the one place a real
+  `advance_turn` turned out unsafe — see criterion 7559's own moduledoc
+  for the full story: a live tick's worth of exposure to a nearby
+  camp's natural spawn cadence, repeated nine times across this
+  criterion's longer ten-swing sequence, risks the warrior taking
+  incidental damage or dying outright well before the killing blow.
+  `Fixtures.recharge_unit/2` restores movement directly with no live
+  tick at all. The post-loop `advance_turn` the original version ran
+  once more after the tenth strike was also removed: `do_attack_camp`
+  destroys the camp and pays the bounty synchronously within that same
+  attack (`apply_camp_damage/3`), broadcasting `:units_changed`
+  immediately — the `then_` block's own "game:camps"/"game:cities"
+  pushes are already fresh without an extra boundary, and skipping it
+  removes one more turn's worth of unrelated exposure.
   """
 
   use BrokenOathsSpex.Case
@@ -61,9 +83,14 @@ defmodule BrokenOathsSpex.Story894.Criterion7560Spex do
         [camp | _] = pushed_camps
         [city] = Fixtures.player_cities(context.world, context.user)
         render_hook(play_live, "queue_production", %{"city_id" => city.id, "item" => "warrior"})
+        drain(play_live)
         render_hook(play_live, "queue_production", %{"city_id" => city.id, "item" => "worker"})
+        drain(play_live)
 
-        for _ <- 1..8, do: Fixtures.advance_turn(context.world)
+        for _ <- 1..8 do
+          Fixtures.advance_turn(context.world)
+          drain(play_live)
+        end
 
         [warrior] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :warrior, do: u
@@ -80,20 +107,8 @@ defmodule BrokenOathsSpex.Story894.Criterion7560Spex do
           |> Enum.filter(land?)
           |> Enum.reject(&(&1 in my_occupied))
 
-        render_hook(play_live, "queue_move", %{"unit_id" => warrior.id, "to_tile" => target})
-
-        Enum.reduce_while(1..40, :ok, fn _, :ok ->
-          [w] =
-            for u <- Fixtures.player_units(context.world, context.user), u.id == warrior.id,
-              do: u
-
-          if w.tile_id == target do
-            {:halt, :ok}
-          else
-            Fixtures.advance_turn(context.world)
-            {:cont, :ok}
-          end
-        end)
+        clear_tile(context.world, target)
+        :ok = Fixtures.relocate_unit(context.world, warrior.id, target)
 
         [warrior] =
           for u <- Fixtures.player_units(context.world, context.user), u.id == warrior.id, do: u
@@ -116,10 +131,26 @@ defmodule BrokenOathsSpex.Story894.Criterion7560Spex do
             "target_camp_id" => to_string(context.camp.id)
           })
 
-          if i < 10, do: Fixtures.advance_turn(context.world)
+          # Every attack broadcasts `:units_changed` (fresh
+          # "game:camps"/"game:cities"/"game:units" pushes on top of the
+          # direct "game:combat" one) — drain the first nine so the
+          # `then_` block's own `assert_push_event` sees the TENTH
+          # (killing) blow's fresh state, not a stale mid-fight one.
+          if i < 10 do
+            drain(context.play_live)
+
+            # `Fixtures.recharge_unit/2`, not a real `advance_turn` —
+            # see criterion 7559's moduledoc: a live tick's worth of
+            # exposure to this camp's own (or any nearby camp's)
+            # natural spawn cadence risks the warrior taking incidental
+            # damage or dying outright partway through a TEN-swing
+            # sequence, well before the killing blow — recharging
+            # directly needs no live tick at all, so there's nothing
+            # left to be exposed to.
+            Fixtures.recharge_unit(context.world, context.warrior.id)
+          end
         end
 
-        Fixtures.advance_turn(context.world)
         {:ok, context}
       end
 
@@ -157,29 +188,26 @@ defmodule BrokenOathsSpex.Story894.Criterion7560Spex do
 
         refute is_nil(worker)
 
-        render_hook(context.play_live, "queue_move", %{
-          "unit_id" => worker.id,
-          "to_tile" => context.camp.tile_id
-        })
-
-        Enum.reduce_while(1..40, :ok, fn _, :ok ->
-          [w] =
-            for u <- Fixtures.player_units(context.world, context.user), u.id == worker.id,
-              do: u
-
-          if w.tile_id == context.camp.tile_id do
-            {:halt, :ok}
-          else
-            Fixtures.advance_turn(context.world)
-            {:cont, :ok}
-          end
-        end)
+        clear_tile(context.world, context.camp.tile_id)
+        :ok = Fixtures.relocate_unit(context.world, worker.id, context.camp.tile_id)
 
         render_hook(context.play_live, "select_unit", %{"unit_id" => worker.id})
         assert has_element?(context.play_live, "[data-test='build-road']")
         {:ok, context}
       end
     end
+  end
+
+  # `assert_push_event` always matches the FIRST matching message still
+  # sitting in the mailbox — every `queue_production`/`advance_turn`/
+  # "attack" broadcasts its own fresh "game:camps"/"game:cities" push
+  # (`refresh_board/1` fires on `:cities_changed`/`{:turn_advanced, _}`/
+  # `:units_changed` alike), so leaving them undrained would make this
+  # criterion's own `then_` assertions see a stale, pre-fight state
+  # instead of the fresh one their own action produced.
+  defp drain(play_live) do
+    assert_push_event(play_live, "game:camps", %{camps: _}, 500)
+    assert_push_event(play_live, "game:cities", %{cities: _}, 500)
   end
 
   # The gold badge renders the icon component (no digits) followed by
@@ -193,5 +221,28 @@ defmodule BrokenOathsSpex.Story894.Criterion7560Spex do
     |> List.last()
     |> List.first()
     |> String.to_integer()
+  end
+
+  # Deliberate, narrow exception, same status as story 893's restructured
+  # criteria (see criterion 7556's own `clear_tile/2`): a real, active
+  # camp may have already spawned a warrior of its own onto a tile this
+  # criterion needs to place something ELSE on exactly — relocate it out
+  # of the way first. A no-op if `tile_id` is already clear.
+  defp clear_tile(world, tile_id) do
+    occupant =
+      world
+      |> Fixtures.list_camps()
+      |> Enum.flat_map(& &1.warriors)
+      |> Enum.find(&(&1.tile_id == tile_id))
+
+    if occupant do
+      parking =
+        Fixtures.adjacent_tiles(world, tile_id)
+        |> Enum.filter(&(Fixtures.tile_class(world, &1) == :land and &1 != tile_id))
+
+      Enum.find_value(parking, fn t -> Fixtures.relocate_unit(world, occupant.id, t) == :ok end)
+    end
+
+    :ok
   end
 end

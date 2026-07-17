@@ -37,6 +37,7 @@ defmodule BrokenOaths.Game.WorldServer do
   import Ecto.Query
 
   alias BrokenOaths.Game.{
+    BarbarianAI,
     Camp,
     Camps,
     City,
@@ -228,6 +229,23 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
+  def handle_call({:attack_camp, user, unit_id, camp_id}, _from, state) do
+    case do_attack_camp(state, user, unit_id, camp_id) do
+      {:ok, result, new_state} ->
+        case persist_tick(state, new_state) do
+          :ok ->
+            broadcast(new_state.world.id, [:units_changed])
+            {:reply, {:ok, result}, new_state}
+
+          :stale ->
+            {:reply, {:error, :stale}, resync(state)}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   def handle_call({:found_city, user, unit_id}, _from, state) do
     case do_found_city(state, user, unit_id) do
       {:ok, new_state} ->
@@ -342,18 +360,152 @@ defmodule BrokenOaths.Game.WorldServer do
     {:reply, :ok, new_state}
   end
 
-  # Test-only: place a real, ownerless barbarian warrior directly on
-  # `tile_id` — no camp, no cadence, no waiting for movement. Story 893
-  # (barbarian roaming/AI) doesn't exist yet, so this is the sanctioned
-  # way a spec gets a real `Combat.hostile?/2`-recognized target without
-  # marching a camp-spawned one into place turn by turn; same narrow,
-  # documented-bridge status as `:set_unit_hp_for_test` above.
-  def handle_call({:spawn_barbarian_for_test, tile_id}, _from, state) do
+  # Test-only: instantly restore `unit_id`'s movement to its own max,
+  # bypassing the turn boundary that would normally do it
+  # (`reset_movement/1` in `Turn.tick/1`) — same narrow, documented-bridge
+  # status as `:set_unit_hp_for_test` above. A scenario whose SUBJECT is
+  # repeated attacks from the SAME unit (e.g. story 894 criterion 7559's
+  # "every hit deals exactly its strength, no random roll") needs that
+  # unit to recharge between swings, but a REAL turn boundary exposes it
+  # to a full tick's worth of barbarian AI activity it has no relation
+  # to — including outright death, which no post-hoc HP fixture can
+  # undo. This sidesteps the tick (and its exposure) entirely for the
+  # one narrow thing the scenario actually needs from it.
+  def handle_call({:recharge_unit_for_test, unit_id}, _from, state) do
+    unit = Map.fetch!(state.units, unit_id)
+    Repo.update_all(from(u in Unit, where: u.id == ^unit_id), set: [movement: unit.max_movement])
+    new_state = %{state | units: Map.put(state.units, unit_id, %{unit | movement: unit.max_movement})}
+    {:reply, :ok, new_state}
+  end
+
+  # Test-only: place a real barbarian warrior directly on `tile_id` — no
+  # cadence, no waiting for movement. `camp_id` (nil by default) is the
+  # same narrow, documented-bridge extension `insert_unit/7` already
+  # supports: passing a REAL camp's id makes this warrior indistinguishable
+  # from one the camp spawned naturally, so `Turn`'s barbarian AI loop
+  # (story 893) picks it up and drives it for real from the very next
+  # boundary — the sanctioned way a spec gets a REAL, AI-controlled
+  # warrior at an exact, controlled tile without marching anything
+  # through a live hostile world to find it (same status as
+  # `:set_unit_hp_for_test` above). Omitting `camp_id` keeps story 891's
+  # original "ownerless target, no AI" behavior unchanged.
+  def handle_call({:spawn_barbarian_for_test, tile_id, camp_id}, _from, state) do
     stats = Production.unit_stats(:barbarian_warrior)
-    {:ok, unit} = insert_unit(state.world.id, nil, :barbarian_warrior, tile_id, stats.hp, stats.movement)
+
+    {:ok, unit} =
+      insert_unit(state.world.id, nil, :barbarian_warrior, tile_id, stats.hp, stats.movement, camp_id)
+
     unit_data = unit_map(unit)
     new_state = %{state | units: Map.put(state.units, unit.id, unit_data)}
     {:reply, unit_data, new_state}
+  end
+
+  # Test-only: instantly relocate `unit_id` (any player's own unit) to
+  # `tile_id`, bypassing movement points, pathing, and turn boundaries
+  # entirely. A scenario that needs a unit standing at a specific,
+  # possibly-distant spot (e.g. "adjacent to this real, naturally-placed
+  # camp") no longer has to march it there over dozens of exposed turns
+  # to get it there — same narrow, documented-bridge status as
+  # `:spawn_barbarian_for_test` above. Refuses a tile already held by
+  # another unit (one unit per hex is a hard rule everywhere else too).
+  def handle_call({:relocate_unit_for_test, unit_id, tile_id}, _from, state) do
+    if Enum.any?(state.units, fn {id, u} -> id != unit_id and u.tile_id == tile_id end) do
+      {:reply, {:error, :occupied}, state}
+    else
+      unit = Map.fetch!(state.units, unit_id)
+      Repo.update_all(from(u in Unit, where: u.id == ^unit_id), set: [tile_id: tile_id])
+      new_state = %{state | units: Map.put(state.units, unit_id, %{unit | tile_id: tile_id})}
+      {:reply, :ok, new_state}
+    end
+  end
+
+  # Test-only: instantly place a COMPLETE improvement of `kind` on
+  # `tile_id`, bypassing the real build (a worker standing still for
+  # `Improvement.duration/1` real turns) entirely — same narrow,
+  # documented-bridge status as `:spawn_barbarian_for_test` above. A
+  # scenario whose SUBJECT is what happens to an ALREADY-FINISHED
+  # improvement (pillage, story 893 criterion 7556) has no structural
+  # need to expose a worker to a live, spawning camp for the several
+  # real turns a build would otherwise take just to get there — that
+  # exposure risks a genuine (if incidental) death to the very AI this
+  # story is testing elsewhere, unrelated to what THIS criterion means
+  # to exercise.
+  def handle_call({:complete_improvement_for_test, tile_id, kind}, _from, state) do
+    duration = Improvement.duration(kind)
+
+    improvement =
+      case Repo.get_by(Improvement, world_id: state.world.id, tile_id: tile_id) do
+        nil ->
+          {:ok, improvement} =
+            %Improvement{}
+            |> Improvement.changeset(%{
+              world_id: state.world.id,
+              tile_id: tile_id,
+              kind: kind,
+              progress: duration,
+              status: :complete,
+              builder_unit_id: nil
+            })
+            |> Repo.insert()
+
+          improvement
+
+        existing ->
+          {:ok, improvement} =
+            existing
+            |> Improvement.changeset(%{
+              kind: kind,
+              progress: duration,
+              status: :complete,
+              builder_unit_id: nil
+            })
+            |> Repo.update()
+
+          improvement
+      end
+
+    improvement_data = improvement_map(improvement)
+    new_state = %{state | improvements: Map.put(state.improvements, tile_id, improvement_data)}
+    {:reply, improvement_data, new_state}
+  end
+
+  # Test-only: move a barbarian warrior directly onto `tile_id`,
+  # applying `Turn`'s own pillage-on-entry rule (`maybe_pillage/2`)
+  # exactly as `apply_barbarian_decision({:move, tile}, ...)` would —
+  # but as a single, isolated write rather than a full `Turn.tick/1`
+  # boundary. Story 893 criterion 7556's own SUBJECT is what happens
+  # WHEN a barbarian enters a tile with a completed improvement, not
+  # the AI's path-finding/target-selection that gets it there (already
+  # covered by criteria 7551/7554) — driving that arrival through a
+  # real multi-camp tick made this scenario hostage to every OTHER
+  # camp's own independent, same-tick spawn/movement cadence, which can
+  # (and empirically did, often) land an unrelated warrior on the exact
+  # bridge tile this scenario needs clear at the exact moment its own
+  # decision is computed, no matter how thoroughly the tile is cleared
+  # beforehand. Same narrow, documented-bridge status as
+  # `:spawn_barbarian_for_test`/`:relocate_unit_for_test` above; refuses
+  # a tile already held by another unit, the same "one unit per hex"
+  # rule those two already enforce.
+  def handle_call({:move_barbarian_for_test, barbarian_id, tile_id}, _from, state) do
+    if Enum.any?(state.units, fn {id, u} -> id != barbarian_id and u.tile_id == tile_id end) do
+      {:reply, {:error, :occupied}, state}
+    else
+      barbarian = Map.fetch!(state.units, barbarian_id)
+      Repo.update_all(from(u in Unit, where: u.id == ^barbarian_id), set: [tile_id: tile_id])
+
+      new_state = %{
+        state
+        | units: Map.put(state.units, barbarian_id, %{barbarian | tile_id: tile_id}),
+          improvements: maybe_pillage_for_test(state.improvements, tile_id)
+      }
+
+      case Repo.get_by(Improvement, world_id: state.world.id, tile_id: tile_id) do
+        nil -> :ok
+        improvement -> persist_pillage_for_test(improvement, new_state.improvements[tile_id])
+      end
+
+      {:reply, :ok, new_state}
+    end
   end
 
   # Test-only: resolve an attack FROM a barbarian, bypassing the
@@ -768,15 +920,92 @@ defmodule BrokenOaths.Game.WorldServer do
       |> apply_combat_unit(defender.id, new_defender)
 
     state =
-      state
+      %{state | units: units}
       |> schedule_heir_if_lord_fell(attacker, new_attacker)
       |> schedule_heir_if_lord_fell(defender, new_defender)
+      |> pay_bounty_if_barbarian_fell(new_attacker, defender)
+      |> pay_bounty_if_barbarian_fell(new_defender, attacker)
 
-    {%{damage_dealt: dealt, damage_taken: taken}, %{state | units: units}}
+    {%{damage_dealt: dealt, damage_taken: taken}, state}
   end
 
   defp apply_combat_unit(units, id, %{hp: 0}), do: Map.delete(units, id)
   defp apply_combat_unit(units, id, unit), do: Map.put(units, id, unit)
+
+  # Story 893, criterion 7557: whichever side of a resolved exchange was
+  # a barbarian (`player_id: nil`) and reached 0 HP pays the OTHER
+  # side's owner the bounty — covers both a player's own "attack" (the
+  # barbarian is always the defender there) and a barbarian-initiated
+  # exchange resolved by `Turn`'s own AI loop through this same
+  # function's sibling in that module (the barbarian is the attacker
+  # there, killed by the defender's counter-blow).
+  defp pay_bounty_if_barbarian_fell(state, %{player_id: nil, hp: 0}, %{player_id: payee_id})
+       when not is_nil(payee_id) do
+    update_in(state.players[payee_id].gold, &(&1 + BarbarianAI.bounty_gold()))
+  end
+
+  defp pay_bounty_if_barbarian_fell(state, _fallen, _other), do: state
+
+  # -------------------------------------------------------------------
+  # Camp assault (story 894)
+  # -------------------------------------------------------------------
+
+  # Resolves immediately, like `do_attack/4` — flat damage, no counter
+  # (see `Combat.camp_damage/2`). An already-destroyed (or nonexistent)
+  # camp is refused the same way an already-dead unit target is.
+  defp do_attack_camp(state, user, unit_id, camp_id) do
+    player = find_player(state, user.id)
+    attacker = Map.get(state.units, unit_id)
+    camp = Map.get(state.camps, camp_id)
+
+    cond do
+      is_nil(player) or is_nil(attacker) or attacker.player_id != player.id ->
+        {:error, :not_owner}
+
+      is_nil(camp) or not is_nil(camp.destroyed_at) ->
+        {:error, :invalid_target}
+
+      true ->
+        adjacent_tile_ids = Regions.adjacent_tiles(state.world, attacker.tile_id)
+
+        case Combat.validate_camp_attack(attacker, camp, adjacent_tile_ids) do
+          :ok ->
+            {result, new_state} = resolve_camp_attack(state, attacker, camp)
+            {:ok, result, new_state}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
+
+  defp resolve_camp_attack(state, attacker, camp) do
+    dealt = Combat.camp_damage(attacker, lord_adjacent?(state, attacker))
+    new_camp = %{camp | hp: max(camp.hp - dealt, 0)}
+    new_attacker = %{attacker | movement: 0}
+
+    state =
+      %{state | units: Map.put(state.units, attacker.id, new_attacker)}
+      |> apply_camp_damage(new_camp, attacker.player_id)
+
+    {%{damage_dealt: dealt, damage_taken: 0}, state}
+  end
+
+  # Story 894, criterion 7560: 0 HP destroys the camp — `destroyed_at`
+  # stops `Camps.advance/2` from ever spawning again (already handled,
+  # story 892) and drops it from `visible_camps/2`'s fog-filtered
+  # surface; the destroying player's owner is paid `Camps.destroy_reward/0`.
+  # Orphaned warriors are untouched — they're separate `Unit` rows, not
+  # nested under the camp in `state.units` (criterion 7561).
+  defp apply_camp_damage(state, %{hp: 0} = camp, payee_id) do
+    destroyed = %{camp | destroyed_at: NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)}
+    state = %{state | camps: Map.put(state.camps, camp.id, destroyed)}
+    update_in(state.players[payee_id].gold, &(&1 + Camps.destroy_reward()))
+  end
+
+  defp apply_camp_damage(state, camp, _payee_id) do
+    %{state | camps: Map.put(state.camps, camp.id, camp)}
+  end
 
   # A living unit of the SAME player standing next door — dead units
   # are already gone from `state.units`, so presence alone means
@@ -1131,12 +1360,16 @@ defmodule BrokenOaths.Game.WorldServer do
   # of the SAME kind just reattaches (any worker may resume a frozen
   # dig — improvements aren't owned); a DIFFERENT kind already
   # mid-build on this tile is refused rather than silently switched.
+  # A pillaged one (story 893) is the same "resume the same kind"
+  # story, just entered from `:pillaged` instead of `:building`.
   defp validate_improvement_slot(improvements, tile_id, kind) do
     case Map.get(improvements, tile_id) do
       nil -> :ok
       %{status: :complete} -> {:error, :occupied_improvement}
       %{status: :building, kind: ^kind} -> :ok
       %{status: :building} -> {:error, :invalid_improvement}
+      %{status: :pillaged, kind: ^kind} -> :ok
+      %{status: :pillaged} -> {:error, :invalid_improvement}
     end
   end
 
@@ -1297,6 +1530,7 @@ defmodule BrokenOaths.Game.WorldServer do
 
         state.camps
         |> Map.values()
+        |> Enum.reject(&(!is_nil(&1.destroyed_at)))
         |> Enum.filter(&(MapSet.member?(home, &1.tile_id) or MapSet.member?(explored, &1.tile_id)))
         |> Enum.map(&format_camp(&1, state))
     end
@@ -1340,6 +1574,7 @@ defmodule BrokenOaths.Game.WorldServer do
           persist_city_changes(old_state.cities, new_state.cities)
           persist_production_item_changes(old_state.cities, new_state.cities)
           persist_camp_changes(Map.get(old_state, :camps, %{}), Map.get(new_state, :camps, %{}))
+          persist_player_changes(old_state.players, new_state.players)
 
           persist_improvement_changes(
             new_state.world.id,
@@ -1418,13 +1653,26 @@ defmodule BrokenOaths.Game.WorldServer do
 
   # New camps are persisted immediately at founding (see
   # `spawn_wilderness_camps/3`) — this only reconciles what the tick
-  # itself advances: `spawn_counter` (every camp, every tick) and,
-  # eventually, `hp`/`destroyed_at` once a future story can damage one.
+  # itself advances: `spawn_counter` (every camp, every tick), `hp`
+  # (story 894's camp assault), and `destroyed_at` (also story 894 — a
+  # camp reduced to 0 HP, both via `do_attack_camp/4` immediately and
+  # via `Turn`'s barbarian AI loop pillaging nothing of the camp itself,
+  # only ever set here).
   defp persist_camp_changes(old_camps, new_camps) do
     for {id, camp} <- new_camps, Map.get(old_camps, id) != camp do
       Repo.update_all(from(c in Camp, where: c.id == ^id),
         set: [hp: camp.hp, spawn_counter: camp.spawn_counter, destroyed_at: camp.destroyed_at]
       )
+    end
+  end
+
+  # Gold is the only mutable field on a player once joined — bounty
+  # kills (story 893, criterion 7557) and camp-destroy rewards (story
+  # 894, criterion 7560) are the first things that ever change it after
+  # `spawn_new_player/2`'s initial 50.
+  defp persist_player_changes(old_players, new_players) do
+    for {id, player} <- new_players, Map.get(old_players, id) != player do
+      Repo.update_all(from(p in Player, where: p.id == ^id), set: [gold: player.gold])
     end
   end
 
@@ -1444,6 +1692,26 @@ defmodule BrokenOaths.Game.WorldServer do
       )
     end
   end
+
+  # Test-only helpers for `:move_barbarian_for_test` — mirrors `Turn`'s
+  # own `maybe_pillage/2` (in-memory) and then a targeted DB write
+  # (rather than a full `persist_tick`, since this is a single isolated
+  # move, not a tick boundary).
+  defp maybe_pillage_for_test(improvements, tile_id) do
+    case Map.get(improvements, tile_id) do
+      nil -> improvements
+      %{status: :complete} = improvement -> Map.put(improvements, tile_id, Improvement.pillage(improvement))
+      improvement -> Map.put(improvements, tile_id, improvement)
+    end
+  end
+
+  defp persist_pillage_for_test(%{status: :complete} = existing, %{status: :pillaged} = pillaged) do
+    existing
+    |> Improvement.changeset(%{status: pillaged.status, progress: pillaged.progress, builder_unit_id: nil})
+    |> Repo.update()
+  end
+
+  defp persist_pillage_for_test(_existing, _unchanged), do: :ok
 
   defp persist_order_changes(old_orders, new_orders) do
     case Map.keys(old_orders) -- Map.keys(new_orders) do

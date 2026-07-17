@@ -18,6 +18,14 @@ defmodule BrokenOaths.Game.Improvement do
   duration rules — `allowed?/2` and `duration/1` below — and
   `BrokenOaths.Game.Yields` for the yield bonus a finished improvement
   contributes).
+
+  A barbarian entering a `:complete` improvement's tile pillages it
+  (`pillage/1`, story 893): `status` flips to `:pillaged` — the same
+  "not `:complete`" gate `Yields.completed_kind/2` already uses, so a
+  pillaged improvement's bonus silently stops counting with no separate
+  check — and its `kind` is kept so a worker resuming the SAME kind
+  repairs it in exactly one turn rather than paying a fresh build's
+  full `duration/1`.
   """
 
   use Ecto.Schema
@@ -28,7 +36,7 @@ defmodule BrokenOaths.Game.Improvement do
   alias BrokenOaths.Worlds.World
 
   @type kind :: :farm | :mine | :road
-  @type status :: :building | :complete
+  @type status :: :building | :complete | :pillaged
 
   @type t :: %__MODULE__{
           id: integer() | nil,
@@ -48,7 +56,7 @@ defmodule BrokenOaths.Game.Improvement do
     field :tile_id, :integer
     field :kind, Ecto.Enum, values: [:farm, :mine, :road]
     field :progress, :integer, default: 0
-    field :status, Ecto.Enum, values: [:building, :complete], default: :building
+    field :status, Ecto.Enum, values: [:building, :complete, :pillaged], default: :building
 
     belongs_to :world, World
     belongs_to :builder, Unit, foreign_key: :builder_unit_id
@@ -88,4 +96,19 @@ defmodule BrokenOaths.Game.Improvement do
   def allowed?(:mine, %Terrain{relief: :hills}), do: true
   def allowed?(:mine, %Terrain{}), do: false
   def allowed?(:road, %Terrain{}), do: true
+
+  @doc """
+  Pillage a `:complete` improvement (story 893, criterion 7556):
+  `status` flips to `:pillaged` and `builder_unit_id` clears (nothing
+  is mid-build); `progress` is pre-loaded to `duration(kind) - 1` so
+  resuming the SAME kind needs only one more tick to finish, instead of
+  a fresh build's full duration. A no-op on anything not `:complete` —
+  a barbarian only burns a FINISHED improvement, never one mid-build.
+  """
+  @spec pillage(map()) :: map()
+  def pillage(%{status: :complete, kind: kind} = improvement) do
+    %{improvement | status: :pillaged, progress: max(duration(kind) - 1, 0), builder_unit_id: nil}
+  end
+
+  def pillage(improvement), do: improvement
 end

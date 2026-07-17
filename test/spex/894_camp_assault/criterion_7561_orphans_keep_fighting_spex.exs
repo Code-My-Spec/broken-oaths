@@ -21,6 +21,27 @@ defmodule BrokenOathsSpex.Story894.Criterion7561Spex do
   Ten hits land the killing blow, per the same reasoning as criterion
   7560's moduledoc (criterion 7559 pins a full-HP Warrior at exactly
   10 flat damage per hit, no random roll).
+
+  Setup-hardening (not in the original contract): the warrior used to
+  WALK to the camp's doorstep via `queue_move` + a 40-turn wait loop,
+  and the tracked "orphan" used to be waited for via a 15-turn
+  natural-spawn-cadence loop. `Fixtures.relocate_unit/3` places the
+  warrior instantly; `Fixtures.spawn_barbarian/3` (tied to the same
+  REAL, revealed camp — see criterion 7551's moduledoc) places the
+  orphan-to-be directly, since this criterion's SUBJECT is what happens
+  to an already-spawned warrior once its camp is destroyed, not the
+  spawn cadence itself. `clear_tile/2` evicts any real, camp-driven
+  squatter already sitting on a target tile. Recharging between the
+  warrior's TEN strikes (and before the final re-attack on the orphan)
+  uses `Fixtures.recharge_unit/2`, not a real `advance_turn` — see
+  criterion 7559's moduledoc for why a live tick's worth of exposure to
+  nearby camps' natural spawn cadence isn't safe across a long combat
+  sequence. `drain/1` clears the "game:camps"/"game:units" pushes each
+  `queue_production`/`advance_turn`/"attack" broadcasts, so the `then_`
+  blocks' own `assert_push_event` calls see fresh post-fight state
+  instead of a stale pre-fight one (the same mailbox hazard already
+  fixed across story 893's and this story's other restructured
+  criteria).
   """
 
   use BrokenOathsSpex.Case
@@ -52,8 +73,12 @@ defmodule BrokenOathsSpex.Story894.Criterion7561Spex do
         [camp | _] = pushed_camps
         [city] = Fixtures.player_cities(context.world, context.user)
         render_hook(play_live, "queue_production", %{"city_id" => city.id, "item" => "warrior"})
+        drain(play_live)
 
-        for _ <- 1..8, do: Fixtures.advance_turn(context.world)
+        for _ <- 1..8 do
+          Fixtures.advance_turn(context.world)
+          drain(play_live)
+        end
 
         [warrior] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :warrior, do: u
@@ -70,20 +95,8 @@ defmodule BrokenOathsSpex.Story894.Criterion7561Spex do
           |> Enum.filter(land?)
           |> Enum.reject(&(&1 in my_occupied))
 
-        render_hook(play_live, "queue_move", %{"unit_id" => warrior.id, "to_tile" => target})
-
-        Enum.reduce_while(1..40, :ok, fn _, :ok ->
-          [w] =
-            for u <- Fixtures.player_units(context.world, context.user), u.id == warrior.id,
-              do: u
-
-          if w.tile_id == target do
-            {:halt, :ok}
-          else
-            Fixtures.advance_turn(context.world)
-            {:cont, :ok}
-          end
-        end)
+        clear_tile(context.world, target)
+        :ok = Fixtures.relocate_unit(context.world, warrior.id, target)
 
         [warrior] =
           for u <- Fixtures.player_units(context.world, context.user), u.id == warrior.id, do: u
@@ -96,22 +109,28 @@ defmodule BrokenOathsSpex.Story894.Criterion7561Spex do
       end
 
       given_ "the camp has already spawned at least one barbarian warrior", context do
-        orphan =
-          Enum.reduce_while(1..15, nil, fn _, _ ->
-            [camp_now] =
-              for c <- Fixtures.list_camps(context.world), c.id == context.camp.id, do: c
+        # Direct placement (`Fixtures.spawn_barbarian/3`, tied to the
+        # REAL camp), not a 15-turn natural-cadence wait loop — the
+        # same narrow, documented-bridge status story 893's restructured
+        # criteria already established (see criterion 7551's moduledoc).
+        # This criterion's SUBJECT is what happens to an ALREADY-spawned
+        # warrior once its camp is destroyed, not the spawn cadence
+        # itself (that's story 892's job).
+        land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
 
-            case camp_now.warriors do
-              [w | _] ->
-                {:halt, w}
+        my_occupied = [
+          context.warrior.tile_id,
+          Enum.find(Fixtures.player_units(context.world, context.user), &(&1.type == :lord)).tile_id
+        ]
 
-              [] ->
-                Fixtures.advance_turn(context.world)
-                {:cont, nil}
-            end
-          end)
+        [orphan_tile | _] =
+          context.world
+          |> Fixtures.adjacent_tiles(context.camp.tile_id)
+          |> Enum.filter(land?)
+          |> Enum.reject(&(&1 in my_occupied))
 
-        refute is_nil(orphan)
+        clear_tile(context.world, orphan_tile)
+        orphan = Fixtures.spawn_barbarian(context.world, orphan_tile, context.camp.id)
         {:ok, Map.put(context, :orphan_id, orphan.id)}
       end
 
@@ -123,10 +142,24 @@ defmodule BrokenOathsSpex.Story894.Criterion7561Spex do
             "target_camp_id" => to_string(context.camp.id)
           })
 
-          if i < 10, do: Fixtures.advance_turn(context.world)
+          # Every attack broadcasts `:units_changed` (fresh
+          # "game:camps"/"game:units" pushes on top of the direct
+          # "game:combat" one) — drain the first nine so the `then_`
+          # block's own `assert_push_event` sees the TENTH (killing)
+          # blow's fresh state, not a stale mid-fight one.
+          if i < 10 do
+            drain(context.play_live)
+
+            # `Fixtures.recharge_unit/2`, not a real `advance_turn` —
+            # see criterion 7559's moduledoc: a live tick's worth of
+            # exposure to this camp's own (or any nearby camp's)
+            # natural spawn cadence risks the warrior taking incidental
+            # damage or dying outright partway through a TEN-swing
+            # sequence, well before the killing blow.
+            Fixtures.recharge_unit(context.world, context.warrior.id)
+          end
         end
 
-        Fixtures.advance_turn(context.world)
         {:ok, context}
       end
 
@@ -158,29 +191,16 @@ defmodule BrokenOathsSpex.Story894.Criterion7561Spex do
             |> Fixtures.adjacent_tiles(orphan.tile_id)
             |> Enum.filter(&(Fixtures.tile_class(context.world, &1) == :land))
 
-          render_hook(context.play_live, "queue_move", %{
-            "unit_id" => warrior.id,
-            "to_tile" => bridge
-          })
-
-          Enum.reduce_while(1..40, :ok, fn _, :ok ->
-            [w] =
-              for u <- Fixtures.player_units(context.world, context.user), u.id == warrior.id,
-                do: u
-
-            if w.tile_id == bridge do
-              {:halt, :ok}
-            else
-              Fixtures.advance_turn(context.world)
-              {:cont, :ok}
-            end
-          end)
-
-          # The step above spent the warrior's one point of movement
-          # closing the gap (same rule criterion 7536 established) —
-          # one more boundary recharges it before the attack below.
-          Fixtures.advance_turn(context.world)
+          clear_tile(context.world, bridge)
+          :ok = Fixtures.relocate_unit(context.world, warrior.id, bridge)
         end
+
+        # The ten-attack `when_` step above always leaves the warrior's
+        # movement spent (its own tenth, killing blow) — recharge
+        # directly (see criterion 7559's moduledoc) regardless of
+        # whether the bridge relocation above ran, so this final attack
+        # never refuses with `:out_of_movement`.
+        Fixtures.recharge_unit(context.world, warrior.id)
 
         render_hook(context.play_live, "attack", %{
           "unit_id" => to_string(warrior.id),
@@ -192,5 +212,40 @@ defmodule BrokenOathsSpex.Story894.Criterion7561Spex do
         {:ok, context}
       end
     end
+  end
+
+  # `assert_push_event` always matches the FIRST matching message still
+  # sitting in the mailbox — every `queue_production`/`advance_turn`/
+  # "attack" broadcasts its own fresh "game:camps"/"game:units" push
+  # (`refresh_board/1` fires on `:cities_changed`/`{:turn_advanced, _}`/
+  # `:units_changed` alike), so leaving them undrained would make this
+  # criterion's own `then_` assertions see a stale, pre-fight state
+  # instead of the fresh one their own action produced.
+  defp drain(play_live) do
+    assert_push_event(play_live, "game:camps", %{camps: _}, 500)
+    assert_push_event(play_live, "game:units", %{units: _}, 500)
+  end
+
+  # Deliberate, narrow exception, same status as story 893's restructured
+  # criteria (see criterion 7556's own `clear_tile/2`): a real, active
+  # camp may have already spawned a warrior of its own onto a tile this
+  # criterion needs to place something ELSE on exactly — relocate it out
+  # of the way first. A no-op if `tile_id` is already clear.
+  defp clear_tile(world, tile_id) do
+    occupant =
+      world
+      |> Fixtures.list_camps()
+      |> Enum.flat_map(& &1.warriors)
+      |> Enum.find(&(&1.tile_id == tile_id))
+
+    if occupant do
+      parking =
+        Fixtures.adjacent_tiles(world, tile_id)
+        |> Enum.filter(&(Fixtures.tile_class(world, &1) == :land and &1 != tile_id))
+
+      Enum.find_value(parking, fn t -> Fixtures.relocate_unit(world, occupant.id, t) == :ok end)
+    end
+
+    :ok
   end
 end

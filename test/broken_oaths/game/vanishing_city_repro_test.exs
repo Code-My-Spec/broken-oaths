@@ -40,10 +40,17 @@ defmodule BrokenOaths.Game.VanishingCityReproTest do
     grow_until.(grow_until, 60)
 
     # Queue a settler at the cap and tick through its completion,
-    # asserting the city survives every single boundary.
+    # asserting the city survives every single boundary. 60 turns (not
+    # 30): story 893's barbarian AI (this world's first founding seeds
+    # real, roaming camps) can occasionally camp adjacent to an
+    # undefended city for a while — production keeps banking regardless
+    # and the tile frees up once the barbarian moves on, but a tight
+    # turn budget makes that ordinary, transient interference look like
+    # a spawn failure. The assertion itself (never vanishes, eventually
+    # spawns) is unchanged — only the patience.
     :ok = Game.queue_production(world, user, city.id, "settler")
 
-    Enum.each(1..30, fn turn ->
+    Enum.each(1..60, fn turn ->
       :ok = Game.advance_turn(world)
 
       case Game.player_cities(world, user) do
