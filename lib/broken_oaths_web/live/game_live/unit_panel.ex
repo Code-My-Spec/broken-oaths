@@ -36,6 +36,7 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
     assigns =
       assigns
       |> assign_new(:allowed_improvements, fn -> [] end)
+      |> assign_new(:current_dig, fn -> nil end)
       |> assign_new(:unit_id, fn -> Map.get(assigns.unit, :id) end)
 
     ~H"""
@@ -67,8 +68,21 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
         </button>
 
         <div :if={@unit.type == :worker} class="flex flex-col gap-1">
+          <%!-- A dig in progress on the worker's tile is the loudest
+               thing in the panel — silent success on Build reads as a
+               dead button (issue b5cc4ae9). --%>
+          <div
+            :if={@current_dig}
+            class="badge badge-info gap-1 whitespace-nowrap"
+            data-test="dig-progress"
+          >
+            Digging {improvement_label(@current_dig.kind)} — {@current_dig.progress}/{BrokenOaths.Game.Improvement.duration(
+              @current_dig.kind
+            )} turns
+          </div>
           <.build_button
             :for={kind <- @allowed_improvements}
+            :if={is_nil(@current_dig)}
             kind={kind}
             unit_id={@unit_id}
           />

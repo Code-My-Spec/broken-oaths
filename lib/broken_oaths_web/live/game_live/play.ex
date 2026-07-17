@@ -141,6 +141,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
             selected_unit: nil,
             selected_order: nil,
             allowed_improvements: [],
+            current_dig: nil,
             order_error: nil,
             combat_error: nil,
             selected_city_id: nil,
@@ -175,6 +176,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         selected_unit: unit,
         selected_order: unit && unit.order,
         allowed_improvements: worker_allowed_improvements(socket.assigns.world, unit),
+        current_dig: worker_current_dig(socket.assigns.improvements, unit),
         order_error: nil,
         improvement_error: nil,
         selected_city_id: nil,
@@ -324,7 +326,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
     case Game.start_improvement(world, user, parse_id(unit_id), kind) do
       :ok ->
-        {:noreply, assign(socket, improvement_error: nil)}
+        # Refresh inline (not just via the async :improvements_changed
+        # broadcast) so the dig-progress badge appears in the same
+        # render as the click — issue b5cc4ae9.
+        {:noreply, socket |> assign(improvement_error: nil) |> refresh_board()}
 
       {:error, reason} ->
         {:noreply, assign(socket, improvement_error: improvement_error_message(reason))}
@@ -608,6 +613,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
       selected_unit: selected_unit,
       selected_order: selected_unit && selected_unit.order,
       allowed_improvements: worker_allowed_improvements(world, selected_unit),
+      current_dig: worker_current_dig(improvements, selected_unit),
       selected_city: selected_city,
       assignable_tiles: assignable_tiles(world, selected_city)
     )
@@ -756,6 +762,14 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # (`Regions.tile_class/2` == :land, then `Improvement.allowed?/2`),
   # computed here purely so `UnitPanel` only ever offers legal actions
   # (story 882, criterion 7482: Farm is never offered on hills/forest).
+  # The dig under the selected worker's feet, if one is in progress —
+  # the unit panel shows it as live progress (issue b5cc4ae9: silent
+  # success on Build read as a dead button).
+  defp worker_current_dig(improvements, %{type: :worker, tile_id: tile_id}),
+    do: Enum.find(improvements, &(&1.tile_id == tile_id and &1.status == :building))
+
+  defp worker_current_dig(_improvements, _unit), do: nil
+
   defp worker_allowed_improvements(_world, nil), do: []
   defp worker_allowed_improvements(_world, %{type: type}) when type != :worker, do: []
 
@@ -932,6 +946,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
           unit={@selected_unit}
           order={@selected_order}
           allowed_improvements={@allowed_improvements}
+          current_dig={@current_dig}
         />
 
         <.live_component
