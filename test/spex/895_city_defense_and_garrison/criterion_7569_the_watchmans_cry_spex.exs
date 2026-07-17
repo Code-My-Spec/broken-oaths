@@ -21,6 +21,26 @@ defmodule BrokenOathsSpex.Story895.Criterion7569Spex do
   Barbarian-fixture note: see `BrokenOathsSpex.Story891.Criterion7533Spex`'s
   moduledoc — "the barbarian" here is mechanically a second real
   player's warrior.
+
+  Setup-hardening (not in the original contract), all real in-game
+  actions rather than new fixtures — see criterion 7566's moduledoc
+  for the general rationale this criterion shares (same long-march,
+  cross-player setup):
+
+    * `Fixtures.isolate_camp/2` against an unrelated camp warrior
+      reaching (and killing) the marching barbarian across the up to
+      60 boundaries it takes to reach `approach_tile`.
+    * The original contract's second `when_` step drives `"attack"`
+      straight from `approach_tile` — 3 hexes out, per the FIRST
+      `when_`'s own name — never actually adjacent to the city, which
+      `CityDefense.validate_attack/3` refuses (`:not_adjacent`), so no
+      "under attack" alert would ever fire. This version finishes the
+      march to an actual adjacent tile first (same bounded wait
+      pattern the rest of this story's specs use), then
+      `Fixtures.recharge_unit/2` (that final step is what spends the
+      barbarian's own movement arriving) before attacking — genuinely
+      exercising "that barbarian THEN attacks the city," which the
+      step's own name already promises.
   """
 
   use BrokenOathsSpex.Case
@@ -70,6 +90,19 @@ defmodule BrokenOathsSpex.Story895.Criterion7569Spex do
           "city_id" => to_string(other_city.id),
           "item" => "warrior"
         })
+
+        # See moduledoc's isolate_camp hardening note.
+        [farthest_camp | _] =
+          context.world
+          |> Fixtures.list_camps()
+          |> Enum.sort_by(fn camp ->
+            -min(
+              mesh_distance(context.world, city.tile_id, camp.tile_id),
+              mesh_distance(context.world, other_city.tile_id, camp.tile_id)
+            )
+          end)
+
+        :ok = Fixtures.isolate_camp(context.world, farthest_camp.id)
 
         for _ <- 1..8, do: Fixtures.advance_turn(context.world)
 
@@ -143,6 +176,38 @@ defmodule BrokenOathsSpex.Story895.Criterion7569Spex do
       end
 
       when_ "that barbarian then attacks the city", context do
+        # See moduledoc's second hardening note: finish the march to
+        # an actual adjacent tile (the FIRST `when_` above only gets
+        # the barbarian to `approach_tile`, 3 hexes out) before
+        # attacking.
+        land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
+
+        [adjacent_tile | _] =
+          context.world
+          |> Fixtures.adjacent_tiles(context.city.tile_id)
+          |> Enum.filter(land?)
+
+        render_hook(context.other_play_live, "queue_move", %{
+          "unit_id" => to_string(context.barbarian.id),
+          "to_tile" => adjacent_tile
+        })
+
+        Enum.reduce_while(1..10, :ok, fn _, :ok ->
+          [b] =
+            for u <- Fixtures.player_units(context.world, context.other_user),
+                u.id == context.barbarian.id,
+                do: u
+
+          if b.tile_id == adjacent_tile do
+            {:halt, :ok}
+          else
+            Fixtures.advance_turn(context.world)
+            {:cont, :ok}
+          end
+        end)
+
+        :ok = Fixtures.recharge_unit(context.world, context.barbarian.id)
+
         render_hook(context.other_play_live, "attack", %{
           "unit_id" => to_string(context.barbarian.id),
           "target_city_id" => to_string(context.city.id)
@@ -156,6 +221,31 @@ defmodule BrokenOathsSpex.Story895.Criterion7569Spex do
         assert msg == "Your city #{context.city.name} is under attack!"
         {:ok, context}
       end
+    end
+  end
+
+  # Raw mesh-adjacency BFS distance from `from` to `to` — the same
+  # notion `BrokenOaths.Game.Camps.ring_band/3` places camps by, used
+  # here only to rank camps by "how far from the action," not to
+  # validate any land-path route.
+  defp mesh_distance(world, from, to, max_depth \\ 40) do
+    0..max_depth
+    |> Enum.reduce_while({[from], MapSet.new([from])}, fn depth, {frontier, seen} ->
+      if to in frontier do
+        {:halt, {:found, depth}}
+      else
+        next =
+          frontier
+          |> Enum.flat_map(&BrokenOathsSpex.Fixtures.adjacent_tiles(world, &1))
+          |> Enum.uniq()
+          |> Enum.reject(&MapSet.member?(seen, &1))
+
+        {:cont, {next, MapSet.union(seen, MapSet.new(next))}}
+      end
+    end)
+    |> case do
+      {:found, depth} -> depth
+      _ -> 999
     end
   end
 end

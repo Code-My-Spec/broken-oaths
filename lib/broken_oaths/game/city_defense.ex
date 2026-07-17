@@ -1,0 +1,369 @@
+defmodule BrokenOaths.Game.CityDefense do
+  @moduledoc """
+  Pure city-combat core: HP and defensive strength, the garrison
+  stacking exception, garrison combat bonuses, pillage-not-capture, and
+  the regen/production-halt bookkeeping a turn boundary applies. No
+  `Repo`, no process state — mirrors `BrokenOaths.Game.Combat`'s role:
+  `BrokenOaths.Game.WorldServer` (immediate city-target attacks) and
+  `BrokenOaths.Game.Turn` (regen, production halt, the barbarian-AI
+  "hold adjacent to a city" case) are the imperative shells that read a
+  city and its garrison out of the canonical tick-state, call into this
+  module, and write the result back.
+
+  ## HP and defensive strength
+
+  A city starts at `max_hp/0` (100) and its defensive strength is
+  `20 + 5 × size + garrison defense` — the base defense of every
+  friendly MILITARY unit standing on the city's own tile, summed
+  (`defensive_strength/2`). Civilians (`:settler`, `:worker`) shelter
+  on the tile for free: `garrison/2` finds every unit standing there,
+  but `military_garrison/2` (and therefore the defense total) only
+  ever counts `:lord`/`:warrior`.
+
+  ## Garrison stacking (the one stacking exception in the game)
+
+  Everywhere else, a player's own second unit is refused onto a tile
+  it already occupies (`WorldServer`'s `occupied_by_own?/3`). A city's
+  own tile is the exception: up to `garrison_cap/0` (3) friendly
+  military units may stand together there. `garrison_room?/2` is the
+  single predicate both the queue-time occupancy check
+  (`WorldServer.do_queue_move/4`) and the tick-time movement collision
+  check (`BrokenOaths.Game.Turn.attempt_step/2`) call to decide whether
+  one more unit fits — a civilian mover always fits (and never counts
+  against the cap); a military mover fits only while fewer than 3
+  military units already stand there.
+
+  ## Garrison combat bonus
+
+  A unit standing on its own city's tile fights at +50% strength
+  (`BrokenOaths.Game.Combat.garrisoned_strength/2`) whether it's
+  striking out at an adjacent barbarian (`garrisoned?/2` is the
+  predicate `WorldServer` checks before passing `attacker_garrisoned?:
+  true` into `Combat.resolve/3`) or defending the walls against an
+  assault on the city itself (`resolve_attack/4`, below).
+
+  ## Barbarian-vs-city combat
+
+  `resolve_attack/4` resolves a barbarian's (or, per this story's own
+  spec convention, a stand-in real player's) assault on a city:
+  damage to the city is the same Civ VI curve `Combat.damage/3` computes
+  for unit-vs-unit combat, attacker strength against the city's own
+  defensive strength (not a single defender's). The counter-blow comes
+  from the single STRONGEST living garrisoned defender (ties break on
+  lowest id) at its garrison-boosted strength — an undefended city
+  (empty garrison) counters for nothing, so an attacker sacking an
+  undefended city never takes damage back. `take_damage/3` applies the
+  result to a city's HP, floored at 0, and folds in `pillage/2` the
+  instant it lands there.
+
+  ## Pillage, not capture
+
+  A city reduced to 0 HP is pillaged (`pillage/2`): loses one
+  population (floored at 1 — a size-1 city can't shrink further),
+  banked production freezes for `pillage_halt_boundaries/0` (3) turn
+  boundaries counted from the turn the pillage happened
+  (`production_halted?/2` reads `production_halted_until` against the
+  CURRENT turn — see that function's doc for the exact boundary
+  count), and HP resets to `pillage_hp/0` (50, not 0 — the city is
+  never destroyed). The in-flight production item itself is untouched:
+  once the halt lifts, accrual resumes from whatever was already
+  banked, not from zero.
+
+  ## Regeneration
+
+  `regen/1` heals `regen_per_boundary/0` (5) HP, capped at `max_hp/0`.
+  `Turn` calls this once per boundary for every city its OWN
+  barbarian-AI phase didn't attack that same tick — an attack landed
+  through `WorldServer`'s immediate, out-of-tick "attack" surface
+  (this story's own spec convention) never suppresses the NEXT
+  boundary's regen, since it isn't part of any tick's own AI phase; see
+  `Turn`'s "city regeneration" phase doc for exactly how the two
+  interact.
+
+  ## Alerts
+
+  `approaching?/4` and `under_attack?/0`'s sibling copy helpers
+  (`approach_alert/1`, `under_attack_alert/1`) back the two player
+  alerts this story adds: a barbarian (or any foreign unit — the same
+  stand-in convention above) closing within `approach_range/0` (3)
+  hexes of a player's city, and a city actually taking a hit.
+  `approaching?/4` measures distance the same way
+  `BrokenOaths.Game.Camps.ring_band/3` places camps — raw mesh
+  adjacency, not the land-only path distance
+  `BrokenOaths.Game.BarbarianAI` uses for targeting — since an alert is
+  about how close a threat LOOKS on the globe, not how far it would
+  have to walk to arrive.
+  """
+
+  alias BrokenOaths.Game.Combat
+  alias BrokenOaths.Worlds.Regions
+  alias BrokenOaths.Worlds.World
+
+  @type tile_id :: non_neg_integer()
+  @type unit :: Combat.unit()
+  @type city :: %{
+          optional(atom()) => term(),
+          id: term(),
+          player_id: term(),
+          name: String.t(),
+          tile_id: tile_id(),
+          size: pos_integer(),
+          hp: non_neg_integer(),
+          worked_tiles: [tile_id()],
+          production_halted_until: non_neg_integer() | nil
+        }
+  @type attack_result :: %{
+          damage_to_city: non_neg_integer(),
+          damage_to_barbarian: non_neg_integer(),
+          defender_id: term() | nil
+        }
+  @type refusal :: :out_of_movement | :not_adjacent | :own_city
+
+  @military_types [:lord, :warrior]
+
+  @max_hp 100
+  @base_defense 20
+  @size_defense 5
+  @garrison_cap 3
+  @regen_per_boundary 5
+  @pillage_hp 50
+  @pillage_halt_boundaries 3
+  @approach_range 3
+
+  @doc "A city's max HP — every city is founded at this value."
+  @spec max_hp() :: pos_integer()
+  def max_hp, do: @max_hp
+
+  @doc "HP a pillaged city resets to — never 0 (pillage, not destruction)."
+  @spec pillage_hp() :: pos_integer()
+  def pillage_hp, do: @pillage_hp
+
+  @doc "How many turn boundaries a pillaged city's production stays frozen."
+  @spec pillage_halt_boundaries() :: pos_integer()
+  def pillage_halt_boundaries, do: @pillage_halt_boundaries
+
+  @doc "HP a city regains each unthreatened turn boundary, capped at `max_hp/0`."
+  @spec regen_per_boundary() :: pos_integer()
+  def regen_per_boundary, do: @regen_per_boundary
+
+  @doc "How many friendly military units may garrison a single city tile."
+  @spec garrison_cap() :: pos_integer()
+  def garrison_cap, do: @garrison_cap
+
+  @doc "How close (raw mesh hexes) a threat must be to trigger the approach alert."
+  @spec approach_range() :: pos_integer()
+  def approach_range, do: @approach_range
+
+  @doc "Whether `unit` is a combat-capable (garrison-eligible) type — `:lord` or `:warrior`."
+  @spec military?(unit()) :: boolean()
+  def military?(%{type: type}), do: type in @military_types
+
+  # -------------------------------------------------------------------
+  # Garrison
+  # -------------------------------------------------------------------
+
+  @doc "Every unit (military or civilian) standing on `city`'s own tile."
+  @spec garrison(city(), [unit()]) :: [unit()]
+  def garrison(city, units), do: Enum.filter(units, &(&1.tile_id == city.tile_id))
+
+  @doc "The military subset of `garrison/2` — the only units that count toward the cap or add defense."
+  @spec military_garrison(city(), [unit()]) :: [unit()]
+  def military_garrison(city, units), do: city |> garrison(units) |> Enum.filter(&military?/1)
+
+  @doc """
+  Whether `mover` may join `existing_units_on_tile` — the units already
+  standing on the destination tile it's entering. A civilian always
+  fits and never counts against the cap; a military mover fits only
+  while fewer than `garrison_cap/0` military units are already there.
+  Callers are responsible for confirming the destination is actually
+  the mover's own city's tile in the first place — this predicate is
+  the same regardless of tile identity, so a non-city destination
+  should never reach it (see `WorldServer.occupied_by_own?/4`).
+  """
+  @spec garrison_room?(unit(), [unit()]) :: boolean()
+  def garrison_room?(%{type: type}, _existing_units_on_tile) when type not in @military_types,
+    do: true
+
+  def garrison_room?(_mover, existing_units_on_tile) do
+    existing_units_on_tile |> Enum.filter(&military?/1) |> length() < @garrison_cap
+  end
+
+  @doc """
+  Whether `unit` currently qualifies for the garrison combat bonus:
+  a military unit standing on ITS OWN player's city's own tile.
+  """
+  @spec garrisoned?(unit(), [city()]) :: boolean()
+  def garrisoned?(unit, cities) do
+    military?(unit) and
+      Enum.any?(cities, &(&1.tile_id == unit.tile_id and &1.player_id == unit.player_id))
+  end
+
+  # -------------------------------------------------------------------
+  # Defensive strength
+  # -------------------------------------------------------------------
+
+  @doc "City defensive strength: `20 + 5 × size` plus the summed base defense of its military garrison."
+  @spec defensive_strength(city(), [unit()]) :: non_neg_integer()
+  def defensive_strength(city, units) do
+    garrison_defense =
+      city |> military_garrison(units) |> Enum.map(&Combat.base_strength(&1.type)) |> Enum.sum()
+
+    @base_defense + @size_defense * city.size + garrison_defense
+  end
+
+  # -------------------------------------------------------------------
+  # Barbarian-vs-city combat
+  # -------------------------------------------------------------------
+
+  @doc """
+  Resolve `attacker`'s assault on `city`: damage to the city (attacker
+  strength against the city's own `defensive_strength/2`, capped at the
+  city's current HP so a single hit never drives it negative) and
+  counter-damage to `attacker` from the single strongest living
+  garrisoned defender at its garrison-boosted strength (0, no
+  defender, if the city is undefended). Required `opts`:
+
+    * `:seed` — any term; rolls are deterministic for a given seed
+    * `:attacker_aura?` — whether `attacker` stands adjacent to its own
+      living lord (default `false`)
+  """
+  @spec resolve_attack(city(), [unit()], unit(), keyword()) :: attack_result()
+  def resolve_attack(city, units, attacker, opts) do
+    seed = Keyword.fetch!(opts, :seed)
+    attacker_aura? = Keyword.get(opts, :attacker_aura?, false)
+
+    resisting_strength = defensive_strength(city, units)
+    striking_strength = Combat.effective_strength(attacker, attacker_aura?)
+    damage_to_city = min(Combat.damage(striking_strength, resisting_strength, {seed, :to_city}), city.hp)
+
+    case strongest_defender(city, units) do
+      nil ->
+        %{damage_to_city: damage_to_city, damage_to_barbarian: 0, defender_id: nil}
+
+      defender ->
+        counter_strength = Combat.garrisoned_strength(defender)
+        attacker_strength = Combat.effective_strength(attacker, attacker_aura?)
+        damage_to_barbarian = Combat.damage(counter_strength, attacker_strength, {seed, :to_attacker})
+        %{damage_to_city: damage_to_city, damage_to_barbarian: damage_to_barbarian, defender_id: defender.id}
+    end
+  end
+
+  defp strongest_defender(city, units) do
+    city
+    |> military_garrison(units)
+    |> Enum.filter(&(&1.hp > 0))
+    |> Enum.sort_by(&{-Combat.base_strength(&1.type), &1.id})
+    |> List.first()
+  end
+
+  @doc """
+  Whether `attacker` may legally assault `city` right now: movement
+  left, the city on an adjacent tile, and `attacker` isn't the city's
+  own owner (a player can never attack their own city; every OTHER
+  player's unit is a legal attacker here — city assault doesn't share
+  `Combat.hostile?/2`'s "no Stone Age PvP" restriction on unit-vs-unit
+  combat, per this story's own spec convention of standing a second
+  real player's unit in for a barbarian).
+  """
+  @spec validate_attack(unit(), city(), [tile_id()]) :: :ok | {:error, refusal()}
+  def validate_attack(attacker, city, adjacent_tile_ids) do
+    cond do
+      attacker.movement <= 0 -> {:error, :out_of_movement}
+      city.tile_id not in adjacent_tile_ids -> {:error, :not_adjacent}
+      attacker.player_id == city.player_id -> {:error, :own_city}
+      true -> :ok
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Damage application, pillage, regen
+  # -------------------------------------------------------------------
+
+  @doc "Apply `damage` to `city`'s HP, floored at 0 — pillaging it (`pillage/2`) the instant it lands there."
+  @spec take_damage(city(), non_neg_integer(), non_neg_integer()) :: city()
+  def take_damage(city, damage, current_turn) do
+    case max(city.hp - damage, 0) do
+      0 -> pillage(%{city | hp: 0}, current_turn)
+      hp -> %{city | hp: hp}
+    end
+  end
+
+  @doc """
+  Pillage `city`, pillaged at `current_turn`: -1 population (floored at
+  1), HP resets to `pillage_hp/0`, worked tiles trimmed to fit the new
+  (smaller) population, and production frozen through
+  `pillage_halt_boundaries/0` more boundaries — see
+  `production_halted?/2` for exactly which boundaries that covers.
+  """
+  @spec pillage(city(), non_neg_integer()) :: city()
+  def pillage(city, current_turn) do
+    new_size = max(city.size - 1, 1)
+
+    %{
+      city
+      | size: new_size,
+        hp: @pillage_hp,
+        worked_tiles: Enum.take(city.worked_tiles, new_size),
+        production_halted_until: current_turn + @pillage_halt_boundaries
+    }
+  end
+
+  @doc """
+  Whether `city`'s production is still frozen at `turn` (the CURRENT,
+  not-yet-incremented turn a boundary is about to advance FROM — see
+  `BrokenOaths.Game.Turn.tick/1`'s own phase ordering). A city pillaged
+  at turn T freezes accrual for exactly the three boundaries that bump
+  the turn from T→T+1, T+1→T+2, and T+2→T+3 (`production_halted_until`
+  is `T + pillage_halt_boundaries/0`); the boundary that bumps T+3→T+4
+  sees `turn == production_halted_until` and resumes.
+  """
+  @spec production_halted?(city(), non_neg_integer()) :: boolean()
+  def production_halted?(city, turn) do
+    case Map.get(city, :production_halted_until) do
+      nil -> false
+      halted_until -> turn < halted_until
+    end
+  end
+
+  @doc "Heal `city` `regen_per_boundary/0` HP, capped at `max_hp/0` — a no-op already at full HP."
+  @spec regen(city()) :: city()
+  def regen(%{hp: hp} = city) when hp >= @max_hp, do: city
+  def regen(city), do: %{city | hp: min(@max_hp, city.hp + @regen_per_boundary)}
+
+  # -------------------------------------------------------------------
+  # Alerts
+  # -------------------------------------------------------------------
+
+  @doc """
+  Whether `unit_tile` sits within `hexes` (default `approach_range/0`)
+  raw mesh-adjacency hops of `city_tile` — see this module's doc for
+  why raw adjacency, not land-path distance.
+  """
+  @spec approaching?(World.t(), tile_id(), tile_id(), pos_integer()) :: boolean()
+  def approaching?(world, city_tile, unit_tile, hexes \\ @approach_range) do
+    MapSet.member?(mesh_disk(world, city_tile, hexes), unit_tile)
+  end
+
+  defp mesh_disk(world, start, max_depth) do
+    {_frontier, seen} =
+      Enum.reduce(1..max_depth, {[start], MapSet.new([start])}, fn _, {frontier, seen} ->
+        next =
+          frontier
+          |> Enum.flat_map(&Regions.adjacent_tiles(world, &1))
+          |> Enum.uniq()
+          |> Enum.reject(&MapSet.member?(seen, &1))
+
+        {next, MapSet.union(seen, MapSet.new(next))}
+      end)
+
+    MapSet.delete(seen, start)
+  end
+
+  @doc "Copy for the approach alert (`\"game:alert\"` push) — story copy, §3.3/§10.3."
+  @spec approach_alert(String.t()) :: String.t()
+  def approach_alert(city_name), do: "Barbarians approaching #{city_name}! #{@approach_range} hexes away."
+
+  @doc "Copy for the under-attack alert (`\"game:alert\"` push) — story copy, §3.3/§10.3."
+  @spec under_attack_alert(String.t()) :: String.t()
+  def under_attack_alert(city_name), do: "Your city #{city_name} is under attack!"
+end

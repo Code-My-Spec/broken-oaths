@@ -18,6 +18,22 @@ defmodule BrokenOathsSpex.Story895.Criterion7562Spex do
   Garrison, per stories 879/881 (criteria 7471, 7480), is simply "a
   unit standing on the city's own `tile_id`" — no new concept, just
   reused from the existing healing/landing rules.
+
+  Setup-hardening (not in the original contract): a founding pop
+  auto-works the best-scoring adjacent tile (`Yields.pick_worked_tile/2`,
+  story 878), and 8 boundaries of a worked tile's food ON TOP OF the
+  city center's own floor reliably crosses `Yields.threshold(1)` (20)
+  well before the Warrior (40 production, exactly 8 turns at the flat
+  5/turn base with the tile left unworked) finishes — silently growing
+  the city to size 2 mid-`when_` and turning "20 + 5×1 + 10 = 35" into
+  "20 + 5×2 + 10 = 40" for a reason this criterion's SUBJECT (the
+  additive defense formula, not growth timing) never meant to
+  exercise. The `given_` step now immediately un-works that one
+  auto-assigned tile via the ordinary `assign_worked_tile` command
+  (center-only food, well under threshold across the whole 8-turn
+  wait) — a real in-game action, not a new fixture — so the size-1
+  precondition this criterion's own name promises actually holds by
+  the time `then_` reads it.
   """
 
   use BrokenOathsSpex.Case
@@ -50,6 +66,20 @@ defmodule BrokenOathsSpex.Story895.Criterion7562Spex do
           "city_id" => to_string(city.id),
           "item" => "warrior"
         })
+
+        # See moduledoc's "Setup-hardening" note — keeps the city at
+        # size 1 for the whole 8-turn wait ahead, which growing tile
+        # production/food was never this criterion's concern.
+        case city.worked_tiles do
+          [worked | _] ->
+            render_hook(play_live, "assign_worked_tile", %{
+              "city_id" => to_string(city.id),
+              "from_tile_id" => to_string(worked)
+            })
+
+          [] ->
+            :ok
+        end
 
         {:ok, context |> Map.put(:play_live, play_live) |> Map.put(:city, city)}
       end

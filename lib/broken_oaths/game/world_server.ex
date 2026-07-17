@@ -17,19 +17,22 @@ defmodule BrokenOaths.Game.WorldServer do
   every tick inside the same transaction as the rest of that tick's
   delta. `turn_started_at` is the wall-clock moment the current turn
   began; `turn_ends_at` (exposed via `BrokenOaths.Game`) is always
-  `turn_started_at + 60s`.
+  `turn_started_at + world.turn_seconds`.
 
   ## Ticking
 
-  In every environment except test, `init/1` schedules a
-  `Process.send_after(self(), :tick, 60_000)` self-loop, and if
-  `turn_started_at` is more than 60s stale on boot (the world was
-  dormant), missed ticks are run synchronously before the server
-  accepts requests — wall-clock catch-up. Test env sets
-  `config :broken_oaths, :game_auto_tick, false`, which disables both
-  the self-loop and catch-up: `advance_turn/1` (called by
-  `BrokenOathsSpex.Fixtures.advance_turn/1`) is the only tick source,
-  exactly mirroring what the timer would have fired.
+  Story 897: each world carries its own `turn_seconds` (a `worlds`
+  column, default 60, immutable after creation — see
+  `BrokenOaths.Worlds.World`) rather than every world in the process
+  sharing one hardcoded cadence. In every environment except test,
+  `init/1` schedules a `Process.send_after(self(), :tick, turn_seconds
+  * 1_000)` self-loop, and if `turn_started_at` is more than
+  `turn_seconds` stale on boot (the world was dormant), missed ticks
+  are run synchronously before the server accepts requests — wall-clock
+  catch-up. Test env sets `config :broken_oaths, :game_auto_tick,
+  false`, which disables both the self-loop and catch-up: `advance_turn/1`
+  (called by `BrokenOathsSpex.Fixtures.advance_turn/1`) is the only
+  tick source, exactly mirroring what the timer would have fired.
   """
 
   use GenServer
@@ -41,6 +44,7 @@ defmodule BrokenOaths.Game.WorldServer do
     Camp,
     Camps,
     City,
+    CityDefense,
     Combat,
     Exploration,
     Improvement,
@@ -60,8 +64,8 @@ defmodule BrokenOaths.Game.WorldServer do
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
 
-  @tick_seconds 60
-  @tick_ms @tick_seconds * 1_000
+  # Story 897: no more single process-wide cadence — every tick/catch-up/
+  # countdown computation below reads `state.world.turn_seconds` instead.
 
   # -------------------------------------------------------------------
   # Public API
@@ -133,7 +137,7 @@ defmodule BrokenOaths.Game.WorldServer do
     world = Worlds.get_world!(world.id)
 
     state = load_state(world) |> catch_up()
-    if auto_tick?(), do: schedule_tick()
+    if auto_tick?(), do: schedule_tick(state.world.turn_seconds)
 
     {:ok, state}
   end
@@ -174,7 +178,7 @@ defmodule BrokenOaths.Game.WorldServer do
   def handle_call(:turn_number, _from, state), do: {:reply, state.turn, state}
 
   def handle_call(:turn_ends_at, _from, state) do
-    {:reply, DateTime.add(state.turn_started_at, @tick_seconds, :second), state}
+    {:reply, DateTime.add(state.turn_started_at, state.world.turn_seconds, :second), state}
   end
 
   def handle_call({:gold, user}, _from, state) do
@@ -191,7 +195,7 @@ defmodule BrokenOaths.Game.WorldServer do
 
         case persist_tick(queued, moved) do
           :ok ->
-            broadcast(moved.world.id, [:units_changed])
+            broadcast(moved.world.id, [:units_changed | approach_alert_events(state, moved)])
 
             remaining =
               case Map.get(moved.orders, unit_id) do
@@ -235,6 +239,32 @@ defmodule BrokenOaths.Game.WorldServer do
         case persist_tick(state, new_state) do
           :ok ->
             broadcast(new_state.world.id, [:units_changed])
+            {:reply, {:ok, result}, new_state}
+
+          :stale ->
+            {:reply, {:error, :stale}, resync(state)}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Story 895: attacking a city reuses the "attack" hook, with
+  # `target_city_id` instead of `target_unit_id` (a city is not a
+  # `Game.Unit`) — same immediate-resolution shape as `:attack_camp`
+  # above. `result` carries `damage_dealt` (to the city's HP) and
+  # `damage_taken` (counter-attack damage the attacker takes from the
+  # city's strongest garrisoned defender — 0 if undefended). Also
+  # pushes the "under attack" alert straight to the city owner, same
+  # direct-push pattern `:lineage_continued` uses for a player-scoped
+  # notification.
+  def handle_call({:attack_city, user, unit_id, city_id}, _from, state) do
+    case do_attack_city(state, user, unit_id, city_id) do
+      {:ok, result, new_state, alert} ->
+        case persist_tick(state, new_state) do
+          :ok ->
+            broadcast(new_state.world.id, [:units_changed, :cities_changed, alert])
             {:reply, {:ok, result}, new_state}
 
           :stale ->
@@ -608,7 +638,7 @@ defmodule BrokenOaths.Game.WorldServer do
   @impl true
   def handle_info(:tick, state) do
     new_state = run_tick(state)
-    schedule_tick()
+    schedule_tick(new_state.world.turn_seconds)
     {:noreply, new_state}
   end
 
@@ -618,12 +648,12 @@ defmodule BrokenOaths.Game.WorldServer do
 
   defp auto_tick?, do: Application.get_env(:broken_oaths, :game_auto_tick, true)
 
-  defp schedule_tick, do: Process.send_after(self(), :tick, @tick_ms)
+  defp schedule_tick(turn_seconds), do: Process.send_after(self(), :tick, turn_seconds * 1_000)
 
   defp catch_up(state) do
     if auto_tick?() do
       elapsed = DateTime.diff(DateTime.utc_now(), state.turn_started_at, :second)
-      run_missed(state, div(elapsed, @tick_seconds))
+      run_missed(state, div(elapsed, state.world.turn_seconds))
     else
       state
     end
@@ -639,7 +669,7 @@ defmodule BrokenOaths.Game.WorldServer do
 
     case persist_tick(state, new_state) do
       :ok ->
-        broadcast(new_state.world.id, events)
+        broadcast(new_state.world.id, events ++ approach_alert_events(state, new_state))
         new_state
 
       :stale ->
@@ -648,6 +678,36 @@ defmodule BrokenOaths.Game.WorldServer do
         # first. Our write lost the optimistic race; discard in-memory
         # state and resync from the row instead of clobbering it.
         resync(state)
+    end
+  end
+
+  # Story 895: any foreign unit (barbarian, or per this story's own
+  # spec convention, another player's stand-in) newly within
+  # `CityDefense.approach_range/0` hexes of a city — pushed straight to
+  # that city's owner, same direct-push pattern `:lineage_continued`
+  # uses. Edge-triggered against `old_state`: a (city, threat) pair
+  # already in range before this operation doesn't re-alert, only one
+  # that's in range now and WASN'T a moment ago — otherwise a threat
+  # that merely lingers nearby across many boundaries would re-push
+  # the identical message every single tick, burying a later, DIFFERENT
+  # alert (e.g. "under attack") behind a backlog of stale "approaching"
+  # ones in the client's own event queue.
+  defp approach_alert_events(old_state, new_state) do
+    old_pairs = threat_pairs(old_state)
+
+    for {city_id, _unit_id} <- MapSet.difference(threat_pairs(new_state), old_pairs), uniq: true do
+      city = Map.fetch!(new_state.cities, city_id)
+      {:city_alert, owner_user_id(new_state, city.player_id), CityDefense.approach_alert(city.name)}
+    end
+  end
+
+  defp threat_pairs(state) do
+    for {_id, city} <- state.cities,
+        threat <- Map.values(state.units),
+        threat.player_id != city.player_id,
+        CityDefense.approaching?(state.world, city.tile_id, threat.tile_id),
+        into: MapSet.new() do
+      {city.id, threat.id}
     end
   end
 
@@ -841,7 +901,7 @@ defmodule BrokenOaths.Game.WorldServer do
       Regions.tile_class(state.world, to_tile) != :land ->
         {:error, :impassable}
 
-      occupied_by_own?(state, to_tile, player.id) ->
+      occupied_by_own?(state, to_tile, player.id, unit) ->
         {:error, :occupied}
 
       true ->
@@ -869,11 +929,19 @@ defmodule BrokenOaths.Game.WorldServer do
   # A player can never stack their own units, but a tile another player
   # currently holds is still a valid target — Turn's dynamic collision
   # check (not this queue-time check) is what halts the mover if the
-  # tile is still occupied when they actually arrive.
-  defp occupied_by_own?(state, tile_id, player_id) do
-    state.units
-    |> Map.values()
-    |> Enum.any?(&(&1.tile_id == tile_id and &1.player_id == player_id))
+  # tile is still occupied when they actually arrive. Story 895's one
+  # exception: `mover`'s own city's own tile allows up to
+  # `CityDefense.garrison_cap/0` military units (civilians always fit,
+  # uncounted) — see `CityDefense.garrison_room?/2`. Every other tile
+  # keeps the original all-or-nothing rule.
+  defp occupied_by_own?(state, tile_id, player_id, mover) do
+    own_units_here =
+      for {_id, u} <- state.units, u.tile_id == tile_id, u.player_id == player_id, do: u
+
+    case Enum.find(state.cities, fn {_id, c} -> c.tile_id == tile_id and c.player_id == player_id end) do
+      nil -> own_units_here != []
+      _own_city -> not CityDefense.garrison_room?(mover, own_units_here)
+    end
   end
 
   defp persist_order!(unit_id, path) do
@@ -965,7 +1033,9 @@ defmodule BrokenOaths.Game.WorldServer do
       Combat.resolve(attacker, defender,
         seed: seed,
         attacker_aura?: lord_adjacent?(state, attacker),
-        defender_aura?: lord_adjacent?(state, defender)
+        defender_aura?: lord_adjacent?(state, defender),
+        attacker_garrisoned?: CityDefense.garrisoned?(attacker, Map.values(state.cities)),
+        defender_garrisoned?: CityDefense.garrisoned?(defender, Map.values(state.cities))
       )
 
     new_attacker = %{attacker | hp: max(attacker.hp - taken, 0), movement: 0}
@@ -1063,6 +1133,72 @@ defmodule BrokenOaths.Game.WorldServer do
   defp apply_camp_damage(state, camp, _payee_id) do
     %{state | camps: Map.put(state.camps, camp.id, camp)}
   end
+
+  # -------------------------------------------------------------------
+  # City assault (story 895)
+  # -------------------------------------------------------------------
+
+  # Resolves immediately, like `do_attack/4` — see `CityDefense`'s
+  # moduledoc for the damage math (city defensive strength vs. attacker
+  # strength, countered by the strongest garrisoned defender). Unlike
+  # `Combat.hostile?/2`'s "no Stone Age PvP" rule for unit-vs-unit
+  # combat, ANY player's unit may assault ANY OTHER player's city —
+  # `CityDefense.validate_attack/3` only ever refuses attacking your
+  # OWN city — matching this story's own spec convention of a second
+  # real player standing in for a barbarian.
+  defp do_attack_city(state, user, unit_id, city_id) do
+    player = find_player(state, user.id)
+    attacker = Map.get(state.units, unit_id)
+    city = Map.get(state.cities, city_id)
+
+    cond do
+      is_nil(player) or is_nil(attacker) or attacker.player_id != player.id ->
+        {:error, :not_owner}
+
+      is_nil(city) ->
+        {:error, :invalid_target}
+
+      true ->
+        adjacent_tile_ids = Regions.adjacent_tiles(state.world, attacker.tile_id)
+
+        case CityDefense.validate_attack(attacker, city, adjacent_tile_ids) do
+          :ok ->
+            {result, new_state} = resolve_city_attack(state, attacker, city)
+            alert = {:city_alert, owner_user_id(state, city.player_id), CityDefense.under_attack_alert(city.name)}
+            {:ok, result, new_state, alert}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
+
+  defp resolve_city_attack(state, attacker, city) do
+    seed = {state.world.seed, state.turn, attacker.id, city.id}
+    units = Map.values(state.units)
+
+    %{damage_to_city: dealt, damage_to_barbarian: taken} =
+      CityDefense.resolve_attack(city, units, attacker,
+        seed: seed,
+        attacker_aura?: lord_adjacent?(state, attacker)
+      )
+
+    new_city = CityDefense.take_damage(city, dealt, state.turn)
+    new_attacker = %{attacker | hp: max(attacker.hp - taken, 0), movement: 0}
+
+    state =
+      %{
+        state
+        | units: apply_combat_unit(state.units, attacker.id, new_attacker),
+          cities: Map.put(state.cities, city.id, new_city)
+      }
+      |> schedule_heir_if_lord_fell(attacker, new_attacker)
+      |> pay_bounty_if_barbarian_fell(new_attacker, %{player_id: city.player_id})
+
+    {%{damage_dealt: dealt, damage_taken: taken}, state}
+  end
+
+  defp owner_user_id(state, player_id), do: Map.fetch!(state.players, player_id).user_id
 
   # A living unit of the SAME player standing next door — dead units
   # are already gone from `state.units`, so presence alone means
@@ -1569,7 +1705,9 @@ defmodule BrokenOaths.Game.WorldServer do
       production: Production.flat_base() + worked_production,
       queue: city.queue,
       territory: city.territory,
-      worked_tiles: city.worked_tiles
+      worked_tiles: city.worked_tiles,
+      hp: city.hp,
+      defense: CityDefense.defensive_strength(city, Map.values(state.units))
     }
   end
 
@@ -1681,8 +1819,10 @@ defmodule BrokenOaths.Game.WorldServer do
   # Newly founded/renamed/reassigned cities are already persisted
   # immediately by their own command (see "Found city"/"Worked tiles"/
   # "Rename city" above) — this only ever catches what the TICK itself
-  # changes: size, food, territory (growth), worked_tiles (a settler's
-  # pop cost un-working a tile).
+  # (or, since story 895, `do_attack_city/4`'s own immediate
+  # resolution) changes: size, food, territory (growth), worked_tiles
+  # (a settler's pop cost, or a pillage, un-working a tile), and `hp`/
+  # `production_halted_until` (city combat — see `CityDefense`).
   defp persist_city_changes(old_cities, new_cities) do
     for {id, city} <- new_cities, Map.get(old_cities, id) != city do
       Repo.update_all(from(c in City, where: c.id == ^id),
@@ -1690,7 +1830,9 @@ defmodule BrokenOaths.Game.WorldServer do
           size: city.size,
           food: city.food,
           territory: city.territory,
-          worked_tiles: city.worked_tiles
+          worked_tiles: city.worked_tiles,
+          hp: city.hp,
+          production_halted_until: city.production_halted_until
         ]
       )
     end
@@ -1921,6 +2063,8 @@ defmodule BrokenOaths.Game.WorldServer do
       food: c.food,
       territory: c.territory,
       worked_tiles: c.worked_tiles,
+      hp: c.hp,
+      production_halted_until: c.production_halted_until,
       queue: Enum.map(c.production_items, &queue_item_map/1)
     }
   end

@@ -36,6 +36,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
                            a HARD constraint)
     * `globe3d:airspace`— `%{levels: %{tile_id => 1..3}, arc: float}` (reused
                            weather layer from `BrokenOaths.Worlds.Weather`)
+    * `game:alert`      — `%{message: string}` (story 895), a barbarian
+                           closing within `Game.CityDefense.approach_range/0`
+                           hexes of one of the player's own cities, or one
+                           of their cities taking a hit — player-scoped,
+                           same shape as `game:lineage` below
 
   Turn number, countdown, and the selected-unit's/-city's details are each
   their own `liveview_component` (`GameLive.TurnBar`, `GameLive.UnitPanel`,
@@ -372,6 +377,28 @@ defmodule BrokenOathsWeb.GameLive.Play do
     end
   end
 
+  # Story 895: attacking a city reuses the "attack" hook, with
+  # `target_city_id` instead of `target_unit_id`/`target_camp_id` — same
+  # immediate-resolution, direct-push shape as both clauses above.
+  # `damage_taken` is the attacker's own counter-attack damage from the
+  # city's strongest garrisoned defender (0 if undefended).
+  def handle_event("attack", %{"unit_id" => unit_id, "target_city_id" => target_city_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.attack_city(world, user, parse_id(unit_id), parse_id(target_city_id)) do
+      {:ok, %{damage_dealt: dealt, damage_taken: taken}} ->
+        socket =
+          socket
+          |> assign(combat_error: nil)
+          |> push_event("game:combat", %{damage_dealt: dealt, damage_taken: taken})
+
+        {:noreply, socket}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, combat_error: combat_error_message(reason))}
+    end
+  end
+
   def handle_event("abandon_world", _params, socket) do
     {:noreply, assign(socket, confirm_abandon?: true)}
   end
@@ -443,6 +470,19 @@ defmodule BrokenOathsWeb.GameLive.Play do
   def handle_info({:lineage_continued, user_id, message}, socket) do
     if user_id == socket.assigns.user.id do
       {:noreply, push_event(socket, "game:lineage", %{message: message})}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # Story 895: `WorldServer` pushes this world-wide for both the
+  # approach alert (a threat closing within `CityDefense.approach_range/0`
+  # hexes of a city) and the under-attack alert (a city taking a hit) —
+  # same player-scoped shape as `:lineage_continued` above, just a
+  # `"game:alert"` push instead of `"game:lineage"`.
+  def handle_info({:city_alert, user_id, message}, socket) do
+    if user_id == socket.assigns.user.id do
+      {:noreply, push_event(socket, "game:alert", %{message: message})}
     else
       {:noreply, socket}
     end
@@ -639,6 +679,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   defp combat_error_message(:not_hostile),
     do: "Stone Age players cannot fight each other — only barbarians can be attacked."
+
+  defp combat_error_message(:own_city), do: "You can't attack your own city."
 
   defp combat_error_message(_other), do: "That attack can't be ordered."
 

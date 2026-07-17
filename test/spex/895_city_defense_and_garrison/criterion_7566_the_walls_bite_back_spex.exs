@@ -32,6 +32,19 @@ defmodule BrokenOathsSpex.Story895.Criterion7566Spex do
   clean `then_` assertion failure instead of an uncaught process
   EXIT; `fail_on_error_logs: false` accepts the resulting GenServer
   crash log for the same reason.
+
+  Setup-hardening (not in the original contract), both real-in-game
+  actions rather than new fixtures: (1) each first founding seeds 5-8
+  wilderness camps (story 892) — `Fixtures.isolate_camp/2` (the same
+  bridge story 893's specs use) keeps only the one farthest from
+  either city so no OTHER independently-roaming warrior intercepts
+  the marching "barbarian" before it arrives; (2) that march's own
+  final step is what spends the barbarian's one movement point
+  arriving at `barbarian_target` in the same tick — attacking
+  immediately after (no boundary in between) would find it with 0
+  movement and be refused, so `Fixtures.recharge_unit/2` restores it
+  first. Neither changes what this criterion is actually testing (a
+  city takes damage and its garrison counters).
   """
 
   use BrokenOathsSpex.Case
@@ -86,6 +99,34 @@ defmodule BrokenOathsSpex.Story895.Criterion7566Spex do
           "city_id" => to_string(other_city.id),
           "item" => "warrior"
         })
+
+        # Setup-hardening (not in the original contract): each first
+        # founding seeds 5-8 of its own wilderness camps (story 892),
+        # 1-2 of them INSIDE the founding player's own claimed region —
+        # routinely right next to that player's own city. Over the
+        # up-to-40-turn march below, a REAL, independently-roaming
+        # warrior from any of THOSE camps can (and for this world's
+        # seed, does) intercept and kill the marching "barbarian"
+        # (mechanically the second player's own real warrior, per this
+        # story's own spec convention) before it ever reaches
+        # `barbarian_target` — an unrelated collision this criterion's
+        # own SUBJECT (a city takes damage and counters) has no
+        # interest in. `Fixtures.isolate_camp/2` (the same sanctioned
+        # bridge story 893's specs already use for this exact class of
+        # interference) keeps only the single camp farthest from
+        # EITHER city and destroys every other camp (from either
+        # founding) and its warriors outright.
+        [farthest_camp | _] =
+          context.world
+          |> Fixtures.list_camps()
+          |> Enum.sort_by(fn camp ->
+            -min(
+              mesh_distance(context.world, city.tile_id, camp.tile_id),
+              mesh_distance(context.world, other_city.tile_id, camp.tile_id)
+            )
+          end)
+
+        :ok = Fixtures.isolate_camp(context.world, farthest_camp.id)
 
         for _ <- 1..8, do: Fixtures.advance_turn(context.world)
 
@@ -148,6 +189,19 @@ defmodule BrokenOathsSpex.Story895.Criterion7566Spex do
             {:cont, :ok}
           end
         end)
+
+        # Setup-hardening (not in the original contract): the wait
+        # loop above's own arrival tick is what spends the barbarian's
+        # one movement point getting it onto `barbarian_target` in the
+        # first place (Warrior `max_movement` is 1); attacking in the
+        # very same `when_` step with no boundary in between would find
+        # it with 0 movement left and be refused (`:out_of_movement`),
+        # for a reason that has nothing to do with this criterion's own
+        # SUBJECT (a city takes damage and counters). `Fixtures.
+        # recharge_unit/2` (already documented, in `WorldServer`, for
+        # exactly this "attack right after arrival" shape) restores it
+        # without a real boundary passing.
+        :ok = Fixtures.recharge_unit(context.world, barbarian.id)
 
         [barbarian] =
           for u <- Fixtures.player_units(context.world, context.other_user),
@@ -235,5 +289,30 @@ defmodule BrokenOathsSpex.Story895.Criterion7566Spex do
 
     Process.flag(:trap_exit, original_trap)
     result
+  end
+
+  # Raw mesh-adjacency BFS distance from `from` to `to` — the same
+  # notion `BrokenOaths.Game.Camps.ring_band/3` places camps by, used
+  # here only to rank camps by "how far from the action," not to
+  # validate any land-path route.
+  defp mesh_distance(world, from, to, max_depth \\ 40) do
+    0..max_depth
+    |> Enum.reduce_while({[from], MapSet.new([from])}, fn depth, {frontier, seen} ->
+      if to in frontier do
+        {:halt, {:found, depth}}
+      else
+        next =
+          frontier
+          |> Enum.flat_map(&BrokenOathsSpex.Fixtures.adjacent_tiles(world, &1))
+          |> Enum.uniq()
+          |> Enum.reject(&MapSet.member?(seen, &1))
+
+        {:cont, {next, MapSet.union(seen, MapSet.new(next))}}
+      end
+    end)
+    |> case do
+      {:found, depth} -> depth
+      _ -> 999
+    end
   end
 end

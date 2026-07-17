@@ -34,6 +34,16 @@ defmodule BrokenOathsSpex.Story896.Criterion7570Spex do
   adjacency gives no guarantee either unit lands next to the other, so
   this is engineered with a real move (`queue_move`), the same
   approach criterion 7541 uses.
+
+  Setup-hardening (not in the original contract, added alongside story
+  895): see criterion 7537's own moduledoc note — a completed
+  Warrior's landing tile defaults to its own city's tile when free, so
+  story 895's garrison bonus (+50% strength, on defense same as
+  attack) would otherwise silently stack with the lord's aura here,
+  pushing counter-damage past even the strength-12 band this criterion
+  asserts. The warrior is relocated off the city tile FIRST, before
+  either the barbarian's or the lord's own target tile is picked
+  relative to its (now final) position.
   """
 
   use BrokenOathsSpex.Case
@@ -76,6 +86,17 @@ defmodule BrokenOathsSpex.Story896.Criterion7570Spex do
           for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
 
         land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
+
+        # See moduledoc's garrison-bonus hardening note.
+        [warrior_target | _] =
+          context.world
+          |> Fixtures.adjacent_tiles(city.tile_id)
+          |> Enum.filter(land?)
+          |> Enum.reject(&(&1 in [lord.tile_id]))
+
+        :ok = Fixtures.relocate_unit(context.world, warrior.id, warrior_target)
+        [warrior] = for u <- Fixtures.player_units(context.world, context.user), u.id == warrior.id, do: u
+
         my_occupied = [city.tile_id, lord.tile_id, warrior.tile_id]
 
         [barbarian_target | _] =

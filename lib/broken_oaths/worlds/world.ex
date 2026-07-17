@@ -1,4 +1,19 @@
 defmodule BrokenOaths.Worlds.World do
+  @moduledoc """
+  A generated hex world: seed, mesh frequency, turn tracking, and the
+  world's own turn-boundary cadence (`turn_seconds`, story 897) — a
+  QA-fast world ticks every 5s while the default pace stays the
+  original 60s, each independently, since `turn_seconds` is read off
+  this struct rather than a single hardcoded process-wide constant
+  (see `BrokenOaths.Game.WorldServer`'s ticking doc).
+
+  `turn_seconds` is set once, at creation, via `creation_changeset/2`
+  (`Worlds.create_world/1`) and never cast by the ordinary
+  `changeset/2` (`Worlds.update_world/2`) — a world's pace is a launch
+  decision, not something that can drift out from under a game already
+  in progress.
+  """
+
   use Ecto.Schema
   import Ecto.Changeset
 
@@ -9,6 +24,7 @@ defmodule BrokenOaths.Worlds.World do
     field :status, :string, default: "active"
     field :turn, :integer, default: 0
     field :turn_started_at, :utc_datetime
+    field :turn_seconds, :integer, default: 60
 
     timestamps()
   end
@@ -20,5 +36,13 @@ defmodule BrokenOaths.Worlds.World do
     |> validate_number(:frequency, greater_than: 0, less_than_or_equal_to: 80)
     |> validate_number(:turn, greater_than_or_equal_to: 0)
     |> unique_constraint(:seed)
+  end
+
+  @doc "Changeset for a brand-new world — the only place `turn_seconds` may ever be set."
+  def creation_changeset(world, attrs) do
+    world
+    |> changeset(attrs)
+    |> cast(attrs, [:turn_seconds])
+    |> validate_number(:turn_seconds, greater_than: 0)
   end
 end

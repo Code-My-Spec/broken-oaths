@@ -29,6 +29,20 @@ defmodule BrokenOathsSpex.Story893.Criterion7555Spex do
 
   Inferred, not-yet-implemented shape: as in criterion 7551, this
   assumes each pushed warrior gains a `tile_id` field.
+
+  Setup-hardening (not in the original contract, unrelated to story
+  895): the `given_` step's own anchor check originally asserted
+  BOTH warriors within 1 hex of the camp — but the FIRST warrior to
+  spawn (well before the second reaches the 3-turn cadence needed to
+  join it, up to 24 boundaries later per this same step's own wait
+  loop) is already a live, `BarbarianAI`-driven actor for every one of
+  those intervening turns, free to roam up to `@roam_radius` (2, not
+  1) hexes from its own camp per that module's documented "Roaming"
+  behavior — a pre-existing mechanic this criterion's own SUBJECT
+  (barbarians never attack each other) has no interest in. The anchor
+  now matches that actual, documented radius; the criterion's own
+  `then_` assertion (neither barbarian ever loses HP or disappears)
+  is untouched.
   """
 
   use BrokenOathsSpex.Case
@@ -95,7 +109,7 @@ defmodule BrokenOathsSpex.Story893.Criterion7555Spex do
         assert length(camp.warriors) == 2
 
         for warrior <- camp.warriors do
-          assert land_distance(context.world, context.camp_tile, warrior.tile_id, 4) <= 1
+          assert land_distance(context.world, context.camp_tile, warrior.tile_id, 4) <= 2
         end
 
         {:ok, context |> Map.put(:warriors0, camp.warriors)}

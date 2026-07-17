@@ -20,7 +20,9 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
       (`nil` at the Stone Age cap), `production` (per-turn rate),
       `queue` (`[%{id:, type:, banked:, cost:}]`, head = current),
       `territory` (`[tile_id]`), `worked_tiles` (`[tile_id]`, excludes
-      the always-free center)
+      the always-free center), `hp` (story 895, capped at
+      `Game.CityDefense.max_hp/0`), `defense` (`Game.CityDefense.
+      defensive_strength/2` — base + size + garrison)
     * `:assignable_tiles` - territory tiles Play has already filtered
       to "not the center, not already worked, workable terrain" — this
       component has no world/terrain access to compute that itself
@@ -33,6 +35,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
 
   use BrokenOathsWeb, :live_component
 
+  alias BrokenOaths.Game.CityDefense
   alias BrokenOaths.Game.Production
 
   @catalog [:settler, :worker, :warrior]
@@ -60,6 +63,11 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
             <.icon name="hero-cake" class="w-3 h-3" /> {@city.food}/{food_label(@city.food_threshold)}
           </span>
           <span class="opacity-60">+{@city.production}/turn</span>
+        </div>
+
+        <div class="flex items-center gap-3 text-sm">
+          <span class="badge badge-error badge-outline" data-test="city-hp">{@city.hp}/{CityDefense.max_hp()}</span>
+          <span class="badge badge-outline" data-test="city-defense">{@city.defense}</span>
         </div>
 
         <.current_production queue={@city.queue} city_id={@city.id} />

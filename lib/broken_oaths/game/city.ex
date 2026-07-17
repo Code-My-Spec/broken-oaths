@@ -29,6 +29,8 @@ defmodule BrokenOaths.Game.City do
   alias BrokenOaths.Game.ProductionItem
   alias BrokenOaths.Worlds.World
 
+  @max_hp 100
+
   @type t :: %__MODULE__{
           id: integer() | nil,
           name: String.t() | nil,
@@ -37,6 +39,8 @@ defmodule BrokenOaths.Game.City do
           food: non_neg_integer(),
           territory: [integer()],
           worked_tiles: [integer()],
+          hp: non_neg_integer(),
+          production_halted_until: integer() | nil,
           world_id: integer() | nil,
           player_id: integer() | nil,
           world: World.t() | Ecto.Association.NotLoaded.t(),
@@ -53,6 +57,12 @@ defmodule BrokenOaths.Game.City do
     field :food, :integer, default: 0
     field :territory, {:array, :integer}, default: []
     field :worked_tiles, {:array, :integer}, default: []
+    # Story 895 — see `BrokenOaths.Game.CityDefense` for the combat math
+    # both fields back: `hp` (capped at 100, mirrors `game_camps.hp`)
+    # and `production_halted_until` (nil until the city is ever
+    # pillaged; the turn number its frozen production resumes at).
+    field :hp, :integer, default: @max_hp
+    field :production_halted_until, :integer
 
     belongs_to :world, World
     belongs_to :player, Player
@@ -72,12 +82,15 @@ defmodule BrokenOaths.Game.City do
       :size,
       :food,
       :territory,
-      :worked_tiles
+      :worked_tiles,
+      :hp,
+      :production_halted_until
     ])
     |> validate_required([:world_id, :player_id, :tile_id, :name, :size, :food])
     |> validate_length(:name, min: 1, max: 100)
     |> validate_number(:size, greater_than_or_equal_to: 1, less_than_or_equal_to: 4)
     |> validate_number(:food, greater_than_or_equal_to: 0)
+    |> validate_number(:hp, greater_than_or_equal_to: 0, less_than_or_equal_to: @max_hp)
     |> validate_worked_tiles_within_size()
     |> assoc_constraint(:world)
     |> assoc_constraint(:player)

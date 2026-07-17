@@ -43,6 +43,7 @@ defmodule BrokenOaths.Game.Turn do
           name: String.t(),
           size: pos_integer(),
           food: non_neg_integer(),
+          hp: non_neg_integer(),
           territory: [tile_id],
           worked_tiles: [tile_id],
           queue: [%{id: term(), type: :settler | :worker | :warrior,
@@ -109,7 +110,10 @@ defmodule BrokenOaths.Game.Turn do
        for any improvement whose declared builder is still standing on
        its tile.
     2. production accrual -- `Production.accrue/3` (flat base plus
-       worked-tile production) into each city's current queue item.
+       worked-tile production) into each city's current queue item, EXCEPT
+       a pillaged city still serving its `CityDefense.production_halted?/2`
+       freeze (story 895) -- that city's queue simply doesn't move this
+       boundary; its banked progress is untouched, not lost.
     3. completions/spawn placement -- `Production.complete/3`; a
        completed item with nowhere to land simply waits. Successful
        spawns come back as `{:unit_spawned, spawn_event}` events --
@@ -134,10 +138,27 @@ defmodule BrokenOaths.Game.Turn do
        `BarbarianAI.bounty_gold/0`, and a lord dying schedules an heir
        exactly like `WorldServer`'s own combat handler does), step one
        hex toward the nearest in-range target, or roam near its camp.
-       Entering a tile with a `:complete` improvement pillages it
-       (`Improvement.pillage/1`). Warriors resolve in ascending unit id
-       order, threading the tick's occupied-tile set so two barbarians
-       never collide.
+       `BarbarianAI.decide/6` itself never targets a city directly --
+       "adjacent to a city, nothing else to attack" is still reported
+       as `:hold` (see that module's own doc and its own committed unit
+       test) -- so THIS phase is what turns a `:hold` next to a city
+       into a real assault (story 895): `CityDefense.resolve_attack/4`
+       against that city, applied through `CityDefense.take_damage/3`
+       (folding in `CityDefense.pillage/2` the instant HP hits 0), with
+       every city a barbarian actually struck THIS tick tracked so
+       phase 3d below knows to skip its regen. A true hold (nothing
+       adjacent at all) is unchanged. Entering a tile with a `:complete`
+       improvement pillages it (`Improvement.pillage/1`). Warriors
+       resolve in ascending unit id order, threading the tick's
+       occupied-tile set so two barbarians never collide.
+    3d. city regeneration (story 895) -- every city NOT struck by
+       phase 3c's own barbarian-AI assault this tick regains
+       `CityDefense.regen_per_boundary/0` HP, capped at
+       `CityDefense.max_hp/0`. A city hit through `WorldServer`'s
+       immediate, out-of-tick "attack" surface (this story's own spec
+       convention of a stand-in real player) never suppresses this --
+       only an attack that's part of THIS tick's own AI phase does, so
+       the very next boundary after an out-of-band hit still regens.
     4. food accrual -- `Yields.accrue_food/3`.
     5. growth -- `Yields.grow/3`, at most once per city per tick.
     6. healing -- a unit that spent no movement this tick heals: 15 HP
@@ -163,6 +184,7 @@ defmodule BrokenOaths.Game.Turn do
 
   alias BrokenOaths.Game.BarbarianAI
   alias BrokenOaths.Game.Camps
+  alias BrokenOaths.Game.CityDefense
   alias BrokenOaths.Game.Combat
   alias BrokenOaths.Game.Improvement
   alias BrokenOaths.Game.Production
@@ -244,12 +266,13 @@ defmodule BrokenOaths.Game.Turn do
 
     {state, spawn_events, occupied} = resolve_completions(state)
     {state, camp_events, occupied} = resolve_camp_spawns(state, occupied)
-    state = resolve_barbarian_ai(state, occupied, new_turn)
+    {state, attacked_cities} = resolve_barbarian_ai(state, occupied, new_turn)
     {state, heir_events} = resolve_heirs(state, new_turn)
 
     new_state =
       state
       |> clear_orphaned_builders()
+      |> regen_cities(attacked_cities)
       |> accrue_food()
       |> grow_cities()
       |> heal_units()
@@ -288,7 +311,7 @@ defmodule BrokenOaths.Game.Turn do
         }
 
         positions = Map.new(state.units, fn {id, u} -> {id, u.tile_id} end)
-        {movers, positions} = run_rounds(movers, positions)
+        {movers, positions} = run_rounds(movers, positions, state.units, garrisonable_tiles(state.cities))
 
         %{
           state
@@ -328,7 +351,7 @@ defmodule BrokenOaths.Game.Turn do
 
     positions = Map.new(state.units, fn {id, unit} -> {id, unit.tile_id} end)
 
-    {movers, positions} = run_rounds(movers, positions)
+    {movers, positions} = run_rounds(movers, positions, state.units, garrisonable_tiles(state.cities))
 
     %{
       state
@@ -337,14 +360,22 @@ defmodule BrokenOaths.Game.Turn do
     }
   end
 
-  defp run_rounds(movers, positions) do
+  # `units` is the pre-round snapshot of every unit's `type`/`player_id`
+  # (stable for the round — only `positions` changes as movers claim
+  # tiles); `garrisonable` is `player_id => MapSet.t(their own cities'
+  # tile_ids)`, precomputed once via `garrisonable_tiles/1`. Both are
+  # read-only context for `attempt_step/4`'s story-895 garrison
+  # exception below.
+  defp run_rounds(movers, positions, units, garrisonable) do
     case active_movers(movers) do
       [] ->
         {movers, positions}
 
       ids ->
-        {movers, positions} = Enum.reduce(ids, {movers, positions}, &attempt_step/2)
-        run_rounds(movers, positions)
+        {movers, positions} =
+          Enum.reduce(ids, {movers, positions}, &attempt_step(&1, &2, units, garrisonable))
+
+        run_rounds(movers, positions, units, garrisonable)
     end
   end
 
@@ -357,16 +388,54 @@ defmodule BrokenOaths.Game.Turn do
     |> Enum.sort()
   end
 
-  defp attempt_step(unit_id, {movers, positions}) do
+  # `player_id => MapSet.t(tile_id)` of that player's own cities' own
+  # tiles — the only tiles `blocked?/4`'s garrison exception ever
+  # applies to.
+  defp garrisonable_tiles(cities) do
+    cities
+    |> Map.values()
+    |> Enum.group_by(& &1.player_id)
+    |> Map.new(fn {player_id, owned} -> {player_id, MapSet.new(Enum.map(owned, & &1.tile_id))} end)
+  end
+
+  defp attempt_step(unit_id, {movers, positions}, units, garrisonable) do
     mover = Map.fetch!(movers, unit_id)
     [target | rest] = mover.path
+    mover_unit = Map.fetch!(units, unit_id)
 
-    if target in Map.values(positions) do
+    # A step onto the mover's OWN current-in-round tile is degenerate,
+    # not a same-tile arrival to silently drop: `blocked?/5` always
+    # excludes the mover itself from `positions`-derived occupants (a
+    # unit never blocks its own vacated tile), so without this guard
+    # such a step would "succeed" into an empty path, `apply_orders/2`
+    # would read that as arrival, and the order would vanish instead of
+    # halting the mover with `:interrupted` as a blocked step should.
+    if target == mover.tile_id or blocked?(target, positions, units, mover_unit, garrisonable) do
       {Map.put(movers, unit_id, %{mover | status: :interrupted}), positions}
     else
       moved = %{mover | tile_id: target, path: rest, movement_left: mover.movement_left - 1}
       {Map.put(movers, unit_id, moved), Map.put(positions, unit_id, target)}
     end
+  end
+
+  # A tile with no occupants at all is never blocked. Otherwise blocked
+  # UNLESS `target` is `mover_unit`'s own city's own tile with garrison
+  # room for it (story 895 — `CityDefense.garrison_room?/2`); every
+  # other occupied tile, city or not, mine or another player's, keeps
+  # the original all-or-nothing rule.
+  defp blocked?(target, positions, units, mover_unit, garrisonable) do
+    occupants =
+      for {id, tile} <- positions, tile == target, id != mover_unit.id, do: Map.fetch!(units, id)
+
+    case occupants do
+      [] -> false
+      _ -> not entering_own_garrison_with_room?(target, occupants, mover_unit, garrisonable)
+    end
+  end
+
+  defp entering_own_garrison_with_room?(target, occupants, mover_unit, garrisonable) do
+    MapSet.member?(Map.get(garrisonable, mover_unit.player_id, MapSet.new()), target) and
+      CityDefense.garrison_room?(mover_unit, occupants)
   end
 
   defp apply_positions(units, movers, positions) do
@@ -473,10 +542,21 @@ defmodule BrokenOaths.Game.Turn do
   defp accrue_production(state) do
     cities =
       Map.new(state.cities, fn {id, city} ->
-        {id, Production.accrue(city, state.world, state.improvements)}
+        {id, accrue_or_skip(city, state)}
       end)
 
     %{state | cities: cities}
+  end
+
+  # A pillaged city's queue simply doesn't move while
+  # `CityDefense.production_halted?/2` holds — see that function's doc
+  # for exactly which boundaries that covers.
+  defp accrue_or_skip(city, state) do
+    if CityDefense.production_halted?(city, state.turn) do
+      city
+    else
+      Production.accrue(city, state.world, state.improvements)
+    end
   end
 
   # Threads a running "occupied tiles" set through cities in ascending
@@ -585,20 +665,25 @@ defmodule BrokenOaths.Game.Turn do
   # gets its first decision next boundary — but `spawn_occupied` (that
   # same phase's own occupied-tile thread) still reserves its tile, so
   # an already-existing barbarian can't roam or hunt onto it either.
+  #
+  # Returns `{state, attacked_city_ids}` — the second element (story
+  # 895) is every city THIS phase itself struck, ascending-id order
+  # threaded the same way `occupied` is; `regen_cities/2` reads it to
+  # skip that city's own regen this boundary (see `tick/1`'s doc).
   defp resolve_barbarian_ai(state, spawn_occupied, new_turn) do
     ids = for {id, unit} <- state.units, Map.get(unit, :camp_id), do: id
     occupied = MapSet.new(Map.keys(spawn_occupied))
 
-    {state, _occupied} =
-      Enum.reduce(Enum.sort(ids), {state, occupied}, &resolve_barbarian(&1, new_turn, &2))
+    {state, _occupied, attacked_cities} =
+      Enum.reduce(Enum.sort(ids), {state, occupied, MapSet.new()}, &resolve_barbarian(&1, new_turn, &2))
 
-    state
+    {state, attacked_cities}
   end
 
-  defp resolve_barbarian(id, new_turn, {state, occupied}) do
+  defp resolve_barbarian(id, new_turn, {state, occupied, attacked_cities}) do
     case Map.get(state.units, id) do
       nil ->
-        {state, occupied}
+        {state, occupied, attacked_cities}
 
       barbarian ->
         camp_tile = camp_tile_for(state.camps, Map.get(barbarian, :camp_id))
@@ -615,7 +700,7 @@ defmodule BrokenOaths.Game.Turn do
             seed: seed
           )
 
-        apply_barbarian_decision(decision, state, occupied, barbarian, new_turn)
+        apply_barbarian_decision(decision, state, occupied, attacked_cities, barbarian, new_turn)
     end
   end
 
@@ -630,9 +715,9 @@ defmodule BrokenOaths.Game.Turn do
   # the position is the one place this can be caught for certain — the
   # DB's own unique index on `(world_id, tile_id)` would otherwise raise
   # mid-transaction. A blocked barbarian simply holds this boundary.
-  defp apply_barbarian_decision({:move, tile}, state, occupied, barbarian, _new_turn) do
+  defp apply_barbarian_decision({:move, tile}, state, occupied, attacked_cities, barbarian, _new_turn) do
     if MapSet.member?(occupied, tile) do
-      {state, occupied}
+      {state, occupied, attacked_cities}
     else
       moved = %{barbarian | tile_id: tile, movement: 0}
 
@@ -643,16 +728,31 @@ defmodule BrokenOaths.Game.Turn do
       }
 
       new_occupied = occupied |> MapSet.delete(barbarian.tile_id) |> MapSet.put(tile)
-      {new_state, new_occupied}
+      {new_state, new_occupied, attacked_cities}
     end
   end
 
-  defp apply_barbarian_decision(:hold, state, occupied, _barbarian, _new_turn), do: {state, occupied}
+  # Story 895: `BarbarianAI.decide/6` reports `:hold` both for a true
+  # "nothing anywhere near" hold AND for "already adjacent to a city,
+  # nothing else to attack there yet" (that module's own doc/tests
+  # never resolve the city fight itself — see this module's own doc).
+  # This is where that second case becomes a real assault; a true hold
+  # (no adjacent city either) is unchanged.
+  defp apply_barbarian_decision(:hold, state, occupied, attacked_cities, barbarian, _new_turn) do
+    case adjacent_city(state, barbarian) do
+      nil ->
+        {state, occupied, attacked_cities}
 
-  defp apply_barbarian_decision({:attack, target_id}, state, occupied, barbarian, new_turn) do
+      city ->
+        new_state = resolve_barbarian_city_attack(state, barbarian, city)
+        {new_state, occupied, MapSet.put(attacked_cities, city.id)}
+    end
+  end
+
+  defp apply_barbarian_decision({:attack, target_id}, state, occupied, attacked_cities, barbarian, new_turn) do
     case Map.get(state.units, target_id) do
       nil ->
-        {state, occupied}
+        {state, occupied, attacked_cities}
 
       target ->
         new_state = resolve_barbarian_attack(state, barbarian, target, new_turn)
@@ -662,8 +762,38 @@ defmodule BrokenOaths.Game.Turn do
           |> vacate_if_gone(barbarian.tile_id, barbarian.id, new_state.units)
           |> vacate_if_gone(target.tile_id, target.id, new_state.units)
 
-        {new_state, new_occupied}
+        {new_state, new_occupied, attacked_cities}
     end
+  end
+
+  defp adjacent_city(state, barbarian) do
+    adjacent_tile_ids = Regions.adjacent_tiles(state.world, barbarian.tile_id)
+    Enum.find(Map.values(state.cities), &(&1.tile_id in adjacent_tile_ids))
+  end
+
+  # Same math `WorldServer.resolve_city_attack/3` uses for a stand-in
+  # real player's immediate "attack" — see `CityDefense.resolve_attack/4`'s
+  # doc. A barbarian that dies here (killed by the garrison's
+  # counter-blow) pays its killer's owner the bounty.
+  defp resolve_barbarian_city_attack(state, barbarian, city) do
+    seed = {state.world.seed, state.turn, barbarian.id, city.id}
+    units = Map.values(state.units)
+
+    %{damage_to_city: dealt, damage_to_barbarian: taken} =
+      CityDefense.resolve_attack(city, units, barbarian,
+        seed: seed,
+        attacker_aura?: lord_adjacent?(state, barbarian)
+      )
+
+    new_city = CityDefense.take_damage(city, dealt, state.turn)
+    new_barbarian = %{barbarian | hp: max(barbarian.hp - taken, 0), movement: 0}
+
+    %{
+      state
+      | units: apply_combat_unit(state.units, barbarian.id, new_barbarian),
+        cities: Map.put(state.cities, city.id, new_city)
+    }
+    |> pay_bounty_if_barbarian_fell(new_barbarian, %{player_id: city.player_id})
   end
 
   defp vacate_if_gone(occupied, tile_id, unit_id, units) do
@@ -681,12 +811,18 @@ defmodule BrokenOaths.Game.Turn do
   # (`WorldServer.resolve_attack/3`) — a dying defender still lands its
   # counter-blow. A barbarian that dies here pays its killer's owner
   # the bounty; a lord that dies here schedules an heir exactly like a
-  # player-initiated kill would.
+  # player-initiated kill would. `defender_garrisoned?` (story 895):
+  # a player unit standing on its own city's tile fights back at +50%
+  # here too, same as when it's the one striking out.
   defp resolve_barbarian_attack(state, barbarian, target, new_turn) do
     seed = {state.world.seed, state.turn, barbarian.id, target.id}
 
     %{damage_to_defender: dealt, damage_to_attacker: taken} =
-      Combat.resolve(barbarian, target, seed: seed, defender_aura?: lord_adjacent?(state, target))
+      Combat.resolve(barbarian, target,
+        seed: seed,
+        defender_aura?: lord_adjacent?(state, target),
+        defender_garrisoned?: CityDefense.garrisoned?(target, Map.values(state.cities))
+      )
 
     new_barbarian = %{barbarian | hp: max(barbarian.hp - taken, 0), movement: 0}
     new_target = %{target | hp: max(target.hp - dealt, 0)}
@@ -728,6 +864,26 @@ defmodule BrokenOaths.Game.Turn do
     |> Enum.any?(
       &(&1.type == :lord and &1.player_id == unit.player_id and &1.tile_id in adjacent_tile_ids)
     )
+  end
+
+  # -------------------------------------------------------------------
+  # City regeneration (story 895)
+  # -------------------------------------------------------------------
+
+  # Every city NOT in `attacked_cities` (this tick's own barbarian-AI
+  # assaults — see `resolve_barbarian_ai/3`'s doc) regens; a struck one
+  # is left exactly as the assault left it this boundary.
+  defp regen_cities(state, attacked_cities) do
+    cities =
+      Map.new(state.cities, fn {id, city} ->
+        if MapSet.member?(attacked_cities, id) do
+          {id, city}
+        else
+          {id, CityDefense.regen(city)}
+        end
+      end)
+
+    %{state | cities: cities}
   end
 
   # -------------------------------------------------------------------

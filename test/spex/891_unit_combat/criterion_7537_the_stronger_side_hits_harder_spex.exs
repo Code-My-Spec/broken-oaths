@@ -13,6 +13,18 @@ defmodule BrokenOathsSpex.Story891.Criterion7537Spex do
   unit placed via `Fixtures.spawn_barbarian/2`, whose strength (15) is
   `Game.Combat.base_strength(:barbarian_warrior)` — the same value
   these damage bands were derived from.
+
+  Setup-hardening (not in the original contract, added alongside story
+  895): a completed Warrior's landing tile defaults to its own city's
+  tile when free (`Production.landing_tile/3`), so this warrior stands
+  garrisoned there by construction. Story 895's garrison bonus (+50%
+  strength while standing on a city's own tile) now applies, silently
+  corrupting the plain, no-garrison strength-10 band this criterion
+  asserts — the exact same class of problem `ensure_lord_away/5`
+  already exists to prevent for an unplanned lord aura. The warrior is
+  relocated off the city tile first, a real in-game action
+  (`Fixtures.relocate_unit/3`, the same sanctioned bridge story 893's
+  specs already use).
   """
 
   use BrokenOathsSpex.Case
@@ -51,6 +63,16 @@ defmodule BrokenOathsSpex.Story891.Criterion7537Spex do
           for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
 
         land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
+
+        # See moduledoc's garrison-bonus hardening note.
+        [warrior_target | _] =
+          context.world
+          |> Fixtures.adjacent_tiles(city.tile_id)
+          |> Enum.filter(land?)
+          |> Enum.reject(&(&1 in [lord.tile_id]))
+
+        :ok = Fixtures.relocate_unit(context.world, warrior.id, warrior_target)
+        [warrior] = for u <- Fixtures.player_units(context.world, context.user), u.id == warrior.id, do: u
 
         # This criterion asserts the plain, no-aura strength-10 band —
         # spawn placement gives no guarantee the lord DOESN'T land

@@ -97,7 +97,20 @@ defmodule BrokenOaths.Game.UnitTest do
     assert changeset.valid?
   end
 
-  test "only one unit per tile per world" do
+  # Story 895: the blanket `(world_id, tile_id)` DB uniqueness this test
+  # used to assert was dropped outright by migration
+  # `20260716190000_drop_unit_tile_uniqueness_for_city_garrisons` — a
+  # city's own tile is now a deliberate stacking exception (up to 3
+  # friendly military units, plus any number of civilians; see
+  # `BrokenOaths.Game.CityDefense.garrison_room?/2`), and Postgres has
+  # no built-in "unique except on these specific tiles" constraint, so
+  # "one unit per hex" moved entirely to the application layer
+  # (`WorldServer.occupied_by_own?/4` at queue time, `Turn`'s
+  # `attempt_step/4` collision check at tick time — see `garrison_room?/2`'s
+  # own test coverage in `city_defense_test.exs` for the exception
+  # itself). The changeset/schema layer no longer refuses a same-tile
+  # insert at all, which is exactly what this asserts now.
+  test "the changeset layer no longer refuses two units sharing a tile" do
     attrs = valid_attrs()
     assert {:ok, _unit} = Unit.changeset(%Unit{}, attrs) |> Repo.insert()
 
@@ -105,7 +118,6 @@ defmodule BrokenOaths.Game.UnitTest do
     other_player = player_fixture(%{world: world, region_id: 2})
     dup_attrs = %{attrs | world_id: world.id, player_id: other_player.id}
 
-    {:error, changeset} = Unit.changeset(%Unit{}, dup_attrs) |> Repo.insert()
-    assert %{world_id: ["has already been taken"]} = errors_on(changeset)
+    assert {:ok, _other_unit} = Unit.changeset(%Unit{}, dup_attrs) |> Repo.insert()
   end
 end

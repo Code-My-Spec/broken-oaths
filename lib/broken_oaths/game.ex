@@ -93,6 +93,20 @@ defmodule BrokenOaths.Game do
   def attack_camp(world, user, unit_id, camp_id),
     do: WorldServer.call(world, {:attack_camp, user, unit_id, camp_id})
 
+  @doc """
+  Order `unit_id` to attack `city_id` (story 895): adjacent, not the
+  attacker's own city. Resolves immediately, like `attack/4` — damage
+  to the city's own HP (pillaged, not captured, at 0 — see
+  `BrokenOaths.Game.CityDefense`) and counter-attack damage the
+  attacker takes from the city's strongest garrisoned defender (0 if
+  undefended).
+  """
+  @spec attack_city(map(), map(), term(), term()) ::
+          {:ok, %{damage_dealt: non_neg_integer(), damage_taken: non_neg_integer()}}
+          | {:error, :not_owner | :invalid_target | :out_of_movement | :not_adjacent | :own_city}
+  def attack_city(world, user, unit_id, city_id),
+    do: WorldServer.call(world, {:attack_city, user, unit_id, city_id})
+
   @doc "Run one deterministic turn tick — exactly what the 60s timer fires."
   def advance_turn(world), do: WorldServer.call(world, :advance_turn)
 

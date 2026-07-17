@@ -34,6 +34,16 @@ defmodule BrokenOathsSpex.Story891.Criterion7575Spex do
   and killing the lord before this scenario's own setup even finishes
   — nothing to do with what this criterion tests (wounded-vs-fresh
   damage bands). `Fixtures.relocate_unit/3` places it directly instead.
+
+  A second hardening (added alongside story 895): the FIRST of the two
+  produced warriors lands on the city's own tile by default
+  (`Production.landing_tile/3` prefers it when free — the second,
+  finding it occupied, lands adjacent instead), so story 895's
+  garrison bonus (+50% strength) would otherwise silently apply to
+  ONLY the fresh warrior's attack, corrupting the very comparison this
+  criterion is about. Both warriors are relocated off the city tile
+  first, the same real in-game action (`Fixtures.relocate_unit/3`)
+  already used for the lord above.
   """
 
   use BrokenOathsSpex.Case
@@ -74,6 +84,24 @@ defmodule BrokenOathsSpex.Story891.Criterion7575Spex do
           for u <- Fixtures.player_units(context.world, context.user), u.type == :warrior, do: u
 
         land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
+
+        # See moduledoc's second (garrison-bonus) hardening note. Both
+        # warriors' CURRENT tiles are excluded too — one of them (the
+        # first produced) already stands on one of these candidates.
+        [fresh_warrior_target, wounded_warrior_target | _] =
+          context.world
+          |> Fixtures.adjacent_tiles(city.tile_id)
+          |> Enum.filter(land?)
+          |> Enum.reject(&(&1 in [lord.tile_id, fresh_warrior.tile_id, wounded_warrior.tile_id]))
+
+        :ok = Fixtures.relocate_unit(context.world, fresh_warrior.id, fresh_warrior_target)
+        :ok = Fixtures.relocate_unit(context.world, wounded_warrior.id, wounded_warrior_target)
+
+        [fresh_warrior] =
+          for u <- Fixtures.player_units(context.world, context.user), u.id == fresh_warrior.id, do: u
+
+        [wounded_warrior] =
+          for u <- Fixtures.player_units(context.world, context.user), u.id == wounded_warrior.id, do: u
 
         # Both then_ bands assume no lord aura on either warrior —
         # spawn placement gives no guarantee the lord DOESN'T land

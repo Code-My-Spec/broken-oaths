@@ -46,6 +46,18 @@ defmodule BrokenOaths.Game.Combat do
   from the same tick-state always agree, which lockstep resolution
   requires.
 
+  ## Garrison bonus (story 895)
+
+  A unit standing on its own city's tile fights at +50% strength,
+  whichever side of the exchange it's on — `garrisoned_strength/2` is
+  `effective_strength/2` (aura folded in, then wounding scaled) times
+  1.5. `resolve/3` accepts `:attacker_garrisoned?`/`:defender_garrisoned?`
+  opts (default `false`) that switch a side onto this boosted strength
+  instead of the plain one; `BrokenOaths.Game.CityDefense` is the seam
+  that decides whether a unit qualifies (standing on its own city's own
+  tile) — this module only knows the two numbers that decision
+  produces, exactly like the lord's aura above.
+
   ## Target legality
 
   `hostile?/2` is the seam for barbarian identity: a unit with a `nil`
@@ -84,6 +96,7 @@ defmodule BrokenOaths.Game.Combat do
 
   @base_strength %{lord: 12, warrior: 10, settler: 0, worker: 0, barbarian_warrior: 15}
   @lord_aura_bonus 2
+  @garrison_bonus 1.5
   @base_damage 30
   @damage_scale 0.04
   @roll_floor 0.75
@@ -112,6 +125,15 @@ defmodule BrokenOaths.Game.Combat do
   defp wounded_multiplier(%{hp: hp, max_hp: max_hp}), do: 0.5 + 0.5 * (hp / max_hp)
 
   @doc """
+  `unit`'s combat strength while garrisoned on its own city's tile
+  (story 895): `effective_strength/2`, boosted 50% for fighting from
+  the walls. Callers (`BrokenOaths.Game.CityDefense`) determine whether
+  a unit qualifies; this module only applies the multiplier.
+  """
+  @spec garrisoned_strength(unit(), boolean()) :: float()
+  def garrisoned_strength(unit, aura? \\ false), do: effective_strength(unit, aura?) * @garrison_bonus
+
+  @doc """
   Resolve a single simultaneous exchange: damage `attacker` deals to
   `defender` and damage `defender` deals back to `attacker`, both
   computed from the same pre-combat strengths (a dying defender still
@@ -120,12 +142,15 @@ defmodule BrokenOaths.Game.Combat do
     * `:seed` — any term; rolls are deterministic for a given seed
     * `:attacker_aura?` / `:defender_aura?` — whether each side stands
       adjacent to its own living lord (default `false`)
+    * `:attacker_garrisoned?` / `:defender_garrisoned?` — whether each
+      side fights from its own city's walls, `garrisoned_strength/2`
+      instead of `effective_strength/2` (default `false`, story 895)
   """
   @spec resolve(unit(), unit(), keyword()) :: attack_result()
   def resolve(attacker, defender, opts) do
     seed = Keyword.fetch!(opts, :seed)
-    attacker_strength = effective_strength(attacker, Keyword.get(opts, :attacker_aura?, false))
-    defender_strength = effective_strength(defender, Keyword.get(opts, :defender_aura?, false))
+    attacker_strength = combat_strength(attacker, opts, :attacker)
+    defender_strength = combat_strength(defender, opts, :defender)
 
     %{
       damage_to_defender: damage(attacker_strength, defender_strength, {seed, :to_defender}),
@@ -133,7 +158,28 @@ defmodule BrokenOaths.Game.Combat do
     }
   end
 
-  defp damage(striking_strength, resisting_strength, roll_seed) do
+  defp combat_strength(unit, opts, side) do
+    aura? = Keyword.get(opts, :"#{side}_aura?", false)
+
+    if Keyword.get(opts, :"#{side}_garrisoned?", false) do
+      garrisoned_strength(unit, aura?)
+    else
+      effective_strength(unit, aura?)
+    end
+  end
+
+  @doc """
+  The Civ VI damage curve for a single direction of an exchange: 30
+  base damage at equal strength, scaling ~4% per point of strength
+  difference, with a ±25% random roll seeded from `roll_seed` (see this
+  module's Determinism doc). Public so `BrokenOaths.Game.CityDefense`
+  can resolve a barbarian-vs-city exchange (one side a city's
+  defensive strength, not a unit) against the SAME curve `resolve/3`
+  uses for unit-vs-unit combat, rather than a second, drifting copy of
+  this formula.
+  """
+  @spec damage(number(), number(), term()) :: pos_integer()
+  def damage(striking_strength, resisting_strength, roll_seed) do
     @base_damage
     |> Kernel.*(:math.exp(@damage_scale * (striking_strength - resisting_strength)))
     |> Kernel.*(roll(roll_seed))

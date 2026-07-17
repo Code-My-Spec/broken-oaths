@@ -20,7 +20,7 @@ defmodule BrokenOaths.Worlds do
 
   def create_world(attrs \\ %{}) do
     %World{}
-    |> World.changeset(attrs)
+    |> World.creation_changeset(attrs)
     |> Repo.insert()
   end
 

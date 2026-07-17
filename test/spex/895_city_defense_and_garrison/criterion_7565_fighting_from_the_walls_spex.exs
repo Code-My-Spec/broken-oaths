@@ -8,22 +8,44 @@ defmodule BrokenOathsSpex.Story895.Criterion7565Spex do
   Reuses story 891's `Game.Combat` surface verbatim (the `"attack"`
   hook, the Civ VI damage curve, adjacency-only attacks with no
   movement) — the only new ingredient is that the attacker starts the
-  fight already garrisoned. A player Warrior has Strength 10 =
-  Defense 10 (`.code_my_spec/stories/stone_age.md` §4.2), so a ±50%
-  "defense" bonus and a hypothetical "attack" bonus land on the same
-  number for this unit type — 15 either way — sidestepping which stat
-  name the eventual implementation actually boosts.
+  fight already garrisoned.
 
-  Barbarian-fixture note: see `BrokenOathsSpex.Story891.Criterion7533Spex`'s
-  moduledoc — "the barbarian" here is mechanically a second real
-  player's warrior (Strength 10 = Defense 10, not yet the real 15/15
-  Camps-spawned stat, per that story's own known limitation).
+  Setup-hardening (not in the original contract): earlier drafts of
+  this criterion stood a second real player's warrior in for "the
+  barbarian" (the convention `BrokenOathsSpex.Story891.Criterion7533Spex`'s
+  moduledoc describes for a DIFFERENT purpose — sparing a wait on
+  `Game.Camps`' own spawn cadence). That doesn't work HERE:
+  `Game.Combat.hostile?/2` refuses combat between two units that both
+  carry a real `player_id` ("no Stone Age PvP" — story 891, criterion
+  7542, a HARD, already-passing rule this criterion must not weaken),
+  so an ordinary `"attack"`/`target_unit_id` order between two real
+  players' units is refused outright — `damage_dealt` stays 0
+  regardless of any garrison bonus, for a reason that has nothing to
+  do with what this criterion means to test. This version uses a REAL,
+  ownerless barbarian instead (`Fixtures.spawn_barbarian/2`,
+  `player_id: nil` — the same fixture criterion 7533 itself uses),
+  placed directly on a land tile adjacent to the city — no march, no
+  exposure to any OTHER independently-roaming camp warrior along the
+  way. A real barbarian warrior's base strength is 15
+  (`Game.Combat.base_strength/1`), not the 10 an earlier draft's
+  stand-in Warrior carried, so the expected damage band below is
+  computed against 15, not 10: attacker strength
+  `Combat.garrisoned_strength/2` = 10 × 1.5 = 15 (garrison bonus,
+  full HP, no aura — see the lord-relocation hardening below) against
+  defender strength 15 (equal strength) — `30 × e^0 × [0.75, 1.25]`
+  ≈ `[22.5, 37.5]`, rounding (round-half-away-from-zero, same as
+  `combat_test.exs`'s own `expected_band/2` helper) to `[23, 38]`.
 
-  KNOWN LIMITATION: 30 × e^(0.04 × (15 − 10)) ± 25% ≈ [27.5, 45.8],
-  rounded to [27, 46] — the same numeric band criterion 7537 derives
-  for an unrelated matchup (strength-15 attacker vs. defense-10
-  defender); a coincidence of this story's chosen stat values, not a
-  copy-paste error.
+  A second hardening, unrelated to the barbarian swap: `Spawner`
+  places a fresh civilization's lord and settler close together by
+  design, so the lord routinely lands adjacent to the settler's
+  (hence the city's) own tile. Left there, `Combat`'s pre-existing +2
+  lord-aura bonus (story 891) would fold into the garrison-boosted
+  strength this criterion means to isolate, pushing damage outside
+  the band above on whichever runs happen to spawn the lord next
+  door. The lord is relocated well clear of the city first — a real
+  in-game action, `Fixtures.relocate_unit/3`, the same sanctioned
+  bridge story 893's own specs already use.
   """
 
   use BrokenOathsSpex.Case
@@ -36,7 +58,6 @@ defmodule BrokenOathsSpex.Story895.Criterion7565Spex do
     scenario "a garrisoned warrior strikes an adjacent barbarian without leaving the city" do
       given_(:a_world)
       given_(:registered_player)
-      given_(:second_registered_player)
 
       given_ "my warrior stands garrisoned on my city's own tile, adjacent to a barbarian", context do
         {:ok, join_live, _html} = live(context.conn, ~p"/play")
@@ -58,39 +79,23 @@ defmodule BrokenOathsSpex.Story895.Criterion7565Spex do
           "item" => "warrior"
         })
 
-        {:ok, other_join_live, _html} = live(context.other_conn, ~p"/play")
-
-        other_join_live
-        |> element("[data-test='join-world-#{context.world.id}']")
-        |> render_click()
-
-        {:ok, other_play_live, _html} = live(context.other_conn, ~p"/play/#{context.world.id}")
-
-        [other_settler | _] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.type == :settler,
-              do: u
-
-        render_hook(other_play_live, "found_city", %{"unit_id" => to_string(other_settler.id)})
-        [other_city] = Fixtures.player_cities(context.world, context.other_user)
-
-        render_hook(other_play_live, "queue_production", %{
-          "city_id" => to_string(other_city.id),
-          "item" => "warrior"
-        })
-
         for _ <- 1..8, do: Fixtures.advance_turn(context.world)
 
         [warrior] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :warrior, do: u
 
-        [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.type == :warrior,
-              do: u
-
         [lord] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
+
+        # See moduledoc's lord-relocation hardening note.
+        far_tile =
+          context.world
+          |> ring_tiles(city.tile_id, 3)
+          |> Enum.filter(&(Fixtures.tile_class(context.world, &1) == :land))
+          |> List.first()
+
+        :ok = Fixtures.relocate_unit(context.world, lord.id, far_tile)
+        [lord] = for u <- Fixtures.player_units(context.world, context.user), u.id == lord.id, do: u
 
         unless warrior.tile_id == city.tile_id do
           render_hook(play_live, "queue_move", %{
@@ -119,35 +124,13 @@ defmodule BrokenOathsSpex.Story895.Criterion7565Spex do
         land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
         my_occupied = [city.tile_id, lord.tile_id]
 
-        [barbarian_target | _] =
+        [barbarian_tile | _] =
           context.world
           |> Fixtures.adjacent_tiles(city.tile_id)
           |> Enum.filter(land?)
           |> Enum.reject(&(&1 in my_occupied))
 
-        render_hook(other_play_live, "queue_move", %{
-          "unit_id" => to_string(barbarian.id),
-          "to_tile" => barbarian_target
-        })
-
-        Enum.reduce_while(1..40, :ok, fn _, :ok ->
-          [b] =
-            for u <- Fixtures.player_units(context.world, context.other_user),
-                u.id == barbarian.id,
-                do: u
-
-          if b.tile_id == barbarian_target do
-            {:halt, :ok}
-          else
-            Fixtures.advance_turn(context.world)
-            {:cont, :ok}
-          end
-        end)
-
-        [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.id == barbarian.id,
-              do: u
+        barbarian = Fixtures.spawn_barbarian(context.world, barbarian_tile)
 
         {:ok,
          context
@@ -167,15 +150,13 @@ defmodule BrokenOathsSpex.Story895.Criterion7565Spex do
         {:ok, context}
       end
 
-      then_ "the damage dealt reflects the garrison's boosted combat strength (roughly 27 to 46)",
+      then_ "the damage dealt reflects the garrison's boosted combat strength (roughly 23 to 38)",
             context do
         [barbarian] =
-          for u <- Fixtures.player_units(context.world, context.other_user),
-              u.id == context.barbarian.id,
-              do: u
+          for u <- Fixtures.visible_units(context.world, context.user), u.id == context.barbarian.id, do: u
 
         dealt = context.barbarian_hp0 - barbarian.hp
-        assert dealt >= 27 and dealt <= 46
+        assert dealt >= 23 and dealt <= 38
         {:ok, context}
       end
 
@@ -189,5 +170,21 @@ defmodule BrokenOathsSpex.Story895.Criterion7565Spex do
         {:ok, context}
       end
     end
+  end
+
+  # Every land tile whose raw mesh-adjacency distance from `start` is
+  # exactly `depth` — the same BFS-ring idiom criteria 7543/7544/7569
+  # already use for "how many hexes away."
+  defp ring_tiles(world, start, depth) do
+    Enum.reduce(1..depth, {[start], MapSet.new([start])}, fn _, {frontier, seen} ->
+      next =
+        frontier
+        |> Enum.flat_map(&BrokenOathsSpex.Fixtures.adjacent_tiles(world, &1))
+        |> Enum.uniq()
+        |> Enum.reject(&MapSet.member?(seen, &1))
+
+      {next, MapSet.union(seen, MapSet.new(next))}
+    end)
+    |> elem(0)
   end
 end

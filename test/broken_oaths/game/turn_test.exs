@@ -51,6 +51,11 @@ defmodule BrokenOaths.Game.TurnTest do
       name: Keyword.get(opts, :name, "City #{id}"),
       size: Keyword.get(opts, :size, 1),
       food: Keyword.get(opts, :food, 0),
+      # Story 895: `CityDefense.regen/1` (wired into `Turn.regen_cities/2`)
+      # requires city HP — `Game.City`'s own schema defaults a freshly
+      # founded city to `CityDefense.max_hp/0` (100), so plain test-built
+      # city maps mirror that same default here.
+      hp: Keyword.get(opts, :hp, 100),
       territory: Keyword.get(opts, :territory, [Keyword.fetch!(opts, :tile)]),
       worked_tiles: Keyword.get(opts, :worked_tiles, []),
       queue: Keyword.get(opts, :queue, [])

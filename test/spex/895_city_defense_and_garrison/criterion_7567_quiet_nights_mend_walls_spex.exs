@@ -19,6 +19,13 @@ defmodule BrokenOathsSpex.Story895.Criterion7567Spex do
   that the same way `Criterion7533Spex.attempt_attack/3` and
   `Criterion7566Spex.attempt_attack/2` do. `fail_on_error_logs: false`
   accepts the resulting GenServer crash log for the same reason.
+
+  Setup-hardening (not in the original contract): see criterion 7566's
+  moduledoc for the full rationale — this reuses that criterion's
+  long-march setup verbatim, so it needs the SAME two real-in-game-action
+  fixes (`Fixtures.isolate_camp/2` against unrelated camp interference,
+  `Fixtures.recharge_unit/2` against the march's own final step
+  spending the attacker's only movement point).
   """
 
   use BrokenOathsSpex.Case
@@ -69,6 +76,26 @@ defmodule BrokenOathsSpex.Story895.Criterion7567Spex do
           "item" => "warrior"
         })
 
+        # Setup-hardening (not in the original contract), both real
+        # in-game actions rather than new fixtures — see criterion
+        # 7566's moduledoc for the full rationale (this criterion
+        # reuses that one's attack surface and shares the same
+        # long-march setup): (1) `Fixtures.isolate_camp/2` keeps only
+        # the wilderness camp farthest from either city, so no OTHER
+        # independently-roaming warrior intercepts the marching
+        # "barbarian" before it arrives.
+        [farthest_camp | _] =
+          context.world
+          |> Fixtures.list_camps()
+          |> Enum.sort_by(fn camp ->
+            -min(
+              mesh_distance(context.world, city.tile_id, camp.tile_id),
+              mesh_distance(context.world, other_city.tile_id, camp.tile_id)
+            )
+          end)
+
+        :ok = Fixtures.isolate_camp(context.world, farthest_camp.id)
+
         for _ <- 1..8, do: Fixtures.advance_turn(context.world)
 
         [barbarian] =
@@ -106,6 +133,12 @@ defmodule BrokenOathsSpex.Story895.Criterion7567Spex do
             {:cont, :ok}
           end
         end)
+
+        # (2) that march's own final step is what spends the
+        # barbarian's one movement point arriving in the same tick —
+        # attacking immediately after (no boundary in between) would
+        # find it with 0 movement and be refused.
+        :ok = Fixtures.recharge_unit(context.world, barbarian.id)
 
         [barbarian] =
           for u <- Fixtures.player_units(context.world, context.other_user),
@@ -176,5 +209,30 @@ defmodule BrokenOathsSpex.Story895.Criterion7567Spex do
 
     Process.flag(:trap_exit, original_trap)
     result
+  end
+
+  # Raw mesh-adjacency BFS distance from `from` to `to` — the same
+  # notion `BrokenOaths.Game.Camps.ring_band/3` places camps by, used
+  # here only to rank camps by "how far from the action," not to
+  # validate any land-path route.
+  defp mesh_distance(world, from, to, max_depth \\ 40) do
+    0..max_depth
+    |> Enum.reduce_while({[from], MapSet.new([from])}, fn depth, {frontier, seen} ->
+      if to in frontier do
+        {:halt, {:found, depth}}
+      else
+        next =
+          frontier
+          |> Enum.flat_map(&BrokenOathsSpex.Fixtures.adjacent_tiles(world, &1))
+          |> Enum.uniq()
+          |> Enum.reject(&MapSet.member?(seen, &1))
+
+        {:cont, {next, MapSet.union(seen, MapSet.new(next))}}
+      end
+    end)
+    |> case do
+      {:found, depth} -> depth
+      _ -> 999
+    end
   end
 end

@@ -10,8 +10,14 @@ defmodule BrokenOaths.Game.Unit do
   warriors per camp" at 2). An ordinary player-owned unit always sets
   `player_id` and leaves `camp_id` nil; the two are never both set.
 
-  One unit per hex is a hard rule enforced by the DB via a unique
-  index on `(world_id, tile_id)`.
+  One unit per hex is a hard rule everywhere EXCEPT a city's own tile
+  (story 895's garrison exception — see
+  `BrokenOaths.Game.CityDefense.garrison_room?/2`), so it's enforced at
+  the application layer (`BrokenOaths.Game.WorldServer.occupied_by_own?/4`
+  at queue time, `BrokenOaths.Game.Turn`'s movement collision check at
+  tick time) rather than a blanket DB unique index — see migration
+  `20260716190000` for why a DB-level constraint can no longer express
+  this rule.
 
   Per-type stats (starting hp/movement) live in
   `BrokenOaths.Game.Production.unit_stats/1` alongside the rest of the
@@ -93,7 +99,6 @@ defmodule BrokenOaths.Game.Unit do
     |> assoc_constraint(:world)
     |> assoc_constraint(:player)
     |> assoc_constraint(:camp)
-    |> unique_constraint([:world_id, :tile_id], name: :game_units_world_id_tile_id_index)
   end
 
   defp validate_hp_within_max(changeset) do

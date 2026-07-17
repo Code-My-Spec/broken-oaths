@@ -24,6 +24,12 @@ defmodule BrokenOathsSpex.Story895.Criterion7568Spex do
   existing, so the softening loop is bounded generously (25 attacks)
   rather than counted precisely — a documented uncertainty, not a
   fabricated number.
+
+  Setup-hardening (not in the original contract): see criterion
+  7566's moduledoc for the full rationale — `Fixtures.isolate_camp/2`
+  against an unrelated camp warrior reaching (and killing) the
+  attacking barbarian across this criterion's own considerably longer
+  wait.
   """
 
   use BrokenOathsSpex.Case
@@ -74,6 +80,27 @@ defmodule BrokenOathsSpex.Story895.Criterion7568Spex do
           "city_id" => to_string(other_city.id),
           "item" => "warrior"
         })
+
+        # Setup-hardening (not in the original contract), a real
+        # in-game action rather than a new fixture — see criterion
+        # 7566's moduledoc for the full rationale. This criterion's own
+        # wait is considerably LONGER (up to 40 marching + 120 growing
+        # + 3 queuing turn boundaries before the softening loop even
+        # starts, all real ticks the barbarian sits idle through near
+        # the city), so the exposure to an unrelated camp warrior is
+        # even greater here. `Fixtures.isolate_camp/2` keeps only the
+        # camp farthest from either city.
+        [farthest_camp | _] =
+          context.world
+          |> Fixtures.list_camps()
+          |> Enum.sort_by(fn camp ->
+            -min(
+              mesh_distance(context.world, city.tile_id, camp.tile_id),
+              mesh_distance(context.world, other_city.tile_id, camp.tile_id)
+            )
+          end)
+
+        :ok = Fixtures.isolate_camp(context.world, farthest_camp.id)
 
         for _ <- 1..8, do: Fixtures.advance_turn(context.world)
 
@@ -131,10 +158,43 @@ defmodule BrokenOathsSpex.Story895.Criterion7568Spex do
         [city] =
           for c <- Fixtures.player_cities(context.world, context.user), c.id == city.id, do: c
 
-        render_hook(play_live, "queue_production", %{
-          "city_id" => to_string(city.id),
-          "item" => "worker"
-        })
+        # Setup-hardening (not in the original contract): this
+        # criterion's own city regenerates 5 HP on every boundary the
+        # softening loop below DOESN'T land a pillaging blow on (see
+        # `Game.CityDefense.regen/1` — this loop's attacks are all
+        # immediate, out-of-tick resolutions, exactly the class this
+        # story's own criterion 7567 requires regen to ignore), so
+        # reaching 0 HP from an undefended city's 100 routinely takes
+        # well more than the ~8 boundaries a size-2 city's worked-tile
+        # production would need to finish ONE Worker (cost 60) —
+        # emptying the queue before pillage ever lands, contradicting
+        # this criterion's own "there is real banked progress for the
+        # pillage to freeze" premise. Un-working the auto-assigned tile
+        # (the ordinary `assign_worked_tile` command, same fix
+        # criterion 7562 already established) drops accrual to the
+        # flat base alone; queuing five Workers back-to-back (instead
+        # of one) guarantees a "Worker" item is still in progress
+        # whenever pillage actually lands, however many boundaries the
+        # softening loop needs (capped at 25, i.e. at most 24 real
+        # boundaries of production — nowhere near enough at the flat
+        # base to exhaust five).
+        case city.worked_tiles do
+          [worked | _] ->
+            render_hook(play_live, "assign_worked_tile", %{
+              "city_id" => to_string(city.id),
+              "from_tile_id" => to_string(worked)
+            })
+
+          [] ->
+            :ok
+        end
+
+        for _ <- 1..5 do
+          render_hook(play_live, "queue_production", %{
+            "city_id" => to_string(city.id),
+            "item" => "worker"
+          })
+        end
 
         for _ <- 1..3, do: Fixtures.advance_turn(context.world)
 
@@ -224,5 +284,30 @@ defmodule BrokenOathsSpex.Story895.Criterion7568Spex do
       Regex.run(~r/data-test="city-production-current"[^>]*>\D*(\d+)\/(\d+)/, html)
 
     String.to_integer(banked)
+  end
+
+  # Raw mesh-adjacency BFS distance from `from` to `to` — the same
+  # notion `BrokenOaths.Game.Camps.ring_band/3` places camps by, used
+  # here only to rank camps by "how far from the action," not to
+  # validate any land-path route.
+  defp mesh_distance(world, from, to, max_depth \\ 40) do
+    0..max_depth
+    |> Enum.reduce_while({[from], MapSet.new([from])}, fn depth, {frontier, seen} ->
+      if to in frontier do
+        {:halt, {:found, depth}}
+      else
+        next =
+          frontier
+          |> Enum.flat_map(&BrokenOathsSpex.Fixtures.adjacent_tiles(world, &1))
+          |> Enum.uniq()
+          |> Enum.reject(&MapSet.member?(seen, &1))
+
+        {:cont, {next, MapSet.union(seen, MapSet.new(next))}}
+      end
+    end)
+    |> case do
+      {:found, depth} -> depth
+      _ -> 999
+    end
   end
 end
