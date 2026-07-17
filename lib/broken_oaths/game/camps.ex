@@ -105,14 +105,30 @@ defmodule BrokenOaths.Game.Camps do
   end
 
   defp pick_near(world, city_tile_id, home_region_tiles, occupied_tiles, reachable, seed) do
+    # In-region camps obey the same 8-15 hex distance band as the far
+    # ones (story 892 rule; QA issue ebe8abf1 — without the band a camp
+    # could land on the founding city's doorstep and make the early
+    # game unsurvivable). Regions too small to reach the full band fall
+    # back to 4+ hexes: outside the founding ring, never adjacent.
+    candidates = near_candidates(world, city_tile_id, home_region_tiles, occupied_tiles, @ring_min)
+
     candidates =
-      home_region_tiles
-      |> MapSet.delete(city_tile_id)
-      |> Enum.reject(&MapSet.member?(occupied_tiles, &1))
-      |> Enum.sort()
+      if candidates == [],
+        do: near_candidates(world, city_tile_id, home_region_tiles, occupied_tiles, 4),
+        else: candidates
 
     count = seeded_int({seed, :near_count}, @near_count)
     seeded_pick_preferring_land(candidates, count, world, reachable, {seed, :near_pick})
+  end
+
+  defp near_candidates(world, city_tile_id, home_region_tiles, occupied_tiles, min_ring) do
+    band = world |> ring_band(city_tile_id, min_ring, @ring_max) |> MapSet.new()
+
+    home_region_tiles
+    |> MapSet.delete(city_tile_id)
+    |> Enum.filter(&MapSet.member?(band, &1))
+    |> Enum.reject(&MapSet.member?(occupied_tiles, &1))
+    |> Enum.sort()
   end
 
   defp pick_far(world, city_tile_id, home_region_tiles, explored_tiles, occupied_tiles, reachable, seed) do
