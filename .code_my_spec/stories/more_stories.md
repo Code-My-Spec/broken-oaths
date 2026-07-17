@@ -478,6 +478,9 @@ A persistent, browser-based strategy game combining Civilization-style hex-based
 ### 9. Chat & Diplomacy
 
 #### 9.1 In-Game Chat
+
+> ✅ Imported to CodeMySpec 2026-07-17 — story 900 "Player-to-Player Chat" (batch 4, merged with stone_age.md §11.1). Diplomacy/negotiation uses beyond messaging stay deferred to the vassalization/rebellion stories.
+
 **As a** player  
 **I want to** send messages to other players  
 **So that** I can negotiate, coordinate, and interact socially
@@ -501,6 +504,9 @@ A persistent, browser-based strategy game combining Civilization-style hex-based
 - Threats/diplomacy: "Pay me 100 gold or I attack your capital"
 
 #### 9.2 Chat Notifications
+
+> ✅ Imported to CodeMySpec 2026-07-17 — folded into story 900 "Player-to-Player Chat" (batch 4) as its unread-badge behavior.
+
 **As a** player  
 **I want to** know when someone messages me  
 **So that** I don't miss important communications

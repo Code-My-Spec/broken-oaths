@@ -345,6 +345,8 @@
 
 ### 8.1 Discovering Other Players
 
+> ✅ Imported to CodeMySpec 2026-07-17 — story 899 "Discovering Other Players" (batch 4). Chat unlock lives in story 900; cooperative fighting in story 901.
+
 **As a** player  
 **I want to** be notified when I discover another player  
 **So that** I know I'm no longer alone
@@ -361,6 +363,8 @@
 - Players can coordinate via chat to fight barbarians together
 
 ### 8.2 Cooperative Barbarian Fighting
+
+> ✅ Imported to CodeMySpec 2026-07-17 — story 901 "Cooperative Barbarian Fighting" (batch 4).
 
 **As a** player  
 **I want to** coordinate with discovered neighbors to fight barbarians  
@@ -485,6 +489,8 @@
 ## 11. Chat System (Unlocked After Discovery)
 
 ### 11.1 Player-to-Player Chat
+
+> ✅ Imported to CodeMySpec 2026-07-17 — story 900 "Player-to-Player Chat" (batch 4), merged with more_stories.md §9.1 and §9.2.
 
 **As a** player  
 **I want to** send messages to players I've discovered  
