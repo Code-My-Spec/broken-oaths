@@ -32,10 +32,13 @@ defmodule BrokenOathsWeb.Router do
     end
   end
 
-  # Other scopes may use custom stacks.
-  # scope "/api", BrokenOathsWeb do
-  #   pipe_through :api
-  # end
+  # Registered-users read model for the CodeMySpec dashboard
+  # (deploy-key Bearer auth inside the controller, not a session).
+  scope "/api/cms", BrokenOathsWeb do
+    pipe_through :api
+
+    get "/users", CmsUsersController, :index
+  end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
   if Application.compile_env(:broken_oaths, :dev_routes) do

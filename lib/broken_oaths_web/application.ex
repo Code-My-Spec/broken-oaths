@@ -24,6 +24,10 @@ defmodule BrokenOathsWeb.Application do
         # writes to — without it every /integrations/oauth/* request
         # crashes on a missing table.
         BrokenOaths.Integrations.OAuthStateStore,
+        # Per-user CodeMySpec support-widget connections (chat + report
+        # a problem), one Slipstream client per logged-in user.
+        {Registry, keys: :unique, name: BrokenOaths.CodeMySpec.WidgetRegistry},
+        {DynamicSupervisor, strategy: :one_for_one, name: BrokenOaths.CodeMySpec.WidgetSupervisor},
         # Start to serve requests, typically the last entry
         BrokenOathsWeb.Endpoint
       ] ++ globe_warmup()

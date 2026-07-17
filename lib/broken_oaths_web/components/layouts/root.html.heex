@@ -52,5 +52,11 @@
       <% end %>
     </ul>
     {@inner_content}
+    <%= if @current_scope && @current_scope.user do %>
+      {live_render(@conn, BrokenOathsWeb.SupportWidgetLive,
+        id: "codemyspec-support",
+        sticky: true
+      )}
+    <% end %>
   </body>
 </html>

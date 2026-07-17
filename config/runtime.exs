@@ -54,13 +54,16 @@ if config_env() == :dev and File.exists?(".env") do
   end)
 end
 
-# CodeMySpec feedback widget credentials. The deploy key comes from the
-# project page at codemyspec.com and self-identifies the project — no
-# per-user OAuth needed. Deployed envs read it from SSM (loaded above),
-# dev reads it from .env.
+# CodeMySpec credentials. The deploy key comes from the project page at
+# codemyspec.com and self-identifies the project — it authenticates the
+# support widget socket (chat + report a problem) and the registered-users
+# endpoint CodeMySpec pulls from. Deployed envs read it from SSM (loaded
+# above), dev reads it from .env.
 config :broken_oaths,
   codemyspec_url: System.get_env("CODEMYSPEC_URL") || "https://codemyspec.com",
-  codemyspec_deploy_key: System.get_env("CODEMYSPEC_DEPLOY_KEY"),
+  codemyspec_widget_url:
+    System.get_env("CODEMYSPEC_WIDGET_URL") || "wss://codemyspec.com/widget",
+  deploy_key: System.get_env("CODEMYSPEC_DEPLOY_KEY"),
   codemyspec_client_id: System.get_env("CODEMYSPEC_CLIENT_ID"),
   codemyspec_client_secret: System.get_env("CODEMYSPEC_CLIENT_SECRET")
 

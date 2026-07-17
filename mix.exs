@@ -80,10 +80,12 @@ defmodule BrokenOaths.MixProject do
       {:ex_aws_ssm, "~> 2.1"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:client_utils, "~> 0.1"},
+      {:slipstream, "~> 1.1"},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
       {:sexy_spex, github: "JediLuke/spex", branch: "main", only: :test},
       {:boundary, "~> 0.10", runtime: false},
-      {:code_my_spec_generators, "~> 0.1", only: :dev}
+      # Path dep: the hex-published 0.1.0 predates cms_gen.support_widget.
+      {:code_my_spec_generators, path: "../code_my_spec_generators", only: :dev}
     ]
   end
 
