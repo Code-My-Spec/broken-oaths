@@ -18,13 +18,15 @@ defmodule BrokenOathsSpex.Story891.Criterion7575Spex do
   documented, narrow exception story 881's healing criteria already
   rely on.
 
-  KNOWN LIMITATION (statistical): the two damage bands (fresh ~18-31,
-  wounded ~16-26, per the formula's own math) overlap, so a single
-  random roll per side cannot conclusively separate them the way many
-  trials could. This spec asserts the literal, most direct reading of
-  "a visibly lower band" — a same-scenario relative comparison
-  (wounded < fresh) — plus the individual bands as a secondary sanity
-  check.
+  RESOLVED LIMITATION (statistical): the two roll-based damage bands
+  (fresh ~18-31, wounded ~16-26) overlap, so the original
+  single-sample `wounded < fresh` comparison failed ~23% of runs on
+  formula-correct outcomes. The ordering claim now reads effective
+  strength deterministically instead: each warrior strikes a wilderness
+  camp first (flat effective-strength damage, no roll, no counter —
+  story 894), observing exactly 10 vs exactly 6 — the criterion's own
+  parenthetical. The roll-based bands stay as the original "visibly
+  lower band" sanity check.
 
   Setup-hardening (not in the original contract): `ensure_lord_away/6`
   used to WALK the lord clear via `queue_move` + a turn-boundary wait
@@ -150,6 +152,68 @@ defmodule BrokenOathsSpex.Story891.Criterion7575Spex do
       end
 
       when_ "both combats resolve", context do
+        # Deterministic effective-strength read (added when story 895's
+        # review promoted this from the moduledoc's KNOWN LIMITATION to
+        # a fix): camps take FLAT effective-strength damage with no
+        # random roll and no counter-attack (story 894, criterion 7559),
+        # so one strike each reads the two warriors' effective strengths
+        # directly — exactly 10 vs exactly 6, the criterion's own
+        # parenthetical — with zero statistical overlap. The founding's
+        # own wilderness camps supply the target; the camp never
+        # counters, so the 20-HP warrior survives to fight its
+        # barbarian below. Camp strikes spend movement, so both
+        # warriors are recharged before the roll-based attacks whose
+        # bands the then_ still asserts.
+        land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
+        [camp | _] = Fixtures.list_camps(context.world)
+
+        # Camp warriors (this camp's or a piled-up neighbor's) may stand
+        # on the doorstep tiles, invisible to this player's fog — keep
+        # only the target camp, strip every warrior. The two spawned
+        # barbarians from given_ carry no camp_id, so they survive for
+        # the roll-based attacks below.
+        Fixtures.isolate_camp(context.world, camp.id)
+        Fixtures.clear_camp_warriors(context.world, camp.id)
+
+        occupied_now =
+          [
+            for(u <- Fixtures.player_units(context.world, context.user), do: u.tile_id),
+            [context.fresh_barbarian.tile_id, context.wounded_barbarian.tile_id],
+            for(c <- Fixtures.player_cities(context.world, context.user), do: c.tile_id)
+          ]
+          |> List.flatten()
+
+        [fresh_perch, wounded_perch | _] =
+          context.world
+          |> Fixtures.adjacent_tiles(camp.tile_id)
+          |> Enum.filter(land?)
+          |> Enum.reject(&(&1 in occupied_now))
+
+        camp_hp = fn ->
+          [c] = for cc <- Fixtures.list_camps(context.world), cc.id == camp.id, do: cc
+          c.hp
+        end
+
+        hp0 = camp_hp.()
+        Fixtures.relocate_unit(context.world, context.fresh_warrior.id, fresh_perch)
+        Fixtures.recharge_unit(context.world, context.fresh_warrior.id)
+        attempt_camp_attack(context.play_live, context.fresh_warrior.id, camp.id)
+        hp1 = camp_hp.()
+        Fixtures.relocate_unit(context.world, context.wounded_warrior.id, wounded_perch)
+        Fixtures.recharge_unit(context.world, context.wounded_warrior.id)
+        attempt_camp_attack(context.play_live, context.wounded_warrior.id, camp.id)
+        hp2 = camp_hp.()
+
+        Fixtures.relocate_unit(context.world, context.fresh_warrior.id, context.fresh_warrior.tile_id)
+        Fixtures.relocate_unit(context.world, context.wounded_warrior.id, context.wounded_warrior.tile_id)
+        Fixtures.recharge_unit(context.world, context.fresh_warrior.id)
+        Fixtures.recharge_unit(context.world, context.wounded_warrior.id)
+
+        context =
+          context
+          |> Map.put(:fresh_camp_damage, hp0 - hp1)
+          |> Map.put(:wounded_camp_damage, hp1 - hp2)
+
         fresh_result =
           attempt_attack(context.play_live, context.fresh_warrior.id, context.fresh_barbarian.id)
 
@@ -187,7 +251,17 @@ defmodule BrokenOathsSpex.Story891.Criterion7575Spex do
         fresh_damage = context.fresh_barbarian_hp0 - fresh_barbarian.hp
         wounded_damage = context.wounded_barbarian_hp0 - wounded_barbarian.hp
 
-        assert wounded_damage < fresh_damage
+        # The ordering claim is proven deterministically by the camp
+        # strikes (flat effective strength: exactly 10 vs exactly 6);
+        # the roll-based bands below stay as the criterion's original
+        # "visibly lower band" sanity check. The old single-sample
+        # `wounded_damage < fresh_damage` compared two overlapping
+        # random rolls and failed ~23% of runs on formula-correct
+        # outcomes (this file's original KNOWN LIMITATION, now
+        # resolved).
+        assert context.fresh_camp_damage == 10
+        assert context.wounded_camp_damage == 6
+        assert context.wounded_camp_damage < context.fresh_camp_damage
         assert fresh_damage >= 18 and fresh_damage <= 31
         assert wounded_damage >= 16 and wounded_damage <= 26
         {:ok, context}
@@ -233,6 +307,15 @@ defmodule BrokenOathsSpex.Story891.Criterion7575Spex do
   # into an ordinary `{:EXIT, pid, reason}` message instead, so the RED
   # here is a clean `then_` assertion failure instead of an uncaught
   # process EXIT taking down the whole test.
+  defp attempt_camp_attack(live_view, unit_id, camp_id) do
+    render_hook(live_view, "attack", %{
+      "unit_id" => to_string(unit_id),
+      "target_camp_id" => to_string(camp_id)
+    })
+
+    :ok
+  end
+
   defp attempt_attack(live_view, unit_id, target_unit_id) do
     original_trap = Process.flag(:trap_exit, true)
 
