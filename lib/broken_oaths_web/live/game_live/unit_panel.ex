@@ -147,4 +147,7 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
   defp unit_type_label(:settler), do: "Settler"
   defp unit_type_label(:worker), do: "Worker"
   defp unit_type_label(:warrior), do: "Warrior"
+  # Enemy units are selectable too — the panel doubles as the threat
+  # readout (stats, HP), with every action already type/owner-gated.
+  defp unit_type_label(:barbarian_warrior), do: "Barbarian Warrior"
 end
