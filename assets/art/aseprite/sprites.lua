@@ -223,4 +223,171 @@ build("city", "decor", {
   "................",
 })
 
+-- ------------------------------------------------------------- warrior
+build("warrior", "units", {
+  K = rgba("#1a1a1a"),
+  R = rgba("#c0392b"), -- tunic red
+  D = rgba("#8e2820"), -- dark red
+  S = rgba("#eab887"), -- skin
+  H = rgba("#9ca3af"), -- helmet steel
+  L = rgba("#d1d5db"), -- steel highlight
+  T = rgba("#8a5a2b"), -- spear shaft
+  P = rgba("#e5e7eb"), -- spear head
+}, {
+  "..............K.",
+  ".....KKK.....KPK",
+  "....KHLHK....KPK",
+  "...KHHHHHK...KTK",
+  "....KSSSSK...KTK",
+  "....KSKSKK...KTK",
+  "....KSSSSK...KTK",
+  "...KKRRRRKK..KTK",
+  "..KRKRDRRKRKKKTK",
+  "..KRKRRRRKRK.KTK",
+  "..KRKRDRRKRK.KTK",
+  "...KKRRRRKK..KTK",
+  "....KRRKRRK.....",
+  "....KRK.KRK.....",
+  "...KKKK.KKKK....",
+  "................",
+})
+
+-- -------------------------------------------------------------- worker
+build("worker", "units", {
+  K = rgba("#1a1a1a"),
+  O = rgba("#b07a3e"), -- overalls tan
+  V = rgba("#8a5a2b"), -- overalls shade
+  S = rgba("#eab887"), -- skin
+  W = rgba("#e8e2d0"), -- shirt
+  T = rgba("#7a4a1f"), -- shovel handle
+  M = rgba("#9ca3af"), -- shovel blade
+}, {
+  "................",
+  ".....KKKK.......",
+  "....KWWWWK..KK..",
+  "...KWWWWWWKKMMK.",
+  "....KSSSSK.KMMK.",
+  "....KSKSKK..KTK.",
+  "....KSSSSK..KTK.",
+  "...KKOOOOKK.KTK.",
+  "..KWKOVOOKWKKTK.",
+  "..KWKOOOOKWK.KT.",
+  "..KWKOVOOKWK....",
+  "...KKOOOOKK.....",
+  "....KOOKOOK.....",
+  "....KOK.KOK.....",
+  "...KKKK.KKKK....",
+  "................",
+})
+
+-- ----------------------------------------------------------- barbarian
+build("barbarian", "units", {
+  K = rgba("#1a1a1a"),
+  F = rgba("#57534e"), -- fur gray
+  G = rgba("#3f3c38"), -- fur shade
+  S = rgba("#d9a06b"), -- weathered skin
+  B = rgba("#f5f0e6"), -- bone / horn
+  R = rgba("#7f1d1d"), -- war paint
+  T = rgba("#6b4520"), -- club
+}, {
+  "..KK......KK....",
+  ".KBBK....KBBK...",
+  ".KBKKKKKKKKBK...",
+  "..KKSSSSSSKK.K..",
+  "...KSRKSKRSKKTK.",
+  "...KSSSSSSK.KTK.",
+  "...KSKRRKSK.KTK.",
+  "..KKFFFFFFKKKTK.",
+  ".KFKFGFFGFKFKTK.",
+  ".KFKFFFFFFKFKTK.",
+  ".KFKFGFFGFKFKK..",
+  "..KKFFFFFFKK....",
+  "...KFFKKFFK.....",
+  "...KFK..KFK.....",
+  "..KKKK..KKKK....",
+  "................",
+})
+
+-- ---------------------------------------------------------------- camp
+build("camp", "decor", {
+  K = rgba("#1a1a1a"),
+  R = rgba("#a83232"), -- tent red
+  D = rgba("#7f2222"), -- tent shade
+  V = rgba("#4a1414"), -- tent mouth
+  F = rgba("#f59e0b"), -- fire
+  Y = rgba("#fde047"), -- fire core
+  T = rgba("#7a4a1f"), -- wood
+}, {
+  "................",
+  "................",
+  "......K.........",
+  ".....KRK....K...",
+  "....KRRRK..KRK..",
+  "...KRRDRRK.KRDK.",
+  "..KRRRRRRRKRRDRK",
+  ".KRRDRRVRRKRVDRK",
+  ".KKKKKVVVKKKVKKK",
+  "......KKK.......",
+  "....K.....K.....",
+  "....KTKYKTK.....",
+  ".....KFYFK......",
+  "....KTFFFTK.....",
+  ".....KKKKK......",
+  "................",
+})
+
+-- ---------------------------------------------------------------- farm
+build("farm", "decor", {
+  K = rgba("#1a1a1a"),
+  W = rgba("#eab308"), -- wheat
+  Y = rgba("#facc15"), -- wheat light
+  E = rgba("#a16207"), -- furrow
+  T = rgba("#c9a55a"), -- hut thatch
+  V = rgba("#8a5a2b"), -- hut wall
+}, {
+  "................",
+  "................",
+  "...........KK...",
+  "..........KTTK..",
+  ".........KTTTTK.",
+  ".........KVVVVK.",
+  ".........KVKKVK.",
+  ".KKKKKKKKKKKKKK.",
+  ".KWYWYWYWYWYWK..",
+  ".KEEEEEEEEEEEK..",
+  ".KYWYWYWYWYWYK..",
+  ".KEEEEEEEEEEEK..",
+  ".KWYWYWYWYWYWK..",
+  ".KKKKKKKKKKKKK..",
+  "................",
+  "................",
+})
+
+-- ---------------------------------------------------------------- mine
+build("mine", "decor", {
+  K = rgba("#1a1a1a"),
+  A = rgba("#6b7280"), -- rock
+  L = rgba("#9ca3af"), -- light rock
+  T = rgba("#8a5a2b"), -- beam wood
+  V = rgba("#2d2a26"), -- shaft dark
+  G = rgba("#fbbf24"), -- ore glint
+}, {
+  "................",
+  "................",
+  "......KKKK......",
+  "....KKALLAKK....",
+  "...KALAAAALAK...",
+  "..KAAGAALAAAAK..",
+  ".KALAAKKKKAALAK.",
+  ".KAAAKTTTTKAAGK.",
+  ".KAGAKTVVTKALAK.",
+  ".KAAAKVVVVKAAAK.",
+  ".KALAKVVVVKAGAK.",
+  ".KKKKKVVVVKKKKK.",
+  "................",
+  "................",
+  "................",
+  "................",
+})
+
 print("sprite set complete")

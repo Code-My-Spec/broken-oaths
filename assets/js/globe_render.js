@@ -90,11 +90,17 @@ const GlobeRender = {
   SPRITES: {
     lord: "/images/game/units/lord.png",
     settler: "/images/game/units/settler.png",
+    warrior: "/images/game/units/warrior.png",
+    worker: "/images/game/units/worker.png",
+    barbarian: "/images/game/units/barbarian.png",
     mountain: "/images/game/decor/mountain.png",
     hills: "/images/game/decor/hills.png",
     woods: "/images/game/decor/woods.png",
     rainforest: "/images/game/decor/rainforest.png",
     city: "/images/game/decor/city.png",
+    camp: "/images/game/decor/camp.png",
+    farm: "/images/game/decor/farm.png",
+    mine: "/images/game/decor/mine.png",
   },
 
   TERRAIN_TEXTURES: ["grassland", "plains", "desert", "tundra", "snow", "ocean",
