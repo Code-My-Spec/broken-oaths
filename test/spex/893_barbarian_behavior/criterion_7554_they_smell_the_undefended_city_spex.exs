@@ -60,22 +60,25 @@ defmodule BrokenOathsSpex.Story893.Criterion7554Spex do
   but neither city1 nor its citizens are exposed anywhere near the
   target camp during that wait.
 
-  KNOWN LIMITATION (geometric, rare): the barbarian's step-toward
-  pathing (`BarbarianAI.step_toward/4`) refuses to route THROUGH a
-  tile another unit currently holds — correct, load-bearing behavior
-  (a barbarian never walks through an occupied hex) — but this world
-  has 1-6 OTHER real camps besides the one this criterion tracks, each
-  independently roaming by the time city1 finishes growing and
-  producing. On the rare run where one of those unrelated warriors
-  happens to sit on the single shortest-path hex between the tracked
-  barbarian and city2, the tracked barbarian's first step detours
-  around it instead of landing exactly one hex closer that specific
-  boundary — confirmed by direct inspection to still be correctly
-  TARGETING the undefended city (never the lord) even on a detour step;
-  only the "exactly one hex closer, this one boundary" distance
-  bookkeeping is thrown off. Same caveat class as the "most mutually
-  divergent" note above — verified rare (roughly 1 in 5-6 runs during
-  investigation) but not eliminated.
+  Re-anchored (this world's OTHER camps eliminated, not tolerated):
+  measured independently at a 60% failure rate — this world always
+  ships with several OTHER, independently-roaming real camps besides
+  the one this criterion tracks (criterion 7543), and `BarbarianAI.
+  step_toward/4` correctly refuses to route THROUGH a tile another
+  unit currently holds. On a routine (not rare) fraction of runs, one
+  of those unrelated warriors sat on the tracked barbarian's single
+  shortest-path hex toward city2, or wandered onto `city_target`/
+  `lord_target` themselves, throwing off this criterion's exact
+  "one hex closer, this boundary" and "unoccupied by construction"
+  assertions — a real result of a genuinely live, multi-camp world,
+  but irrelevant to what this criterion actually tests (ONE camp's own
+  target-selection decision). `Fixtures.isolate_camp/2` (new,
+  narrow, documented-bridge status — see `BrokenOaths.Game.WorldServer`'s
+  `:isolate_camp_for_test` handler) destroys every OTHER camp and
+  hard-deletes their warriors the moment the tracked camp is known —
+  before city1 even starts growing — so no other actor exists to
+  interfere for the rest of this scenario. The tracked camp itself is
+  untouched and still spawns/decides for real.
   """
 
   use BrokenOathsSpex.Case
@@ -107,6 +110,13 @@ defmodule BrokenOathsSpex.Story893.Criterion7554Spex do
         assert_push_event(play_live, "game:camps", %{camps: camps0})
         [camp | _] = camps0
         [city1] = Fixtures.player_cities(context.world, context.user)
+
+        # Eliminate every OTHER camp right away, before any wait even
+        # starts — see this module's doc: this criterion's SUBJECT is
+        # ONE camp's own target-selection decision (city vs. unit), not
+        # whether it survives incidental interference from the several
+        # OTHER camps this world always ships with (criterion 7543).
+        :ok = Fixtures.isolate_camp(context.world, camp.id)
 
         {:ok,
          context
@@ -213,42 +223,19 @@ defmodule BrokenOathsSpex.Story893.Criterion7554Spex do
       end
 
       given_ "a barbarian warrior stands at the camp", context do
-        # The camp's own tile (and possibly an adjacent one) may already
-        # hold a warrior — this camp's own natural spawn cadence, or
-        # another camp's entirely (this world has 1-6 more) wandering
-        # through — after the ~80 turns city1 spent growing and banking
-        # a settler above. Pick whichever candidate tile is actually
-        # free across EVERY camp's warriors, not just this one's.
-        land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
-
-        already_occupied =
-          context.world
-          |> Fixtures.list_camps()
-          |> Enum.flat_map(& &1.warriors)
-          |> MapSet.new(& &1.tile_id)
-
-        # The camp's own tile is 2 hexes from both `city_target` and
-        # `lord_target` by construction, but a FALLBACK candidate (only
-        # reached if the camp's own tile is already held) is merely
-        # ADJACENT to camp — anywhere from 1 to 3 hexes from either
-        # target depending on direction. Landing exactly 1 hex from the
-        # city would make the barbarian hold on arrival (already
-        # adjacent — city-tile entry is story 895's job), not step
-        # toward it, so candidates within 1 hex of either real target
-        # are excluded to keep this criterion's actual precondition (a
-        # target that's in range but not yet adjacent) intact.
-        too_close = fn t ->
-          land_distance(context.world, t, context.city2.tile_id, 3) == 1 or
-            land_distance(context.world, t, context.lord.tile_id, 3) == 1
-        end
-
-        [spawn_tile | _] =
-          [context.camp_tile | Fixtures.adjacent_tiles(context.world, context.camp_tile)]
-          |> Enum.filter(land?)
-          |> Enum.reject(&MapSet.member?(already_occupied, &1))
-          |> Enum.reject(too_close)
-
-        warrior = Fixtures.spawn_barbarian(context.world, spawn_tile, context.camp_id)
+        # `Fixtures.clear_camp_warriors/2` guarantees zero pre-existing
+        # warriors anywhere in the world at this point — including this
+        # SAME (tracked, never-isolated) camp's own natural spawn
+        # cadence, which otherwise has ~80 real turns to accumulate a
+        # sibling warrior before this deliberate placement even happens.
+        # With every other camp already eliminated (previous given_) and
+        # this camp's own board cleared, spawning directly on
+        # `camp_tile` itself needs no occupancy search or "too close"
+        # fallback anymore — it's exactly 2 hexes from both
+        # `city_target` and `lord_target` by construction, and nothing
+        # else exists to land there instead.
+        Fixtures.clear_camp_warriors(context.world, context.camp_id)
+        warrior = Fixtures.spawn_barbarian(context.world, context.camp_tile, context.camp_id)
         {:ok, Map.put(context, :barbarian, warrior)}
       end
 

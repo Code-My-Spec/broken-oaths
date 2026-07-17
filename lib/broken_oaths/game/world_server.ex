@@ -508,6 +508,63 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
+  # Test-only: destroy EVERY camp except `keep_camp_id` (`Camps.advance/2`
+  # never spawns from a destroyed camp) and hard-delete every unit
+  # already tied to one of those other camps — not just relocate them
+  # elsewhere, since a merely-relocated warrior is still a live, roaming
+  # actor that could wander back into range. A scenario testing ONE
+  # camp's decision (target selection, pillage-on-entry) in a world
+  # that always ships with several OTHER independently-roaming camps
+  # (criterion 7543) needs to eliminate those other actors outright
+  # rather than tolerate their incidental interference — same narrow,
+  # documented-bridge status as `:spawn_barbarian_for_test` above, and
+  # the same "sanctioned ground-truth write" class as that fixture's
+  # own direct placement. The kept camp is untouched and keeps spawning/
+  # fighting normally; nothing about `keep_camp_id`'s own warriors is
+  # affected here.
+  def handle_call({:isolate_camp_for_test, keep_camp_id}, _from, state) do
+    destroyed_at = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+    other_camp_ids = state.camps |> Map.keys() |> Enum.reject(&(&1 == keep_camp_id))
+
+    new_camps =
+      Map.new(state.camps, fn {id, camp} ->
+        if id in other_camp_ids, do: {id, %{camp | destroyed_at: destroyed_at}}, else: {id, camp}
+      end)
+
+    Repo.update_all(from(c in Camp, where: c.id in ^other_camp_ids), set: [destroyed_at: destroyed_at])
+
+    removed_unit_ids =
+      for {id, u} <- state.units, Map.get(u, :camp_id) in other_camp_ids, do: id
+
+    Repo.delete_all(from(u in Unit, where: u.id in ^removed_unit_ids))
+
+    new_state = %{state | camps: new_camps, units: Map.drop(state.units, removed_unit_ids)}
+    {:reply, :ok, new_state}
+  end
+
+  # Test-only: hard-delete every warrior currently tied to `camp_id`,
+  # WITHOUT touching the camp itself (still alive, still spawning
+  # normally afterward) — the complement to `:isolate_camp_for_test`
+  # above. That fixture only ever eliminates OTHER camps; it
+  # deliberately leaves the kept camp's own warriors alone, since the
+  # whole point is to keep exercising that camp's real spawn/AI loop.
+  # But letting a real scenario's long setup wait (city growth,
+  # production banking — no shortcut exists for those) run for dozens
+  # of turns means that SAME camp's own natural cadence can accumulate
+  # sibling warriors before the scenario ever deliberately places its
+  # OWN tracked one — a sibling that's still a live, path-blocking actor
+  # this criterion never asked for. Calling this immediately before
+  # `:spawn_barbarian_for_test` places the scenario's actual warrior
+  # guarantees it's the ONLY warrior anywhere in the world at that
+  # decision boundary — same narrow, documented-bridge status as
+  # `:isolate_camp_for_test`.
+  def handle_call({:clear_camp_warriors_for_test, camp_id}, _from, state) do
+    removed_unit_ids = for {id, u} <- state.units, Map.get(u, :camp_id) == camp_id, do: id
+    Repo.delete_all(from(u in Unit, where: u.id in ^removed_unit_ids))
+    new_state = %{state | units: Map.drop(state.units, removed_unit_ids)}
+    {:reply, :ok, new_state}
+  end
+
   # Test-only: resolve an attack FROM a barbarian, bypassing the
   # player-ownership check `do_attack/4` requires (a barbarian has no
   # owning player/session to drive it through the ordinary "attack"

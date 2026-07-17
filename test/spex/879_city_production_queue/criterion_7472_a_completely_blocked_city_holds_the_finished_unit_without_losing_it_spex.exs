@@ -10,6 +10,18 @@ defmodule BrokenOathsSpex.Story879.Criterion7472Spex do
   seed — the search itself is what makes this route-agnostic): the
   city tile plus those 4 neighbors is only 5 tiles to block, reachable
   with three players' starting units (1 + 2 + 2).
+
+  Cross-epic regression fix (this criterion predates story 893's
+  barbarian AI, and has nothing to do with it): the ONLY player who
+  founds here is player1 (players 2/3 only ever use their starting
+  units as blockers, never founding), so `WorldServer.spawn_wilderness_camps/3`
+  fires exactly once, near player1's own city. But SIX separate 30-turn
+  walks converge on that same narrow spot afterward (lord1's own walk,
+  plus all four blockers') — real, camp-spawned barbarian exposure this
+  criterion's own subject (a blocked production queue) has nothing to
+  do with. `Fixtures.isolate_camp/2` (story 893's own bridge) destroys
+  every camp immediately after player1 founds, before any of those
+  walks begin.
   """
 
   use BrokenOathsSpex.Case
@@ -69,6 +81,11 @@ defmodule BrokenOathsSpex.Story879.Criterion7472Spex do
         [settler1] = for u <- Fixtures.player_units(context.world, context.user), u.id == settler1.id, do: u
         render_hook(play_live, "found_city", %{"unit_id" => settler1.id})
         [city] = Fixtures.player_cities(context.world, context.user)
+
+        # See this module's doc: eliminate the camp player1's founding
+        # just spawned before lord1 (or any of the four blockers below)
+        # walk anywhere near it.
+        :ok = Fixtures.isolate_camp(context.world, :none)
 
         walk.(play_live, context.world, context.user, lord1, spot)
 

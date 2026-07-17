@@ -4,6 +4,28 @@ defmodule BrokenOathsSpex.Story882.Criterion7483Spex do
   Criterion 7483 — improvements can be built anywhere passable,
   including another player's territory; a completed farm feeds
   whichever city works that tile.
+
+  Cross-epic regression fix (this criterion predates story 893's
+  barbarian AI, and has nothing to do with it): once barbarian AI went
+  live, the second player's worker — walking through the FIRST
+  player's own territory for up to 30 turns, plus the 12 turns spent
+  producing it — became exposed to a real, camp-spawned barbarian a
+  camp guaranteed inside that territory (criterion 7543) could kill it
+  with, breaking THIS criterion for a reason entirely unrelated to what
+  it tests (worker/improvement mechanics across two players).
+  `Fixtures.isolate_camp/2` (story 893's own bridge, `WorldServer`'s
+  `:isolate_camp_for_test` handler) destroys every camp in the world —
+  passing a sentinel that matches no real camp id destroys all of them,
+  not just "every other one." `WorldServer.spawn_wilderness_camps/3`
+  fires on EACH player's own first founding (`do_found_city/3`'s own
+  `first_founding?` check), not once globally, so this scenario's own
+  isolation call has to wait until BOTH players have founded their
+  first city before every camp that will ever exist here does — called
+  right after that, before either player's worker/settler spends any
+  turn near either territory. Barbarians are irrelevant to this
+  criterion's SUBJECT, so eliminating them outright (not tolerating
+  incidental interference) is the same hardening pattern story 893/894's
+  own restructured criteria settled on.
   """
 
   use BrokenOathsSpex.Case
@@ -61,6 +83,15 @@ defmodule BrokenOathsSpex.Story882.Criterion7483Spex do
         # worker rather than trespassing with their starting settler.
         render_hook(other_play_live, "found_city", %{"unit_id" => other_settler.id})
         [other_city] = Fixtures.player_cities(context.world, context.other_user)
+
+        # See this module's doc: barbarians are irrelevant to this
+        # criterion's SUBJECT. `spawn_wilderness_camps/3` fires on EACH
+        # player's own first founding (`WorldServer.do_found_city/3`),
+        # so this has to wait until BOTH players have founded before
+        # every camp that will ever exist for this scenario does —
+        # eliminate them all now, before either player's units spend
+        # dozens of turns anywhere near either territory.
+        :ok = Fixtures.isolate_camp(context.world, :none)
 
         render_hook(other_play_live, "queue_production", %{
           "city_id" => other_city.id,

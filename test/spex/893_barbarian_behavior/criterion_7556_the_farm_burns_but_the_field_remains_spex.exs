@@ -50,29 +50,41 @@ defmodule BrokenOathsSpex.Story893.Criterion7556Spex do
        rule `Turn` itself would, as one isolated write instead of a
        full multi-camp tick.
 
-  The LATER "worker returns to repair" phase still uses a REAL
-  `advance_turn` loop (waiting for the barbarian to wander off,
-  lured by a real, deliberately-placed lord within its aggro/leash
-  range) — that part doesn't need pinpoint precision, just SOME
-  distant, in-range target to make the barbarian eventually leave
-  `farm_tile` on its own, which is squarely `Turn`'s real AI doing its
-  real job. The final "repair completes in one turn" tick clears a
-  two-hex neighborhood around `farm_tile` first, for the same reason:
-  confirmed empirically that an adjacent real barbarian can attack and
-  kill the returning worker in that SAME tick (`resolve_barbarian_ai`
-  runs after `advance_improvements`, so the repair itself still
-  completes first), freeing `farm_tile` mid-resolution for a SEPARATE
-  barbarian to walk onto and re-pillage the improvement that had JUST
-  finished — all within one tick.
+  Re-anchored (every other actor eliminated, not tolerated): the
+  previous version above still let the LATER "worker returns to
+  repair" phase run through several real `advance_turn` boundaries in
+  a live, multi-camp world — a documented "1-in-20" residual measured
+  independently at closer to 1-in-5. This world always ships with
+  several OTHER, independently-roaming real camps besides the one this
+  criterion tracks (criterion 7543), and `resolve_camp_spawns` runs
+  before `resolve_barbarian_ai` every tick, so a brand-new warrior born
+  THAT SAME tick can still end up adjacent to `farm_tile` and strike —
+  no pre-tick check can rule out a spawn that doesn't exist yet. Fixed
+  by eliminating the other actors outright instead of tolerating them:
 
-  KNOWN LIMITATION (rare, same-tick spawn): a fresh warrior born THIS
-  SAME tick (`resolve_camp_spawns` runs before `resolve_barbarian_ai`)
-  at a camp more than two hexes from `farm_tile` can still end up
-  adjacent to it after that tick's own movement, and attack — no
-  pre-tick check can rule out a spawn that doesn't exist yet. Measured
-  at roughly a 1-in-20 residual failure rate after the two-hex clear
-  above, the same class of geometry/timing acceptance already
-  documented for criterion 7554's own bridge.
+    * `Fixtures.isolate_camp/2` destroys every OTHER camp and
+      hard-deletes their warriors the moment the tracked camp is known
+      — before city1/the worker/the lord are even placed — so no other
+      camp exists to interfere for the rest of this scenario.
+    * `Fixtures.clear_camp_warriors/2` removes any sibling THIS SAME
+      (tracked, never-isolated) camp's own natural cadence accumulated
+      during the 12-turn production wait, right before this
+      criterion's own deliberate warrior is placed.
+    * "The barbarian moves on" is now a direct `Fixtures.relocate_unit/3`
+      back to `camp_tile`, not a real multi-turn wait for the AI to
+      wander off on its own — that wandering is criteria 7551/7554's
+      subject, not this one's.
+    * Immediately before the decisive repair tick, `Fixtures.isolate_camp/2`
+      is called again with a sentinel matching no real camp id,
+      destroying EVERY camp including the tracked one — nothing after
+      the repair assertion needs any barbarian alive, so
+      `resolve_barbarian_ai` has nothing left to iterate over that
+      could kill the worker or re-pillage the tile mid-tick.
+
+  Both decisive boundaries (the pillage-on-entry write, and the
+  one-turn repair tick) now run with either zero or exactly one
+  barbarian actor in the entire world — a faithful "one clean tick"
+  test of each SUBJECT, not a race against a living system.
   """
 
   use BrokenOathsSpex.Case
@@ -104,6 +116,13 @@ defmodule BrokenOathsSpex.Story893.Criterion7556Spex do
         assert_push_event(play_live, "game:camps", %{camps: camps0})
         [camp | _] = camps0
         [city] = Fixtures.player_cities(context.world, context.user)
+
+        # Eliminate every OTHER camp right away, before any wait even
+        # starts — see this module's doc: this criterion's SUBJECT is
+        # ONE camp's own pillage-on-entry/repair-timing behavior, not
+        # whether it survives incidental interference from the several
+        # OTHER camps this world always ships with (criterion 7543).
+        :ok = Fixtures.isolate_camp(context.world, camp.id)
 
         {:ok,
          context
@@ -229,15 +248,17 @@ defmodule BrokenOathsSpex.Story893.Criterion7556Spex do
       end
 
       given_ "a barbarian warrior stands at the camp", context do
-        # A real, active camp may have already spawned a warrior of its
-        # own onto `camp_tile` during the many turns already spent
-        # waiting on production above — clear it first (see
-        # `clear_tile/2` below) so `spawn_barbarian/3` doesn't collide
-        # with it. Still a REAL, camp-tied warrior (`Turn`'s barbarian
+        # This SAME (tracked, never-isolated) camp's own natural spawn
+        # cadence has had 12 real turns to accumulate a sibling warrior
+        # before this deliberate placement — `Fixtures.clear_camp_warriors/2`
+        # guarantees zero pre-existing warriors anywhere in the world at
+        # this point (every OTHER camp was already eliminated above),
+        # so spawning directly on `camp_tile` needs no occupancy check
+        # anymore. Still a REAL, camp-tied warrior (`Turn`'s barbarian
         # AI loop drives it for real from the very next `advance_turn`
-        # — see criterion 7551's moduledoc), needed for the LATER
-        # "moves on" phase below.
-        clear_tile(context.world, context.camp_tile)
+        # — see criterion 7551's moduledoc), needed for the pillage
+        # step right below.
+        Fixtures.clear_camp_warriors(context.world, context.camp_id)
         warrior = Fixtures.spawn_barbarian(context.world, context.camp_tile, context.camp_id)
         {:ok, Map.put(context, :barbarian, warrior)}
       end
@@ -275,20 +296,14 @@ defmodule BrokenOathsSpex.Story893.Criterion7556Spex do
       end
 
       when_ "the barbarian moves on and a worker returns to repair the farm", context do
-        Enum.reduce_while(1..8, :ok, fn _turn, :ok ->
-          Fixtures.advance_turn(context.world)
-          assert_push_event(context.play_live, "game:camps", %{camps: camps}, 500)
-          camp = Enum.find(camps, &(&1.id == context.camp_id))
-          barbarian = Enum.find(camp.warriors, &(&1.id == context.barbarian.id))
-
-          if barbarian == nil or barbarian.tile_id != context.farm_tile do
-            {:halt, :ok}
-          else
-            {:cont, :ok}
-          end
-        end)
-
-        clear_tile(context.world, context.farm_tile)
+        # Direct relocation, not a real multi-turn wait for the AI to
+        # wander off on its own — see this module's doc: "the barbarian
+        # moves on" is pure setup for the repair-timing assertion below,
+        # not itself the thing being tested (pillage-on-entry, already
+        # proven above; the AI's own targeting/roaming is criteria
+        # 7551/7554's job). Send it back to its own camp tile, off
+        # `farm_tile`, so the worker has somewhere to stand.
+        :ok = Fixtures.relocate_unit(context.world, context.barbarian.id, context.camp_tile)
         :ok = Fixtures.relocate_unit(context.world, context.worker.id, context.farm_tile)
 
         render_hook(context.play_live, "select_unit", %{"unit_id" => to_string(context.worker.id)})
@@ -299,30 +314,13 @@ defmodule BrokenOathsSpex.Story893.Criterion7556Spex do
         # several lines later.
         :ok = BrokenOaths.Game.start_improvement(context.world, context.user, context.worker.id, :farm)
 
-        # Clear a two-hex neighborhood, not just `farm_tile` itself:
-        # confirmed empirically that a lone `clear_tile(farm_tile)` here
-        # wasn't enough — an ADJACENT real barbarian (from this camp or
-        # another) can attack and kill the worker in THIS SAME repair
-        # tick (`resolve_barbarian_ai` runs after `advance_improvements`,
-        # so the repair itself still completes that tick), which frees
-        # `farm_tile` mid-resolution for a SEPARATE barbarian to walk
-        # onto and re-pillage the improvement that had JUST finished,
-        # all within one tick. A one-hex clear removes any attacker that
-        # already existed going into this tick; the second hex also
-        # catches a brand-new warrior born THIS SAME tick at a nearby
-        # camp (`resolve_camp_spawns` runs before `resolve_barbarian_ai`,
-        # so a fresh spawn up to a camp-tile's own distance away can
-        # still land adjacent) — no pre-tick check can rule out a spawn
-        # from a camp more than two hexes out attacking this same turn,
-        # but that residual is small and geometry-dependent, the same
-        # class this module's "KNOWN LIMITATION" note already accepts
-        # for criterion 7554's own bridge.
-        one_hex = Fixtures.adjacent_tiles(context.world, context.farm_tile)
-        two_hex = Enum.flat_map(one_hex, &Fixtures.adjacent_tiles(context.world, &1))
-
-        [context.farm_tile | one_hex ++ two_hex]
-        |> Enum.uniq()
-        |> Enum.each(&clear_tile(context.world, &1))
+        # One clean tick for the decisive assertion: nothing after this
+        # point needs any barbarian (this camp's or otherwise) to exist
+        # — `Fixtures.isolate_camp/2` with a sentinel that matches no
+        # real camp id destroys EVERY camp, including the tracked one,
+        # so `resolve_barbarian_ai` has nothing left to iterate over
+        # that could kill the worker or re-pillage the tile mid-tick.
+        :ok = Fixtures.isolate_camp(context.world, :none)
 
         Fixtures.advance_turn(context.world)
 

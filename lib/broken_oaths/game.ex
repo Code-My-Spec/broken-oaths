@@ -265,6 +265,26 @@ defmodule BrokenOaths.Game do
     do: WorldServer.call(world, {:move_barbarian_for_test, barbarian_id, tile_id})
 
   @doc """
+  Test-only: destroy every camp except `keep_camp_id` and hard-delete
+  every unit already tied to one of those other camps — see
+  `BrokenOaths.Game.WorldServer`'s `:isolate_camp_for_test` handler for
+  the same documented, narrow-exception status.
+  """
+  @spec isolate_camp_for_test(map(), term()) :: :ok
+  def isolate_camp_for_test(world, keep_camp_id),
+    do: WorldServer.call(world, {:isolate_camp_for_test, keep_camp_id})
+
+  @doc """
+  Test-only: hard-delete every warrior currently tied to `camp_id`,
+  without touching the camp itself — see `BrokenOaths.Game.WorldServer`'s
+  `:clear_camp_warriors_for_test` handler for the same documented,
+  narrow-exception status.
+  """
+  @spec clear_camp_warriors_for_test(map(), term()) :: :ok
+  def clear_camp_warriors_for_test(world, camp_id),
+    do: WorldServer.call(world, {:clear_camp_warriors_for_test, camp_id})
+
+  @doc """
   Test-only: resolve an attack FROM a barbarian (no owning player/session
   exists to drive this through `attack/4`) — see
   `BrokenOaths.Game.WorldServer`'s `:resolve_barbarian_attack_for_test`

@@ -184,6 +184,33 @@ defmodule BrokenOathsSpex.Fixtures do
     to: BrokenOaths.Game,
     as: :move_barbarian_for_test
 
+  # Deliberate, narrow exception to "read-only" above, same status as
+  # `move_barbarian/3`: destroys EVERY camp except `keep_camp_id` and
+  # hard-deletes every unit already tied to one of those other camps —
+  # not merely relocated, since a relocated warrior is still a live,
+  # roaming actor that could wander back into range. A scenario testing
+  # ONE camp's own decision (target selection, pillage-on-entry) in a
+  # world that always ships with several OTHER independently-roaming
+  # camps (criterion 7543) needs to eliminate those other actors
+  # outright, not tolerate their incidental interference.
+  defdelegate isolate_camp(world, keep_camp_id),
+    to: BrokenOaths.Game,
+    as: :isolate_camp_for_test
+
+  # Deliberate, narrow exception to "read-only" above, same status as
+  # `isolate_camp/2`: hard-deletes every warrior tied to `camp_id`,
+  # without touching the camp itself (still alive, still spawning
+  # normally afterward). `isolate_camp/2` deliberately leaves the KEPT
+  # camp's own warriors alone; a scenario whose own long setup wait (no
+  # shortcut exists for city growth/production) lets that SAME camp's
+  # natural cadence accumulate sibling warriors before the scenario
+  # deliberately places its OWN tracked one calls this immediately
+  # before `spawn_barbarian/3` to guarantee that placed warrior is the
+  # ONLY one anywhere in the world at that decision boundary.
+  defdelegate clear_camp_warriors(world, camp_id),
+    to: BrokenOaths.Game,
+    as: :clear_camp_warriors_for_test
+
   # Story 893 (barbarian roaming/AI) doesn't exist yet, so a barbarian
   # has no owning player/session to drive an "attack" event through
   # `GameLive.Play` — this resolves an attack FROM `attacker_id`

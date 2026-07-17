@@ -20,6 +20,17 @@ defmodule BrokenOathsSpex.Story880.Criterion7490Spex do
   target tile UNASSIGNED against the same city with it assigned — the
   delta is that tile's exact yield, independent of the city's own
   flat-5 production baseline (story 879) or its center's own terrain.
+
+  Cross-epic regression fix (this criterion predates story 893's
+  barbarian AI, and has nothing to do with it): the desert-tile and
+  snow-tile facts both found on the SAME shared `context.world`, as two
+  DIFFERENT players (`context.user`/`context.other_user`).
+  `WorldServer.spawn_wilderness_camps/3` fires on each player's own
+  first founding, so once the desert city exists, a real camp near
+  `context.user`'s territory can kill `context.other_user`'s settler as
+  it marches up to 30 turns toward `snow_tile` on that same shared
+  world. `Fixtures.isolate_camp/2` (story 893's own bridge) destroys
+  every camp on `context.world` right after each founding there.
   """
 
   use BrokenOathsSpex.Case
@@ -133,6 +144,12 @@ defmodule BrokenOathsSpex.Story880.Criterion7490Spex do
 
         render_hook(play_live, "found_city", %{"unit_id" => settler.id})
         [city] = Fixtures.player_cities(context.world, context.user)
+
+        # See this module's doc: eliminate the camp this founding just
+        # spawned before the snow-tile given_ below marches a DIFFERENT
+        # player's settler anywhere near it.
+        :ok = Fixtures.isolate_camp(context.world, :none)
+
         render_hook(play_live, "queue_production", %{"city_id" => city.id, "item" => "warrior"})
         [worked | _] = city.worked_tiles
 
@@ -191,6 +208,14 @@ defmodule BrokenOathsSpex.Story880.Criterion7490Spex do
 
         render_hook(play_live, "found_city", %{"unit_id" => settler.id})
         [city] = Fixtures.player_cities(context.world, context.other_user)
+
+        # This second founding on `context.world` spawns its OWN fresh
+        # camp near `context.other_user`'s territory — eliminate it too
+        # before the several more `advance_turn` calls this shared
+        # world still has ahead of it (the desert city's own
+        # measurements, below).
+        :ok = Fixtures.isolate_camp(context.world, :none)
+
         render_hook(play_live, "queue_production", %{"city_id" => city.id, "item" => "warrior"})
 
         [before] =
