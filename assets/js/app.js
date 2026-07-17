@@ -24,7 +24,6 @@ import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/broken_oaths"
 import topbar from "../vendor/topbar"
-import "./screenshot"
 import "./globe_render"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")

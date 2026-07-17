@@ -2,8 +2,9 @@ defmodule BrokenOathsWeb.FeedbackWidget do
   @moduledoc """
   Floating feedback widget for reporting issues to CodeMySpec.
 
-  Self-contained LiveComponent that checks its own connection status.
-  Renders nothing if the user hasn't connected to CodeMySpec.
+  Submissions authenticate with the app's deploy key, so any logged-in
+  user can send feedback — no per-user CodeMySpec connection required.
+  Renders nothing when logged out or when no deploy key is configured.
   No hooks, no prop-drilling, no layout attr changes needed.
 
   ## Usage
@@ -26,20 +27,14 @@ defmodule BrokenOathsWeb.FeedbackWidget do
     socket = assign(socket, assigns)
 
     socket =
-      if connected?(socket) && !Map.has_key?(socket.assigns, :connected) do
-        connected =
-          case socket.assigns[:current_scope] do
-            nil -> false
-            scope -> Client.connected?(scope)
-          end
+      if connected?(socket) && !Map.has_key?(socket.assigns, :enabled) do
+        enabled = socket.assigns[:current_scope] != nil && Client.enabled?()
 
         socket
-        |> assign(:connected, connected)
+        |> assign(:enabled, enabled)
         |> assign(:expanded, false)
         |> assign(:submitted, false)
         |> assign(:error, nil)
-        |> assign(:screenshot_data, nil)
-        |> assign(:capturing, false)
       else
         socket
       end
@@ -53,21 +48,6 @@ defmodule BrokenOathsWeb.FeedbackWidget do
   end
 
   @impl true
-  def handle_event("capture_start", _params, socket) do
-    {:noreply, assign(socket, :capturing, true)}
-  end
-
-  @impl true
-  def handle_event("screenshot_captured", %{"data" => data_url}, socket) do
-    {:noreply, socket |> assign(:screenshot_data, data_url) |> assign(:capturing, false)}
-  end
-
-  @impl true
-  def handle_event("remove_screenshot", _params, socket) do
-    {:noreply, assign(socket, :screenshot_data, nil)}
-  end
-
-  @impl true
   def handle_event("submit_feedback", params, socket) do
     title = String.trim(params["title"] || "")
     description = String.trim(params["description"] || "")
@@ -76,29 +56,17 @@ defmodule BrokenOathsWeb.FeedbackWidget do
     if title == "" do
       {:noreply, assign(socket, :error, "Title is required")}
     else
-      scope = socket.assigns.current_scope
+      user = socket.assigns.current_scope.user
 
-      attachments =
-        case socket.assigns.screenshot_data do
-          nil ->
-            []
+      attrs = %{
+        "title" => title,
+        "description" => "#{description}\n\nReported by: #{user.email}",
+        "severity" => severity
+      }
 
-          data_url ->
-            case upload_screenshot(scope, data_url) do
-              {:ok, attachment} -> [attachment]
-              {:error, _} -> []
-            end
-        end
-
-      attrs = %{"title" => title, "description" => description, "severity" => severity}
-
-      case Client.create_issue(scope, attrs, attachments) do
+      case Client.create_issue(attrs) do
         {:ok, _} ->
-          {:noreply,
-           socket
-           |> assign(:submitted, true)
-           |> assign(:error, nil)
-           |> assign(:screenshot_data, nil)}
+          {:noreply, socket |> assign(:submitted, true) |> assign(:error, nil)}
 
         {:error, reason} ->
           {:noreply, assign(socket, :error, "Failed to submit: #{inspect(reason)}")}
@@ -106,58 +74,12 @@ defmodule BrokenOathsWeb.FeedbackWidget do
     end
   end
 
-  defp upload_screenshot(scope, data_url) do
-    with [_, base64] <- Regex.run(~r/^data:image\/png;base64,(.+)$/, data_url),
-         {:ok, binary} <- Base.decode64(base64),
-         {:ok, %{upload_url: url, s3_key: key}} <-
-           Client.presign_upload(scope, "screenshot.png", "image/png") do
-      case Req.put(url, body: binary, headers: [{"content-type", "image/png"}]) do
-        {:ok, %Req.Response{status: status}} when status in 200..299 ->
-          {:ok,
-           %{
-             "s3_key" => key,
-             "filename" => "screenshot.png",
-             "content_type" => "image/png",
-             "size" => byte_size(binary)
-           }}
-
-        _ ->
-          {:error, :upload_failed}
-      end
-    else
-      _ -> {:error, :invalid_screenshot}
-    end
-  end
-
   @impl true
   def render(assigns) do
     ~H"""
     <div>
-      <script :type={Phoenix.LiveView.ColocatedHook} name=".CmsScreenshot">
-        export default {
-          mounted() {
-            this.el.addEventListener("click", async (e) => {
-              if (!e.target.closest("[data-capture-screenshot]")) return;
-              this.pushEventTo(this.el, "capture_start", {});
-              try {
-                const dataUrl = await window.__captureScreenshot();
-                this.pushEventTo(this.el, "screenshot_captured", { data: dataUrl });
-              } catch (err) {
-                console.error("Screenshot capture failed:", err);
-                this.pushEventTo(this.el, "screenshot_captured", { data: null });
-              }
-            });
-          },
-        }
-      </script>
-
-      <%= if Map.get(assigns, :connected, false) do %>
-        <div
-          class="fixed bottom-4 right-4 z-50"
-          id="cms-feedback"
-          phx-hook=".CmsScreenshot"
-          phx-target={@myself}
-        >
+      <%= if Map.get(assigns, :enabled, false) do %>
+        <div class="fixed bottom-4 right-4 z-50" id="cms-feedback">
           <%= if @expanded do %>
             <div class="card bg-base-100 shadow-2xl border border-base-300 w-80">
               <div class="card-body p-4">
@@ -184,38 +106,6 @@ defmodule BrokenOathsWeb.FeedbackWidget do
                   <form phx-submit="submit_feedback" phx-target={@myself} class="space-y-3">
                     <%= if @error do %>
                       <div class="alert alert-error text-xs p-2"><span>{@error}</span></div>
-                    <% end %>
-
-                    <%= if @screenshot_data do %>
-                      <div class="relative">
-                        <img src={@screenshot_data} class="w-full rounded border border-base-300" />
-                        <button
-                          type="button"
-                          phx-click="remove_screenshot"
-                          phx-target={@myself}
-                          class="btn btn-circle btn-xs absolute top-1 right-1 btn-error"
-                        >
-                          &times;
-                        </button>
-                      </div>
-                    <% else %>
-                      <%= if @capturing do %>
-                        <button
-                          type="button"
-                          class="btn btn-ghost btn-xs w-full border-dashed border-base-300"
-                          disabled
-                        >
-                          <.icon name="hero-arrow-path" class="size-4 animate-spin" /> Capturing...
-                        </button>
-                      <% else %>
-                        <button
-                          type="button"
-                          class="btn btn-ghost btn-xs w-full border-dashed border-base-300"
-                          data-capture-screenshot
-                        >
-                          <.icon name="hero-camera" class="size-4" /> Capture Screenshot
-                        </button>
-                      <% end %>
                     <% end %>
 
                     <input

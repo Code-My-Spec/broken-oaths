@@ -55,8 +55,11 @@ config :broken_oaths, :integration_providers, [:codemyspec, :google]
 
 config :broken_oaths, :codemyspec_url, "https://codemyspec.com"
 
+# CodeMySpec is deliberately absent: feedback goes through the deploy
+# key (BrokenOaths.Codemyspec.Client), never a per-user connection.
+# It stays in :integration_providers above only so any historical
+# integration rows still load.
 config :broken_oaths, :oauth_providers, %{
-  codemyspec: BrokenOaths.Integrations.Providers.Codemyspec,
   google: BrokenOaths.Integrations.Providers.Google
 }
 
