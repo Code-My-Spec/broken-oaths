@@ -690,8 +690,6 @@ defmodule BrokenOathsWeb.GameLive.Play do
     |> Enum.map_join(" · ", &(&1 |> to_string() |> String.capitalize()))
   end
 
-  defp terrain_label(_), do: "Unknown"
-
   defp improvement_summary(%{kind: kind, status: :complete}),
     do: "#{kind |> to_string() |> String.capitalize()} (complete)"
 
@@ -1042,6 +1040,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
             })
             this.handleEvent("game:cities", ({cities}) => { this.cities = cities; this.draw() })
             this.handleEvent("game:camps", ({camps}) => { this.camps = camps; this.draw() })
+            this.handleEvent("game:combat", ({damage_dealt, damage_taken}) => {
+              this.combatFlash = {dealt: damage_dealt, taken: damage_taken, until: performance.now() + 2500}
+              this.ensureLoop()
+              this.draw()
+            })
             this.handleEvent("game:improvements", ({improvements}) => { this.improvements = improvements; this.draw() })
             this.handleEvent("game:selected", ({unit_id}) => { this.selectedId = unit_id; this.path = null; this.draw() })
             this.handleEvent("game:path", ({unit_id, tiles}) => {
@@ -1144,6 +1147,18 @@ defmodule BrokenOathsWeb.GameLive.Play do
           // which tile was aimed at, so orders into the shroud work.
           orderMove(e) {
             if (this.selectedId == null) return
+
+            // A right click on an adjacent barbarian or camp is an
+            // attack order, not a move — the RTS convention (story
+            // 891/894). Anything else falls through to movement.
+            const tile = this.hitTile(e)
+            if (tile != null) {
+              const enemy = this.units.find((u) => u.tile_id === tile && u.type === "barbarian_warrior")
+              if (enemy) { this.pushEvent("attack", {unit_id: this.selectedId, target_unit_id: enemy.id}); return }
+              const camp = this.camps.find((c) => c.tile_id === tile)
+              if (camp) { this.pushEvent("attack", {unit_id: this.selectedId, target_camp_id: camp.id}); return }
+            }
+
             const r = this.el.getBoundingClientRect()
             const p = this.unproject(e.clientX - r.left, e.clientY - r.top)
             if (!p) return
@@ -1193,7 +1208,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
               }
               this.draw()
               const pulsing = this.units.some((u) => u.order && u.order.status === "pending")
-              if (this.anims.size || pulsing) this.raf = requestAnimationFrame(step)
+              const flashing = this.combatFlash && now < this.combatFlash.until
+              if (this.anims.size || pulsing || flashing) this.raf = requestAnimationFrame(step)
             }
             this.raf = requestAnimationFrame(step)
           },
@@ -1396,6 +1412,26 @@ defmodule BrokenOathsWeb.GameLive.Play do
               ctx.setLineDash([4, 4])
               ctx.stroke()
               ctx.setLineDash([])
+            }
+
+            // Battle report flash: the last combat's damage exchange,
+            // fading out top-center for a couple of seconds.
+            if (this.combatFlash) {
+              const t = performance.now()
+              if (t < this.combatFlash.until) {
+                ctx.globalAlpha = Math.min(1, (this.combatFlash.until - t) / 800)
+                ctx.font = "bold 15px ui-monospace, monospace"
+                ctx.textAlign = "center"
+                ctx.fillStyle = "#fca5a5"
+                ctx.fillText(
+                  `⚔ dealt ${this.combatFlash.dealt} · took ${this.combatFlash.taken}`,
+                  this.cx, 34
+                )
+                ctx.globalAlpha = 1
+                ctx.textAlign = "start"
+              } else {
+                this.combatFlash = null
+              }
             }
           },
 
