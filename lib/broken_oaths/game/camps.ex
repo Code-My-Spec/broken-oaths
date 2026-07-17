@@ -208,10 +208,19 @@ defmodule BrokenOaths.Game.Camps do
     {camp, false}
   end
 
-  def advance(camp, alive_count) do
+  def advance(camp, alive_count) when alive_count >= @max_warriors do
+    # At cap the counter HOLDS at zero instead of climbing: the rule is
+    # "re-spawning one every 3 turns only while below the cap", so a
+    # kill buys attackers a full 3-turn grace before the replacement.
+    # The climbing-counter version made camps unclearable in practice —
+    # a freed slot refilled on the very next tick (QA issue: reaching a
+    # camp cost 25+ units because guards respawned instantly).
+    {%{camp | spawn_counter: 0}, false}
+  end
+
+  def advance(camp, _alive_count) do
     counter = camp.spawn_counter + 1
-    ready? = counter >= @spawn_cadence and alive_count < @max_warriors
-    {%{camp | spawn_counter: counter}, ready?}
+    {%{camp | spawn_counter: counter}, counter >= @spawn_cadence}
   end
 
   @doc "Reset a camp's spawn counter after a warrior has actually been placed."
