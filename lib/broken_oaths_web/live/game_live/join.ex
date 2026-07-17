@@ -66,12 +66,6 @@ defmodule BrokenOathsWeb.GameLive.Join do
       <ul :if={@worlds != []} class="menu bg-base-200 rounded-box w-full mt-4">
         <.world_row :for={world <- @worlds} world={world} current_user={@current_scope.user} />
       </ul>
-
-      <.live_component
-        module={BrokenOathsWeb.FeedbackWidget}
-        id="codemyspec-feedback"
-        current_scope={@current_scope}
-      />
     </div>
     """
   end

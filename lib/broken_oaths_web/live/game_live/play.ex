@@ -1441,12 +1441,6 @@ defmodule BrokenOathsWeb.GameLive.Play do
           }
         }
       </script>
-
-      <.live_component
-        module={BrokenOathsWeb.FeedbackWidget}
-        id="codemyspec-feedback"
-        current_scope={@current_scope}
-      />
     </div>
     """
   end
