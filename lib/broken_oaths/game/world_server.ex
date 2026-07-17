@@ -1805,6 +1805,11 @@ defmodule BrokenOaths.Game.WorldServer do
           persist_camp_changes(Map.get(old_state, :camps, %{}), Map.get(new_state, :camps, %{}))
           persist_player_changes(old_state.players, new_state.players)
 
+          persist_heir_changes(
+            Map.get(old_state, :pending_heirs, %{}),
+            Map.get(new_state, :pending_heirs, %{})
+          )
+
           persist_improvement_changes(
             new_state.world.id,
             old_state.improvements,
@@ -1909,6 +1914,19 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
+  # The heir schedule is small and rarely changes — diff both directions
+  # so a scheduled arrival is written and a resolved (or superseded) one
+  # is cleared (story 896, QA issue 0b7e82cd).
+  defp persist_heir_changes(old_heirs, new_heirs) do
+    for {id, turn} <- new_heirs, Map.get(old_heirs, id) != turn do
+      Repo.update_all(from(p in Player, where: p.id == ^id), set: [heir_arrives_turn: turn])
+    end
+
+    for {id, _turn} <- old_heirs, not Map.has_key?(new_heirs, id) do
+      Repo.update_all(from(p in Player, where: p.id == ^id), set: [heir_arrives_turn: nil])
+    end
+  end
+
   # Starting/attaching an improvement is persisted immediately (see
   # "Improvements" above) — this only reconciles what the tick itself
   # advances: progress, completion, and a builder walking away.
@@ -1986,21 +2004,27 @@ defmodule BrokenOaths.Game.WorldServer do
   # -------------------------------------------------------------------
 
   defp load_state(world) do
+    players = load_players(world.id)
+
     %{
       world: world,
       turn: world.turn,
       turn_started_at: world.turn_started_at || persist_initial_turn_started_at(world),
       units: load_units(world.id),
       orders: load_orders(world.id),
-      players: load_players(world.id),
+      players: players,
       explored: load_explored(world.id),
       cities: load_cities(world.id),
       improvements: load_improvements(world.id),
       camps: load_camps(world.id),
-      # Not persisted — see `schedule_heir_if_lord_fell/3`'s doc for the
-      # known, narrow restart limitation this implies.
-      pending_heirs: %{}
+      # Hydrated from game_players.heir_arrives_turn so a restart
+      # mid-wait re-derives every pending heir (QA issue 0b7e82cd).
+      pending_heirs: pending_heirs_from(players)
     }
+  end
+
+  defp pending_heirs_from(players) do
+    for {id, %{heir_arrives_turn: turn}} <- players, not is_nil(turn), into: %{}, do: {id, turn}
   end
 
   defp persist_initial_turn_started_at(world) do
@@ -2060,7 +2084,13 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   defp player_map(%Player{} = p),
-    do: %{id: p.id, user_id: p.user_id, region_id: p.region_id, gold: p.gold}
+    do: %{
+      id: p.id,
+      user_id: p.user_id,
+      region_id: p.region_id,
+      gold: p.gold,
+      heir_arrives_turn: p.heir_arrives_turn
+    }
 
   defp unit_map(%Unit{} = u) do
     %{

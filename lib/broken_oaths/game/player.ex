@@ -30,6 +30,10 @@ defmodule BrokenOaths.Game.Player do
     field :region_id, :integer
     field :gold, :integer, default: 50
     field :joined_turn, :integer
+    # Story 896: the turn the fallen lord's heir arrives at the capital
+    # — persisted so a WorldServer restart mid-wait can't lose the
+    # lineage (QA issue 0b7e82cd). Nil when no heir is pending.
+    field :heir_arrives_turn, :integer
 
     belongs_to :world, World
     belongs_to :user, User
