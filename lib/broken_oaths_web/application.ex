@@ -17,6 +17,10 @@ defmodule BrokenOathsWeb.Application do
         # addressed by world id (see BrokenOaths.Game.WorldServer).
         {Registry, keys: :unique, name: BrokenOaths.GameRegistry},
         {DynamicSupervisor, name: BrokenOaths.GameSupervisor, strategy: :one_for_one},
+        # Owns the :oauth_state_store ETS table the OAuth connect flow
+        # writes to — without it every /integrations/oauth/* request
+        # crashes on a missing table.
+        BrokenOaths.Integrations.OAuthStateStore,
         # Start to serve requests, typically the last entry
         BrokenOathsWeb.Endpoint
       ] ++ globe_warmup()
