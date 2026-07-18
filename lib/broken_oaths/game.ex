@@ -304,6 +304,28 @@ defmodule BrokenOaths.Game do
     do: WorldServer.call(world, {:set_unit_hp_for_test, unit_id, hp})
 
   @doc """
+  Test-only: set `user`'s own gold treasury directly, standing in for a
+  per-turn city gold YIELD this codebase has no real source for yet —
+  see `BrokenOaths.Game.WorldServer`'s `:set_player_gold_for_test`
+  handler for the same documented, narrow-exception status
+  `set_unit_hp_for_test/3` already has.
+  """
+  @spec set_player_gold_for_test(map(), map(), integer()) :: :ok
+  def set_player_gold_for_test(world, user, gold),
+    do: WorldServer.call(world, {:set_player_gold_for_test, user.id, gold})
+
+  @doc """
+  Test-only: declares `user`'s per-turn gold INCOME, separate from
+  their actual treasury balance (`set_player_gold_for_test/3`) — see
+  `BrokenOaths.Game.WorldServer`'s `:set_player_gold_income_for_test`
+  handler for the full rationale (story 908's tribute specs, "debt on
+  an empty treasury" needs the two concepts kept apart).
+  """
+  @spec set_player_gold_income_for_test(map(), map(), integer()) :: :ok
+  def set_player_gold_income_for_test(world, user, income),
+    do: WorldServer.call(world, {:set_player_gold_income_for_test, user.id, income})
+
+  @doc """
   Test-only: instantly restore `unit_id`'s movement to its own max,
   bypassing the turn boundary that would normally do it — see
   `BrokenOaths.Game.WorldServer`'s `:recharge_unit_for_test` handler for

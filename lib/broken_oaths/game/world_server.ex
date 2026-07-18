@@ -481,6 +481,50 @@ defmodule BrokenOaths.Game.WorldServer do
     {:reply, :ok, new_state}
   end
 
+  # Test-only: instantly sets `user`'s own treasury to `gold`, same
+  # narrow, documented-bridge status as `:set_unit_hp_for_test` above.
+  # Stand-in for a per-turn city GOLD YIELD this codebase doesn't have
+  # yet at all (`BrokenOaths.Game.Yields` only ever produces food/
+  # production; a player's `gold` column only ever moves via
+  # `BarbarianAI.bounty_gold/0` and `Camps.destroy_reward/0`, both
+  # one-off rewards, never a recurring per-turn income) — the exact
+  # same "no real source exists yet" gap `:set_unit_hp_for_test` already
+  # papers over for healing (story 881, before any combat existed to
+  # produce a damaged unit). Feudal batch tribute specs (story 908) use
+  # this to put a vassal's treasury at a controlled figure immediately
+  # before the one turn boundary tribute is expected to skim against —
+  # standing in for "this turn's gold income" since nothing in the
+  # schema distinguishes accrued income from total balance either.
+  def handle_call({:set_player_gold_for_test, user_id, gold}, _from, state) do
+    player = find_player(state, user_id)
+    Repo.update_all(from(p in Player, where: p.id == ^player.id), set: [gold: gold])
+    new_state = put_in(state.players[player.id].gold, gold)
+    {:reply, :ok, new_state}
+  end
+
+  # Test-only: declares `user`'s per-turn gold INCOME for story 908's
+  # tribute specs — deliberately SEPARATE from `:set_player_gold_for_test`
+  # above (the player's actual treasury BALANCE), since "insufficient
+  # gold -> debt" (`.code_my_spec/knowledge/feudal_vassalage_design.md`,
+  # "Round-5 decisions") only makes sense if tribute is computed from an
+  # INCOME figure distinct from whatever the treasury already holds.
+  # Held purely in ephemeral `WorldServer` state (`state.test_gold_
+  # income`, never persisted — there is no DB column for it, the same
+  # way a pending heir is tracked in `state.pending_heirs` only) since
+  # nothing reads it yet: `BrokenOaths.Game.Tribute` (this story's own
+  # component) doesn't exist, so this is a documented CONTRACT for that
+  # future implementation to read during its own turn-boundary phase,
+  # not a wired-up mechanic today — the same "narrow, false-until-
+  # implemented" status every other not-yet-existing seam in these
+  # feudal batch specs already has (a not-yet-existing event, a
+  # not-yet-rendered badge). Setting it never mutates `gold` itself.
+  def handle_call({:set_player_gold_income_for_test, user_id, income}, _from, state) do
+    player = find_player(state, user_id)
+    existing = Map.get(state, :test_gold_income, %{})
+    new_state = Map.put(state, :test_gold_income, Map.put(existing, player.id, income))
+    {:reply, :ok, new_state}
+  end
+
   # Test-only: instantly restore `unit_id`'s movement to its own max,
   # bypassing the turn boundary that would normally do it
   # (`reset_movement/1` in `Turn.tick/1`) — same narrow, documented-bridge

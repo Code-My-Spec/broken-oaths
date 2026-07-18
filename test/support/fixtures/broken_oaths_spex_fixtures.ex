@@ -68,6 +68,12 @@ defmodule BrokenOathsSpex.Fixtures do
 
   # --- Game reads for board-state assertions (sanctioned) ---
   defdelegate player_units(world, user), to: BrokenOaths.Game, as: :player_units
+
+  # The player's current gold treasury — same sanctioned, read-only
+  # status as `player_units/2` (`Game.gold/2` is a normal, non-test
+  # read); also rendered as `data-test="player-gold"` on `GameLive.Play`,
+  # so this is a shortcut for the SAME fact, not a new one.
+  defdelegate gold(world, user), to: BrokenOaths.Game, as: :gold
   defdelegate adjacent_tiles(world, tile_id), to: BrokenOaths.Worlds.Regions, as: :adjacent_tiles
 
   # The fog-filtered "everything user can currently see" read (own units
@@ -140,6 +146,28 @@ defmodule BrokenOathsSpex.Fixtures do
   # sets HP directly and nothing else. Revisit/remove once a combat
   # story lands and can supply real damage.
   defdelegate set_unit_hp(world, unit_id, hp), to: BrokenOaths.Game, as: :set_unit_hp_for_test
+
+  # Deliberate, narrow exception to "read-only" above, same status as
+  # `set_unit_hp/3`: story 908 (tribute) needs a vassal with a
+  # controlled gold treasury to skim from, but no per-turn city gold
+  # YIELD mechanic exists anywhere in this codebase yet (`Game.Yields`
+  # has no gold field at all; a player's gold only ever moves via
+  # barbarian bounty/camp-destroy rewards, both one-off, never a
+  # recurring income) — see `BrokenOaths.Game.WorldServer`'s
+  # `:set_player_gold_for_test` handler for the full rationale.
+  defdelegate set_player_gold(world, user, gold), to: BrokenOaths.Game, as: :set_player_gold_for_test
+
+  # Deliberate, narrow exception to "read-only" above, same status as
+  # `set_player_gold/3`: a SEPARATE per-turn gold INCOME declaration,
+  # distinct from the treasury balance `set_player_gold/3` sets — see
+  # `BrokenOaths.Game.WorldServer`'s `:set_player_gold_income_for_test`
+  # handler for why story 908's "debt on an empty treasury" criterion
+  # needs the two kept apart. Nothing reads this yet (`BrokenOaths.
+  # Game.Tribute` doesn't exist) — a documented contract for that
+  # future implementation, not a wired-up mechanic today.
+  defdelegate set_player_gold_income(world, user, income),
+    to: BrokenOaths.Game,
+    as: :set_player_gold_income_for_test
 
   # Deliberate, narrow exception to "read-only" above, same status as
   # `set_unit_hp/3`: instantly restores a unit's movement to its own

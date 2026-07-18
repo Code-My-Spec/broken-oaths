@@ -65,3 +65,60 @@ player; hidden tiles never reach a client.
 - BrokenOathsWeb.GameLive -> BrokenOaths.Worlds
 - BrokenOaths.Game -> BrokenOaths.Worlds
 - BrokenOaths.Game -> BrokenOaths.Users
+
+## Feudal Foundation Batch (stories 906–908)
+
+The feudal vassalage foundation maps onto the **existing** `BrokenOaths.Game`
+context (as new child modules/schemas) and the existing `BrokenOathsWeb.GameLive`
+live-context (as new components) rather than a new top-level context. Rationale:
+in this codebase everything mutable-on-a-world (units, cities, combat, research)
+is a child of the single `Game` context, serialized by the WorldServer and
+persisted via the tick delta — vassalage is the same kind of live state. A
+separate `Vassalage` context would have to depend on `Game` (players, cities,
+turn pipeline) while `Game` depends on it (Siege creates vassalage, Turn collects
+tribute), i.e. a `Game`↔`Vassalage` cycle. Keeping the new pieces inside `Game`
+matches convention and keeps the graph acyclic. No new context dependency edges
+are required — the existing `GameLive -> Game`, `Game -> Worlds`, `Game -> Users`
+edges cover all new components.
+
+### New children of BrokenOaths.Game
+
+- BrokenOaths.Game.Siege (module) [Story 906]: PvP city siege + capture. Composes
+  Combat + CityDefense for the multi-turn HP grind and counter-attacks; the
+  capture flow (zero HP breaks the city, moving a unit onto the tile occupies it);
+  fallen-garrison execute/release with a small Honor delta; fires the last-free-city
+  check. **Occupied state lives on the City schema** (an occupier field), not on the
+  relationship — a city can be occupied without the owner being a vassal (a non-last
+  city, criterion 7664), so occupation is a per-city fact distinct from Vassalage.
+- BrokenOaths.Game.Vassalage (schema) [Story 907]: the player→player relationship
+  record with day-one forward-looking fields (tribute_rate 0.25, oath_strain 0-100,
+  hidden_agenda enum, contract_terms jsonb, status, Honor hooks).
+- BrokenOaths.Game.Vassalization (module) [Story 907]: the subjugation pivot —
+  last-free-city trigger, creates the Vassalage record, records the secret Hidden
+  Agenda pick, notifies both players; deterministic when several last-cities fall
+  in one tick.
+- BrokenOaths.Game.Tribute (module) [Story 908]: per-turn gold tribute (vassal
+  city-yield gold pre-upkeep × lord rate) with debt + gold log, plus call-to-arms
+  levy issue/answer/refuse (Oath Strain + Honor on refusal); runs in the turn
+  pipeline, scales to many relationships.
+- BrokenOaths.Game.Levy (schema) [Story 908]: a call-to-arms pledge record (war,
+  lord, vassal, pledged army share, status, war-duration binding).
+- BrokenOaths.Game.GoldLog (schema) [Story 908]: a gold-transfer ledger entry both
+  parties can see (world, turn, from/to player, amount, reason).
+
+`Honor` is carried as a field on the existing `BrokenOaths.Game.Player` schema
+(mutated by Siege on execute-garrison and by Tribute on levy refusal); the
+`occupied` marker and the peacetime owner-runs-it rule extend the existing
+`BrokenOaths.Game.City` schema — both are spec-time field additions, no new
+component.
+
+### New children of BrokenOathsWeb.GameLive
+
+- BrokenOathsWeb.GameLive.OathPanel (liveview_component) [Story 907]: the
+  Terms-of-Oath screen — secret Hidden Agenda pick on subjugation.
+- BrokenOathsWeb.GameLive.VassalsPanel (liveview_component) [Stories 907, 908]: the
+  lord's Vassals list + per-vassal tribute-rate control + gold log + call-to-arms
+  issue; the vassal's "Sworn to X" indicator + rate + answer/refuse controls.
+
+The board attack affordance and occupied rendering extend the existing
+`GameLive.Play` and `GameLive.CityPanel` surfaces (spec-time additions).
