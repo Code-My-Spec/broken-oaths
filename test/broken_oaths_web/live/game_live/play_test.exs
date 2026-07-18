@@ -246,6 +246,74 @@ defmodule BrokenOathsWeb.GameLive.PlayTest do
   end
 
   # -------------------------------------------------------------------
+  # Issue d403faa6 — clicking a stacked tile (a non-combat unit plus a
+  # combat escort, both this player's own — the v0.2.1 field-stacking
+  # fix) cycles through its units instead of always resolving to the
+  # same one
+  # -------------------------------------------------------------------
+
+  describe "cycling through a stacked tile's own units (QA issue d403faa6)" do
+    test "first click selects unit A, second selects unit B, third wraps back to A", %{
+      conn: conn,
+      world: world,
+      user: user
+    } do
+      {:ok, play_live, _html} = join_and_mount(conn, world)
+
+      [lord | _] = for u <- Game.player_units(world, user), u.type == :lord, do: u
+      # `spawn_unit_for_test/4` takes the `Game.Player` id, not the
+      # `Accounts.User` one — `join_world/2` is idempotent (`do_join/2`
+      # just hands back the already-joined row), so this re-fetches it
+      # rather than threading a fresh assign through `join_and_mount/2`.
+      {:ok, player} = Game.join_world(world, user)
+      worker = Game.spawn_unit_for_test(world, player.id, :worker, lord.tile_id)
+
+      [unit_a_id, unit_b_id] = Enum.sort([lord.id, worker.id])
+
+      select_on_tile = fn ->
+        render_hook(play_live, "select_unit", %{
+          "unit_id" => to_string(lord.id),
+          "tile_id" => to_string(lord.tile_id)
+        })
+      end
+
+      select_on_tile.()
+      assert_push_event(play_live, "game:selected", %{unit_id: ^unit_a_id})
+
+      select_on_tile.()
+      assert_push_event(play_live, "game:selected", %{unit_id: ^unit_b_id})
+
+      select_on_tile.()
+      assert_push_event(play_live, "game:selected", %{unit_id: ^unit_a_id})
+    end
+
+    test "a single-unit tile keeps selecting that same unit on repeat clicks", %{
+      conn: conn,
+      world: world,
+      user: user
+    } do
+      {:ok, play_live, _html} = join_and_mount(conn, world)
+
+      [lord | _] = for u <- Game.player_units(world, user), u.type == :lord, do: u
+      lord_id = lord.id
+
+      render_hook(play_live, "select_unit", %{
+        "unit_id" => to_string(lord.id),
+        "tile_id" => to_string(lord.tile_id)
+      })
+
+      assert_push_event(play_live, "game:selected", %{unit_id: ^lord_id})
+
+      render_hook(play_live, "select_unit", %{
+        "unit_id" => to_string(lord.id),
+        "tile_id" => to_string(lord.tile_id)
+      })
+
+      assert_push_event(play_live, "game:selected", %{unit_id: ^lord_id})
+    end
+  end
+
+  # -------------------------------------------------------------------
   # Issue 937ea82b — a first-pass in-game Help panel
   # -------------------------------------------------------------------
 

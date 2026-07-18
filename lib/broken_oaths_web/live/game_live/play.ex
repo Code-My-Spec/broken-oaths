@@ -224,14 +224,44 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # Events
   # -------------------------------------------------------------------
 
-  def handle_event("select_unit", %{"unit_id" => unit_id}, socket) do
+  # A left click on a tile is always resolved to "the unit standing
+  # there" client-side (the board hook's `click/1`), but since v0.2.1's
+  # field stacking (a non-combat unit sharing a tile with an escort of
+  # the SAME owner — see `BrokenOaths.Game.Unit`'s own moduledoc) a
+  # single tile can now hold two of the player's own units — QA issue
+  # d403faa6, "can't pick stacked unit". The hook sends the CLICKED
+  # tile's id alongside its own best-guess `unit_id`; when that tile
+  # carries more than one of THIS player's own units, `next_unit_in_stack/2`
+  # decides which one actually gets selected: the Civ convention is
+  # "cycle to the next one" on a re-click of an already-selected tile,
+  # wrapping back to the first past the last. `socket.assigns.units`
+  # (fog-filtered, see the moduledoc's `game:units` doc) never carries
+  # ownership on each entry, so the tile's own stack is read fresh off
+  # `Game.player_units/2` — already scoped to this player's own units
+  # — rather than trying to infer ownership client-side. A click on a
+  # tile with only a foreign (visible enemy) unit, or with no `tile_id`
+  # at all (every direct `render_hook` call in this codebase's own
+  # tests), falls straight through to the plain by-id lookup —
+  # unchanged from before this fix.
+  def handle_event("select_unit", %{"unit_id" => unit_id} = params, socket) do
     unit_id = parse_id(unit_id)
-    unit = Enum.find(socket.assigns.units, &(&1.id == unit_id))
+    tile_id = params |> Map.get("tile_id") |> parse_id()
+
+    %{units: units, world: world, user: user, selected_unit_id: current_selected_id} =
+      socket.assigns
+
+    unit =
+      case tile_id && owned_stack_on_tile(world, user, tile_id) do
+        [_ | _] = stack -> next_unit_in_stack(stack, current_selected_id)
+        _no_owned_stack -> Enum.find(units, &(&1.id == unit_id))
+      end
+
+    selected_unit_id = if unit, do: unit.id, else: unit_id
 
     socket =
       socket
       |> assign(
-        selected_unit_id: unit_id,
+        selected_unit_id: selected_unit_id,
         selected_unit: unit,
         selected_order: unit && unit.order,
         allowed_improvements:
@@ -245,7 +275,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         selected_camp_id: nil,
         selected_camp: nil
       )
-      |> push_event("game:selected", %{unit_id: unit_id})
+      |> push_event("game:selected", %{unit_id: selected_unit_id})
       |> push_selected_path()
       |> push_city_selection()
 
@@ -1566,6 +1596,37 @@ defmodule BrokenOathsWeb.GameLive.Play do
   defp parse_id(id) when is_integer(id), do: id
   defp parse_id(id) when is_binary(id), do: String.to_integer(id)
 
+  # QA issue d403faa6: this player's own units currently standing on
+  # `tile_id`, sorted into a stable (by id) order — the "stack"
+  # `next_unit_in_stack/2` cycles through on repeat clicks. Reads fresh
+  # off `Game.player_units/2` (already scoped to this player's own
+  # units, unlike `socket.assigns.units`'s fog-filtered — and
+  # ownership-blind — entries) rather than the pushed board state, the
+  # same authoritative-read pattern every other command handler in this
+  # module already uses.
+  defp owned_stack_on_tile(world, user, tile_id) do
+    world
+    |> Game.player_units(user)
+    |> Enum.filter(&(&1.tile_id == tile_id))
+    |> Enum.sort_by(& &1.id)
+  end
+
+  # Pure cycling rule, kept separate from the `Game.player_units/2` read
+  # above so it's trivially unit-testable: given a NON-EMPTY, already
+  # `owned_stack_on_tile/3`-sorted stack and whichever unit id is
+  # presently selected (`nil` when nothing is, or when the selection
+  # belongs to a different tile entirely), returns the unit a click
+  # should select next — the first of the stack when none of it is
+  # already selected (the unchanged "first click" behavior a
+  # single-unit tile always hits), otherwise the NEXT one, wrapping
+  # back to the first past the last.
+  defp next_unit_in_stack(stack, current_selected_id) do
+    case Enum.find_index(stack, &(&1.id == current_selected_id)) do
+      nil -> List.first(stack)
+      idx -> Enum.at(stack, rem(idx + 1, length(stack)))
+    end
+  end
+
   defp city_error_message(:not_owner), do: "You don't control that city."
   defp city_error_message(:not_settler), do: "Only a settler can found a city."
   defp city_error_message(:invalid_terrain), do: "A city can't be founded there."
@@ -2247,12 +2308,19 @@ defmodule BrokenOathsWeb.GameLive.Play do
           // none is there but one of my own cities is, select that
           // instead (mutually exclusive side panels — see Play's
           // moduledoc). A click on empty ground selects nothing.
+          //
+          // QA issue d403faa6: a stacked tile (a non-combat unit
+          // escorted by a combat unit, both this player's own) can no
+          // longer be resolved to "the unit" client-side — `tile_id`
+          // rides along with this best-guess `unit_id` so the server's
+          // own `owned_stack_on_tile/3` + `next_unit_in_stack/2` can
+          // cycle through the player's own stack there instead.
           click(e) {
             const tile = this.hitTile(e)
             if (tile == null) return
 
             const unit = this.units.find((u) => u.tile_id === tile)
-            if (unit) { this.pushEvent("select_unit", {unit_id: unit.id}); return }
+            if (unit) { this.pushEvent("select_unit", {unit_id: unit.id, tile_id: tile}); return }
 
             const city = this.cities.find((c) => c.tile_id === tile)
             if (city) { this.pushEvent("select_city", {city_id: city.id}); return }
