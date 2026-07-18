@@ -43,9 +43,19 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
       |> assign_new(:unit_id, fn -> Map.get(assigns.unit, :id) end)
 
     ~H"""
-    <div id={@id} data-test="unit-panel" class="card bg-base-200 shadow-sm">
+    <div id={@id} data-test="unit-panel" class="card bg-base-200 shadow-sm w-64 relative">
+      <%!-- QA issue e51a31be — same dismiss affordance as `CityPanel`,
+           bubbling to `Play`'s own "clear_selection" handler. --%>
+      <button
+        type="button"
+        phx-click="clear_selection"
+        data-test="close-unit-panel"
+        class="btn btn-ghost btn-xs btn-circle absolute top-1 right-1"
+      >
+        <.icon name="hero-x-mark" class="w-4 h-4" />
+      </button>
       <div class="card-body gap-2">
-        <h3 data-test="unit-type" class="card-title text-base">
+        <h3 data-test="unit-type" class="card-title text-base pr-6">
           {unit_type_label(@unit.type)}
           <span :if={@unit.type == :lord} data-test="unit-crown">
             <.icon name="hero-trophy-solid" class="size-4 text-warning" />

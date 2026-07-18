@@ -96,6 +96,17 @@ defmodule BrokenOathsWeb.GameLive.CityPanelTest do
     end
   end
 
+  # QA issue e51a31be "UI issues" — the detail pane needed a dismiss
+  # affordance.
+  describe "the close control" do
+    test "renders and bubbles clear_selection to the parent LiveView" do
+      html = render_panel([])
+
+      assert html =~ ~s(data-test="close-city-panel")
+      assert html =~ ~s(phx-click="clear_selection")
+    end
+  end
+
   describe "Bronze Age reached" do
     test "offers the Bronze Spearman, alongside the always-available types" do
       html = render_panel(player_research: @bronze_age)

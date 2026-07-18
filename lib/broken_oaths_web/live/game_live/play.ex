@@ -104,7 +104,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   alias BrokenOaths.Chat
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.{Improvement, Presence, Research, Yields}
+  alias BrokenOaths.Game.{Camp, Improvement, Presence, Research, Yields}
   alias BrokenOaths.Worlds
   alias BrokenOaths.Worlds.{Generator, Globe, Regions, Resources, Terrain, Weather}
 
@@ -168,6 +168,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
             selected_city_id: nil,
             selected_city: nil,
             assignable_tiles: [],
+            selected_camp_id: nil,
+            selected_camp: nil,
             city_error: nil,
             improvement_error: nil,
             confirm_abandon?: false,
@@ -233,10 +235,13 @@ defmodule BrokenOathsWeb.GameLive.Play do
         improvement_error: nil,
         selected_city_id: nil,
         selected_city: nil,
-        selected_tile: nil
+        selected_tile: nil,
+        selected_camp_id: nil,
+        selected_camp: nil
       )
       |> push_event("game:selected", %{unit_id: unit_id})
       |> push_selected_path()
+      |> push_city_selection()
 
     {:noreply, socket}
   end
@@ -255,22 +260,27 @@ defmodule BrokenOathsWeb.GameLive.Play do
     yields = Yields.tile_yield(terrain, resource)
     improvement = Enum.find(improvements, &(&1.tile_id == tile_id))
 
-    {:noreply,
-     assign(socket,
-       selected_tile: %{
-         id: tile_id,
-         terrain: terrain_label(terrain),
-         food: yields.food,
-         production: yields.production,
-         improvement: improvement,
-         resource: resource
-       },
-       selected_unit_id: nil,
-       selected_unit: nil,
-       selected_order: nil,
-       selected_city_id: nil,
-       selected_city: nil
-     )}
+    socket =
+      assign(socket,
+        selected_tile: %{
+          id: tile_id,
+          terrain: terrain_label(terrain),
+          food: yields.food,
+          production: yields.production,
+          improvement: improvement,
+          resource: resource
+        },
+        selected_unit_id: nil,
+        selected_unit: nil,
+        selected_order: nil,
+        selected_city_id: nil,
+        selected_city: nil,
+        selected_camp_id: nil,
+        selected_camp: nil
+      )
+      |> push_city_selection()
+
+    {:noreply, socket}
   end
 
   # A left click on one of the player's own cities (see the board hook's
@@ -289,8 +299,67 @@ defmodule BrokenOathsWeb.GameLive.Play do
         city_error: nil,
         selected_unit_id: nil,
         selected_unit: nil,
-        selected_tile: nil
+        selected_tile: nil,
+        selected_camp_id: nil,
+        selected_camp: nil
       )
+      |> push_city_selection()
+
+    {:noreply, socket}
+  end
+
+  # QA issue 748348fe "barbarian camp issues" — a camp under siege had
+  # no way to show its own HP. Same mutual-exclusivity shape as
+  # `select_unit`/`select_city`/`select_tile` above (one side panel at
+  # a time): a camp lives in `@camps` (already fog-filtered by
+  # `Game.camps_visible_to/2`), never a fresh `Game` read.
+  def handle_event("select_camp", %{"camp_id" => camp_id}, socket) do
+    camp_id = parse_id(camp_id)
+    camp = Enum.find(socket.assigns.camps, &(&1.id == camp_id))
+
+    socket =
+      socket
+      |> assign(
+        selected_camp_id: camp_id,
+        selected_camp: camp,
+        selected_tile: nil,
+        selected_unit_id: nil,
+        selected_unit: nil,
+        selected_order: nil,
+        selected_city_id: nil,
+        selected_city: nil
+      )
+      |> push_city_selection()
+
+    {:noreply, socket}
+  end
+
+  # QA issue e51a31be "UI issues" — the right-side detail pane had no
+  # dismiss affordance. Every panel's own close (X) button routes here;
+  # it resets the exact same selection assigns `mount/3` starts with,
+  # and echoes the clear back to the client the same way every OTHER
+  # selection-changing handler already does (`"game:selected"` with a
+  # nil unit id clears the board's own selection ring/path — see the
+  # `.Board` hook's own `"game:selected"` handler; `push_city_selection/1`
+  # clears the territory border/worked-tile highlight the same way).
+  def handle_event("clear_selection", _params, socket) do
+    socket =
+      socket
+      |> assign(
+        selected_tile: nil,
+        selected_unit_id: nil,
+        selected_unit: nil,
+        selected_order: nil,
+        allowed_improvements: [],
+        current_dig: nil,
+        selected_city_id: nil,
+        selected_city: nil,
+        assignable_tiles: [],
+        selected_camp_id: nil,
+        selected_camp: nil
+      )
+      |> push_event("game:selected", %{unit_id: nil})
+      |> push_city_selection()
 
     {:noreply, socket}
   end
@@ -935,7 +1004,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
       world: world,
       user: user,
       selected_unit_id: selected_unit_id,
-      selected_city_id: selected_city_id
+      selected_city_id: selected_city_id,
+      selected_camp_id: selected_camp_id
     } = socket.assigns
 
     units = Game.units_visible_to(world, user)
@@ -945,6 +1015,13 @@ defmodule BrokenOathsWeb.GameLive.Play do
     %{visible: visible, explored: explored} = Game.visibility(world, user)
     selected_unit = selected_unit_id && Enum.find(units, &(&1.id == selected_unit_id))
     selected_city = selected_city_id && Enum.find(cities, &(&1.id == selected_city_id))
+    # QA issue 748348fe: a camp under siege stays selected across the
+    # refresh a successful attack triggers (`:units_changed`), the same
+    # "re-find by id in the fresh list" pattern `selected_unit`/
+    # `selected_city` already use — a destroyed camp simply drops out of
+    # `camps_visible_to/2`'s own list, so this naturally clears back to
+    # `nil` the instant the camp falls, with no separate teardown needed.
+    selected_camp = selected_camp_id && Enum.find(camps, &(&1.id == selected_camp_id))
     # Story 904: `science_per_turn` is derived from `cities` (`Research.
     # science_per_turn/1`, `2 * size` per city) — re-pulled here, not
     # just on `refresh_research/1`'s own turn-boundary/research-change
@@ -968,12 +1045,14 @@ defmodule BrokenOathsWeb.GameLive.Play do
       current_dig: worker_current_dig(improvements, selected_unit),
       selected_city: selected_city,
       assignable_tiles: assignable_tiles(world, selected_city),
+      selected_camp: selected_camp,
       known_players: Game.known_players(world, user),
       player_stats: Game.player_stats(world, user),
       player_research: player_research
     )
     |> push_board_state()
     |> push_selected_path()
+    |> push_city_selection()
   end
 
   # Story 902: single source of truth for `player_research`, the same
@@ -1012,6 +1091,54 @@ defmodule BrokenOathsWeb.GameLive.Play do
       unit ->
         tiles = (unit.order && unit.order.path) || []
         push_event(socket, "game:path", %{unit_id: unit.id, tiles: tiles})
+    end
+  end
+
+  # Story 759d02c8/0b8a75e4 (v0.2.1 playtest) — Civ-style territory
+  # border + worked-tile highlight for whichever city is currently
+  # selected, so a city panel's raw "Tile N" rows correspond to
+  # something visible on the board (issue 0b8a75e4's own ask). Called
+  # from every selection-changing handler (including to no city, which
+  # clears the render) and again at the end of every `refresh_board/1`
+  # so growth/worked-tile changes redraw the border live while the
+  # panel stays open. Deliberately scoped to the ONE selected city,
+  # never every city on the board — the "keep it performant"
+  # requirement both issues call out.
+  #
+  # Content-diffed against the last-pushed value, the SAME idiom (and
+  # the same reason — QA issue dbcbd478) `push_camps/2`/
+  # `push_improvements/2`/`push_resources/2` already establish: every
+  # `refresh_board/1` calls this unconditionally, including the common
+  # case of "nothing is selected" — without the diff, that would queue
+  # a fresh no-op "game:city_selection" push on EVERY turn boundary/
+  # units-changed refresh, sitting in a spec's mailbox ahead of the
+  # next MEANINGFUL push the way an undiffed camps push once did.
+  defp push_city_selection(socket) do
+    payload =
+      case socket.assigns.selected_city do
+        nil ->
+          %{territory: [], worked_tiles: []}
+
+        city ->
+          %{
+            territory: city.territory,
+            worked_tiles: Enum.uniq([city.tile_id | city.worked_tiles])
+          }
+      end
+
+    last = Map.get(socket.assigns, :last_city_selection)
+
+    cond do
+      payload == last ->
+        socket
+
+      payload.territory == [] and (is_nil(last) or last.territory == []) ->
+        socket
+
+      true ->
+        socket
+        |> assign(:last_city_selection, payload)
+        |> push_event("game:city_selection", payload)
     end
   end
 
@@ -1431,6 +1558,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
           bronze_working_pending?={@bronze_working_pending?}
         />
 
+        <%!-- QA issue 937ea82b "There is no help or wiki" — a first-pass,
+             always-reachable in-game reference. --%>
+        <.live_component module={BrokenOathsWeb.GameLive.HelpPanel} id="help-panel" />
+
         <div class="flex-1"></div>
 
         <button
@@ -1582,43 +1713,95 @@ defmodule BrokenOathsWeb.GameLive.Play do
           />
         </div>
 
+        <%!-- QA issue e51a31be "UI issues" — the selection detail pane
+             (tile/unit/city/camp): absolutely positioned so it never
+             stretches to the board's full height or crowds board-viewport
+             out of the flex row (the original bug — a plain flow child
+             under a `relative` container with no `items-start` stretched
+             to 100% height and sat directly under the top-right corner
+             overlays), sized to its own content, anchored to the one
+             free corner (top-right is Known Players/Chat/Alliance,
+             bottom-left is Progress), and capped/scrollable so even a
+             tall panel never covers the whole board. Every panel gets
+             its own close (X), routed through the shared
+             "clear_selection" handler. --%>
         <div
-          :if={@selected_tile}
-          class="card bg-base-200/95 shadow-xl w-64"
-          data-test="tile-panel"
+          :if={@selected_tile || @selected_unit || @selected_city || @selected_camp}
+          data-test="detail-pane"
+          class="absolute bottom-4 right-4 z-20 max-h-[70vh] overflow-y-auto flex flex-col gap-2"
         >
-          <div class="card-body p-4 gap-1">
-            <h3 class="card-title text-sm" data-test="tile-terrain">{@selected_tile.terrain}</h3>
-            <p class="text-xs opacity-80" data-test="tile-yields">
-              +{@selected_tile.food} food · +{@selected_tile.production} production
-            </p>
-            <p :if={@selected_tile.improvement} class="text-xs" data-test="tile-improvement">
-              {improvement_summary(@selected_tile.improvement)}
-            </p>
-            <p :if={@selected_tile.resource} class="text-xs" data-test="tile-resource">
-              {resource_label(@selected_tile.resource)}
-            </p>
+          <div
+            :if={@selected_tile}
+            class="card bg-base-200/95 shadow-xl w-64 relative"
+            data-test="tile-panel"
+          >
+            <button
+              type="button"
+              phx-click="clear_selection"
+              data-test="close-tile-panel"
+              class="btn btn-ghost btn-xs btn-circle absolute top-1 right-1"
+            >
+              <.icon name="hero-x-mark" class="w-4 h-4" />
+            </button>
+            <div class="card-body p-4 gap-1">
+              <h3 class="card-title text-sm pr-6" data-test="tile-terrain">
+                {@selected_tile.terrain}
+              </h3>
+              <p class="text-xs opacity-80" data-test="tile-yields">
+                +{@selected_tile.food} food · +{@selected_tile.production} production
+              </p>
+              <p :if={@selected_tile.improvement} class="text-xs" data-test="tile-improvement">
+                {improvement_summary(@selected_tile.improvement)}
+              </p>
+              <p :if={@selected_tile.resource} class="text-xs" data-test="tile-resource">
+                {resource_label(@selected_tile.resource)}
+              </p>
+            </div>
           </div>
+
+          <%!-- QA issue 748348fe "barbarian camp issues" — a camp under
+               siege now shows its own HP, the same "watch it drop"
+               readout `city-hp` already gives a besieged city. --%>
+          <div
+            :if={@selected_camp}
+            class="card bg-base-200/95 shadow-xl w-64 relative"
+            data-test="camp-panel"
+          >
+            <button
+              type="button"
+              phx-click="clear_selection"
+              data-test="close-camp-panel"
+              class="btn btn-ghost btn-xs btn-circle absolute top-1 right-1"
+            >
+              <.icon name="hero-x-mark" class="w-4 h-4" />
+            </button>
+            <div class="card-body p-4 gap-1">
+              <h3 class="card-title text-sm pr-6" data-test="camp-name">Barbarian Camp</h3>
+              <span class="badge badge-error badge-outline w-fit" data-test="camp-hp">
+                {@selected_camp.hp}/{Camp.max_hp()}
+              </span>
+            </div>
+          </div>
+
+          <.live_component
+            :if={@selected_unit}
+            module={BrokenOathsWeb.GameLive.UnitPanel}
+            id="unit-panel"
+            unit={@selected_unit}
+            order={@selected_order}
+            allowed_improvements={@allowed_improvements}
+            current_dig={@current_dig}
+          />
+
+          <.live_component
+            :if={@selected_city}
+            module={BrokenOathsWeb.GameLive.CityPanel}
+            id="city-panel"
+            city={@selected_city}
+            assignable_tiles={@assignable_tiles}
+            player_research={@player_research}
+          />
         </div>
-
-        <.live_component
-          :if={@selected_unit}
-          module={BrokenOathsWeb.GameLive.UnitPanel}
-          id="unit-panel"
-          unit={@selected_unit}
-          order={@selected_order}
-          allowed_improvements={@allowed_improvements}
-          current_dig={@current_dig}
-        />
-
-        <.live_component
-          :if={@selected_city}
-          module={BrokenOathsWeb.GameLive.CityPanel}
-          id="city-panel"
-          city={@selected_city}
-          assignable_tiles={@assignable_tiles}
-          player_research={@player_research}
-        />
       </div>
 
       <%!-- Canvas-only board: no tile DOM. Camera (drag rotate + wheel zoom)
@@ -1645,6 +1828,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
             this.cities = []
             this.camps = []
             this.improvements = []
+            this.citySelection = null
             this.resources = []
             this.visibleSet = new Set()
             this.selectedId = null
@@ -1706,6 +1890,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
             })
             this.handleEvent("game:cities", ({cities}) => { this.cities = cities; this.draw() })
             this.handleEvent("game:camps", ({camps}) => { this.camps = camps; this.draw() })
+            this.handleEvent("game:city_selection", ({territory, worked_tiles}) => {
+              this.citySelection = (territory && territory.length)
+                ? {territory, workedTiles: worked_tiles || []}
+                : null
+              this.draw()
+            })
             this.handleEvent("game:combat", ({damage_dealt, damage_taken}) => {
               this.combatFlash = {dealt: damage_dealt, taken: damage_taken, until: performance.now() + 2500}
               this.ensureLoop()
@@ -1904,6 +2094,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
             const city = this.cities.find((c) => c.tile_id === tile)
             if (city) { this.pushEvent("select_city", {city_id: city.id}); return }
+
+            // QA issue 748348fe — a barbarian camp is selectable too,
+            // the same left-click convention as a unit/city, so a
+            // besieging player can watch its HP drop.
+            const camp = this.camps.find((c) => c.tile_id === tile)
+            if (camp) { this.pushEvent("select_camp", {camp_id: camp.id}); return }
 
             // Open ground: show the tile's own info (terrain, yields,
             // improvement) — but only for tiles the player knows, which
@@ -2143,6 +2339,54 @@ defmodule BrokenOathsWeb.GameLive.Play do
                   ctx.stroke()
                 }
               }
+            }
+
+            // Story 759d02c8/0b8a75e4 (v0.2.1 playtest) — the selected
+            // city's own territory border and worked-tile highlight,
+            // Civ-style. Scoped to ONLY the selected city's own tiles
+            // (never every city on the board) for performance. The
+            // border is the set of polygon edges that belong to exactly
+            // ONE territory tile — an edge shared by two territory
+            // tiles is an interior seam, not a border — computed once
+            // per draw by the shared render core's `computeBorderEdges`.
+            // Tile-id labels are the SAME "Tile N" number the City
+            // panel's worked/assignable rows already show (issue
+            // 0b8a75e4: a raw tile id had nothing to visually anchor
+            // it to), so a player can match a panel row to its board
+            // location at a glance.
+            if (this.citySelection) {
+              const territorySet = new Set(this.citySelection.territory)
+              const workedSet = new Set(this.citySelection.workedTiles)
+              const territoryRows = order.filter(({row}) => territorySet.has(row[0]))
+
+              for (const {row} of territoryRows) {
+                if (!workedSet.has(row[0])) continue
+                ctx.beginPath()
+                GR.tracePolygon(ctx, R, row, 7)
+                ctx.fillStyle = "rgba(250, 204, 21, 0.35)"
+                ctx.fill()
+              }
+
+              const edges = GR.computeBorderEdges(territoryRows.map(({row}) => row))
+              ctx.strokeStyle = "#ffffff"
+              ctx.lineWidth = 2
+              for (const [a, b] of edges) {
+                const pa = this.project(a[0], a[1], a[2])
+                const pb = this.project(b[0], b[1], b[2])
+                if (pa.depth < 0.02 || pb.depth < 0.02) continue
+                ctx.beginPath()
+                ctx.moveTo(pa.px, pa.py)
+                ctx.lineTo(pb.px, pb.py)
+                ctx.stroke()
+              }
+
+              ctx.font = "bold 11px ui-monospace, monospace"
+              ctx.textAlign = "center"
+              ctx.fillStyle = "#ffffff"
+              for (const {row, cx, cy} of territoryRows) {
+                ctx.fillText(String(row[0]), cx, cy)
+              }
+              ctx.textAlign = "start"
             }
 
             // Weather: translucent cloud hexes one shell above known

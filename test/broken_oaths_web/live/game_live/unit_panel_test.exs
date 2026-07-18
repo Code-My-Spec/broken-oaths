@@ -74,6 +74,17 @@ defmodule BrokenOathsWeb.GameLive.UnitPanelTest do
   # QA issue 8aa2c571: a worker mid-dig had no way to back out of it —
   # the Cancel Build button sits beside the dig-progress badge and only
   # ever renders alongside it.
+  # QA issue e51a31be "UI issues" — same dismiss affordance as
+  # CityPanel.
+  describe "the close control" do
+    test "renders and bubbles clear_selection to the parent LiveView" do
+      html = render_component(UnitPanel, id: "unit-panel", unit: @lord, order: nil)
+
+      assert html =~ ~s(data-test="close-unit-panel")
+      assert html =~ ~s(phx-click="clear_selection")
+    end
+  end
+
   describe "a worker with a dig in progress" do
     @worker %{type: :worker, hp: 6, max_hp: 6, movement: 2, max_movement: 2}
 

@@ -161,6 +161,38 @@ const GlobeRender = {
   drawBillboard(ctx, img, px, py, size, footBias = 0.62) {
     ctx.drawImage(img, px - size / 2, py - size * footBias, size, size)
   },
+
+  // Boundary edges for a set of compact tile rows (QA issues
+  // 759d02c8/0b8a75e4 — a selected city's own territory border):
+  // the polygon edges that belong to exactly ONE tile in `rows` — an
+  // edge shared by two tiles in the same set is an interior seam, not
+  // a border. Row corner coordinates are already the server's own
+  // `round4/1`'d floats, so two neighboring tiles' shared corner is
+  // bit-identical — no epsilon matching needed, a plain string key is
+  // exact. Returns `[[a, b], ...]`, each a pair of `[x, y, z]` world
+  // points (not yet projected).
+  computeBorderEdges(rows) {
+    const count = new Map()
+    const coords = new Map()
+
+    for (const row of rows) {
+      const corners = []
+      for (let i = 7; i < row.length; i += 3) corners.push([row[i], row[i + 1], row[i + 2]])
+
+      for (let i = 0; i < corners.length; i++) {
+        const a = corners[i]
+        const b = corners[(i + 1) % corners.length]
+        const ka = a.join(","), kb = b.join(",")
+        const key = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`
+        count.set(key, (count.get(key) || 0) + 1)
+        coords.set(key, [a, b])
+      }
+    }
+
+    const edges = []
+    for (const [key, n] of count) if (n === 1) edges.push(coords.get(key))
+    return edges
+  },
 }
 
 window.GlobeRender = GlobeRender

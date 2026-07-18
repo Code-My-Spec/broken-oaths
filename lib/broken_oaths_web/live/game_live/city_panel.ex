@@ -81,7 +81,18 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
       |> assign(:catalog, Production.available_items(production_opts))
 
     ~H"""
-    <div id={@id} data-test="city-panel" class="card bg-base-200 shadow-sm w-72">
+    <div id={@id} data-test="city-panel" class="card bg-base-200 shadow-sm w-72 relative">
+      <%!-- QA issue e51a31be — every selection panel gets its own
+           dismiss affordance; this bubbles "clear_selection" to `Play`
+           exactly like every other button here (no `phx-target`). --%>
+      <button
+        type="button"
+        phx-click="clear_selection"
+        data-test="close-city-panel"
+        class="btn btn-ghost btn-xs btn-circle absolute top-1 right-1"
+      >
+        <.icon name="hero-x-mark" class="w-4 h-4" />
+      </button>
       <div class="card-body gap-3">
         <.name_header city={@city} />
 
