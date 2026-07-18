@@ -10,7 +10,12 @@ defmodule BrokenOathsSpex.Story908.Criterion7675Spex do
   Reuses `criterion_7673`'s own `"set_tribute_rate"` judgment call and
   `criterion_7674`'s own gold-income-gap workaround
   (`Fixtures.set_player_gold_income/3`/`Fixtures.set_player_gold/3`) —
-  see both moduledocs for the full rationale.
+  see both moduledocs for the full rationale, including `criterion_7674`'s
+  own "Story 909 postscript" for why the vassal goes offline
+  (`go_offline(context.other_play_live)`) before their income is
+  declared: a logged-in player's own declared income now genuinely
+  credits their treasury too (story 909), which this criterion's own
+  rate-math isn't about.
   """
 
   use BrokenOathsSpex.Case
@@ -27,6 +32,8 @@ defmodule BrokenOathsSpex.Story908.Criterion7675Spex do
 
       given_ "my vassal earns 20 gold/turn, and I've just raised their rate to 50%", context do
         context = a_freshly_subjugated_vassal(context)
+
+        go_offline(context.other_play_live)
 
         :ok = Fixtures.set_player_gold(context.world, context.other_user, 100)
         :ok = Fixtures.set_player_gold_income(context.world, context.other_user, 20)

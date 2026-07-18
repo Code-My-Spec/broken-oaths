@@ -10,7 +10,11 @@ defmodule BrokenOathsSpex.Story908.Criterion7679Spex do
 
   Reuses `criterion_7674`'s own gold-income-gap workaround
   (`Fixtures.set_player_gold/3`/`Fixtures.set_player_gold_income/3`)
-  and `criterion_7677`'s own "world with room for three players" note
+  — including its own "Story 909 postscript" `go_offline/1` step, so
+  each vassal's declared income here still ONLY ever feeds the tribute
+  skim, never their own treasury directly (a story 909 concern this
+  criterion's own "many relationships, one boundary" scope isn't about)
+  — and `criterion_7677`'s own "world with room for three players" note
   — this criterion needs FOUR (one lord, three vassals), so it picks
   its own bigger deterministic world the same documented way (issue
   7509b3e6: the shared `:a_world` fixture, seed 424242/frequency 8, has
@@ -70,6 +74,12 @@ defmodule BrokenOathsSpex.Story908.Criterion7679Spex do
                 other_user,
                 vassal_context.other_city
               )
+
+            # Story 909 postscript — see `criterion_7674`'s own
+            # moduledoc: a LOGGED-IN vassal's declared income now
+            # genuinely credits their own treasury too, which this
+            # criterion's own tribute-only math isn't about.
+            go_offline(vassal_context.other_play_live)
 
             %{user: other_user, conn: conn, city: vassal_context.other_city, my_lord: my_lord}
           end

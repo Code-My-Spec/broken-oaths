@@ -586,6 +586,20 @@ defmodule BrokenOathsSpex.SharedGivens do
 
     assert seen?, "player A's lord never scouted within sight of player B's unit"
 
+    # Story 909/910: this scouting mount is about to be superseded
+    # below — closed out first (`go_offline/1`) so it stops holding
+    # `Presence.online?/2`'s own registration open. `Presence`'s own
+    # `:duplicate` Registry keys mean ANY live connection counts as
+    # "online" (multi-tab support, by design) — this function used to
+    # leave every earlier remount silently connected forever, which
+    # story 901's own alliance specs never noticed (nothing before
+    # story 909 ever asked "is this player still connected"), but
+    # would permanently strand this pair's own `play_live_a`/
+    # `play_live_b` as "online" for story 910's own stewardship specs,
+    # no matter how many times a caller's own `go_offline/1` closed the
+    # FINAL, returned pair.
+    go_offline(play_live_a)
+
     {:ok, play_live_a, _html} = live(conn_a, "/play/#{world.id}")
     {:ok, play_live_b, _html} = live(conn_b, "/play/#{world.id}")
 
@@ -604,6 +618,9 @@ defmodule BrokenOathsSpex.SharedGivens do
     play_live_b
     |> element("[data-test='alliance-panel'] [data-test='accept-alliance']")
     |> render_click()
+
+    go_offline(play_live_a)
+    go_offline(play_live_b)
 
     {:ok, play_live_a, _html} = live(conn_a, "/play/#{world.id}")
     {:ok, play_live_b, _html} = live(conn_b, "/play/#{world.id}")

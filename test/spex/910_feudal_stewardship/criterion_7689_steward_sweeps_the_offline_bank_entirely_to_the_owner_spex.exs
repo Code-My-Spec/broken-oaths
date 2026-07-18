@@ -13,6 +13,14 @@ defmodule BrokenOathsSpex.Story910.Criterion7689Spex do
 
   See `criterion_7686`'s own moduledoc for the `subjugate/5` setup and
   the `"steward_collect_bank"` judgment call this reuses unchanged.
+
+  Reuses `subjugate/5`'s own `vassal_play_live` directly (rather than a
+  fresh `live/2` remount) before calling `go_offline/1` on it —
+  `BrokenOaths.Game.Presence`'s own `:duplicate` Registry keys mean ANY
+  live connection for this user counts as "online" (multi-tab support,
+  by design), so a stray extra mount left silently connected would
+  strand the vassal "online" regardless of which OTHER connection
+  `go_offline/1` closes.
   """
 
   use BrokenOathsSpex.Case
@@ -29,10 +37,9 @@ defmodule BrokenOathsSpex.Story910.Criterion7689Spex do
 
       given_ "my vassal is offline with 12 gold banked, and my own treasury sits at its own figure",
              context do
-        %{lord_play_live: lord_play_live} =
+        %{lord_play_live: lord_play_live, vassal_play_live: vassal_play_live} =
           subjugate(context.world, context.conn, context.user, context.other_conn, context.other_user)
 
-        {:ok, vassal_play_live, _html} = live(context.other_conn, "/play/#{context.world.id}")
         go_offline(vassal_play_live)
 
         :ok = Fixtures.set_player_gold_income(context.world, context.other_user, 12)

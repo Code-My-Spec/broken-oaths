@@ -6,10 +6,16 @@ defmodule BrokenOathsWeb.GameLive.FeudalFlagTest do
   Age PvP" (`combat-error` toast, `:not_hostile`,
   `BrokenOaths.Game.FeudalFlagTest` covers the same rejection at the
   `WorldServer` level), and the feudal UI (`vassals-list`,
-  `vassal-status`, `oath-screen`) never renders — nothing ever creates
-  a `Vassalage` row to power it. With the flag ON, the same order
-  lands (the deeper capture/vassalization/tribute flow itself stays
-  the 906/907/908 spex suites' own job).
+  `vassal-status`, `oath-screen`, and stories 909/910's own `bank-gold`/
+  `bank-cap`/`player-honor`/`steward-log`) never renders — nothing ever
+  creates a `Vassalage` row to power the first three, and
+  `GameLive.Play`'s own `@feudal_enabled?` assign gates the last four
+  directly (they read STRUCTURAL `Player` fields that exist, at inert
+  defaults, regardless of the flag — see `BrokenOaths.Game.
+  Bank`/`BrokenOaths.Game.Stewardship`'s own moduledocs). With the flag
+  ON, the same order lands (the deeper capture/vassalization/tribute
+  flow itself stays the 906/907/908 spex suites' own job; the deeper
+  Bank/Stewardship flow stays the 909/910 spex suites' own job).
   """
 
   # async: false — mounts two real `GameLive.Play` LiveViews, each
@@ -96,6 +102,10 @@ defmodule BrokenOathsWeb.GameLive.FeudalFlagTest do
       refute html =~ ~s(data-test="vassal-status")
       refute html =~ ~s(data-test="oath-screen")
       refute html =~ ~s(data-test="city-status")
+      refute html =~ ~s(data-test="bank-gold")
+      refute html =~ ~s(data-test="bank-cap")
+      refute html =~ ~s(data-test="player-honor")
+      refute html =~ ~s(data-test="steward-log")
 
       html =
         render_hook(play_live, "attack", %{
@@ -113,6 +123,19 @@ defmodule BrokenOathsWeb.GameLive.FeudalFlagTest do
       refute html =~ ~s(data-test="vassal-status")
       refute html =~ ~s(data-test="oath-screen")
       refute html =~ ~s(data-test="city-status")
+      refute html =~ ~s(data-test="bank-gold")
+      refute html =~ ~s(data-test="bank-cap")
+      refute html =~ ~s(data-test="player-honor")
+      refute html =~ ~s(data-test="steward-log")
+
+      # Story 909's own collect/upgrade events are refused outright
+      # too, not merely hidden — belt-and-suspenders alongside the
+      # missing UI above (`BrokenOaths.Game.FeudalFlagTest`'s own
+      # "Bank/Stewardship, with the flag OFF" case covers the same
+      # refusal directly against `Game`).
+      gold_before = Game.gold(world, user)
+      render_hook(play_live, "collect_bank", %{})
+      assert Game.gold(world, user) == gold_before
     end
   end
 

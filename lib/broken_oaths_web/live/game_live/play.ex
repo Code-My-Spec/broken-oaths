@@ -191,6 +191,22 @@ defmodule BrokenOathsWeb.GameLive.Play do
             # `:vassals_changed`/`:new_vassal`/`:vassalized` broadcasts.
             vassals: Game.vassals(world, user),
             vassal_status: Game.vassal_status(world, user),
+            # Story 909: cleared the next time either `"collect_bank"`/
+            # `"upgrade_bank"` succeeds — same transient-error status
+            # `city_error`/`order_error`/`combat_error`/`improvement_error`
+            # already have (never DB-persisted, only ever lives on this
+            # one connection's own socket).
+            bank_error: nil,
+            # Story 909/910: unlike `vassals-list`/`vassal-status`
+            # (naturally empty with the flag off, since nothing ever
+            # creates a `Vassalage` row to power them), the Bank/Honor/
+            # steward-log UI reads STRUCTURAL `Player` fields that exist
+            # — at their inert defaults — on every player regardless of
+            # the flag. `Game.feudal_enabled?/0` is read once here and
+            # gates every one of those NEW badges/panels directly in the
+            # template, keeping prod's own board looking exactly as it
+            # does today until this batch ships for real.
+            feudal_enabled?: Game.feudal_enabled?(),
             yaw: yaw,
             pitch: pitch,
             scale: @default_scale,
@@ -711,6 +727,147 @@ defmodule BrokenOathsWeb.GameLive.Play do
     end
   end
 
+  # -------------------------------------------------------------------
+  # Gold Bank (story 909)
+  # -------------------------------------------------------------------
+
+  # The deliberate engagement tap — sweeps the ENTIRE bank into the
+  # treasury. Never refused outright (an empty bank just moves nothing),
+  # so this never needs its own error branch.
+  def handle_event("collect_bank", _params, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.collect_bank(world, user) do
+      :ok -> {:noreply, socket |> assign(bank_error: nil) |> refresh_board()}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  # Raises the bank's own cap for a gold cost — refused outright (no
+  # partial charge) when the treasury can't cover it.
+  def handle_event("upgrade_bank", _params, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.upgrade_bank(world, user) do
+      :ok -> {:noreply, socket |> assign(bank_error: nil) |> refresh_board()}
+      {:error, reason} -> {:noreply, assign(socket, bank_error: bank_error_message(reason))}
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Feudal Stewardship (story 910)
+  # -------------------------------------------------------------------
+
+  # A steward sweeps an offline household member's own bank — pure
+  # stewardship, entirely to the OWNER; refused unless eligible AND the
+  # owner is genuinely offline. Refreshes THIS steward's own board
+  # (their own Honor never moves here — only `"steward_defend"`'s own
+  # overreach case can ding it — but re-pulling costs nothing and keeps
+  # every steward action on the same "refresh after acting" footing).
+  def handle_event("steward_collect_bank", %{"owner_user_id" => owner_user_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+    Game.steward_collect_bank(world, user, parse_id(owner_user_id))
+    {:noreply, refresh_board(socket)}
+  end
+
+  # Sets an offline household member's own production queue —
+  # constructive-only, mirrors `"queue_production"`'s own `"city_id"`/
+  # `"item"` param shape, scoped through stewardship eligibility.
+  def handle_event(
+        "steward_queue_production",
+        %{"owner_user_id" => owner_user_id, "city_id" => city_id, "item" => item},
+        socket
+      ) do
+    %{world: world, user: user} = socket.assigns
+
+    Game.steward_queue_production(world, user, parse_id(owner_user_id), parse_id(city_id), item)
+    {:noreply, refresh_board(socket)}
+  end
+
+  # "No cancel-griefing" — always refused, whitelist enforced by
+  # structural absence (`BrokenOaths.Game.Stewardship`'s own moduledoc).
+  def handle_event(
+        "steward_cancel_production_item",
+        %{"owner_user_id" => owner_user_id, "city_id" => city_id, "item_id" => item_id},
+        socket
+      ) do
+    %{world: world, user: user} = socket.assigns
+
+    Game.steward_cancel_production_item(
+      world,
+      user,
+      parse_id(owner_user_id),
+      parse_id(city_id),
+      parse_id(item_id)
+    )
+
+    {:noreply, refresh_board(socket)}
+  end
+
+  # "No disbanding" — always refused, same structural-absence status
+  # above.
+  def handle_event(
+        "steward_disband_unit",
+        %{"owner_user_id" => owner_user_id, "unit_id" => unit_id},
+        socket
+      ) do
+    %{world: world, user: user} = socket.assigns
+    Game.steward_disband_unit(world, user, parse_id(owner_user_id), parse_id(unit_id))
+    {:noreply, refresh_board(socket)}
+  end
+
+  # "Normally stewards CANNOT move units" — always refused; the
+  # default-closed baseline `"steward_defend"`'s own emergency exception
+  # opens against.
+  def handle_event(
+        "steward_queue_move",
+        %{"owner_user_id" => owner_user_id, "unit_id" => unit_id, "to_tile" => to_tile},
+        socket
+      ) do
+    %{world: world, user: user} = socket.assigns
+    Game.steward_queue_move(world, user, parse_id(owner_user_id), parse_id(unit_id), to_tile)
+    {:noreply, refresh_board(socket)}
+  end
+
+  # EMERGENCY DEFENSE — the one sanctioned exception: refused unless the
+  # offline owner is genuinely under attack, and even then only for a
+  # strictly adjacent, defensive reposition. An eligible steward who
+  # overreaches the destination mid-emergency is provable sabotage —
+  # refused, logged, AND dings the STEWARD's own Honor (this refresh is
+  # what picks that up on THIS session).
+  def handle_event(
+        "steward_defend",
+        %{"owner_user_id" => owner_user_id, "unit_id" => unit_id, "to_tile" => to_tile},
+        socket
+      ) do
+    %{world: world, user: user} = socket.assigns
+    Game.steward_defend(world, user, parse_id(owner_user_id), parse_id(unit_id), to_tile)
+    {:noreply, refresh_board(socket)}
+  end
+
+  # "Never to launch aggression" — always refused, even mid-emergency.
+  def handle_event(
+        "steward_attack",
+        %{
+          "owner_user_id" => owner_user_id,
+          "unit_id" => unit_id,
+          "target_camp_id" => target_camp_id
+        },
+        socket
+      ) do
+    %{world: world, user: user} = socket.assigns
+
+    Game.steward_attack(
+      world,
+      user,
+      parse_id(owner_user_id),
+      parse_id(unit_id),
+      parse_id(target_camp_id)
+    )
+
+    {:noreply, refresh_board(socket)}
+  end
+
   # Story 899, criterion 7601: a Known Players row's "chat-link"
   # affordance opens the chat panel straight onto that contact's
   # thread — full conversation-loading behavior lands with
@@ -1128,7 +1285,16 @@ defmodule BrokenOathsWeb.GameLive.Play do
       selected_camp: selected_camp,
       known_players: Game.known_players(world, user),
       player_stats: Game.player_stats(world, user),
-      player_research: player_research
+      player_research: player_research,
+      # Story 909/910: the bank badges, Honor figure, and the owner's
+      # own steward-action log — re-pulled on every board refresh (the
+      # same "single source of truth, re-fetched on every signal" status
+      # `gold`/`known_players` already have above), so an offline
+      # accrual/collect/upgrade/steward action never lags behind a
+      # reconnect or turn boundary.
+      bank: Game.bank(world, user),
+      honor: Game.honor(world, user),
+      steward_log: Game.steward_log(world, user)
     )
     |> push_board_state()
     |> push_selected_path()
@@ -1669,6 +1835,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   defp improvement_error_message(_other), do: "That improvement can't be started."
 
+  defp bank_error_message(:insufficient_gold), do: "You can't afford that upgrade yet."
+  defp bank_error_message(_other), do: "The bank refused that action."
+
   # -------------------------------------------------------------------
   # Render
   # -------------------------------------------------------------------
@@ -1689,6 +1858,48 @@ defmodule BrokenOathsWeb.GameLive.Play do
         <span class="badge badge-neutral gap-1" data-test="player-gold">
           <.icon name="hero-circle-stack" class="w-3 h-3" /> {@gold}
         </span>
+
+        <%!-- Stories 909/910: Bank/Honor/steward-log — gated on
+             `@feudal_enabled?` (`Game.feudal_enabled?/0`), unlike
+             `vassals-list`/`vassal-status` below (naturally empty with
+             the flag off since nothing ever creates the relationship
+             data that powers them). These three read STRUCTURAL
+             `Player` fields that exist — at inert defaults — on every
+             player regardless of the flag, so without an explicit gate
+             here prod's own board would show a "0/100" bank badge and a
+             "100" Honor badge today, well before this batch is meant to
+             be user-facing (`BrokenOathsWeb.GameLive.FeudalFlagTest`'s
+             own "with the flag OFF" case asserts none of the three ever
+             render). --%>
+        <%= if @feudal_enabled? do %>
+          <%!-- Story 909: the Gold Bank — holdings/cap badges +
+               Collect/Upgrade, always mounted (a fresh player's own
+               bank starts empty, never absent). --%>
+          <.live_component
+            module={BrokenOathsWeb.GameLive.BankPanel}
+            id="bank-panel"
+            bank={@bank}
+            error={@bank_error}
+          />
+
+          <%!-- Story 910: the world-visible Honor reputation figure —
+               sibling to `player-gold`/the bank badges above. The
+               number lives in its OWN innermost
+               `data-test="player-honor"` span (icon kept OUTSIDE it) —
+               mirrors `BankPanel`'s own `bank-gold`/`bank-cap`
+               structure, since a spec's own `data-test="player-honor"[^>]*>(-?\d+)`
+               regex needs the digit immediately after that span's own
+               closing tag, not after a sibling icon's markup. --%>
+          <span class="badge badge-outline gap-1" title="Honor">
+            <.icon name="hero-scale" class="w-3 h-3" />
+            <span data-test="player-honor">{@honor}</span>
+          </span>
+
+          <%!-- Story 910: every steward action taken on my own behalf
+               while I was away — always mounted (an empty log is a
+               real, renderable state, not an absent one). --%>
+          <.steward_log_panel steward_log={@steward_log} />
+        <% end %>
 
         <%!-- Story 907: the lord's own Vassals list — only mounted while
              non-empty (criterion 7667's own "no vassals-list at all"
@@ -2821,6 +3032,55 @@ defmodule BrokenOathsWeb.GameLive.Play do
         <span class="text-xs">%</span>
         <button type="submit" class="btn btn-xs">Set Rate</button>
       </form>
+
+      <%!-- Story 910: stewarding an OFFLINE vassal's bank — a lord may
+           always steward their own vassal (`Stewardship.steward_role/4`
+           always resolves `:lord` here), so this only ever hides on
+           `online?`, never on eligibility. --%>
+      <button
+        :if={!@vassal.online?}
+        type="button"
+        phx-click="steward_collect_bank"
+        phx-value-owner_user_id={@vassal.vassal_user_id}
+        data-test="steward-collect-bank"
+        class="btn btn-xs btn-outline self-start"
+      >
+        Steward: Collect Bank
+      </button>
+    </div>
+    """
+  end
+
+  # -------------------------------------------------------------------
+  # Steward log (story 910)
+  # -------------------------------------------------------------------
+
+  attr :steward_log, :list, required: true
+
+  defp steward_log_panel(assigns) do
+    ~H"""
+    <div data-test="steward-log" class="dropdown dropdown-end">
+      <div tabindex="0" role="button" class="btn btn-sm btn-ghost gap-1">
+        <.icon name="hero-clipboard-document-list" class="w-3 h-3" />
+        Steward Log ({length(@steward_log)})
+      </div>
+      <div
+        tabindex="0"
+        class="dropdown-content z-10 menu p-3 shadow bg-base-100 rounded-box w-80 gap-1"
+      >
+        <p :if={@steward_log == []} class="text-xs opacity-60">
+          No steward actions taken on your behalf yet.
+        </p>
+        <div
+          :for={entry <- @steward_log}
+          data-test="steward-log-entry"
+          class="flex items-center justify-between gap-2 text-xs border-b border-base-300 pb-1 last:border-b-0"
+        >
+          <span class="truncate">{entry.steward_email}</span>
+          <span class="opacity-70">{entry.action}</span>
+          <span :if={entry.sabotage} class="badge badge-error badge-xs">sabotage</span>
+        </div>
+      </div>
     </div>
     """
   end

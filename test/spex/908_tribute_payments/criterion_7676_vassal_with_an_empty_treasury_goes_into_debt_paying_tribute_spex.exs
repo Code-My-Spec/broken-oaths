@@ -29,6 +29,16 @@ defmodule BrokenOathsSpex.Story908.Criterion7676Spex do
   for tribute writes), a second, independent gap this criterion's own
   failure surfaces alongside `BrokenOaths.Game.Tribute` not existing at
   all yet.
+
+  ## Story 909 postscript: the vassal goes offline too
+
+  See `criterion_7674`'s own "Story 909 postscript" for why —
+  `go_offline(context.other_play_live)` keeps this criterion's own
+  premise intact (an income figure that feeds tribute but never itself
+  reaches the treasury): once `BrokenOaths.Game.Bank` shipped, a
+  LOGGED-IN vassal's declared 12/turn income would land in their own
+  treasury too, more than covering the 3 gold tribute and making "goes
+  into debt" impossible to reach at all.
   """
 
   use BrokenOathsSpex.Case
@@ -45,6 +55,8 @@ defmodule BrokenOathsSpex.Story908.Criterion7676Spex do
 
       given_ "my vassal's treasury is empty, yet they still earn 12 gold/turn income", context do
         context = a_freshly_subjugated_vassal(context)
+
+        go_offline(context.other_play_live)
 
         :ok = Fixtures.set_player_gold(context.world, context.other_user, 0)
         :ok = Fixtures.set_player_gold_income(context.world, context.other_user, 12)

@@ -393,6 +393,125 @@ defmodule BrokenOaths.Game do
   def refuse_levy(world, user, lord_user_id),
     do: WorldServer.call(world, {:refuse_levy, user, lord_user_id})
 
+  # -------------------------------------------------------------------
+  # Gold Bank (story 909)
+  # -------------------------------------------------------------------
+
+  @doc "`user`'s own bank status: `%{gold:, cap:}` (`BrokenOaths.Game.Bank.status/1`)."
+  @spec bank(map(), map()) :: %{gold: non_neg_integer(), cap: pos_integer()}
+  def bank(world, user), do: WorldServer.call(world, {:bank, user})
+
+  @doc "Sweep `user`'s own bank into their treasury — a no-op against an already-empty bank, never refused."
+  @spec collect_bank(map(), map()) :: :ok | {:error, :not_a_player | :feudal_disabled}
+  def collect_bank(world, user), do: WorldServer.call(world, {:collect_bank, user})
+
+  @doc "Raise `user`'s own bank cap for `BrokenOaths.Game.Bank.upgrade_cost/1`'s own gold price — refused outright when unaffordable."
+  @spec upgrade_bank(map(), map()) ::
+          :ok | {:error, :not_a_player | :insufficient_gold | :feudal_disabled}
+  def upgrade_bank(world, user), do: WorldServer.call(world, {:upgrade_bank, user})
+
+  # -------------------------------------------------------------------
+  # Feudal Stewardship (story 910)
+  # -------------------------------------------------------------------
+
+  @doc "`user`'s own world-visible Honor reputation figure (`BrokenOaths.Game.Player.honor`)."
+  @spec honor(map(), map()) :: integer()
+  def honor(world, user), do: WorldServer.call(world, {:honor, user})
+
+  @doc "`user`'s own full steward-action audit trail — every action taken on their behalf while offline, freshest first."
+  @spec steward_log(map(), map()) :: [map()]
+  def steward_log(world, user), do: WorldServer.call(world, {:steward_log, user})
+
+  @doc """
+  `steward_user` sweeps `owner_user_id`'s own offline Gold Bank
+  entirely into the OWNER's treasury — pure stewardship, the steward's
+  own treasury never moves. Refused unless `steward_user` is the
+  owner's lord, a fellow vassal of the same lord, or an accepted ally
+  (`BrokenOaths.Game.Stewardship.eligible?/1`), AND `owner_user_id` is
+  genuinely offline (`BrokenOaths.Game.Presence.online?/2`).
+  """
+  @spec steward_collect_bank(map(), map(), term()) ::
+          :ok | {:error, :not_a_player | :not_eligible | :owner_online | :feudal_disabled}
+  def steward_collect_bank(world, steward_user, owner_user_id),
+    do: WorldServer.call(world, {:steward_collect_bank, steward_user, owner_user_id})
+
+  @doc """
+  `steward_user` sets `owner_user_id`'s own production queue —
+  constructive-only, same eligibility gate as `steward_collect_bank/3`.
+  """
+  @spec steward_queue_production(map(), map(), term(), term(), atom() | String.t()) ::
+          :ok
+          | {:error,
+             :not_a_player
+             | :not_eligible
+             | :owner_online
+             | :not_found
+             | :not_constructive
+             | :invalid_item
+             | :feudal_disabled
+             | atom()}
+  def steward_queue_production(world, steward_user, owner_user_id, city_id, type),
+    do:
+      WorldServer.call(
+        world,
+        {:steward_queue_production, steward_user, owner_user_id, city_id, type}
+      )
+
+  @doc "Always refused — \"no cancel-griefing\" (story 910); no path anywhere ever reaches the real cancel command for a steward."
+  @spec steward_cancel_production_item(map(), map(), term(), term(), term()) ::
+          {:error, :not_constructive}
+  def steward_cancel_production_item(world, steward_user, owner_user_id, city_id, item_id),
+    do:
+      WorldServer.call(
+        world,
+        {:steward_cancel_production_item, steward_user, owner_user_id, city_id, item_id}
+      )
+
+  @doc "Always refused — \"no disbanding\" (story 910); no disband mechanic exists anywhere in this codebase yet, for anyone."
+  @spec steward_disband_unit(map(), map(), term(), term()) :: {:error, :not_constructive}
+  def steward_disband_unit(world, steward_user, owner_user_id, unit_id),
+    do: WorldServer.call(world, {:steward_disband_unit, steward_user, owner_user_id, unit_id})
+
+  @doc "Always refused — the default-closed baseline `steward_defend/4`'s own emergency exception opens against."
+  @spec steward_queue_move(map(), map(), term(), term(), term()) :: {:error, :not_allowed}
+  def steward_queue_move(world, steward_user, owner_user_id, unit_id, to_tile \\ nil),
+    do:
+      WorldServer.call(
+        world,
+        {:steward_queue_move, steward_user, owner_user_id, unit_id, to_tile}
+      )
+
+  @doc "Always refused — a steward may never launch aggression, even mid-emergency (story 910)."
+  @spec steward_attack(map(), map(), term(), term(), term()) :: {:error, :not_allowed}
+  def steward_attack(world, steward_user, owner_user_id, unit_id, target_camp_id \\ nil),
+    do:
+      WorldServer.call(
+        world,
+        {:steward_attack, steward_user, owner_user_id, unit_id, target_camp_id}
+      )
+
+  @doc """
+  EMERGENCY DEFENSE: `steward_user` orders `owner_user_id`'s own unit
+  to a strictly adjacent, defensive `to_tile` — refused unless eligible
+  AND `owner_user_id` is both offline and currently
+  `BrokenOaths.Game.Stewardship.under_attack?/1`. An eligible steward
+  who overreaches the destination during a genuine emergency window is
+  provable sabotage: the move is still refused, but the attempt is
+  logged and dings the STEWARD's own Honor.
+  """
+  @spec steward_defend(map(), map(), term(), term(), term()) ::
+          :ok
+          | {:error,
+             :not_a_player
+             | :not_eligible
+             | :owner_online
+             | :not_owner
+             | :not_under_attack
+             | :unreachable
+             | :feudal_disabled}
+  def steward_defend(world, steward_user, owner_user_id, unit_id, to_tile),
+    do: WorldServer.call(world, {:steward_defend, steward_user, owner_user_id, unit_id, to_tile})
+
   @doc """
   Every barbarian camp in `world`, unfiltered ground truth (never
   fog-filtered) — see `BrokenOathsSpex.Fixtures.list_camps/1`'s doc for
@@ -505,7 +624,8 @@ defmodule BrokenOaths.Game do
   `{:error, :no_copper_on_map}` if this world's own placement rolled
   no Copper anywhere.
   """
-  @spec grant_copper_access_for_test(map(), term()) :: :ok | {:error, :no_copper_on_map | :not_found}
+  @spec grant_copper_access_for_test(map(), term()) ::
+          :ok | {:error, :no_copper_on_map | :not_found}
   def grant_copper_access_for_test(world, city_id),
     do: WorldServer.call(world, {:grant_copper_access_for_test, city_id})
 

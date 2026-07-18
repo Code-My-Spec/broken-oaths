@@ -222,32 +222,60 @@ defmodule BrokenOathsWeb.GameLive.AlliancePanel do
     ~H"""
     <div
       data-test={"alliance-#{@alliance.id}"}
-      class="flex items-center justify-between gap-2 text-sm"
+      class="flex flex-col gap-1"
     >
-      <span class="truncate">{@alliance.other_email}</span>
+      <div class="flex items-center justify-between gap-2 text-sm">
+        <span class="truncate">{@alliance.other_email}</span>
 
-      <span :if={@alliance.status == :accepted} data-test="alliance-status-accepted" class="badge badge-success badge-sm">
-        Allied
-      </span>
+        <span
+          :if={@alliance.status == :accepted}
+          data-test="alliance-status-accepted"
+          class="badge badge-success badge-sm"
+        >
+          Allied
+        </span>
 
-      <span
-        :if={@alliance.status == :proposed and @alliance.proposed_by_me?}
-        data-test="alliance-status-pending"
-        class="badge badge-ghost badge-sm"
-      >
-        Awaiting response
-      </span>
+        <span
+          :if={@alliance.status == :proposed and @alliance.proposed_by_me?}
+          data-test="alliance-status-pending"
+          class="badge badge-ghost badge-sm"
+        >
+          Awaiting response
+        </span>
 
+        <button
+          :if={@alliance.status == :proposed and !@alliance.proposed_by_me?}
+          type="button"
+          data-test="accept-alliance"
+          phx-click="accept_alliance"
+          phx-value-alliance_id={@alliance.id}
+          phx-target={@myself}
+          class="btn btn-primary btn-xs"
+        >
+          Accept
+        </button>
+      </div>
+
+      <%!-- Story 910: alliance stewardship is SYMMETRIC — either accepted
+           party may steward the other while they're offline. Deliberately
+           NO `phx-target`: this button bubbles straight to `Play`'s own
+           `"steward_collect_bank"` handler (the same event story 910's own
+           BDD spex drive directly), never THIS component's own
+           `handle_event/3` (which has no clause for it at all). Gated on
+           `Game.feudal_enabled?/0` directly — unlike `vassals-list`/
+           `vassal-status`, an accepted `Alliance` is story 901's own
+           ALREADY-shipped, always-on feature, so this button (unlike
+           theirs) would otherwise render for any offline ally regardless
+           of the feudal batch's own dormant-in-prod status. --%>
       <button
-        :if={@alliance.status == :proposed and !@alliance.proposed_by_me?}
+        :if={@alliance.status == :accepted and !@alliance.online? and Game.feudal_enabled?()}
         type="button"
-        data-test="accept-alliance"
-        phx-click="accept_alliance"
-        phx-value-alliance_id={@alliance.id}
-        phx-target={@myself}
-        class="btn btn-primary btn-xs"
+        phx-click="steward_collect_bank"
+        phx-value-owner_user_id={@alliance.other_user_id}
+        data-test="steward-collect-bank"
+        class="btn btn-xs btn-outline self-start"
       >
-        Accept
+        Steward: Collect Bank
       </button>
     </div>
     """

@@ -20,6 +20,9 @@ defmodule BrokenOaths.Game.Player do
           joined_turn: integer() | nil,
           barbarians_killed: integer(),
           camps_destroyed: integer(),
+          banked_gold: integer(),
+          bank_cap: integer(),
+          honor: integer(),
           world_id: integer() | nil,
           user_id: integer() | nil,
           world: World.t() | Ecto.Association.NotLoaded.t(),
@@ -45,6 +48,20 @@ defmodule BrokenOaths.Game.Player do
     # player-supplied attribute, same as `heir_arrives_turn`).
     field :barbarians_killed, :integer, default: 0
     field :camps_destroyed, :integer, default: 0
+    # Story 909: the Gold Bank's own two fields — `banked_gold` (current
+    # holdings, accrued while offline, up to `bank_cap`) and `bank_cap`
+    # (raised by `BrokenOaths.Game.Bank.upgrade/1`, for a gold cost).
+    # Same "never cast through `changeset/2`, mutated only via the
+    # WorldServer's own diff-and-persist path" status `barbarians_killed`/
+    # `camps_destroyed` already have above — see `BrokenOaths.Game.Bank`.
+    field :banked_gold, :integer, default: 0
+    field :bank_cap, :integer, default: 100
+    # Story 910: the world-visible Honor reputation ledger
+    # (`.code_my_spec/knowledge/feudal_vassalage_design.md`, "Honor
+    # brake") — this batch's only writer is `BrokenOaths.Game.
+    # Stewardship`'s provable-sabotage penalty, same never-cast status
+    # as every other system-mutated counter on this schema.
+    field :honor, :integer, default: 100
 
     belongs_to :world, World
     belongs_to :user, User

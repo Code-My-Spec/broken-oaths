@@ -3,12 +3,12 @@ defmodule BrokenOaths.Game.FeudalFlagTest do
   Proves the `config :broken_oaths, :feudal_enabled` shipping gate
   (main-is-deployable-with-feudal-dormant enabler): the in-progress
   feudal PvP batch (Siege player-city capture — story 906,
-  Vassalization — story 907, Tribute — story 908) is built and wired
-  into `WorldServer`, but still missing its Bank/Stewardship/
-  first-class panels/QA/balance pass, so it must stay unreachable
-  wherever this flag reads `false` (prod's own default) and fully
-  functional wherever it reads `true` (dev/test's own default — see
-  `config/dev.exs`/`config/test.exs`).
+  Vassalization — story 907, Tribute — story 908, Gold Bank — story
+  909, Feudal Stewardship — story 910) is built and wired into
+  `WorldServer`, but still missing its first-class QA/balance pass, so
+  it must stay unreachable wherever this flag reads `false` (prod's own
+  default) and fully functional wherever it reads `true` (dev/test's
+  own default — see `config/dev.exs`/`config/test.exs`).
 
   Toggles `Application.put_env/3` directly (mirrors `config/test.exs`'s
   own note that this is "mirrored" dev config, not itself a compile-time
@@ -23,6 +23,7 @@ defmodule BrokenOaths.Game.FeudalFlagTest do
   use BrokenOathsTest.DataCase, async: false
 
   alias BrokenOaths.Game
+  alias BrokenOaths.Game.Bank
   alias BrokenOaths.Game.WorldServer
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.Worlds.Regions
@@ -123,6 +124,72 @@ defmodule BrokenOaths.Game.FeudalFlagTest do
                Game.attack_city(world, lord, attacker.id, rival_city.id)
 
       assert dealt > 0
+
+      WorldServer.restart(world)
+    end
+  end
+
+  describe "Bank/Stewardship (stories 909/910), with the flag OFF" do
+    test "no banking on the turn tick, no collect/upgrade/steward commands — gold stays exactly as it does today" do
+      Application.put_env(:broken_oaths, :feudal_enabled, false)
+
+      world = WorldsFixtures.world_fixture(%{seed: 424_242})
+
+      lord = UsersFixtures.user_fixture()
+      vassal = UsersFixtures.user_fixture()
+
+      {:ok, _lord_player} = Game.join_world(world, lord)
+      {:ok, _vassal_player} = Game.join_world(world, vassal)
+
+      gold_before = Game.gold(world, vassal)
+
+      # A real tick, with a real declared income, must move NOTHING —
+      # `apply_bank/1`'s own gate. Prod's own barbarian/normal gold
+      # economy (bounty kills, camp-destroy rewards — the only things
+      # that ever move `gold` today) is unaffected either way, since
+      # `test_gold_income` is itself only ever populated by a test.
+      :ok = Game.set_player_gold_income_for_test(world, vassal, 100)
+      :ok = Game.advance_turn(world)
+
+      assert Game.gold(world, vassal) == gold_before
+      assert Game.bank(world, vassal) == %{gold: 0, cap: Bank.starting_cap()}
+
+      # Every direct Bank/Stewardship command is refused outright too —
+      # `ensure_feudal_enabled/0`/`fetch_steward_context/3`'s own gate.
+      assert Game.collect_bank(world, vassal) == {:error, :feudal_disabled}
+      assert Game.upgrade_bank(world, vassal) == {:error, :feudal_disabled}
+      assert Game.steward_collect_bank(world, lord, vassal.id) == {:error, :feudal_disabled}
+
+      assert Game.gold(world, vassal) == gold_before
+      assert Game.honor(world, vassal) == 100
+      assert Game.steward_log(world, vassal) == []
+
+      WorldServer.restart(world)
+    end
+  end
+
+  describe "Bank/Stewardship (stories 909/910), with the flag ON" do
+    test "the turn tick banks offline earnings, and collect/upgrade actually work" do
+      Application.put_env(:broken_oaths, :feudal_enabled, true)
+
+      world = WorldsFixtures.world_fixture(%{seed: 424_242})
+
+      player = UsersFixtures.user_fixture()
+      {:ok, _player} = Game.join_world(world, player)
+
+      # Never connected via `GameLive.Play` at all in this bare-`Game`-call
+      # test, so `Presence.online?/2` reads false for this user the whole
+      # time — the same "offline" signal `SharedGivens.go_offline/1`
+      # gives a real LiveView connection.
+      :ok = Game.set_player_gold_income_for_test(world, player, 10)
+      :ok = Game.advance_turn(world)
+
+      assert Game.bank(world, player) == %{gold: 10, cap: Bank.starting_cap()}
+
+      gold_before = Game.gold(world, player)
+      assert Game.collect_bank(world, player) == :ok
+      assert Game.gold(world, player) == gold_before + 10
+      assert Game.bank(world, player) == %{gold: 0, cap: Bank.starting_cap()}
 
       WorldServer.restart(world)
     end

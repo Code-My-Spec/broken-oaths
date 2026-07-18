@@ -10,7 +10,11 @@ defmodule BrokenOathsSpex.Story910.Criterion7695Spex do
 
   See `criterion_7686`'s own moduledoc for the `subjugate/5` setup, and
   `criterion_7689`/`criterion_7690`'s own `"steward_collect_bank"`/
-  `"steward_queue_production"` judgment calls, reused unchanged.
+  `"steward_queue_production"` judgment calls, reused unchanged —
+  including reusing `subjugate/5`'s own `vassal_play_live` directly
+  (rather than a fresh `live/2` remount) before `go_offline/1`, so a
+  stray extra mount never strands the vassal "online" against
+  `BrokenOaths.Game.Presence`'s own `:duplicate` Registry keys.
 
   ## This criterion's own new judgment call: the log itself
 
@@ -34,10 +38,9 @@ defmodule BrokenOathsSpex.Story910.Criterion7695Spex do
       given_(:second_registered_player)
 
       given_ "my lord stewarded my bank and my production while I was offline", context do
-        %{lord_play_live: lord_play_live, vassal_city: vassal_city} =
+        %{lord_play_live: lord_play_live, vassal_city: vassal_city, vassal_play_live: vassal_play_live} =
           subjugate(context.world, context.conn, context.user, context.other_conn, context.other_user)
 
-        {:ok, vassal_play_live, _html} = live(context.other_conn, "/play/#{context.world.id}")
         go_offline(vassal_play_live)
 
         :ok = Fixtures.set_player_gold_income(context.world, context.other_user, 5)

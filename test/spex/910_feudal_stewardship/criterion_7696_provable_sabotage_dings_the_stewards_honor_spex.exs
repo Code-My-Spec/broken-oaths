@@ -27,6 +27,12 @@ defmodule BrokenOathsSpex.Story910.Criterion7696Spex do
   before/after, never a specific starting number or delta (the design
   doc's own "Round-5 decisions": "Honor deltas are small and tunable...
   not a blocker").
+
+  Reuses `subjugate/5`'s own `vassal_play_live` directly (rather than a
+  fresh `live/2` remount) before calling `go_offline/1` on it — see
+  `criterion_7689`'s own moduledoc for why a stray extra mount would
+  otherwise strand the vassal "online" against `BrokenOaths.Game.
+  Presence`'s own `:duplicate` Registry keys.
   """
 
   use BrokenOathsSpex.Case
@@ -43,13 +49,12 @@ defmodule BrokenOathsSpex.Story910.Criterion7696Spex do
 
       given_ "my vassal is offline and under attack, and I read my own Honor before acting",
              context do
-        %{lord_play_live: lord_play_live} =
+        %{lord_play_live: lord_play_live, vassal_play_live: vassal_play_live} =
           subjugate(context.world, context.conn, context.user, context.other_conn, context.other_user)
 
         honor_before_html = render(lord_play_live)
         honor_before = Regex.run(~r/data-test="player-honor"[^>]*>(-?\d+)/, honor_before_html)
 
-        {:ok, vassal_play_live, _html} = live(context.other_conn, "/play/#{context.world.id}")
         go_offline(vassal_play_live)
 
         [vassal_lord | _] =

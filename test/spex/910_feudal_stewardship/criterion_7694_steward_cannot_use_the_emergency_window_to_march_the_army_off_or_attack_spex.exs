@@ -18,6 +18,15 @@ defmodule BrokenOathsSpex.Story910.Criterion7694Spex do
   ordinary `"attack"` hook's own `target_camp_id` param shape. Both
   driven through `attempt_event/3` since neither `handle_event/3`
   clause exists yet.
+
+  Reuses `subjugate/5`'s own `vassal_play_live` directly (rather than a
+  fresh `live/2` remount) before calling `go_offline/1` on it — see
+  `criterion_7689`'s own moduledoc for why a stray extra mount would
+  otherwise strand the vassal "online" against `BrokenOaths.Game.
+  Presence`'s own `:duplicate` Registry keys, which would make THIS
+  criterion's own refusal pass for the wrong reason ("owner online")
+  rather than the one actually under test (the emergency window's own
+  destination/aggression refusal).
   """
 
   use BrokenOathsSpex.Case
@@ -35,10 +44,9 @@ defmodule BrokenOathsSpex.Story910.Criterion7694Spex do
 
       given_ "my vassal is offline and under attack, with a distant tile and a barbarian camp both in reach",
              context do
-        %{lord_play_live: lord_play_live} =
+        %{lord_play_live: lord_play_live, vassal_play_live: vassal_play_live} =
           subjugate(context.world, context.conn, context.user, context.other_conn, context.other_user)
 
-        {:ok, vassal_play_live, _html} = live(context.other_conn, "/play/#{context.world.id}")
         go_offline(vassal_play_live)
 
         [vassal_lord | _] =
