@@ -186,6 +186,45 @@ interesting decisions, and vassalage must not *always* be negative.
   the Vassals panel; the vassal sees the rate and feels the pressure.
 - **Hidden Agenda v1 = all four:** Restore, Usurp, Kingmaker, Merchant Prince.
 
+## Round-5 decisions + build defaults (2026-07-18, post-Three-Amigos)
+
+Product-owner answers to the implementation-blocking questions:
+- **Tribute basis:** a % of the vassal's **city yields, before upkeep** (not all-gold,
+  not net). Excludes one-off loot and tribute the vassal itself receives — no
+  tribute-chain double-dip in v1.
+- **Call to arms = pledge a SHARE of standing army for the WAR'S DURATION.** The
+  vassal commits a portion of their army to the lord's war until it ends; pulling
+  out early counts as **refusal** (Oath Strain spike + Honor ding). Vassal keeps
+  command of the pledged units. (Chosen over the muster-point-by-deadline model.)
+- **Tribute debt:** accrues; negative balance allowed; **no auto-penalty**. Being in
+  the red **blocks the vassal's own spending until repaid**, and the lord simply
+  goes unpaid — a natural incentive for the lord to keep the rate fair. Drama stays
+  social (no seizure in v1).
+
+Build defaults chosen to unblock implementation (documented, correctable):
+- **No razing in the foundation** — capture occupies only; razing is deferred (it is
+  anti-vassalage and not needed for the core loop).
+- **In-progress production on capture:** the occupied city keeps running under its
+  **owner** (peacetime rule), so its production queue simply continues; the lord
+  skims tribute and does NOT seize production.
+- **Honor deltas are small and tunable** — e.g. executing a fallen garrison ≈ −2
+  Honor, releasing ≈ 0 (neutral); refusing a call / breaking protection is a larger
+  hit. Exact numbers are a balancing pass, not a blocker.
+- **Occupied rendering:** the city shows an "occupied / Sworn to X" marker on the
+  globe and in the owner's/lord's city lists — a spec-time visual detail.
+- **Wartime control override is DEFERRED to the rebellion batch.** The foundation
+  always applies the peacetime rule (owner runs the occupied city). The wartime/
+  revolt shift-of-control is designed with §8.
+- **"Free city" = a city you own that no other player occupies.** Vassalization fires
+  at **zero** free cities. Multiple last-cities falling in one tick resolve in
+  **deterministic capture order**, each firing its own last-free-city check.
+- **Vassalage relationship schema (to finalize at architecture/spec):**
+  `{world_id, lord_player_id, vassal_player_id, tribute_rate (default 0.25),
+  oath_strain (0-100, default 0), hidden_agenda (enum: restore|usurp|kingmaker|
+  merchant_prince), contract_terms (jsonb — reciprocal duties, forward-looking),
+  status, honor hooks}`. Built this batch carrying the forward-looking fields so the
+  rebellion batch doesn't rebuild it.
+
 ## Sources
 See `feudal_vassalage_prior_art.md` (CK3/EU4/Civ VI/Travian/EVE mechanics + numbers)
 and `feudal_vassalage_novel_design.md` (Neptune's Pride, Nemesis, EVE heists,
