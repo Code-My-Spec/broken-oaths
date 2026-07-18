@@ -246,15 +246,29 @@ defmodule BrokenOathsWeb.GameLive.HelpPanel do
                 Every city generates <strong>2 × its size</strong>
                 science per turn, banked toward whichever tech is currently
                 selected (switching never loses progress on the one you
-                switch away from). Four Stone Age techs:
+                switch away from). Eleven Ancient-era techs, some gated
+                behind a prerequisite — a locked tech's row names exactly
+                which one it's waiting on:
               </p>
               <ul class="list-disc list-inside opacity-80">
-                <li>Animal Husbandry — 50 science. Unlocks the Pasture improvement.</li>
-                <li>Pottery — 50 science. Unlocks the Granary (+2 food storage/turn).</li>
-                <li>Mining — 75 science. Mines build in 3 turns instead of 5.</li>
                 <li>
-                  Bronze Working — 100 science. Advances your civilization to
-                  the Bronze Age, unlocking the Bronze Spearman.
+                  Pottery — 50 science, no prerequisite. Unlocks the Granary (+2 food storage/turn).
+                </li>
+                <li>
+                  Animal Husbandry — 50 science, no prerequisite. Unlocks the Pasture improvement.
+                </li>
+                <li>Mining — 75 science, no prerequisite. Mines build in 3 turns instead of 5.</li>
+                <li>Sailing — 90 science, no prerequisite.</li>
+                <li>Astrology — 90 science, no prerequisite.</li>
+                <li>Writing — 90 science. Needs Pottery.</li>
+                <li>Irrigation — 90 science. Needs Pottery.</li>
+                <li>Archery — 90 science. Needs Animal Husbandry.</li>
+                <li>Masonry — 100 science. Needs Mining.</li>
+                <li>The Wheel — 100 science. Needs Mining.</li>
+                <li>
+                  Bronze Working — 100 science. Needs Mining. Advances your
+                  civilization to the Bronze Age, unlocking the Bronze
+                  Spearman.
                 </li>
               </ul>
             </.section>

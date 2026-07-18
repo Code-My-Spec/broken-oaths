@@ -3,21 +3,66 @@ defmodule BrokenOaths.Game.ResearchTest do
 
   alias BrokenOaths.Game.Research
 
-  describe "techs/0 and catalog/0" do
-    test "the four Stone Age techs, at their locked PM costs" do
-      assert Enum.sort(Research.techs()) ==
-               Enum.sort([:animal_husbandry, :pottery, :mining, :bronze_working])
+  @all_techs [
+    :pottery,
+    :animal_husbandry,
+    :mining,
+    :sailing,
+    :astrology,
+    :writing,
+    :irrigation,
+    :archery,
+    :masonry,
+    :the_wheel,
+    :bronze_working
+  ]
 
-      assert Research.cost(:animal_husbandry) == 50
+  describe "techs/0 and catalog/0" do
+    test "the eleven Ancient-era techs, at their locked PM costs" do
+      assert Enum.sort(Research.techs()) == Enum.sort(@all_techs)
+
       assert Research.cost(:pottery) == 50
+      assert Research.cost(:animal_husbandry) == 50
       assert Research.cost(:mining) == 75
+      assert Research.cost(:sailing) == 90
+      assert Research.cost(:astrology) == 90
+      assert Research.cost(:writing) == 90
+      assert Research.cost(:irrigation) == 90
+      assert Research.cost(:archery) == 90
+      assert Research.cost(:masonry) == 100
+      assert Research.cost(:the_wheel) == 100
       assert Research.cost(:bronze_working) == 100
     end
 
-    test "catalog/0 carries every tech's cost and unlock description" do
+    test "catalog/0 carries every tech's cost, unlock description, and prerequisites" do
       catalog = Research.catalog()
       assert catalog[:mining].cost == 75
       assert catalog[:mining].unlock =~ "mines"
+      assert catalog[:mining].prereqs == []
+      assert catalog[:bronze_working].prereqs == [:mining]
+    end
+  end
+
+  describe "prereqs/1 — the Civ-6-accurate prerequisite edges" do
+    test "tier-1 techs have no prerequisite" do
+      for tech <- [:pottery, :animal_husbandry, :mining, :sailing, :astrology] do
+        assert Research.prereqs(tech) == []
+      end
+    end
+
+    test "Writing and Irrigation require Pottery" do
+      assert Research.prereqs(:writing) == [:pottery]
+      assert Research.prereqs(:irrigation) == [:pottery]
+    end
+
+    test "Archery requires Animal Husbandry" do
+      assert Research.prereqs(:archery) == [:animal_husbandry]
+    end
+
+    test "Masonry, The Wheel, and Bronze Working all require Mining" do
+      assert Research.prereqs(:masonry) == [:mining]
+      assert Research.prereqs(:the_wheel) == [:mining]
+      assert Research.prereqs(:bronze_working) == [:mining]
     end
   end
 
@@ -39,6 +84,56 @@ defmodule BrokenOaths.Game.ResearchTest do
     end
   end
 
+  describe "prereqs_met?/2" do
+    test "always true for a tier-1 tech" do
+      assert Research.prereqs_met?(Research.new(), :pottery)
+      assert Research.prereqs_met?(Research.new(), :mining)
+    end
+
+    test "false for a tier-2 tech before its prerequisite is completed" do
+      refute Research.prereqs_met?(Research.new(), :bronze_working)
+      refute Research.prereqs_met?(Research.new(), :writing)
+      refute Research.prereqs_met?(Research.new(), :archery)
+    end
+
+    test "true once the prerequisite is completed" do
+      pr = %{Research.new() | completed_techs: [:mining]}
+      assert Research.prereqs_met?(pr, :bronze_working)
+      assert Research.prereqs_met?(pr, :masonry)
+      assert Research.prereqs_met?(pr, :the_wheel)
+    end
+
+    test "completing an unrelated tech doesn't satisfy a different prerequisite" do
+      pr = %{Research.new() | completed_techs: [:animal_husbandry]}
+      refute Research.prereqs_met?(pr, :bronze_working)
+      refute Research.prereqs_met?(pr, :writing)
+      assert Research.prereqs_met?(pr, :archery)
+    end
+  end
+
+  describe "tech_state/2" do
+    test ":locked when a prerequisite is outstanding" do
+      assert Research.tech_state(Research.new(), :bronze_working) == :locked
+    end
+
+    test ":available when prereq-free or prerequisites are all met" do
+      assert Research.tech_state(Research.new(), :pottery) == :available
+
+      pr = %{Research.new() | completed_techs: [:mining]}
+      assert Research.tech_state(pr, :bronze_working) == :available
+    end
+
+    test ":in_progress when it's the current_research" do
+      pr = %{Research.new() | current_research: :pottery}
+      assert Research.tech_state(pr, :pottery) == :in_progress
+    end
+
+    test ":completed once it's in completed_techs, even if it was current_research" do
+      pr = %{Research.new() | completed_techs: [:pottery]}
+      assert Research.tech_state(pr, :pottery) == :completed
+    end
+  end
+
   describe "set_research/2" do
     test "selects a tech as current_research" do
       assert {:ok, pr} = Research.set_research(Research.new(), :pottery)
@@ -46,12 +141,26 @@ defmodule BrokenOaths.Game.ResearchTest do
     end
 
     test "refuses an unknown tech" do
-      assert Research.set_research(Research.new(), :writing) == {:error, :invalid_tech}
+      assert Research.set_research(Research.new(), :astronomy) == {:error, :invalid_tech}
     end
 
     test "refuses a tech that's already completed" do
       pr = %{Research.new() | completed_techs: [:pottery]}
       assert Research.set_research(pr, :pottery) == {:error, :already_completed}
+    end
+
+    test "refuses a tech whose prerequisite isn't completed yet" do
+      assert Research.set_research(Research.new(), :bronze_working) ==
+               {:error, :prereqs_not_met}
+
+      assert Research.set_research(Research.new(), :writing) == {:error, :prereqs_not_met}
+      assert Research.set_research(Research.new(), :archery) == {:error, :prereqs_not_met}
+    end
+
+    test "selects a tier-2 tech once its prerequisite is completed" do
+      pr = %{Research.new() | completed_techs: [:mining]}
+      assert {:ok, selected} = Research.set_research(pr, :bronze_working)
+      assert selected.current_research == :bronze_working
     end
 
     test "switching research retains banked progress on every tech (per-tech retention)" do
@@ -174,13 +283,17 @@ defmodule BrokenOaths.Game.ResearchTest do
     end
 
     test "other completed techs never flip the age" do
-      pr = %{Research.new() | completed_techs: [:animal_husbandry, :pottery, :mining]}
+      pr = %{
+        Research.new()
+        | completed_techs: [:animal_husbandry, :pottery, :mining, :sailing, :astrology]
+      }
+
       assert Research.age(pr) == :stone_age
     end
   end
 
-  describe "end-to-end: research every tech in sequence, one at a time" do
-    test "banking, completing, and switching compose across the whole tree" do
+  describe "end-to-end: research every tech in sequence, one at a time, respecting prerequisites" do
+    test "banking, completing, and switching compose across the whole eleven-tech tree" do
       pr = Research.new()
 
       {:ok, pr} = Research.set_research(pr, :animal_husbandry)
@@ -196,12 +309,28 @@ defmodule BrokenOaths.Game.ResearchTest do
       {pr, completed} = Research.accrue_and_complete(pr, 75)
       assert completed == :mining
 
+      # Only reachable now that Pottery/Animal Husbandry/Mining are done.
+      {:ok, pr} = Research.set_research(pr, :archery)
+      {pr, completed} = Research.accrue_and_complete(pr, 90)
+      assert completed == :archery
+
+      {:ok, pr} = Research.set_research(pr, :writing)
+      {pr, completed} = Research.accrue_and_complete(pr, 90)
+      assert completed == :writing
+
       {:ok, pr} = Research.set_research(pr, :bronze_working)
       {pr, completed} = Research.accrue_and_complete(pr, 100)
       assert completed == :bronze_working
 
       assert Enum.sort(pr.completed_techs) ==
-               Enum.sort([:animal_husbandry, :pottery, :mining, :bronze_working])
+               Enum.sort([
+                 :animal_husbandry,
+                 :pottery,
+                 :mining,
+                 :archery,
+                 :writing,
+                 :bronze_working
+               ])
 
       assert Research.age(pr) == :bronze_age
       assert {:error, :already_completed} = Research.set_research(pr, :mining)

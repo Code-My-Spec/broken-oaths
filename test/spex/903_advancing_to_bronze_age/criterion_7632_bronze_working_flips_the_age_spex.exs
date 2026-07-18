@@ -58,9 +58,12 @@ defmodule BrokenOathsSpex.Story903.Criterion7632Spex do
 
   This scenario deliberately does NOT use the shared
   `:player_reached_bronze_age` given: the age flip is the very thing
-  under test here, so `given_` only selects (and confirms) the research
-  (0 science banked — not yet complete) and `when_` is what lets the
-  turns pass that actually cross the completion threshold.
+  under test here, so `given_` only researches Mining (Bronze Working's
+  now-required prerequisite — story 902 EXPANDED the tree per playtest
+  issue 133b4893) to completion, then selects (and confirms) Bronze
+  Working itself with 0 science banked toward IT (not yet complete),
+  and `when_` is what lets the turns pass that actually cross Bronze
+  Working's own completion threshold.
   """
 
   use BrokenOathsSpex.Case
@@ -75,8 +78,24 @@ defmodule BrokenOathsSpex.Story903.Criterion7632Spex do
       given_(:registered_player)
       given_(:a_founded_city)
 
-      given_ "I have selected Bronze Working as my current research", context do
+      given_ "I have researched Mining (Bronze Working's prerequisite) to completion", context do
         render_hook(context.play_live, "toggle_tech_panel", %{})
+        render_hook(context.play_live, "select_research", %{"tech" => "mining"})
+
+        Enum.reduce_while(1..60, :ok, fn _, :ok ->
+          if has_element?(context.play_live, "[data-test='tech-completed-mining']") do
+            {:halt, :ok}
+          else
+            Fixtures.advance_turn(context.world)
+            {:cont, :ok}
+          end
+        end)
+
+        assert has_element?(context.play_live, "[data-test='tech-completed-mining']")
+        {:ok, context}
+      end
+
+      given_ "I have selected Bronze Working as my current research", context do
         render_hook(context.play_live, "select_research", %{"tech" => "bronze_working"})
         render_hook(context.play_live, "bronze_working_confirm", %{})
 

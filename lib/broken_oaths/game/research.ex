@@ -1,6 +1,8 @@
 defmodule BrokenOaths.Game.Research do
   @moduledoc """
-  Pure tech-tree core (story 902): the four Stone Age techs and their
+  Pure tech-tree core (story 902, EXPANDED per playtest issue 133b4893
+  "basically copy Civ 6 ... beef up the tech tree"): the eleven
+  Civ-6-accurate Ancient-era techs and their prerequisite edges,
   science cost, converting a player's cities into science income,
   banking that income toward whichever tech is currently selected, and
   completing a tech once its cost is banked. No `Repo`: every function
@@ -27,6 +29,30 @@ defmodule BrokenOaths.Game.Research do
   it left off. A tech already in `completed_techs` can never be
   (re-)selected.
 
+  ## The tech tree: eleven Ancient-era techs, with prerequisites
+
+  Five techs have NO prerequisite (tier 1): Pottery (50), Animal
+  Husbandry (50), Mining (75), Sailing (90), Astrology (90). Six more
+  each require exactly one tier-1 tech first: Writing (90) and
+  Irrigation (90) need Pottery; Archery (90) needs Animal Husbandry;
+  Masonry (100), The Wheel (100), and Bronze Working (100) need
+  Mining. These edges mirror Civ 6's own Ancient-era shape (see
+  `.code_my_spec/knowledge/civ6_tech_tree.md`) — reaching the Bronze
+  Age now requires researching Mining BEFORE Bronze Working, where
+  previously Bronze Working had no prerequisite at all.
+
+  `set_research/2` REFUSES to select a tech whose prerequisites
+  aren't all in `completed_techs` yet (`{:error, :prereqs_not_met}`),
+  exactly the same defensive-refusal shape it already uses for an
+  unknown tech or one already completed. `prereqs_met?/2` is the
+  underlying check; `tech_state/2` classifies a tech into exactly one
+  of `:locked | :available | :in_progress | :completed` for a
+  `TechPanel` (or any other surface) to render without duplicating
+  that classification logic — this directly answers the "prerequisites
+  aren't obvious" complaint issue 133b4893 raised: a locked tech's row
+  is now unambiguous, and its own `prereqs/1` names exactly which
+  tech(s) it is waiting on.
+
   ## Unlocks
 
   Completing a tech (`complete/1`) only ever moves it from
@@ -35,19 +61,38 @@ defmodule BrokenOaths.Game.Research do
   (`mine_duration/1`, `granary_enabled?/1`, `pasture_enabled?/1`,
   `age/1`), so there is exactly one source of truth for "has this
   player unlocked X" and no separate flag can ever drift out of sync
-  with it. Story 903 (Bronze Age units) should read `age/1` rather than
-  adding its own tracking field; story 905 (Pasture/resources) should
-  read `pasture_enabled?/1` the same way. `mine_duration/1` is
-  computed here but not yet wired into
-  `BrokenOaths.Game.Improvement.duration/1`/`BrokenOaths.Game.Turn`'s
-  improvement-progress phase — improvements in this codebase aren't
-  player-owned (any player's worker can resume one), so "whose
-  research decides the duration" needs its own design call before that
-  wiring happens.
+  with it.
+
+  Four techs have a real, wired unlock today: Pottery (Granary),
+  Animal Husbandry (Pasture), Mining (faster mines), and Bronze
+  Working (the Bronze Age itself, plus Bronze units and — story 911 —
+  revealing the Copper strategic resource). The other seven
+  (Sailing, Astrology, Writing, Irrigation, Archery, Masonry, The
+  Wheel) are STRUCTURE-ONLY for this story: they research, bank
+  science, complete, and gate their own dependents exactly like every
+  other tech, but the content they name (Galleys, the Holy Site,
+  Library, Plantation, Archer, Walls/Quarry, roads/Heavy Chariot)
+  doesn't exist in this codebase yet and ships in later stories. The
+  Wheel in particular is the intended future gate for the deferred
+  Road worker-improvement (story 882) — it is NOT wired to anything
+  yet, on purpose.
   """
 
-  @type tech :: :animal_husbandry | :pottery | :mining | :bronze_working
+  @type tech ::
+          :pottery
+          | :animal_husbandry
+          | :mining
+          | :sailing
+          | :astrology
+          | :writing
+          | :irrigation
+          | :archery
+          | :masonry
+          | :the_wheel
+          | :bronze_working
+
   @type age :: :stone_age | :bronze_age
+  @type tech_state :: :locked | :available | :in_progress | :completed
 
   @type player_research :: %{
           completed_techs: [tech()],
@@ -57,18 +102,42 @@ defmodule BrokenOaths.Game.Research do
 
   @type city :: %{required(:size) => pos_integer(), optional(atom()) => term()}
 
-  @type set_research_error :: :invalid_tech | :already_completed
+  @type set_research_error :: :invalid_tech | :already_completed | :prereqs_not_met
 
   @science_per_pop 2
 
   @catalog %{
+    # Tier 1 — no prerequisite.
+    pottery: %{
+      cost: 50,
+      prereqs: [],
+      unlock: "Enables the Granary building (+2 food storage)"
+    },
     animal_husbandry: %{
       cost: 50,
+      prereqs: [],
       unlock: "Enables the Pasture improvement (+2 food on animal resources)"
     },
-    pottery: %{cost: 50, unlock: "Enables the Granary building (+2 food storage)"},
-    mining: %{cost: 75, unlock: "Workers build mines in 3 turns instead of 5"},
-    bronze_working: %{cost: 100, unlock: "Advances your civilization to the Bronze Age"}
+    mining: %{cost: 75, prereqs: [], unlock: "Workers build mines in 3 turns instead of 5"},
+    sailing: %{cost: 90, prereqs: [], unlock: "Enables Galleys and coastal exploration"},
+    astrology: %{cost: 90, prereqs: [], unlock: "Enables the Holy Site district"},
+    # After Pottery.
+    writing: %{cost: 90, prereqs: [:pottery], unlock: "Enables the Library building"},
+    irrigation: %{cost: 90, prereqs: [:pottery], unlock: "Enables farming irrigated resources"},
+    # After Animal Husbandry.
+    archery: %{cost: 90, prereqs: [:animal_husbandry], unlock: "Enables the Archer unit"},
+    # After Mining.
+    masonry: %{
+      cost: 100,
+      prereqs: [:mining],
+      unlock: "Enables Walls and the Quarry improvement"
+    },
+    the_wheel: %{cost: 100, prereqs: [:mining], unlock: "Enables roads and the Heavy Chariot"},
+    bronze_working: %{
+      cost: 100,
+      prereqs: [:mining],
+      unlock: "Advances your civilization to the Bronze Age"
+    }
   }
 
   @techs Map.keys(@catalog)
@@ -77,12 +146,33 @@ defmodule BrokenOaths.Game.Research do
   # Catalog
   # -------------------------------------------------------------------
 
-  @doc "Every Stone Age tech, in a fixed presentation order."
+  @doc """
+  Every Ancient-era tech, in a fixed presentation order: the five
+  prereq-free tier-1 techs first (Pottery, Animal Husbandry, Mining,
+  Sailing, Astrology), then each tier-2 tech grouped after the
+  prerequisite it depends on (Writing/Irrigation after Pottery,
+  Archery after Animal Husbandry, Masonry/The Wheel/Bronze Working
+  after Mining) — what a `TechPanel` lists, top to bottom.
+  """
   @spec techs() :: [tech()]
-  def techs, do: [:animal_husbandry, :pottery, :mining, :bronze_working]
+  def techs do
+    [
+      :pottery,
+      :animal_husbandry,
+      :mining,
+      :sailing,
+      :astrology,
+      :writing,
+      :irrigation,
+      :archery,
+      :masonry,
+      :the_wheel,
+      :bronze_working
+    ]
+  end
 
-  @doc "The full tech catalog: `%{tech => %{cost:, unlock:}}` — what a TechPanel lists."
-  @spec catalog() :: %{tech() => %{cost: pos_integer(), unlock: String.t()}}
+  @doc "The full tech catalog: `%{tech => %{cost:, unlock:, prereqs:}}` — what a TechPanel lists."
+  @spec catalog() :: %{tech() => %{cost: pos_integer(), unlock: String.t(), prereqs: [tech()]}}
   def catalog, do: @catalog
 
   @doc "A tech's science cost."
@@ -92,6 +182,15 @@ defmodule BrokenOaths.Game.Research do
   @doc "A tech's unlock, in prose — what a TechPanel shows as \"why research this\"."
   @spec unlock_description(tech()) :: String.t()
   def unlock_description(tech), do: fetch_tech!(tech).unlock
+
+  @doc """
+  `tech`'s prerequisite techs — empty for every tier-1 tech, exactly
+  one entry for every tier-2 tech in this tree (`set_research/2`
+  requires ALL of them to be completed, but no tech here currently has
+  more than one). What a `TechPanel` row names as "Requires: ...".
+  """
+  @spec prereqs(tech()) :: [tech()]
+  def prereqs(tech), do: fetch_tech!(tech).prereqs
 
   defp fetch_tech!(tech), do: Map.fetch!(@catalog, tech)
 
@@ -114,21 +213,70 @@ defmodule BrokenOaths.Game.Research do
   end
 
   # -------------------------------------------------------------------
+  # Prerequisites
+  # -------------------------------------------------------------------
+
+  @doc """
+  Whether every one of `tech`'s prerequisites is already in
+  `completed_techs` (vacuously true for a tier-1 tech, whose `prereqs/1`
+  is `[]`). This is independent of whether `tech` ITSELF has already
+  been completed or is already selected — `set_research/2` and
+  `tech_state/2` each layer their own additional checks on top.
+  """
+  @spec prereqs_met?(player_research(), tech()) :: boolean()
+  def prereqs_met?(player_research, tech) do
+    tech |> prereqs() |> Enum.all?(&completed?(player_research, &1))
+  end
+
+  @doc """
+  `tech`'s current state for a `TechPanel` (or any other surface) to
+  render, in exactly one of four buckets — the classification issue
+  133b4893 asked for so a locked tech is never ambiguous:
+
+    * `:completed` — already in `completed_techs`.
+    * `:in_progress` — not completed, and IS `current_research`.
+    * `:available` — not completed, not current, but every prerequisite
+      is done (`prereqs_met?/2`) — researchable right now.
+    * `:locked` — not completed, not current, and at least one
+      prerequisite is still outstanding — `set_research/2` would
+      refuse it with `{:error, :prereqs_not_met}`.
+  """
+  @spec tech_state(player_research(), tech()) :: tech_state()
+  def tech_state(player_research, tech) do
+    cond do
+      completed?(player_research, tech) -> :completed
+      player_research.current_research == tech -> :in_progress
+      prereqs_met?(player_research, tech) -> :available
+      true -> :locked
+    end
+  end
+
+  # -------------------------------------------------------------------
   # Selecting research
   # -------------------------------------------------------------------
 
   @doc """
   Select `tech` as `current_research`, retaining whatever science was
   already banked for it (and for every other tech). Refuses an unknown
-  tech or one already completed.
+  tech, one already completed, or — new for the expanded tree — one
+  whose prerequisites aren't all completed yet
+  (`{:error, :prereqs_not_met}`, checked via `prereqs_met?/2`).
   """
   @spec set_research(player_research(), tech()) ::
           {:ok, player_research()} | {:error, set_research_error()}
   def set_research(player_research, tech) do
-    case {tech in @techs, tech in player_research.completed_techs} do
-      {false, _} -> {:error, :invalid_tech}
-      {true, true} -> {:error, :already_completed}
-      {true, false} -> {:ok, %{player_research | current_research: tech}}
+    cond do
+      tech not in @techs ->
+        {:error, :invalid_tech}
+
+      tech in player_research.completed_techs ->
+        {:error, :already_completed}
+
+      not prereqs_met?(player_research, tech) ->
+        {:error, :prereqs_not_met}
+
+      true ->
+        {:ok, %{player_research | current_research: tech}}
     end
   end
 
@@ -243,8 +391,8 @@ defmodule BrokenOaths.Game.Research do
   @doc """
   Bronze Working's unlock: the player's age. Derived entirely from
   `completed_techs` — there is no separate `age` field to keep in sync.
-  Story 903 (Bronze units, the size-6 city cap) should read this
-  instead of adding its own tracking.
+  Reaching Bronze Working now requires Mining first (`prereqs/1`), so
+  the Bronze Age is only ever one step further than it used to be.
   """
   @spec age(player_research()) :: age()
   def age(player_research) do

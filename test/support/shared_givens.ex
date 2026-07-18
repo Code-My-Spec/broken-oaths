@@ -139,8 +139,11 @@ defmodule BrokenOathsSpex.SharedGivens do
   end
 
   # A player who has founded a first city and advanced to the Bronze
-  # Age (story 903) by selecting Bronze Working as their research and
-  # letting enough turns pass for its 100-science cost to bank in full.
+  # Age (story 903) by researching Mining (its now-required
+  # prerequisite — story 902 EXPANDED the tree per playtest issue
+  # 133b4893 so Bronze Working can no longer be picked directly),
+  # then selecting Bronze Working as their research and letting enough
+  # turns pass for its 100-science cost to bank in full.
   #
   # Real surface — story 902's `TechPanel`/`GameLive.Play` own the
   # research-selection event contract this given drives:
@@ -160,13 +163,17 @@ defmodule BrokenOathsSpex.SharedGivens do
   # the LiveView, so this is now a genuine confirmation rather than a
   # tolerated-crash placeholder.
   #
-  # Turn math: Bronze Working costs 100 science (`Research.cost/1`,
-  # stone_age.md §6.1). A lone size-1 city already earns 2/turn
-  # (`Research.science_per_turn/1`, `2 * size`), so 50 turns already
-  # covers it even with zero growth; growth (an independent mechanic)
-  # only ever raises that rate further. 60 is a safe, generous
-  # overshoot, in the same scale existing specs already accept for long
-  # waits (e.g. `criterion_7477`'s 300-turn bound).
+  # Turn math: Mining costs 75 science and Bronze Working costs 100
+  # (`Research.cost/1`) — 175 total, plus Mining must fully complete
+  # before Bronze Working is even selectable
+  # (`Research.prereqs_met?/2`). Mining is researched to completion
+  # first via a convergence loop (bounded at 60 turns, the same pattern
+  # `criterion_7628`'s own Mining wait uses) rather than a fixed turn
+  # count, since exactly how many turns Mining needs depends on the
+  # city's own growth curve. Bronze Working then gets its own 60-turn
+  # generous overshoot exactly as before — a lone size-1 city already
+  # earns 2/turn (`Research.science_per_turn/1`), so 50 turns already
+  # covers its 100 cost even with zero further growth.
   #
   # Requires `context.world`, `context.user`/`context.conn` — run
   # `:a_world` and `:registered_player` first.
@@ -174,6 +181,17 @@ defmodule BrokenOathsSpex.SharedGivens do
     {:ok, context} = a_founded_city(context)
 
     render_hook(context.play_live, "toggle_tech_panel", %{})
+    render_hook(context.play_live, "select_research", %{"tech" => "mining"})
+
+    Enum.reduce_while(1..60, :ok, fn _, :ok ->
+      if has_element?(context.play_live, "[data-test='tech-completed-mining']") do
+        {:halt, :ok}
+      else
+        Fixtures.advance_turn(context.world)
+        {:cont, :ok}
+      end
+    end)
+
     render_hook(context.play_live, "select_research", %{"tech" => "bronze_working"})
     render_hook(context.play_live, "bronze_working_confirm", %{})
 

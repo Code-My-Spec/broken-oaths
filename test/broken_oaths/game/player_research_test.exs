@@ -6,6 +6,20 @@ defmodule BrokenOaths.Game.PlayerResearchTest do
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.WorldsFixtures
 
+  @all_techs [
+    :pottery,
+    :animal_husbandry,
+    :mining,
+    :sailing,
+    :astrology,
+    :writing,
+    :irrigation,
+    :archery,
+    :masonry,
+    :the_wheel,
+    :bronze_working
+  ]
+
   defp player_fixture do
     world = WorldsFixtures.world_fixture()
     user = UsersFixtures.user_fixture()
@@ -43,15 +57,15 @@ defmodule BrokenOaths.Game.PlayerResearchTest do
     assert player_research.current_research == nil
   end
 
-  test "current_research must be one of the four Stone Age techs" do
-    attrs = Map.put(valid_attrs(), :current_research, :writing)
+  test "current_research must be one of the eleven Ancient-era techs" do
+    attrs = Map.put(valid_attrs(), :current_research, :printing_press)
     changeset = PlayerResearch.changeset(%PlayerResearch{}, attrs)
     refute changeset.valid?
     assert %{current_research: ["is invalid"]} = errors_on(changeset)
   end
 
-  test "current_research may be any of the four valid techs" do
-    for tech <- [:animal_husbandry, :pottery, :mining, :bronze_working] do
+  test "current_research may be any of the eleven valid techs" do
+    for tech <- @all_techs do
       attrs = Map.put(valid_attrs(), :current_research, tech)
       changeset = PlayerResearch.changeset(%PlayerResearch{}, attrs)
       assert changeset.valid?

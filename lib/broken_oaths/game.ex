@@ -590,7 +590,8 @@ defmodule BrokenOaths.Game do
   def tech_catalog, do: BrokenOaths.Game.Research.catalog()
 
   @doc """
-  `user`'s research state in `world` (story 902): `%{completed_techs:,
+  `user`'s research state in `world` (story 902, expanded to the
+  eleven-tech Ancient-era tree per issue 133b4893): `%{completed_techs:,
   current_research:, banked_science:, progress:, science_per_turn:}`,
   or `nil` if `user` hasn't joined `world` — `progress` is
   `%{tech:, banked:, cost:}` for `current_research`, or `nil` with
@@ -598,7 +599,8 @@ defmodule BrokenOaths.Game do
   `science_per_turn` is `2 * population` summed over every one of
   `user`'s cities, right now (`BrokenOaths.Game.Research.science_per_turn/1`).
   `banked_science` and `completed_techs` are both keyed/valued by tech
-  atom (`:animal_husbandry | :pottery | :mining | :bronze_working`).
+  atom (`BrokenOaths.Game.Research.techs/0` names the full eleven-tech
+  set).
   """
   @spec player_research(map(), map()) :: map() | nil
   def player_research(world, user), do: WorldServer.call(world, {:player_research, user})
@@ -606,12 +608,15 @@ defmodule BrokenOaths.Game do
   @doc """
   Select `tech` as `user`'s `current_research` in `world`, retaining
   whatever science was already banked toward it
-  (`BrokenOaths.Game.Research.set_research/2`). Refuses an unknown tech
-  or one already completed. Persists immediately, like
-  `rename_city/4` — no turn boundary required.
+  (`BrokenOaths.Game.Research.set_research/2`). Refuses an unknown tech,
+  one already completed, or — since the tree grew prerequisite edges —
+  one whose prerequisites aren't all completed yet
+  (`{:error, :prereqs_not_met}`, see `BrokenOaths.Game.Research.prereqs_met?/2`).
+  Persists immediately, like `rename_city/4` — no turn boundary required.
   """
   @spec set_research(map(), map(), atom()) ::
-          :ok | {:error, :not_a_player | :invalid_tech | :already_completed}
+          :ok
+          | {:error, :not_a_player | :invalid_tech | :already_completed | :prereqs_not_met}
   def set_research(world, user, tech), do: WorldServer.call(world, {:set_research, user, tech})
 
   # -------------------------------------------------------------------

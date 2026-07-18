@@ -132,7 +132,21 @@ defmodule BrokenOaths.Journeys.ReturningLordManagesCityTest do
       "item_id" => current_after.id
     })
 
+    # Story 902 (expanded per issue 133b4893): Bronze Working now
+    # requires Mining first, so it's researched to completion before
+    # Bronze Working can even be selected.
     render_hook(reloaded_live, "toggle_tech_panel", %{})
+    render_hook(reloaded_live, "select_research", %{"tech" => "mining"})
+
+    Enum.reduce_while(1..60, :ok, fn _, :ok ->
+      if has_element?(reloaded_live, "[data-test='tech-completed-mining']") do
+        {:halt, :ok}
+      else
+        Fixtures.advance_turn(context.world)
+        {:cont, :ok}
+      end
+    end)
+
     render_hook(reloaded_live, "select_research", %{"tech" => "bronze_working"})
     render_hook(reloaded_live, "bronze_working_confirm", %{})
 

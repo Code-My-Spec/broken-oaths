@@ -7,6 +7,12 @@ defmodule BrokenOathsSpex.Story902.Criterion7630Spex do
   text) and only actually select it once the player confirms —
   cancelling leaves nothing selected.
 
+  EXPANDED per playtest issue 133b4893: Bronze Working now requires
+  Mining as a prerequisite (`Research.prereqs/1`), so both scenarios
+  research Mining to completion first — clicking `tech-bronze_working`
+  before Mining is done is a silent no-op (it's `:locked`, see
+  `Criterion7710Spex`), not a path to this warning at all.
+
   See `Criterion7625Spex`'s moduledoc for the assumed `TechPanel`
   surface contract this spec (and its siblings) drives, including the
   `bronze-working-warning` / `bronze-working-confirm` /
@@ -31,14 +37,33 @@ defmodule BrokenOathsSpex.Story902.Criterion7630Spex do
 
   import BrokenOathsSpex.SharedGivens
 
+  alias BrokenOathsSpex.Fixtures
+
   spex "Bronze Working asks first, and confirming commits it" do
     scenario "picking Bronze Working warns first, and confirming commits it" do
       given_(:a_world)
       given_(:registered_player)
       given_(:a_founded_city)
 
-      when_ "the player picks Bronze Working", context do
+      given_ "the player has already researched Mining, Bronze Working's prerequisite",
+             context do
         render_hook(context.play_live, "toggle_tech_panel", %{})
+        render_hook(context.play_live, "select_research", %{"tech" => "mining"})
+
+        Enum.reduce_while(1..60, :ok, fn _, :ok ->
+          if has_element?(context.play_live, "[data-test='tech-completed-mining']") do
+            {:halt, :ok}
+          else
+            Fixtures.advance_turn(context.world)
+            {:cont, :ok}
+          end
+        end)
+
+        assert has_element?(context.play_live, "[data-test='tech-completed-mining']")
+        {:ok, context}
+      end
+
+      when_ "the player picks Bronze Working", context do
         render_hook(context.play_live, "select_research", %{"tech" => "bronze_working"})
         {:ok, context}
       end
@@ -60,7 +85,12 @@ defmodule BrokenOathsSpex.Story902.Criterion7630Spex do
       end
 
       then_ "Bronze Working becomes the current research", context do
-        assert has_element?(context.play_live, "[data-test='research-progress']", "Bronze Working")
+        assert has_element?(
+                 context.play_live,
+                 "[data-test='research-progress']",
+                 "Bronze Working"
+               )
+
         {:ok, context}
       end
     end
@@ -72,8 +102,25 @@ defmodule BrokenOathsSpex.Story902.Criterion7630Spex do
       given_(:registered_player)
       given_(:a_founded_city)
 
-      when_ "the player picks Bronze Working, then cancels the warning", context do
+      given_ "the player has already researched Mining, Bronze Working's prerequisite",
+             context do
         render_hook(context.play_live, "toggle_tech_panel", %{})
+        render_hook(context.play_live, "select_research", %{"tech" => "mining"})
+
+        Enum.reduce_while(1..60, :ok, fn _, :ok ->
+          if has_element?(context.play_live, "[data-test='tech-completed-mining']") do
+            {:halt, :ok}
+          else
+            Fixtures.advance_turn(context.world)
+            {:cont, :ok}
+          end
+        end)
+
+        assert has_element?(context.play_live, "[data-test='tech-completed-mining']")
+        {:ok, context}
+      end
+
+      when_ "the player picks Bronze Working, then cancels the warning", context do
         render_hook(context.play_live, "select_research", %{"tech" => "bronze_working"})
         render_hook(context.play_live, "bronze_working_cancel", %{})
         {:ok, context}

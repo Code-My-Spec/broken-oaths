@@ -47,7 +47,10 @@ defmodule BrokenOathsSpex.Story902.Criterion7628Spex do
         [settler | _] =
           for u <- Fixtures.player_units(world, context.user), u.type == :settler, do: u
 
-        render_hook(play_live, "queue_move", %{"unit_id" => settler.id, "to_tile" => founding_tile})
+        render_hook(play_live, "queue_move", %{
+          "unit_id" => settler.id,
+          "to_tile" => founding_tile
+        })
 
         Enum.reduce_while(1..30, :ok, fn _, :ok ->
           [s] = for u <- Fixtures.player_units(world, context.user), u.id == settler.id, do: u

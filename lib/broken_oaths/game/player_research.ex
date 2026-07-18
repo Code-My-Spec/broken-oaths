@@ -1,11 +1,13 @@
 defmodule BrokenOaths.Game.PlayerResearch do
   @moduledoc """
-  A player's Stone Age research state in a world (story 902): every
-  completed tech, which tech (if any) is currently being researched,
-  and science banked PER TECH — switching `current_research` never
-  loses progress on the tech switched away from (Civ-style; see
-  `BrokenOaths.Game.Research` for the tech catalog, costs, and unlock
-  effects this schema's fields feed).
+  A player's Ancient-era research state in a world (story 902,
+  EXPANDED per playtest issue 133b4893 to the full eleven-tech,
+  prerequisite-gated Civ-6-accurate tree): every completed tech, which
+  tech (if any) is currently being researched, and science banked PER
+  TECH — switching `current_research` never loses progress on the tech
+  switched away from (Civ-style; see `BrokenOaths.Game.Research` for
+  the tech catalog, costs, prerequisite edges, and unlock effects this
+  schema's fields feed).
 
   One row per (world, player) — same convention as `BrokenOaths.Game.Player`
   itself (world + user) and `BrokenOaths.Game.KnownPlayer` (world +
@@ -24,9 +26,32 @@ defmodule BrokenOaths.Game.PlayerResearch do
   alias BrokenOaths.Game.Player
   alias BrokenOaths.Worlds.World
 
-  @techs [:animal_husbandry, :pottery, :mining, :bronze_working]
+  @techs [
+    :pottery,
+    :animal_husbandry,
+    :mining,
+    :sailing,
+    :astrology,
+    :writing,
+    :irrigation,
+    :archery,
+    :masonry,
+    :the_wheel,
+    :bronze_working
+  ]
 
-  @type tech :: :animal_husbandry | :pottery | :mining | :bronze_working
+  @type tech ::
+          :pottery
+          | :animal_husbandry
+          | :mining
+          | :sailing
+          | :astrology
+          | :writing
+          | :irrigation
+          | :archery
+          | :masonry
+          | :the_wheel
+          | :bronze_working
 
   @type t :: %__MODULE__{
           id: integer() | nil,

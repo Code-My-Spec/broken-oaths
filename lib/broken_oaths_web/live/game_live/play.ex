@@ -635,7 +635,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # percentage (mirrors `Levy.pledged_share`'s own scale).
   def handle_event(
         "issue_levy",
-        %{"vassal_user_id" => vassal_user_id, "target_user_id" => target_user_id, "share" => share},
+        %{
+          "vassal_user_id" => vassal_user_id,
+          "target_user_id" => target_user_id,
+          "share" => share
+        },
         socket
       ) do
     %{world: world, user: user} = socket.assigns
@@ -704,12 +708,27 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # rather than waiting on the `:research_changed` broadcast (below) —
   # same "refresh inline so the click's own render sees it" reasoning
   # `"start_improvement"` already documents for `improvement_error`.
+  #
+  # Issue 133b4893 (the expanded, prerequisite-gated tree): Bronze
+  # Working now requires Mining first, so its confirm warning only ever
+  # surfaces once `Research.prereqs_met?/2` says it's actually
+  # researchable — a locked Bronze Working row (Mining not done) is a
+  # silent no-op here, same as `"select_research"`'s own `{:error, _}`
+  # branch below, rather than popping a warning for a pick that would
+  # just be refused anyway. `"bronze_working_confirm"` itself no longer
+  # blindly pattern-matches `:ok` — a race (state changed between the
+  # click opening the warning and the confirm click landing) now
+  # degrades to the same silent no-op instead of crashing the view.
   def handle_event("toggle_tech_panel", _params, socket) do
     {:noreply, assign(socket, tech_panel_open?: !socket.assigns.tech_panel_open?)}
   end
 
   def handle_event("select_research", %{"tech" => "bronze_working"}, socket) do
-    {:noreply, assign(socket, bronze_working_pending?: true)}
+    if Research.prereqs_met?(socket.assigns.player_research, :bronze_working) do
+      {:noreply, assign(socket, bronze_working_pending?: true)}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_event("select_research", %{"tech" => tech}, socket) do
@@ -723,8 +742,14 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   def handle_event("bronze_working_confirm", _params, socket) do
     %{world: world, user: user} = socket.assigns
-    :ok = Game.set_research(world, user, :bronze_working)
-    {:noreply, socket |> assign(bronze_working_pending?: false) |> refresh_research()}
+
+    socket =
+      case Game.set_research(world, user, :bronze_working) do
+        :ok -> refresh_research(socket)
+        {:error, _reason} -> socket
+      end
+
+    {:noreply, assign(socket, bronze_working_pending?: false)}
   end
 
   def handle_event("bronze_working_cancel", _params, socket) do
@@ -1375,7 +1400,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # the `:vassals_changed`/`:new_vassal`/`:vassalized` broadcasts.
   defp refresh_vassalage(socket) do
     %{world: world, user: user} = socket.assigns
-    assign(socket, vassals: Game.vassals(world, user), vassal_status: Game.vassal_status(world, user))
+
+    assign(socket,
+      vassals: Game.vassals(world, user),
+      vassal_status: Game.vassal_status(world, user)
+    )
   end
 
   defp parse_agenda("restore"), do: :restore
@@ -1610,7 +1639,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
       <%!-- Story 907 — the Oath screen: raised the moment a capture
            leaves this player with zero free cities, closed the instant
            they secretly pick a Hidden Agenda (`choose_hidden_agenda`). --%>
-      <div :if={@vassal_status && @vassal_status.agenda_pending?} class="modal modal-open" data-test="oath-screen">
+      <div
+        :if={@vassal_status && @vassal_status.agenda_pending?}
+        class="modal modal-open"
+        data-test="oath-screen"
+      >
         <div class="modal-box">
           <h3 class="font-bold text-lg">Terms of Oath</h3>
           <p class="py-2 opacity-70">

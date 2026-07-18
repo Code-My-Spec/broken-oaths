@@ -253,7 +253,9 @@ defmodule BrokenOaths.Game.WorldServerTest do
       assert length(city.worked_tiles) == city.size
 
       spare = spare_workable_tile(world, city)
-      refute is_nil(spare), "expected a second workable, unworked territory tile to attempt the exploit on"
+
+      refute is_nil(spare),
+             "expected a second workable, unworked territory tile to attempt the exploit on"
 
       assert Game.assign_worked_tile(world, user, city.id, nil, spare) == {:error, :size_exceeded}
 
@@ -354,7 +356,44 @@ defmodule BrokenOaths.Game.WorldServerTest do
       user = UsersFixtures.user_fixture()
       {:ok, _player} = Game.join_world(world, user)
 
-      assert Game.set_research(world, user, :writing) == {:error, :invalid_tech}
+      assert Game.set_research(world, user, :astronomy) == {:error, :invalid_tech}
+
+      WorldServer.restart(world)
+    end
+
+    test "refuses a tech whose prerequisite isn't completed yet (Bronze Working needs Mining)" do
+      world = WorldsFixtures.world_fixture()
+      user = UsersFixtures.user_fixture()
+      {:ok, _player} = Game.join_world(world, user)
+
+      assert Game.set_research(world, user, :bronze_working) == {:error, :prereqs_not_met}
+      assert Game.set_research(world, user, :writing) == {:error, :prereqs_not_met}
+
+      WorldServer.restart(world)
+    end
+
+    test "selects Bronze Working once Mining is completed" do
+      world = WorldsFixtures.world_fixture(%{frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, _player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+
+      :ok = Game.set_research(world, user, :mining)
+
+      Enum.reduce_while(1..60, :ok, fn _, :ok ->
+        if :mining in Game.player_research(world, user).completed_techs do
+          {:halt, :ok}
+        else
+          :ok = Game.advance_turn(world)
+          {:cont, :ok}
+        end
+      end)
+
+      assert :mining in Game.player_research(world, user).completed_techs
+      assert :ok = Game.set_research(world, user, :bronze_working)
+      assert Game.player_research(world, user).current_research == :bronze_working
 
       WorldServer.restart(world)
     end
@@ -717,7 +756,10 @@ defmodule BrokenOaths.Game.WorldServerTest do
   end
 
   defp improvement_complete?(world, user, tile_id) do
-    Enum.any?(Game.improvements_visible_to(world, user), &(&1.tile_id == tile_id and &1.status == :complete))
+    Enum.any?(
+      Game.improvements_visible_to(world, user),
+      &(&1.tile_id == tile_id and &1.status == :complete)
+    )
   end
 
   defp complete_current_research(world, user) do

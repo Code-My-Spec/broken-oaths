@@ -1,10 +1,14 @@
 defmodule BrokenOathsWeb.GameLive.TechPanel do
   @moduledoc """
-  The Stone Age tech tree (story 902): an always-visible `tech-tree-
-  button` that toggles a panel listing all four `BrokenOaths.Game.
-  Research.techs/0` — cost, unlock description, and (once earned) a
-  completed marker — plus the player's current science income and, for
-  whichever tech is `current_research`, a progress bar.
+  The Ancient-era tech tree (story 902, EXPANDED per playtest issue
+  133b4893 to the full eleven-tech, prerequisite-gated Civ-6-accurate
+  tree): an always-visible `tech-tree-button` that toggles a panel
+  listing all eleven `BrokenOaths.Game.Research.techs/0` — cost,
+  unlock description, prerequisite links, and each tech's `:locked |
+  :available | :in_progress | :completed` state
+  (`BrokenOaths.Game.Research.tech_state/2`) — plus the player's
+  current science income and, for whichever tech is `current_research`,
+  a progress bar.
 
   A presentational component mounted unconditionally by
   `BrokenOathsWeb.GameLive.Play` (so `tech-tree-button` is always
@@ -34,10 +38,30 @@ defmodule BrokenOathsWeb.GameLive.TechPanel do
       `tech-bronze_working` row and the player resolving the
       `bronze-working-warning` confirm modal one way or the other
 
-  The catalog itself (cost, unlock prose) is read straight from
-  `BrokenOaths.Game.Research` — a pure, dependency-free core module,
-  exactly the same "one source of truth for what's offered" status
-  `GameLive.CityPanel` already gives `BrokenOaths.Game.Production`.
+  The catalog itself (cost, unlock prose, prerequisites) is read
+  straight from `BrokenOaths.Game.Research` — a pure, dependency-free
+  core module, exactly the same "one source of truth for what's
+  offered" status `GameLive.CityPanel` already gives `BrokenOaths.Game.
+  Production`.
+
+  ## Prerequisite links + lock state (issue 133b4893)
+
+  Each tech row renders `Research.prereqs/1` inline (`"Requires:
+  <label(s)>"`, `data-test="tech-prereqs-<tech>"`) whenever it has any
+  — so a locked tech always names exactly what it's waiting on, right
+  on its own row, rather than leaving the player to guess. The row's
+  overall state comes from a single `Research.tech_state/2` call per
+  tech, rendered as one of four mutually exclusive markers:
+
+    * `data-test="tech-completed-<tech>"` — state is `:completed`.
+    * `data-test="tech-in-progress-<tech>"` — state is `:in_progress`
+      (also visible via the shared `research-progress` bar below).
+    * `data-test="tech-locked-<tech>"` — state is `:locked`; the row's
+      button is `disabled` and visually dimmed, mirroring `CityPanel`'s
+      own `disabled?`/`data-disabled` convention for an unqueueable
+      production option.
+    * `:available` renders no extra marker — an enabled, unlabeled row
+      is the default "you can pick this" state.
 
   ## The Bronze Working confirm flow
 
@@ -51,7 +75,10 @@ defmodule BrokenOathsWeb.GameLive.TechPanel do
   pattern `Play`'s own `abandon-world` flow already uses. Confirming is
   what actually calls `Game.set_research(world, user, :bronze_working)`;
   cancelling dismisses with nothing selected. Every other tech commits
-  immediately on click, no confirm step.
+  immediately on click, no confirm step. Since Bronze Working now
+  requires Mining first, `Play` only ever raises this warning once
+  Bronze Working is actually researchable — see its own moduledoc note
+  on `"select_research"`.
   """
 
   use BrokenOathsWeb, :live_component
@@ -126,13 +153,21 @@ defmodule BrokenOathsWeb.GameLive.TechPanel do
   attr :player_research, :map, required: true
 
   defp tech_row(assigns) do
-    completed? = assigns.tech in assigns.player_research.completed_techs
+    state = Research.tech_state(assigns.player_research, assigns.tech)
+    prereqs = Research.prereqs(assigns.tech)
+    locked? = state == :locked
+    disabled? = state in [:locked, :completed]
 
     assigns =
       assign(assigns,
-        completed?: completed?,
+        state: state,
+        locked?: locked?,
+        completed?: state == :completed,
+        in_progress?: state == :in_progress,
+        disabled?: disabled?,
         cost: Research.cost(assigns.tech),
-        unlock: Research.unlock_description(assigns.tech)
+        unlock: Research.unlock_description(assigns.tech),
+        prereqs: prereqs
       )
 
     ~H"""
@@ -140,18 +175,31 @@ defmodule BrokenOathsWeb.GameLive.TechPanel do
       <button
         type="button"
         data-test={"tech-#{@tech}"}
-        data-disabled={to_string(@completed?)}
-        disabled={@completed?}
+        data-state={@state}
+        data-disabled={to_string(@disabled?)}
+        disabled={@disabled?}
         phx-click="select_research"
         phx-value-tech={@tech}
-        class="btn btn-sm btn-outline justify-between w-full"
+        class={[
+          "btn btn-sm btn-outline justify-between w-full",
+          @locked? && "opacity-50"
+        ]}
       >
         <span>{tech_label(@tech)}</span>
         <span data-test={"tech-cost-#{@tech}"}>{@cost}</span>
       </button>
+      <p :if={@prereqs != []} class="text-xs opacity-60" data-test={"tech-prereqs-#{@tech}"}>
+        Requires: {Enum.map_join(@prereqs, ", ", &tech_label/1)}
+      </p>
       <p class="text-xs opacity-70" data-test={"tech-unlock-#{@tech}"}>{@unlock}</p>
       <p :if={@completed?} class="text-xs text-success" data-test={"tech-completed-#{@tech}"}>
         Completed
+      </p>
+      <p :if={@in_progress?} class="text-xs text-info" data-test={"tech-in-progress-#{@tech}"}>
+        Researching
+      </p>
+      <p :if={@locked?} class="text-xs text-warning" data-test={"tech-locked-#{@tech}"}>
+        Locked
       </p>
     </div>
     """
@@ -176,8 +224,15 @@ defmodule BrokenOathsWeb.GameLive.TechPanel do
     """
   end
 
-  defp tech_label(:animal_husbandry), do: "Animal Husbandry"
   defp tech_label(:pottery), do: "Pottery"
+  defp tech_label(:animal_husbandry), do: "Animal Husbandry"
   defp tech_label(:mining), do: "Mining"
+  defp tech_label(:sailing), do: "Sailing"
+  defp tech_label(:astrology), do: "Astrology"
+  defp tech_label(:writing), do: "Writing"
+  defp tech_label(:irrigation), do: "Irrigation"
+  defp tech_label(:archery), do: "Archery"
+  defp tech_label(:masonry), do: "Masonry"
+  defp tech_label(:the_wheel), do: "The Wheel"
   defp tech_label(:bronze_working), do: "Bronze Working"
 end
