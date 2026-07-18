@@ -215,6 +215,23 @@ defmodule BrokenOaths.Game do
   def start_improvement(world, user, unit_id, kind),
     do: WorldServer.call(world, {:start_improvement, user, unit_id, kind})
 
+  @doc """
+  Cancel the `:building` improvement on `unit_id`'s tile (QA issue
+  8aa2c571 — a worker mid-dig had no way to back out of it). `unit_id`
+  must be a `:worker` owned by `user`, standing on a tile that
+  currently carries a `:building` improvement (any kind — the same
+  `:building` gate `BrokenOathsWeb.GameLive.Play`'s `worker_current_dig/2`
+  already uses to show the dig-progress badge). The improvement row is
+  deleted outright — progress is discarded, not merely frozen the way
+  walking the worker away already freezes it — so the tile is
+  immediately free for ANY kind to start fresh, and the worker is free
+  to queue a different build (or move) in the very same turn.
+  """
+  @spec cancel_improvement(map(), map(), term()) ::
+          :ok | {:error, :not_owner | :not_worker | :no_active_build}
+  def cancel_improvement(world, user, unit_id),
+    do: WorldServer.call(world, {:cancel_improvement, user, unit_id})
+
   @doc "All of `user`'s cities in `world` (see `BrokenOaths.Game.WorldServer` for the shape)."
   def player_cities(world, user), do: WorldServer.call(world, {:player_cities, user})
 

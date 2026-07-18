@@ -381,6 +381,18 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
+  # QA issue 8aa2c571 — see `BrokenOaths.Game.cancel_improvement/3`'s doc.
+  def handle_call({:cancel_improvement, user, unit_id}, _from, state) do
+    case do_cancel_improvement(state, user, unit_id) do
+      {:ok, new_state} ->
+        broadcast(new_state.world.id, [:improvements_changed])
+        {:reply, :ok, new_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   def handle_call({:player_cities, user}, _from, state) do
     {:reply, player_cities(state, user), state}
   end
@@ -1900,6 +1912,44 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
+  # QA issue 8aa2c571 — see `BrokenOaths.Game.cancel_improvement/3`'s doc.
+  # Deletes the DB row outright (rather than merely clearing
+  # `builder_unit_id`, the way a worker simply walking away already
+  # does at a turn boundary — see `BrokenOaths.Game.Turn.advance_improvement/2`)
+  # so the tile comes back completely empty, free for any kind.
+  defp do_cancel_improvement(state, user, unit_id) do
+    with {:ok, unit} <- owned_worker(state, user, unit_id),
+         :ok <- active_building(state.improvements, unit.tile_id) do
+      persist_cancel_improvement!(state, unit.tile_id)
+      {:ok, %{state | improvements: Map.delete(state.improvements, unit.tile_id)}}
+    end
+  end
+
+  # Only a `:building` improvement is cancelable — the same status
+  # `BrokenOathsWeb.GameLive.Play`'s `worker_current_dig/2` gates the
+  # dig-progress badge (and the Cancel button beside it) on, so the
+  # button never offers to cancel something that isn't there to cancel
+  # (a `:complete` improvement, or a `:pillaged` one nobody has resumed
+  # repairing yet).
+  defp active_building(improvements, tile_id) do
+    case Map.get(improvements, tile_id) do
+      %{status: :building} -> :ok
+      _other -> {:error, :no_active_build}
+    end
+  end
+
+  defp persist_cancel_improvement!(state, tile_id) do
+    case Repo.get_by(Improvement, world_id: state.world.id, tile_id: tile_id) do
+      nil -> :ok
+      improvement -> do_delete_improvement(improvement)
+    end
+  end
+
+  defp do_delete_improvement(improvement) do
+    {:ok, _deleted} = Repo.delete(improvement)
+    :ok
+  end
+
   defp owned_worker(state, user, unit_id) do
     player = find_player(state, user.id)
     unit = Map.get(state.units, unit_id)
@@ -2114,7 +2164,13 @@ defmodule BrokenOaths.Game.WorldServer do
       territory: city.territory,
       worked_tiles: city.worked_tiles,
       hp: city.hp,
-      defense: CityDefense.defensive_strength(city, Map.values(state.units))
+      defense: CityDefense.defensive_strength(city, Map.values(state.units)),
+      # QA issue 1c47edff "Granary confusion" — `has_granary` was
+      # tracked on the `City` schema and already fed `Yields.
+      # accrue_food/3`'s math, but never made it into THIS map, the one
+      # `Game.player_cities/2` actually hands to `GameLive.CityPanel` —
+      # so a built Granary had no way to ever show up in the UI at all.
+      has_granary: city.has_granary
     }
   end
 

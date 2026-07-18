@@ -22,7 +22,11 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
       `territory` (`[tile_id]`), `worked_tiles` (`[tile_id]`, excludes
       the always-free center), `hp` (story 895, capped at
       `Game.CityDefense.max_hp/0`), `defense` (`Game.CityDefense.
-      defensive_strength/2` — base + size + garrison)
+      defensive_strength/2` — base + size + garrison), `has_granary`
+      (story 902's Pottery-gated Granary buildable — QA issue
+      `1c47edff`: this flag reached `Game.player_cities/2`'s map late,
+      after the Granary itself already shipped, which is exactly why a
+      built one had no way to show up here before this fix)
     * `:assignable_tiles` - territory tiles Play has already filtered
       to "not the center, not already worked, workable terrain" — this
       component has no world/terrain access to compute that itself
@@ -58,6 +62,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
   alias BrokenOaths.Game.CityDefense
   alias BrokenOaths.Game.Production
   alias BrokenOaths.Game.Research
+  alias BrokenOaths.Game.Yields
 
   def render(%{city: nil} = assigns) do
     ~H"""
@@ -90,6 +95,20 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
         <div class="flex items-center gap-3 text-sm">
           <span class="badge badge-error badge-outline" data-test="city-hp">{@city.hp}/{CityDefense.max_hp()}</span>
           <span class="badge badge-outline" data-test="city-defense">{@city.defense}</span>
+        </div>
+
+        <%!-- QA issue 1c47edff "Granary confusion" — a built Granary
+             had no visible trace anywhere in the city UI. Only ever
+             renders once `has_granary` is true; the real bonus is read
+             straight from `Yields.granary_food_bonus/0`, never a copy
+             hardcoded here that could drift from what `accrue_food/3`
+             actually banks. --%>
+        <div
+          :if={Map.get(@city, :has_granary, false)}
+          data-test="city-granary"
+          class="badge badge-success badge-outline gap-1 text-xs"
+        >
+          <.icon name="hero-check-circle" class="size-3" /> Granary (+{Yields.granary_food_bonus()} food/turn)
         </div>
 
         <.current_production queue={@city.queue} city_id={@city.id} />

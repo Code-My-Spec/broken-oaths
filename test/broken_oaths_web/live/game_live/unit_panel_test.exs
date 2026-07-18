@@ -70,4 +70,40 @@ defmodule BrokenOathsWeb.GameLive.UnitPanelTest do
       assert html =~ ~s(data-test="order-interrupted")
     end
   end
+
+  # QA issue 8aa2c571: a worker mid-dig had no way to back out of it —
+  # the Cancel Build button sits beside the dig-progress badge and only
+  # ever renders alongside it.
+  describe "a worker with a dig in progress" do
+    @worker %{type: :worker, hp: 6, max_hp: 6, movement: 2, max_movement: 2}
+
+    test "shows the Cancel Build action beside the dig-progress badge" do
+      current_dig = %{kind: :farm, progress: 1}
+
+      html =
+        render_component(UnitPanel,
+          id: "unit-panel",
+          unit: @worker,
+          order: nil,
+          current_dig: current_dig
+        )
+
+      assert html =~ ~s(data-test="dig-progress")
+      assert html =~ ~s(data-test="cancel-build")
+      assert html =~ "Cancel Build"
+    end
+
+    test "hides Cancel Build when there's no dig in progress" do
+      html =
+        render_component(UnitPanel,
+          id: "unit-panel",
+          unit: @worker,
+          order: nil,
+          allowed_improvements: [:farm]
+        )
+
+      refute html =~ ~s(data-test="dig-progress")
+      refute html =~ ~s(data-test="cancel-build")
+    end
+  end
 end

@@ -77,6 +77,25 @@ defmodule BrokenOathsWeb.GameLive.CityPanelTest do
     end
   end
 
+  # QA issue 1c47edff "Granary confusion" — a built Granary had no
+  # visible trace anywhere in the city UI.
+  describe "the Granary indicator" do
+    test "renders with the real food bonus when the city has a granary" do
+      city = Map.put(@city, :has_granary, true)
+      html = render_panel(city: city, player_research: @pottery_done)
+
+      assert html =~ ~s(data-test="city-granary")
+      assert html =~ "Granary"
+      assert html =~ "+#{BrokenOaths.Game.Yields.granary_food_bonus()} food"
+    end
+
+    test "is absent when the city has no granary" do
+      html = render_panel(player_research: @pottery_done)
+
+      refute html =~ ~s(data-test="city-granary")
+    end
+  end
+
   describe "Bronze Age reached" do
     test "offers the Bronze Spearman, alongside the always-available types" do
       html = render_panel(player_research: @bronze_age)

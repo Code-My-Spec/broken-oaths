@@ -5,6 +5,7 @@ defmodule BrokenOaths.Game.WorldServerTest do
   import Ecto.Query
 
   alias BrokenOaths.Game
+  alias BrokenOaths.Game.Improvement
   alias BrokenOaths.Game.PlayerResearch
   alias BrokenOaths.Game.Unit
   alias BrokenOaths.Game.WorldServer
@@ -533,6 +534,150 @@ defmodule BrokenOaths.Game.WorldServerTest do
 
       :ok = Game.advance_turn(world)
       assert improvement_complete?(world, user, hills_tile)
+
+      WorldServer.restart(world)
+    end
+  end
+
+  # QA issue 1c47edff "Granary confusion" — `has_granary` never reached
+  # `Game.player_cities/2`'s map at all, so the built Granary had no way
+  # to surface anywhere in the UI even though it was already banking its
+  # food bonus (`Yields.accrue_food/3` reads the flag straight off the
+  # DB-backed city, never through this map).
+  describe "player_cities/2 surfaces a completed Granary" do
+    test "has_granary: true reaches the city map once the Granary finishes building" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, _player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+      [city] = Game.player_cities(world, user)
+      refute city.has_granary
+
+      :ok = Game.set_research(world, user, :pottery)
+      complete_current_research(world, user)
+      assert :pottery in Game.player_research(world, user).completed_techs
+
+      :ok = Game.queue_production(world, user, city.id, "granary")
+
+      Enum.reduce_while(1..120, :ok, fn _, :ok ->
+        [c] = for c <- Game.player_cities(world, user), c.id == city.id, do: c
+
+        if c.has_granary do
+          {:halt, :ok}
+        else
+          :ok = Game.advance_turn(world)
+          {:cont, :ok}
+        end
+      end)
+
+      [built_city] = for c <- Game.player_cities(world, user), c.id == city.id, do: c
+      assert built_city.has_granary
+
+      WorldServer.restart(world)
+    end
+  end
+
+  # QA issue 2ff5bd1a "roads not visible on map" — the fix lives
+  # entirely in the client's sprite manifest (`assets/js/globe_render.js`,
+  # see `SpriteManifestTest`); this confirms the server-side data path a
+  # completed road relies on already carries `kind: :road` through to
+  # `improvements_visible_to/2`, the exact field the board's improvement
+  # billboard loop keys its sprite lookup off.
+  describe "a completed road" do
+    test "reaches :complete and is visible with kind: :road" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+
+      hills_tile = hills_tile(world)
+      worker = Game.spawn_unit_for_test(world, player.id, :worker, hills_tile)
+      :ok = Game.start_improvement(world, user, worker.id, "road")
+
+      for _ <- 1..Improvement.duration(:road), do: :ok = Game.advance_turn(world)
+
+      assert Enum.any?(
+               Game.improvements_visible_to(world, user),
+               &(&1.tile_id == hills_tile and &1.kind == :road and &1.status == :complete)
+             )
+
+      WorldServer.restart(world)
+    end
+  end
+
+  # QA issue 8aa2c571 — a worker mid-dig had no way to back out of it.
+  describe "cancel_improvement/3" do
+    test "deletes the in-progress build outright, freeing the tile for a different kind" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+
+      hills_tile = hills_tile(world)
+      worker = Game.spawn_unit_for_test(world, player.id, :worker, hills_tile)
+      :ok = Game.start_improvement(world, user, worker.id, "mine")
+      :ok = Game.advance_turn(world)
+
+      assert Enum.any?(
+               Game.improvements_visible_to(world, user),
+               &(&1.tile_id == hills_tile and &1.status == :building and &1.kind == :mine)
+             )
+
+      :ok = Game.cancel_improvement(world, user, worker.id)
+
+      refute Enum.any?(Game.improvements_visible_to(world, user), &(&1.tile_id == hills_tile))
+
+      # Free for a DIFFERENT kind entirely on the very next call — proof
+      # the row was deleted, not merely paused the way walking away
+      # already freezes it (`validate_improvement_slot/3` would have
+      # refused a mismatched kind on a merely-paused `:building` row).
+      :ok = Game.start_improvement(world, user, worker.id, "road")
+
+      assert Enum.any?(
+               Game.improvements_visible_to(world, user),
+               &(&1.tile_id == hills_tile and &1.kind == :road)
+             )
+
+      WorldServer.restart(world)
+    end
+
+    test "refuses when the worker's tile has no build in progress" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+
+      hills_tile = hills_tile(world)
+      worker = Game.spawn_unit_for_test(world, player.id, :worker, hills_tile)
+
+      assert {:error, :no_active_build} = Game.cancel_improvement(world, user, worker.id)
+
+      WorldServer.restart(world)
+    end
+
+    test "refuses a unit the caller doesn't own" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      other_user = UsersFixtures.user_fixture()
+      {:ok, player} = Game.join_world(world, user)
+      {:ok, _other_player} = Game.join_world(world, other_user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+
+      hills_tile = hills_tile(world)
+      worker = Game.spawn_unit_for_test(world, player.id, :worker, hills_tile)
+      :ok = Game.start_improvement(world, user, worker.id, "mine")
+
+      assert {:error, :not_owner} = Game.cancel_improvement(world, other_user, worker.id)
 
       WorldServer.restart(world)
     end

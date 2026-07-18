@@ -365,6 +365,22 @@ defmodule BrokenOathsWeb.GameLive.Play do
     end
   end
 
+  # QA issue 8aa2c571 — a worker mid-dig had no way to back out of it.
+  # Same inline-refresh pattern as `start_improvement` above: the
+  # dig-progress badge (and its Cancel button) must disappear in the
+  # SAME render as the click, not wait on the async broadcast.
+  def handle_event("cancel_improvement", %{"unit_id" => unit_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.cancel_improvement(world, user, parse_id(unit_id)) do
+      :ok ->
+        {:noreply, socket |> assign(improvement_error: nil) |> refresh_board()}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, improvement_error: improvement_error_message(reason))}
+    end
+  end
+
   # Right-clicks arrive as the clicked point on the unit sphere, not a
   # tile id: the client's tile window is fog-filtered, so it cannot name
   # a tile it has never seen. The server resolves which tile the player
@@ -1134,6 +1150,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
   defp improvement_error_message(:occupied_improvement),
     do: "This tile already has a completed improvement."
 
+  defp improvement_error_message(:no_active_build),
+    do: "There's no build in progress here to cancel."
+
   defp improvement_error_message(_other), do: "That improvement can't be started."
 
   # -------------------------------------------------------------------
@@ -1881,7 +1900,17 @@ defmodule BrokenOathsWeb.GameLive.Play do
               const {px, py, depth} = this.project(pos[0], pos[1], pos[2])
               if (depth < 0.02) continue
               const barbarian = u.type === "barbarian_warrior"
-              const color = barbarian ? "#b91c1c" : (u.type === "lord" ? "#f5c542" : "#42a5f5")
+              // QA issue 9482a674 — bronze_spearman gets its own bronze
+              // fallback color (matching its sprite's palette) instead
+              // of silently inheriting the generic blue dot every other
+              // unit type without a special case used to fall back to.
+              const color = barbarian
+                ? "#b91c1c"
+                : u.type === "lord"
+                  ? "#f5c542"
+                  : u.type === "bronze_spearman"
+                    ? "#b8732d"
+                    : "#42a5f5"
               const img = this.spriteFor(barbarian ? "barbarian" : u.type)
               const ringR = img ? unitSize * 0.45 : 8
 

@@ -252,6 +252,43 @@ build("warrior", "units", {
   "................",
 })
 
+-- -------------------------------------------------------- bronze_spearman
+-- QA issue 9482a674: story 903's Bronze Age unit had no board sprite
+-- and fell back to a blue dot. Reuses the warrior's exact silhouette
+-- (soldier + spear) — Bronze Spearman is a Warrior upgrade, not a new
+-- archetype — re-skinned bronze/gold so it stays visually distinct on
+-- the board (Warrior keeps its steel-and-red look). See
+-- `priv/static/images/game/units/bronze_spearman.png`, currently hand
+-- -recolored to this exact palette pending an `aseprite -b` run to
+-- regenerate the authoritative .aseprite/.png pair from this source.
+build("bronze_spearman", "units", {
+  K = rgba("#1a1a1a"),
+  R = rgba("#b8732d"), -- tunic bronze
+  D = rgba("#7a4a1d"), -- dark bronze
+  S = rgba("#eab887"), -- skin
+  H = rgba("#c9a227"), -- helmet gold
+  L = rgba("#e0c468"), -- gold highlight
+  T = rgba("#8a5a2b"), -- spear shaft
+  P = rgba("#f0dfa0"), -- spear head (gold-lit)
+}, {
+  "..............K.",
+  ".....KKK.....KPK",
+  "....KHLHK....KPK",
+  "...KHHHHHK...KTK",
+  "....KSSSSK...KTK",
+  "....KSKSKK...KTK",
+  "....KSSSSK...KTK",
+  "...KKRRRRKK..KTK",
+  "..KRKRDRRKRKKKTK",
+  "..KRKRRRRKRK.KTK",
+  "..KRKRDRRKRK.KTK",
+  "...KKRRRRKK..KTK",
+  "....KRRKRRK.....",
+  "....KRK.KRK.....",
+  "...KKKK.KKKK....",
+  "................",
+})
+
 -- -------------------------------------------------------------- worker
 build("worker", "units", {
   K = rgba("#1a1a1a"),
@@ -384,6 +421,36 @@ build("mine", "decor", {
   ".KAAAKVVVVKAAAK.",
   ".KALAKVVVVKAGAK.",
   ".KKKKKVVVVKKKKK.",
+  "................",
+  "................",
+  "................",
+  "................",
+})
+
+-- ---------------------------------------------------------------- road
+-- QA issue 2ff5bd1a: a built road never rendered on the board at all
+-- (`GameLive.Play`'s improvement billboard loop skipped it silently —
+-- `spriteFor("road")` had no manifest entry, so `img` was always
+-- `nil`) even though Farm/Mine/Pasture's own billboards already work.
+-- A simple dirt path band with lighter worn-track dashes, distinct
+-- from Farm's furrow rows and Mine's rock outcrop.
+build("road", "decor", {
+  K = rgba("#1a1a1a"),
+  E = rgba("#8a5a2b"), -- packed dirt
+  Y = rgba("#c9a55a"), -- worn track (lighter)
+}, {
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  "KKKKKKKKKKKKKKKK",
+  "KEEEEEEEEEEEEEEK",
+  "KEEYYEEYYEEYYEEK",
+  "KEEEEEEEEEEEEEEK",
+  "KKKKKKKKKKKKKKKK",
+  "................",
+  "................",
   "................",
   "................",
   "................",

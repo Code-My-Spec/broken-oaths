@@ -83,6 +83,16 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
               @current_dig.kind
             )} turns
           </div>
+          <button
+            :if={@current_dig}
+            type="button"
+            data-test="cancel-build"
+            phx-click="cancel_improvement"
+            phx-value-unit_id={@unit_id}
+            class="btn btn-sm btn-outline btn-error"
+          >
+            Cancel Build
+          </button>
           <.build_button
             :for={kind <- @allowed_improvements}
             :if={is_nil(@current_dig)}

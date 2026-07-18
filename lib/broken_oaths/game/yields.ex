@@ -233,6 +233,16 @@ defmodule BrokenOaths.Game.Yields do
 
   @granary_food_bonus 2
 
+  @doc """
+  The Granary's flat per-turn food bonus (story 902, criterion 7629) —
+  a public accessor so callers outside this module (QA issue
+  `1c47edff`'s `GameLive.CityPanel` Granary indicator) can state the
+  real number instead of hardcoding a copy of it that could drift from
+  `accrue_food/3`'s own math.
+  """
+  @spec granary_food_bonus() :: pos_integer()
+  def granary_food_bonus, do: @granary_food_bonus
+
   defp granary_bonus(city) do
     if Map.get(city, :has_granary, false), do: @granary_food_bonus, else: 0
   end
