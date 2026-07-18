@@ -104,7 +104,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   alias BrokenOaths.Chat
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.{Improvement, Research, Yields}
+  alias BrokenOaths.Game.{Improvement, Presence, Research, Yields}
   alias BrokenOaths.Worlds
   alias BrokenOaths.Worlds.{Generator, Globe, Regions, Resources, Terrain, Weather}
 
@@ -132,6 +132,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         if connected?(socket) do
           Game.subscribe(world)
           Chat.subscribe(world, user)
+          Presence.connect(world, user)
         end
 
         mesh = Globe.get(world.frequency)
@@ -176,6 +177,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
             bronze_working_pending?: false,
             player_research: Game.player_research(world, user),
             player_stats: Game.player_stats(world, user),
+            # Story 907/908: the lord's own Vassals list and, for a
+            # subjugated player, their own oath — both refreshed inline
+            # by every command that can change them, plus the
+            # `:vassals_changed`/`:new_vassal`/`:vassalized` broadcasts.
+            vassals: Game.vassals(world, user),
+            vassal_status: Game.vassal_status(world, user),
             yaw: yaw,
             pitch: pitch,
             scale: @default_scale,
@@ -185,6 +192,24 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
         {:ok, socket}
     end
+  end
+
+  # Story 909/910's own eligibility check (`BrokenOaths.Game.Presence.
+  # online?/2`) reads off this connection's own registration dying —
+  # `Presence.connect/2`'s own doc explains why a `Registry` needs no
+  # explicit teardown, but disconnecting here (rather than only ever on
+  # crash/monitor-driven removal) drops the registration the instant an
+  # ORDINARY navigation away happens too, not just a crash.
+  def terminate(_reason, socket) do
+    # A socket that never actually reached the board (bounced back to
+    # the picker for lacking a claimed region — see `mount/3`'s own
+    # `nil ->` branch) never set `:world`/`:user` at all.
+    case socket.assigns do
+      %{world: world, user: user} -> Presence.disconnect(world, user)
+      _other -> :ok
+    end
+
+    :ok
   end
 
   # -------------------------------------------------------------------
@@ -483,6 +508,99 @@ defmodule BrokenOathsWeb.GameLive.Play do
     end
   end
 
+  # Story 906: the conqueror's own execute-or-release choice for a
+  # captured city's fallen garrison — sent once the conqueror has
+  # already walked onto the broken city's own tile. Matched on the
+  # literal `"choice"` value (never an atom built from user input) so
+  # an unrecognized string is simply refused, not converted.
+  def handle_event(
+        "resolve_garrison_fate",
+        %{"city_id" => city_id, "choice" => "release"},
+        socket
+      ) do
+    resolve_garrison_fate(socket, city_id, :release)
+  end
+
+  def handle_event(
+        "resolve_garrison_fate",
+        %{"city_id" => city_id, "choice" => "execute"},
+        socket
+      ) do
+    resolve_garrison_fate(socket, city_id, :execute)
+  end
+
+  # Story 907: the fresh vassal's own secret Hidden Agenda pick,
+  # closing the Oath screen — matched on the literal agenda string (the
+  # same "never build an atom from raw user input" posture
+  # `resolve_garrison_fate` above already takes); an unrecognized
+  # string falls through to `Game.choose_hidden_agenda/3` with an
+  # `:invalid` atom, which `Ecto.Enum` refuses as a changeset error
+  # rather than crashing.
+  def handle_event("choose_hidden_agenda", %{"agenda" => agenda}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.choose_hidden_agenda(world, user, parse_agenda(agenda)) do
+      :ok -> {:noreply, refresh_vassalage(socket)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  # Story 908: the lord-set, per-vassal tribute rate lever — `"rate"`
+  # arrives as a 0-100 percentage string ("50"), converted to the
+  # 0.0-1.0 fraction `Vassalage.tribute_rate` stores.
+  def handle_event(
+        "set_tribute_rate",
+        %{"vassal_user_id" => vassal_user_id, "rate" => rate},
+        socket
+      ) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.set_tribute_rate(world, user, parse_id(vassal_user_id), parse_percent(rate)) do
+      :ok -> {:noreply, refresh_vassalage(socket)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  # Story 908: the lord's own call to arms against a third player —
+  # `"share"` arrives as the pledged fraction (0, 1] directly, not a
+  # percentage (mirrors `Levy.pledged_share`'s own scale).
+  def handle_event(
+        "issue_levy",
+        %{"vassal_user_id" => vassal_user_id, "target_user_id" => target_user_id, "share" => share},
+        socket
+      ) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.issue_levy(
+           world,
+           user,
+           parse_id(vassal_user_id),
+           parse_id(target_user_id),
+           parse_fraction(share)
+         ) do
+      :ok -> {:noreply, refresh_vassalage(socket)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("answer_levy", %{"lord_user_id" => lord_user_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.answer_levy(world, user, parse_id(lord_user_id)) do
+      :ok -> {:noreply, refresh_vassalage(socket)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("refuse_levy", %{"lord_user_id" => lord_user_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.refuse_levy(world, user, parse_id(lord_user_id)) do
+      :ok -> {:noreply, refresh_vassalage(socket)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
   # Story 899, criterion 7601: a Known Players row's "chat-link"
   # affordance opens the chat panel straight onto that contact's
   # thread — full conversation-loading behavior lands with
@@ -712,6 +830,46 @@ defmodule BrokenOathsWeb.GameLive.Play do
   def handle_info(:alliances_changed, socket) do
     send_update(BrokenOathsWeb.GameLive.AlliancePanel, id: "alliance-panel", refresh: true)
     {:noreply, socket}
+  end
+
+  # Story 906/907: pushed straight to the FRESH VASSAL's own session the
+  # instant their last free city falls — refreshes `:vassal_status`
+  # inline (so the Oath screen/`vassal-status` badge render in the same
+  # update) and pushes the one-shot toast, same player-scoped shape as
+  # `:city_alert`/`:discovery`/`:lineage_continued` above.
+  def handle_info({:vassalized, user_id, message}, socket) do
+    if user_id == socket.assigns.user.id do
+      socket = socket |> refresh_vassalage() |> push_event("game:vassalized", %{message: message})
+      {:noreply, socket}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # Story 907: the lord's own half of "both players notified" — pushed
+  # straight to the LORD's own session, refreshing `:vassals` inline so
+  # the new `vassal-row` appears without waiting on a reconnect.
+  def handle_info({:new_vassal, user_id, vassal_user_id, message}, socket) do
+    if user_id == socket.assigns.user.id do
+      socket =
+        socket
+        |> refresh_vassalage()
+        |> push_event("game:new_vassal", %{vassal_user_id: vassal_user_id, message: message})
+
+      {:noreply, socket}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # Story 908: every OTHER Vassalage/Levy mutation (a raised tribute
+  # rate, an issued/answered/refused call to arms) broadcasts this
+  # world-wide — every connected view re-pulls both its own
+  # `:vassals`/`:vassal_status` reads, the same "every connected view
+  # re-pulls its own state" pattern `:cities_changed`/`:research_changed`
+  # already establish.
+  def handle_info(:vassals_changed, socket) do
+    {:noreply, refresh_vassalage(socket)}
   end
 
   # -------------------------------------------------------------------
@@ -1049,7 +1207,71 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   defp combat_error_message(:own_city), do: "You can't attack your own city."
 
+  defp combat_error_message(:not_military),
+    do: "Only military units can lay siege to a city — civilians cannot besiege."
+
   defp combat_error_message(_other), do: "That attack can't be ordered."
+
+  # -------------------------------------------------------------------
+  # Vassalage / Tribute helpers (stories 906/907/908)
+  # -------------------------------------------------------------------
+
+  defp resolve_garrison_fate(socket, city_id, choice) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.resolve_garrison_fate(world, user, parse_id(city_id), choice) do
+      :ok -> {:noreply, socket}
+      {:error, reason} -> {:noreply, assign(socket, combat_error: combat_error_message(reason))}
+    end
+  end
+
+  # Single source of truth for `:vassals`/`:vassal_status` — re-pulled
+  # inline by every command that can change either (mirrors
+  # `refresh_research/1`'s own "re-fetch on every signal" status) and by
+  # the `:vassals_changed`/`:new_vassal`/`:vassalized` broadcasts.
+  defp refresh_vassalage(socket) do
+    %{world: world, user: user} = socket.assigns
+    assign(socket, vassals: Game.vassals(world, user), vassal_status: Game.vassal_status(world, user))
+  end
+
+  defp parse_agenda("restore"), do: :restore
+  defp parse_agenda("usurp"), do: :usurp
+  defp parse_agenda("kingmaker"), do: :kingmaker
+  defp parse_agenda("merchant_prince"), do: :merchant_prince
+  defp parse_agenda(_other), do: :invalid
+
+  # `"50"` (a 0-100 percentage string, the tribute-rate control's own
+  # scale) -> `0.5` (the `Vassalage.tribute_rate` fraction).
+  defp parse_percent(percent) when is_binary(percent) do
+    case Float.parse(percent) do
+      {value, _rest} -> value / 100
+      :error -> 0.0
+    end
+  end
+
+  defp parse_percent(percent) when is_number(percent), do: percent / 100
+
+  # `"0.5"` (the pledged-share control's own scale, already a fraction)
+  # -> `0.5`.
+  defp parse_fraction(fraction) when is_binary(fraction) do
+    case Float.parse(fraction) do
+      {value, _rest} -> value
+      :error -> 0.0
+    end
+  end
+
+  defp parse_fraction(fraction) when is_number(fraction), do: fraction
+
+  defp tribute_rate_label(rate), do: "#{round(rate * 100)}%"
+
+  defp oath_agenda_options do
+    [
+      {"restore", "Restore — reclaim your fallen realm"},
+      {"usurp", "Usurp — seize your lord's own throne"},
+      {"kingmaker", "Kingmaker — decide who rules"},
+      {"merchant_prince", "Merchant Prince — build wealth beyond war"}
+    ]
+  end
 
   # -------------------------------------------------------------------
   # City loop helpers
@@ -1176,6 +1398,25 @@ defmodule BrokenOathsWeb.GameLive.Play do
           <.icon name="hero-circle-stack" class="w-3 h-3" /> {@gold}
         </span>
 
+        <%!-- Story 907: the lord's own Vassals list — only mounted while
+             non-empty (criterion 7667's own "no vassals-list at all"
+             anchor). --%>
+        <.vassals_panel :if={@vassals != []} vassals={@vassals} />
+
+        <%!-- Story 907/908: a subjugated player's own oath — sworn-to
+             badge, the rate they feel, and their own latest levy status. --%>
+        <div :if={@vassal_status} class="flex items-center gap-1">
+          <span class="badge badge-secondary gap-1" data-test="vassal-status">
+            Sworn to {@vassal_status.lord_email}
+          </span>
+          <span class="badge badge-outline" data-test="my-tribute-rate">
+            {tribute_rate_label(@vassal_status.tribute_rate)}
+          </span>
+          <span :if={@vassal_status.levy_status} class="badge badge-outline" data-test="levy-status">
+            {@vassal_status.levy_status}
+          </span>
+        </div>
+
         <.live_component
           module={BrokenOathsWeb.GameLive.AgePanel}
           id="age-panel"
@@ -1213,6 +1454,31 @@ defmodule BrokenOathsWeb.GameLive.Play do
             <button phx-click="abandon_cancel" class="btn btn-ghost">Cancel</button>
             <button phx-click="abandon_confirm" class="btn btn-error" data-test="abandon-confirm">
               Abandon Forever
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <%!-- Story 907 — the Oath screen: raised the moment a capture
+           leaves this player with zero free cities, closed the instant
+           they secretly pick a Hidden Agenda (`choose_hidden_agenda`). --%>
+      <div :if={@vassal_status && @vassal_status.agenda_pending?} class="modal modal-open" data-test="oath-screen">
+        <div class="modal-box">
+          <h3 class="font-bold text-lg">Terms of Oath</h3>
+          <p class="py-2 opacity-70">
+            Your last free city has fallen. You are sworn to {@vassal_status.lord_email} — but your
+            story is far from over. Choose the ambition you'll secretly pursue as a vassal:
+          </p>
+          <div class="flex flex-col gap-2">
+            <button
+              :for={{agenda, label} <- oath_agenda_options()}
+              type="button"
+              phx-click="choose_hidden_agenda"
+              phx-value-agenda={agenda}
+              data-test={"agenda-option-#{agenda}"}
+              class="btn btn-outline justify-start"
+            >
+              {label}
             </button>
           </div>
         </div>
@@ -1994,6 +2260,69 @@ defmodule BrokenOathsWeb.GameLive.Play do
           }
         }
       </script>
+    </div>
+    """
+  end
+
+  # -------------------------------------------------------------------
+  # Vassalage / Tribute components (stories 906/907/908)
+  # -------------------------------------------------------------------
+
+  # The lord's own "Vassals" list — a dropdown so it never crowds the
+  # top bar; only mounted at all while `@vassals` is non-empty
+  # (`BrokenOathsSpex.Story907.Criterion7667Spex`'s own anchor: no
+  # `vassals-list` element exists at all for a lord with zero vassals).
+  attr :vassals, :list, required: true
+
+  defp vassals_panel(assigns) do
+    ~H"""
+    <div data-test="vassals-list" class="dropdown dropdown-end">
+      <div tabindex="0" role="button" class="btn btn-sm btn-outline gap-1">
+        <.icon name="hero-users" class="w-3 h-3" /> Vassals ({length(@vassals)})
+      </div>
+      <div
+        tabindex="0"
+        class="dropdown-content z-10 menu p-3 shadow bg-base-100 rounded-box w-80 gap-3"
+      >
+        <.vassal_row :for={vassal <- @vassals} vassal={vassal} />
+      </div>
+    </div>
+    """
+  end
+
+  attr :vassal, :map, required: true
+
+  defp vassal_row(assigns) do
+    ~H"""
+    <div
+      data-test={"vassal-row-#{@vassal.vassal_user_id}"}
+      class="flex flex-col gap-1 border-b border-base-300 pb-2 last:border-b-0"
+    >
+      <div class="flex items-center justify-between gap-2">
+        <span class="text-sm">{@vassal.email}</span>
+        <span class="badge badge-outline badge-sm" data-test="vassal-tribute-rate">
+          {tribute_rate_label(@vassal.tribute_rate)}
+        </span>
+      </div>
+
+      <div class="flex items-center justify-between text-xs opacity-70">
+        <span>Oath Strain <span data-test="vassal-oath-strain">{@vassal.oath_strain}</span></span>
+        <span :if={@vassal.levy_status} data-test="levy-status">{@vassal.levy_status}</span>
+      </div>
+
+      <form phx-submit="set_tribute_rate" class="flex items-center gap-1">
+        <input type="hidden" name="vassal_user_id" value={@vassal.vassal_user_id} />
+        <input
+          type="number"
+          name="rate"
+          min="0"
+          max="100"
+          value={round(@vassal.tribute_rate * 100)}
+          class="input input-xs input-bordered w-16"
+        />
+        <span class="text-xs">%</span>
+        <button type="submit" class="btn btn-xs">Set Rate</button>
+      </form>
     </div>
     """
   end

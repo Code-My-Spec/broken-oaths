@@ -325,9 +325,20 @@ defmodule BrokenOaths.Game.CityDefense do
     end
   end
 
-  @doc "Heal `city` `regen_per_boundary/0` HP, capped at `max_hp/0` — a no-op already at full HP."
+  @doc """
+  Heal `city` `regen_per_boundary/0` HP, capped at `max_hp/0` — a no-op
+  already at full HP. Also a no-op at exactly 0 HP: a barbarian assault
+  never actually leaves a city sitting at 0 by the time this phase runs
+  (`take_damage/3` folds `pillage/2` in the SAME calculation, resetting
+  HP to `pillage_hp/0` before `regen/1` is ever called), so a city THIS
+  function finds at 0 is always story 906's own player-siege "broken"
+  state (`BrokenOaths.Game.Siege.broken?/1`) — the walls are down, there
+  is nothing left to regenerate, and the city stays exactly at 0 until
+  it's captured, not healed back onto its feet by a passive boundary.
+  """
   @spec regen(city()) :: city()
   def regen(%{hp: hp} = city) when hp >= @max_hp, do: city
+  def regen(%{hp: 0} = city), do: city
   def regen(city), do: %{city | hp: min(@max_hp, city.hp + @regen_per_boundary)}
 
   # -------------------------------------------------------------------

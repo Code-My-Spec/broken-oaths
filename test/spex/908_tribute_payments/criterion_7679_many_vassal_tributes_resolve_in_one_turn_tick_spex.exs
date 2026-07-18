@@ -71,11 +71,17 @@ defmodule BrokenOathsSpex.Story908.Criterion7679Spex do
                 vassal_context.other_city
               )
 
-            :ok = Fixtures.set_player_gold(context.world, other_user, 100)
-            :ok = Fixtures.set_player_gold_income(context.world, other_user, 12)
-
             %{user: other_user, conn: conn, city: vassal_context.other_city, my_lord: my_lord}
           end
+
+        # Set each vassal's gold/income AFTER all captures. capture_city/march_to
+        # burn many real turn boundaries between vassals, and tribute correctly
+        # taxes every boundary — setting gold inside the loop would drain the
+        # earlier-captured vassals long before the single boundary under test.
+        for %{user: vassal_user} <- vassals do
+          :ok = Fixtures.set_player_gold(context.world, vassal_user, 100)
+          :ok = Fixtures.set_player_gold_income(context.world, vassal_user, 12)
+        end
 
         lord_gold0 = Fixtures.gold(context.world, context.user)
 

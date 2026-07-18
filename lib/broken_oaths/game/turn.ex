@@ -346,7 +346,13 @@ defmodule BrokenOaths.Game.Turn do
         positions = Map.new(state.units, fn {id, u} -> {id, u.tile_id} end)
 
         {movers, positions} =
-          run_rounds(movers, positions, state.units, garrisonable_tiles(state.cities))
+          run_rounds(
+            movers,
+            positions,
+            state.units,
+            garrisonable_tiles(state.cities),
+            broken_city_tiles(state.cities)
+          )
 
         %{
           state
@@ -387,7 +393,13 @@ defmodule BrokenOaths.Game.Turn do
     positions = Map.new(state.units, fn {id, unit} -> {id, unit.tile_id} end)
 
     {movers, positions} =
-      run_rounds(movers, positions, state.units, garrisonable_tiles(state.cities))
+      run_rounds(
+        movers,
+        positions,
+        state.units,
+        garrisonable_tiles(state.cities),
+        broken_city_tiles(state.cities)
+      )
 
     %{
       state
@@ -399,19 +411,25 @@ defmodule BrokenOaths.Game.Turn do
   # `units` is the pre-round snapshot of every unit's `type`/`player_id`
   # (stable for the round — only `positions` changes as movers claim
   # tiles); `garrisonable` is `player_id => MapSet.t(their own cities'
-  # tile_ids)`, precomputed once via `garrisonable_tiles/1`. Both are
-  # read-only context for `attempt_step/4`'s story-895 garrison
-  # exception below.
-  defp run_rounds(movers, positions, units, garrisonable) do
+  # tile_ids)`, precomputed once via `garrisonable_tiles/1`; `broken_cities`
+  # is `tile_id => owner_player_id`, precomputed once via
+  # `broken_city_tiles/1`. All three are read-only context for
+  # `attempt_step/5`'s story-895 garrison exception and story-906 broken-
+  # city exception below.
+  defp run_rounds(movers, positions, units, garrisonable, broken_cities) do
     case active_movers(movers) do
       [] ->
         {movers, positions}
 
       ids ->
         {movers, positions} =
-          Enum.reduce(ids, {movers, positions}, &attempt_step(&1, &2, units, garrisonable))
+          Enum.reduce(
+            ids,
+            {movers, positions},
+            &attempt_step(&1, &2, units, garrisonable, broken_cities)
+          )
 
-        run_rounds(movers, positions, units, garrisonable)
+        run_rounds(movers, positions, units, garrisonable, broken_cities)
     end
   end
 
@@ -425,7 +443,7 @@ defmodule BrokenOaths.Game.Turn do
   end
 
   # `player_id => MapSet.t(tile_id)` of that player's own cities' own
-  # tiles — the only tiles `blocked?/4`'s garrison exception ever
+  # tiles — the only tiles `blocked?/6`'s garrison exception ever
   # applies to.
   defp garrisonable_tiles(cities) do
     cities
@@ -436,19 +454,34 @@ defmodule BrokenOaths.Game.Turn do
     end)
   end
 
-  defp attempt_step(unit_id, {movers, positions}, units, garrisonable) do
+  # `tile_id => owner_player_id` of every BROKEN (0 HP), still-free city
+  # — story 906's own movement exception (`BrokenOaths.Game.Siege.
+  # enterable_despite_garrison?/2`): once a city's walls are down, any
+  # OTHER player's unit may step onto its own tile even past a fallen
+  # (still-alive, not-yet-resolved) garrison. A healthy or already-
+  # captured city (`occupied_by_player_id` set) is never in this map, so
+  # this never loosens collision for either case — see `Siege.broken?/1`.
+  defp broken_city_tiles(cities) do
+    cities
+    |> Map.values()
+    |> Enum.filter(&(Map.get(&1, :hp) == 0 and is_nil(Map.get(&1, :occupied_by_player_id))))
+    |> Map.new(&{&1.tile_id, &1.player_id})
+  end
+
+  defp attempt_step(unit_id, {movers, positions}, units, garrisonable, broken_cities) do
     mover = Map.fetch!(movers, unit_id)
     [target | rest] = mover.path
     mover_unit = Map.fetch!(units, unit_id)
 
     # A step onto the mover's OWN current-in-round tile is degenerate,
-    # not a same-tile arrival to silently drop: `blocked?/5` always
+    # not a same-tile arrival to silently drop: `blocked?/6` always
     # excludes the mover itself from `positions`-derived occupants (a
     # unit never blocks its own vacated tile), so without this guard
     # such a step would "succeed" into an empty path, `apply_orders/2`
     # would read that as arrival, and the order would vanish instead of
     # halting the mover with `:interrupted` as a blocked step should.
-    if target == mover.tile_id or blocked?(target, positions, units, mover_unit, garrisonable) do
+    if target == mover.tile_id or
+         blocked?(target, positions, units, mover_unit, garrisonable, broken_cities) do
       {Map.put(movers, unit_id, %{mover | status: :interrupted}), positions}
     else
       moved = %{mover | tile_id: target, path: rest, movement_left: mover.movement_left - 1}
@@ -458,22 +491,35 @@ defmodule BrokenOaths.Game.Turn do
 
   # A tile with no occupants at all is never blocked. Otherwise blocked
   # UNLESS `target` is `mover_unit`'s own city's own tile with garrison
-  # room for it (story 895 — `CityDefense.garrison_room?/2`); every
+  # room for it (story 895 — `CityDefense.garrison_room?/2`), OR `target`
+  # is another player's BROKEN city (story 906 — `Siege.
+  # enterable_despite_garrison?/2`, the fallen-garrison walk-in); every
   # other occupied tile, city or not, mine or another player's, keeps
   # the original all-or-nothing rule.
-  defp blocked?(target, positions, units, mover_unit, garrisonable) do
+  defp blocked?(target, positions, units, mover_unit, garrisonable, broken_cities) do
     occupants =
       for {id, tile} <- positions, tile == target, id != mover_unit.id, do: Map.fetch!(units, id)
 
     case occupants do
-      [] -> false
-      _ -> not entering_own_garrison_with_room?(target, occupants, mover_unit, garrisonable)
+      [] ->
+        false
+
+      _ ->
+        not (entering_own_garrison_with_room?(target, occupants, mover_unit, garrisonable) or
+               entering_broken_enemy_city?(target, mover_unit, broken_cities))
     end
   end
 
   defp entering_own_garrison_with_room?(target, occupants, mover_unit, garrisonable) do
     MapSet.member?(Map.get(garrisonable, mover_unit.player_id, MapSet.new()), target) and
       CityDefense.garrison_room?(mover_unit, occupants)
+  end
+
+  defp entering_broken_enemy_city?(target, mover_unit, broken_cities) do
+    case Map.get(broken_cities, target) do
+      nil -> false
+      owner_player_id -> owner_player_id != mover_unit.player_id
+    end
   end
 
   defp apply_positions(units, movers, positions) do

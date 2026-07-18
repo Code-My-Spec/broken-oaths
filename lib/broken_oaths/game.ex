@@ -103,9 +103,26 @@ defmodule BrokenOaths.Game do
   """
   @spec attack_city(map(), map(), term(), term()) ::
           {:ok, %{damage_dealt: non_neg_integer(), damage_taken: non_neg_integer()}}
-          | {:error, :not_owner | :invalid_target | :out_of_movement | :not_adjacent | :own_city}
+          | {:error,
+             :not_owner
+             | :invalid_target
+             | :out_of_movement
+             | :not_adjacent
+             | :own_city
+             | :not_military}
   def attack_city(world, user, unit_id, city_id),
     do: WorldServer.call(world, {:attack_city, user, unit_id, city_id})
+
+  @doc """
+  Resolve the conqueror's own execute-or-release choice for a captured
+  city's fallen garrison (story 906): `choice` is `:release` (the
+  garrison survives untouched) or `:execute` (removed from the board).
+  `user` must be `city_id`'s own captor.
+  """
+  @spec resolve_garrison_fate(map(), map(), term(), :release | :execute) ::
+          :ok | {:error, :invalid_target | :not_owner}
+  def resolve_garrison_fate(world, user, city_id, choice),
+    do: WorldServer.call(world, {:resolve_garrison_fate, user, city_id, choice})
 
   @doc "Run one deterministic turn tick — exactly what the 60s timer fires."
   def advance_turn(world), do: WorldServer.call(world, :advance_turn)
@@ -282,6 +299,71 @@ defmodule BrokenOaths.Game do
              | Ecto.Changeset.t()}
   def accept_alliance(world, user, alliance_id),
     do: WorldServer.call(world, {:accept_alliance, user, alliance_id})
+
+  # -------------------------------------------------------------------
+  # Vassalage / Tribute (stories 907/908)
+  # -------------------------------------------------------------------
+
+  @doc """
+  The lord's own "Vassals" list in `world` (story 907/908):
+  `[%{vassal_user_id:, email:, tribute_rate:, oath_strain:, levy_status:}]`
+  for every ACTIVE vassalage `user` holds as lord — never carries the
+  vassal's own secret Hidden Agenda (see `vassal_status/2`'s own doc
+  for where that lives).
+  """
+  @spec vassals(map(), map()) :: [map()]
+  def vassals(world, user), do: WorldServer.call(world, {:vassals, user})
+
+  @doc """
+  `user`'s own oath, if any: `%{lord_user_id:, lord_email:,
+  tribute_rate:, oath_strain:, agenda_pending?:, levy_status:}`, or
+  `nil` for a free player. `agenda_pending?` is the Oath screen's own
+  trigger — `true` until `choose_hidden_agenda/3` closes it.
+  """
+  @spec vassal_status(map(), map()) :: map() | nil
+  def vassal_status(world, user), do: WorldServer.call(world, {:vassal_status, user})
+
+  @doc """
+  Record `user`'s own secret Hidden Agenda pick from the Oath screen —
+  refused unless `user` is a vassal still awaiting one.
+  """
+  @spec choose_hidden_agenda(map(), map(), atom()) ::
+          :ok | {:error, :not_a_vassal | Ecto.Changeset.t()}
+  def choose_hidden_agenda(world, user, agenda),
+    do: WorldServer.call(world, {:choose_hidden_agenda, user, agenda})
+
+  @doc """
+  Raise or lower `vassal_user_id`'s own tribute rate (0.0-1.0) — `user`
+  must be their lord. Takes effect on the vassal's next turn boundary
+  tribute.
+  """
+  @spec set_tribute_rate(map(), map(), term(), float()) ::
+          :ok | {:error, :not_a_player | :not_a_vassal | Ecto.Changeset.t()}
+  def set_tribute_rate(world, user, vassal_user_id, rate),
+    do: WorldServer.call(world, {:set_tribute_rate, user, vassal_user_id, rate})
+
+  @doc """
+  Issue a call to arms (story 908): `user` (the lord) calls
+  `vassal_user_id` to pledge `share` (0, 1] of their standing army
+  against `target_user_id` — a third player, never the lord or the
+  vassal themselves.
+  """
+  @spec issue_levy(map(), map(), term(), term(), float()) ::
+          :ok | {:error, :not_a_player | :not_a_vassal | Ecto.Changeset.t()}
+  def issue_levy(world, user, vassal_user_id, target_user_id, share),
+    do: WorldServer.call(world, {:issue_levy, user, vassal_user_id, target_user_id, share})
+
+  @doc "The vassal (`user`) answers their own lord's pending call to arms — they keep command of the pledged units."
+  @spec answer_levy(map(), map(), term()) ::
+          :ok | {:error, :not_a_player | :not_found | Ecto.Changeset.t()}
+  def answer_levy(world, user, lord_user_id),
+    do: WorldServer.call(world, {:answer_levy, user, lord_user_id})
+
+  @doc "The vassal (`user`) refuses their own lord's pending call — spikes their own Oath Strain."
+  @spec refuse_levy(map(), map(), term()) ::
+          :ok | {:error, :not_a_player | :not_found | Ecto.Changeset.t()}
+  def refuse_levy(world, user, lord_user_id),
+    do: WorldServer.call(world, {:refuse_levy, user, lord_user_id})
 
   @doc """
   Every barbarian camp in `world`, unfiltered ground truth (never

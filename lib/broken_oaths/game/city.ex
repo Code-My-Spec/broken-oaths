@@ -42,10 +42,12 @@ defmodule BrokenOaths.Game.City do
           hp: non_neg_integer(),
           production_halted_until: integer() | nil,
           has_granary: boolean(),
+          occupied_by_player_id: integer() | nil,
           world_id: integer() | nil,
           player_id: integer() | nil,
           world: World.t() | Ecto.Association.NotLoaded.t(),
           player: Player.t() | Ecto.Association.NotLoaded.t(),
+          occupied_by_player: Player.t() | Ecto.Association.NotLoaded.t() | nil,
           production_items: [ProductionItem.t()] | Ecto.Association.NotLoaded.t(),
           inserted_at: NaiveDateTime.t() | nil,
           updated_at: NaiveDateTime.t() | nil
@@ -69,6 +71,14 @@ defmodule BrokenOaths.Game.City do
     # catalog entry); read back by `BrokenOaths.Game.Yields.accrue_food/3`
     # for its +2 food/turn bonus.
     field :has_granary, :boolean, default: false
+    # Story 906 — the siege capture flow (`BrokenOaths.Game.Siege`):
+    # `nil` while free (the owner's own, unoccupied by anyone else);
+    # set to the captor's player once a broken (0 HP) city is walked
+    # into. Peacetime rule (Round-5 decisions): the original owner
+    # keeps running the city (production, worked tiles) — only the
+    # tribute/levy relationship (story 908) and the last-free-city
+    # check (story 907) key off this field.
+    belongs_to :occupied_by_player, Player
 
     belongs_to :world, World
     belongs_to :player, Player
@@ -91,7 +101,8 @@ defmodule BrokenOaths.Game.City do
       :worked_tiles,
       :hp,
       :production_halted_until,
-      :has_granary
+      :has_granary,
+      :occupied_by_player_id
     ])
     |> validate_required([:world_id, :player_id, :tile_id, :name, :size, :food])
     |> validate_length(:name, min: 1, max: 100)
@@ -101,6 +112,7 @@ defmodule BrokenOaths.Game.City do
     |> validate_worked_tiles_within_size()
     |> assoc_constraint(:world)
     |> assoc_constraint(:player)
+    |> assoc_constraint(:occupied_by_player)
     |> unique_constraint([:world_id, :tile_id], name: :game_cities_world_id_tile_id_index)
   end
 

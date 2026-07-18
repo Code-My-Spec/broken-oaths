@@ -50,17 +50,23 @@ defmodule BrokenOaths.Game.WorldServer do
     Cooperation,
     Discovery,
     Exploration,
+    GoldLog,
     Improvement,
     KnownPlayer,
+    Levy,
     Order,
     Player,
     PlayerResearch,
     Production,
     ProductionItem,
     Research,
+    Siege,
     Spawner,
+    Tribute,
     Turn,
     Unit,
+    Vassalage,
+    Vassalization,
     Visibility,
     Yields
   }
@@ -209,10 +215,14 @@ defmodule BrokenOaths.Game.WorldServer do
         # Orders execute immediately with whatever movement the unit has
         # left; the turn boundary only recharges and continues.
         moved = Turn.move_now(queued, unit_id)
+        {moved, capture_events} = apply_captures(moved)
 
         case persist_tick(queued, moved) do
           :ok ->
-            broadcast(moved.world.id, [:units_changed | approach_alert_events(state, moved)])
+            broadcast(
+              moved.world.id,
+              [:units_changed | approach_alert_events(state, moved)] ++ capture_events
+            )
 
             remaining =
               case Map.get(moved.orders, unit_id) do
@@ -437,6 +447,116 @@ defmodule BrokenOaths.Game.WorldServer do
     case do_accept_alliance(state, user, alliance_id) do
       {:ok, _alliance} ->
         broadcast(state.world.id, [:alliances_changed])
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Vassalage / Tribute (stories 907/908)
+  # -------------------------------------------------------------------
+
+  # Story 907: the lord's own "Vassals" list — world-membership-scoped
+  # coordination state, same non-tick-state status `list_alliances/2`
+  # already has for `Alliance`.
+  def handle_call({:vassals, user}, _from, state) do
+    {:reply, vassals(state, user), state}
+  end
+
+  # Story 907/908: the VASSAL's own read of their oath — who they're
+  # sworn to, the current tribute rate, whether the Oath screen is
+  # still pending, and their own levy status.
+  def handle_call({:vassal_status, user}, _from, state) do
+    {:reply, vassal_status(state, user), state}
+  end
+
+  # Story 907: the vassal's own secret Hidden Agenda pick, closing the
+  # Oath screen — never reaches the lord's own view (`vassals/2` never
+  # reads `hidden_agenda` at all).
+  def handle_call({:choose_hidden_agenda, user, agenda}, _from, state) do
+    case do_choose_hidden_agenda(state, user, agenda) do
+      {:ok, _vassalage} ->
+        broadcast(state.world.id, [:vassals_changed])
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Story 908: the lord-set, per-vassal, adjustable tribute rate —
+  # persisted immediately, same non-tick-state status `:set_research`
+  # already has, takes effect on the vassal's next turn boundary
+  # tribute (`apply_tribute/1`, below).
+  def handle_call({:set_tribute_rate, user, vassal_user_id, rate}, _from, state) do
+    case do_set_tribute_rate(state, user, vassal_user_id, rate) do
+      {:ok, _vassalage} ->
+        broadcast(state.world.id, [:vassals_changed])
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Story 906: the conqueror's own execute-or-release choice for a
+  # captured, still-living garrison — persisted via `persist_tick/2`
+  # like every other in-place unit mutation (`persist_unit_changes/2`
+  # already deletes any unit missing from the new map).
+  def handle_call({:resolve_garrison_fate, user, city_id, choice}, _from, state) do
+    case do_resolve_garrison_fate(state, user, city_id, choice) do
+      {:ok, new_state} ->
+        case persist_tick(state, new_state) do
+          :ok ->
+            broadcast(new_state.world.id, [:units_changed])
+            {:reply, :ok, new_state}
+
+          :stale ->
+            {:reply, {:error, :stale}, resync(state)}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Story 908: the lord's own call to arms — a fresh, `:pending` `Levy`
+  # against a third player, persisted immediately (not tick-state, same
+  # status every other Vassalage/Levy mutation in this section has).
+  def handle_call({:issue_levy, user, vassal_user_id, target_user_id, share}, _from, state) do
+    case do_issue_levy(state, user, vassal_user_id, target_user_id, share) do
+      {:ok, _levy} ->
+        broadcast(state.world.id, [:vassals_changed])
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Story 908: the vassal answering their own lord's pending call —
+  # they keep command of the pledged units; nothing about answering
+  # moves a single one.
+  def handle_call({:answer_levy, user, lord_user_id}, _from, state) do
+    case do_answer_levy(state, user, lord_user_id) do
+      {:ok, _levy} ->
+        broadcast(state.world.id, [:vassals_changed])
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Story 908: the refusal branch — marks the levy refused AND spikes
+  # the vassal's own Oath Strain (`Tribute.spike_oath_strain/1`), "a
+  # publicly-legible broken obligation."
+  def handle_call({:refuse_levy, user, lord_user_id}, _from, state) do
+    case do_refuse_levy(state, user, lord_user_id) do
+      {:ok, _levy} ->
+        broadcast(state.world.id, [:vassals_changed])
         {:reply, :ok, state}
 
       {:error, reason} ->
@@ -918,13 +1038,18 @@ defmodule BrokenOaths.Game.WorldServer do
     {ticked, events} = Turn.tick(state)
     {events, ticked} = materialize_spawns(events, ticked)
     ticked = %{ticked | turn_started_at: DateTime.utc_now()}
+    {ticked, capture_events} = apply_captures(ticked)
+    {ticked, tribute_logs} = apply_tribute(ticked)
     {new_state, discovery_events} = apply_discoveries(state, ticked)
 
     case persist_tick(state, new_state) do
       :ok ->
+        persist_gold_logs(tribute_logs)
+
         broadcast(
           new_state.world.id,
-          events ++ discovery_events ++ approach_alert_events(state, new_state)
+          events ++
+            discovery_events ++ approach_alert_events(state, new_state) ++ capture_events
         )
 
         new_state
@@ -1494,8 +1619,11 @@ defmodule BrokenOaths.Game.WorldServer do
   # strength, countered by the strongest garrisoned defender). Unlike
   # `Combat.hostile?/2`'s "no Stone Age PvP" rule for unit-vs-unit
   # combat, ANY player's unit may assault ANY OTHER player's city —
-  # `CityDefense.validate_attack/3` only ever refuses attacking your
-  # OWN city — matching this story's own spec convention of a second
+  # `Siege.validate_siege/3` (story 906) layers ONE new rule on top of
+  # `CityDefense.validate_attack/3`'s own not-your-own-city/adjacency/
+  # movement checks: the attacker must be MILITARY, a civilian besieger
+  # is refused outright (`:not_military`) rather than merely
+  # ineffective — matching this story's own spec convention of a second
   # real player standing in for a barbarian.
   defp do_attack_city(state, user, unit_id, city_id) do
     player = find_player(state, user.id)
@@ -1512,7 +1640,7 @@ defmodule BrokenOaths.Game.WorldServer do
       true ->
         adjacent_tile_ids = Regions.adjacent_tiles(state.world, attacker.tile_id)
 
-        case CityDefense.validate_attack(attacker, city, adjacent_tile_ids) do
+        case Siege.validate_siege(attacker, city, adjacent_tile_ids) do
           :ok ->
             {result, new_state} = resolve_city_attack(state, attacker, city)
 
@@ -1538,7 +1666,7 @@ defmodule BrokenOaths.Game.WorldServer do
         attacker_aura?: lord_adjacent?(state, attacker)
       )
 
-    new_city = CityDefense.take_damage(city, dealt, state.turn)
+    new_city = Siege.take_damage(city, dealt)
     new_attacker = %{attacker | hp: max(attacker.hp - taken, 0), movement: 0}
 
     state =
@@ -1554,6 +1682,122 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   defp owner_user_id(state, player_id), do: Map.fetch!(state.players, player_id).user_id
+
+  # -------------------------------------------------------------------
+  # Capture & Vassalization (stories 906/907)
+  # -------------------------------------------------------------------
+
+  # Safe to call after ANY movement-producing change (an immediate
+  # `queue_move`, or a full tick) — `Siege.materialize_captures/2` is
+  # itself idempotent, so this never double-reports a city already
+  # captured on a prior call. A fresh capture that leaves its defeated
+  # player with zero free cities left also fires vassalization right
+  # here (`Vassalization.vassalization_events/2`), in the SAME pass —
+  # the DB write happens immediately (mirrors `do_propose_alliance/3`'s
+  # own "not tick-state, persisted immediately" status), never waiting
+  # on `persist_tick/2`'s own city/unit diff.
+  defp apply_captures(state) do
+    {new_cities, capture_events} = Siege.materialize_captures(state.cities, state.units)
+    new_state = %{state | cities: new_cities}
+
+    case capture_events do
+      [] ->
+        {new_state, []}
+
+      _ ->
+        vassalize_events =
+          Vassalization.vassalization_events(capture_events, Map.values(new_cities))
+
+        Enum.each(vassalize_events, &persist_vassalization(new_state, &1))
+
+        events =
+          [:cities_changed] ++ Enum.flat_map(vassalize_events, &vassalization_broadcast(new_state, &1))
+
+        {new_state, events}
+    end
+  end
+
+  # Guards against ever double-inserting the same vassal's own row —
+  # `apply_captures/1` is idempotent about REPORTING a capture, but a
+  # defensive re-check here keeps this write idempotent too, in case a
+  # future caller ever runs it against the same event twice.
+  defp persist_vassalization(state, %{captor_player_id: lord_id, defeated_player_id: vassal_id}) do
+    case Repo.get_by(Vassalage, world_id: state.world.id, vassal_player_id: vassal_id, status: :active) do
+      nil ->
+        {:ok, _vassalage} =
+          Vassalization.vassalize_changeset(state.world.id, lord_id, vassal_id) |> Repo.insert()
+
+        :ok
+
+      _existing ->
+        :ok
+    end
+  end
+
+  # Both halves of "both players notified": the fresh vassal's own
+  # `"game:vassalized"` push (story 906's own criterion 7665 trigger,
+  # reused as-is by 907) and the lord's own `"game:new_vassal"` push
+  # (907's own new half).
+  defp vassalization_broadcast(state, %{captor_player_id: lord_id, defeated_player_id: vassal_id}) do
+    lord_user_id = owner_user_id(state, lord_id)
+    vassal_user_id = owner_user_id(state, vassal_id)
+    lord_email = Users.get_user!(lord_user_id).email
+    vassal_email = Users.get_user!(vassal_user_id).email
+
+    [
+      {:vassalized, vassal_user_id, Vassalization.vassalized_message(lord_email)},
+      {:new_vassal, lord_user_id, vassal_user_id, Vassalization.new_vassal_message(vassal_email)}
+    ]
+  end
+
+  # -------------------------------------------------------------------
+  # Tribute (story 908)
+  # -------------------------------------------------------------------
+
+  # Runs every turn boundary, alongside every other tick phase — reads
+  # every ACTIVE vassalage in this world fresh from `Repo` (vassalage
+  # itself is world-membership-scoped coordination state, not
+  # tick-state, the same status `list_alliances/2` already documents
+  # for `Alliance`) and each vassal's own gold INCOME this turn from
+  # `state.test_gold_income` (see `:set_player_gold_income_for_test`'s
+  # own doc for why that's kept separate from the treasury `state.
+  # players` already holds). `Tribute.collect_all/5` moves gold
+  # in-memory; the caller (`run_tick/1`) is responsible for persisting
+  # the resulting `state.players` diff (via `persist_tick/2`, same as
+  # every other in-tick gold change) and the returned `GoldLog` rows
+  # (`persist_gold_logs/1`, immediately after).
+  defp apply_tribute(state) do
+    case active_vassalages(state.world.id) do
+      [] ->
+        {state, []}
+
+      vassalages ->
+        income_by_player = Map.get(state, :test_gold_income, %{})
+
+        {new_players, logs} =
+          Tribute.collect_all(vassalages, state.players, income_by_player, state.world.id, state.turn)
+
+        {%{state | players: new_players}, logs}
+    end
+  end
+
+  defp active_vassalages(world_id) do
+    Vassalage
+    |> where([v], v.world_id == ^world_id and v.status == :active)
+    |> Repo.all()
+  end
+
+  defp persist_gold_logs([]), do: :ok
+
+  defp persist_gold_logs(logs) do
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+    rows =
+      Enum.map(logs, &Map.merge(&1, %{inserted_at: now, updated_at: now}))
+
+    Repo.insert_all(GoldLog, rows)
+    :ok
+  end
 
   # A living unit of the SAME player standing next door — dead units
   # are already gone from `state.units`, so presence alone means
@@ -2170,7 +2414,13 @@ defmodule BrokenOaths.Game.WorldServer do
       # accrue_food/3`'s math, but never made it into THIS map, the one
       # `Game.player_cities/2` actually hands to `GameLive.CityPanel` —
       # so a built Granary had no way to ever show up in the UI at all.
-      has_granary: city.has_granary
+      has_granary: city.has_granary,
+      # Story 906 — `:free` (no badge), `:broken` (0 HP, not yet
+      # entered), or `:occupied` (captured) — `Siege.status/1`'s own
+      # single source of truth for `GameLive.CityPanel`'s `city-status`
+      # badge.
+      status: Siege.status(city),
+      occupied_by_player_id: Map.get(city, :occupied_by_player_id)
     }
   end
 
@@ -2248,6 +2498,212 @@ defmodule BrokenOaths.Game.WorldServer do
          {:ok, alliance} <- fetch_alliance(alliance_id),
          {:ok, changeset} <- Cooperation.accept(alliance, player.id) do
       Repo.update(changeset)
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Vassalage / Tribute (stories 907/908)
+  # -------------------------------------------------------------------
+
+  # The lord's own "Vassals" list — every ACTIVE vassalage they hold,
+  # each row carrying the ONE forward-looking field this batch actually
+  # surfaces end-to-end (tribute rate), Oath Strain (story 908's own
+  # refusal consequence), and the vassal's own latest levy status.
+  # Deliberately never reads `hidden_agenda` — the Oath screen's own
+  # pick stays secret from the lord (`BrokenOathsSpex.Story907.
+  # Criterion7668Spex`).
+  defp vassals(state, user) do
+    case find_player(state, user.id) do
+      nil ->
+        []
+
+      player ->
+        Vassalage
+        |> where(
+          [v],
+          v.world_id == ^state.world.id and v.lord_player_id == ^player.id and
+            v.status == :active
+        )
+        |> Repo.all()
+        |> Enum.map(&format_vassal(state, &1))
+    end
+  end
+
+  defp format_vassal(state, vassalage) do
+    vassal_player = Map.fetch!(state.players, vassalage.vassal_player_id)
+    vassal_user = Users.get_user!(vassal_player.user_id)
+
+    %{
+      vassal_user_id: vassal_user.id,
+      email: vassal_user.email,
+      tribute_rate: vassalage.tribute_rate,
+      oath_strain: vassalage.oath_strain,
+      levy_status:
+        levy_status_for(state.world.id, vassalage.lord_player_id, vassalage.vassal_player_id)
+    }
+  end
+
+  # The vassal's own read of their oath: who they're sworn to, the
+  # current rate ("the vassal sees the rate and feels the pressure"),
+  # whether the Oath screen is still owed (`Vassalization.
+  # agenda_pending?/1`), and their own latest levy status. `nil` for a
+  # free player — no Oath screen, no "Sworn to" badge.
+  defp vassal_status(state, user) do
+    case find_player(state, user.id) do
+      nil ->
+        nil
+
+      player ->
+        case active_vassalage_for_vassal(state, player.id) do
+          nil ->
+            nil
+
+          vassalage ->
+            lord_player = Map.fetch!(state.players, vassalage.lord_player_id)
+            lord_user = Users.get_user!(lord_player.user_id)
+
+            %{
+              lord_user_id: lord_user.id,
+              lord_email: lord_user.email,
+              tribute_rate: vassalage.tribute_rate,
+              oath_strain: vassalage.oath_strain,
+              agenda_pending?: Vassalization.agenda_pending?(vassalage),
+              levy_status: levy_status_for(state.world.id, vassalage.lord_player_id, player.id)
+            }
+        end
+    end
+  end
+
+  # The vassal has exactly one lord at a time, so at most one levy
+  # history between the two of them — the most recent (highest id) is
+  # "the" levy both the lord's own row and the vassal's own badge read.
+  defp levy_status_for(world_id, lord_player_id, vassal_player_id) do
+    Levy
+    |> where(
+      [l],
+      l.world_id == ^world_id and l.lord_player_id == ^lord_player_id and
+        l.vassal_player_id == ^vassal_player_id
+    )
+    |> order_by([l], desc: l.id)
+    |> limit(1)
+    |> Repo.one()
+    |> case do
+      nil -> nil
+      levy -> levy.status
+    end
+  end
+
+  defp do_choose_hidden_agenda(state, user, agenda) do
+    with {:ok, player} <- fetch_player(state, user.id),
+         {:ok, vassalage} <- fetch_vassalage_as_vassal(state, player.id) do
+      Vassalization.choose_agenda_changeset(vassalage, agenda) |> Repo.update()
+    end
+  end
+
+  defp do_set_tribute_rate(state, user, vassal_user_id, rate) do
+    with {:ok, lord_player} <- fetch_player(state, user.id),
+         {:ok, vassal_player} <- fetch_player(state, vassal_user_id),
+         {:ok, vassalage} <- fetch_vassalage(state, lord_player.id, vassal_player.id) do
+      Tribute.set_rate_changeset(vassalage, rate) |> Repo.update()
+    end
+  end
+
+  # Same "diff-and-persist" status every other in-place unit mutation
+  # already has (`Turn`'s own combat, etc.) — the caller runs this
+  # through `persist_tick/2`, which deletes any unit missing from the
+  # returned `state.units` (`persist_unit_changes/2`).
+  defp do_resolve_garrison_fate(state, user, city_id, choice) do
+    player = find_player(state, user.id)
+    city = Map.get(state.cities, city_id)
+
+    cond do
+      is_nil(player) or is_nil(city) ->
+        {:error, :invalid_target}
+
+      city.occupied_by_player_id != player.id ->
+        {:error, :not_owner}
+
+      true ->
+        to_remove = Siege.resolve_garrison_fate(choice, city, Map.values(state.units))
+        {:ok, %{state | units: Map.drop(state.units, to_remove)}}
+    end
+  end
+
+  defp do_issue_levy(state, user, vassal_user_id, target_user_id, share) do
+    with {:ok, lord_player} <- fetch_player(state, user.id),
+         {:ok, vassal_player} <- fetch_player(state, vassal_user_id),
+         {:ok, target_player} <- fetch_player(state, target_user_id),
+         {:ok, _vassalage} <- fetch_vassalage(state, lord_player.id, vassal_player.id) do
+      Tribute.issue_changeset(
+        state.world.id,
+        lord_player.id,
+        vassal_player.id,
+        target_player.id,
+        share
+      )
+      |> Repo.insert()
+    end
+  end
+
+  defp do_answer_levy(state, user, lord_user_id) do
+    with {:ok, vassal_player} <- fetch_player(state, user.id),
+         {:ok, lord_player} <- fetch_player(state, lord_user_id),
+         {:ok, levy} <- fetch_pending_levy(state.world.id, lord_player.id, vassal_player.id) do
+      Tribute.answer_changeset(levy) |> Repo.update()
+    end
+  end
+
+  defp do_refuse_levy(state, user, lord_user_id) do
+    with {:ok, vassal_player} <- fetch_player(state, user.id),
+         {:ok, lord_player} <- fetch_player(state, lord_user_id),
+         {:ok, levy} <- fetch_pending_levy(state.world.id, lord_player.id, vassal_player.id),
+         {:ok, refused} <- Tribute.refuse_changeset(levy) |> Repo.update(),
+         {:ok, vassalage} <- fetch_vassalage(state, lord_player.id, vassal_player.id),
+         {:ok, _vassalage} <- Tribute.spike_oath_strain(vassalage) |> Repo.update() do
+      {:ok, refused}
+    end
+  end
+
+  defp active_vassalage_for_vassal(state, vassal_player_id) do
+    Repo.get_by(Vassalage,
+      world_id: state.world.id,
+      vassal_player_id: vassal_player_id,
+      status: :active
+    )
+  end
+
+  defp fetch_vassalage(state, lord_player_id, vassal_player_id) do
+    case Repo.get_by(Vassalage,
+           world_id: state.world.id,
+           lord_player_id: lord_player_id,
+           vassal_player_id: vassal_player_id,
+           status: :active
+         ) do
+      nil -> {:error, :not_a_vassal}
+      vassalage -> {:ok, vassalage}
+    end
+  end
+
+  defp fetch_vassalage_as_vassal(state, vassal_player_id) do
+    case active_vassalage_for_vassal(state, vassal_player_id) do
+      nil -> {:error, :not_a_vassal}
+      vassalage -> {:ok, vassalage}
+    end
+  end
+
+  defp fetch_pending_levy(world_id, lord_player_id, vassal_player_id) do
+    Levy
+    |> where(
+      [l],
+      l.world_id == ^world_id and l.lord_player_id == ^lord_player_id and
+        l.vassal_player_id == ^vassal_player_id and l.status == :pending
+    )
+    |> order_by([l], desc: l.id)
+    |> limit(1)
+    |> Repo.one()
+    |> case do
+      nil -> {:error, :not_found}
+      levy -> {:ok, levy}
     end
   end
 
@@ -2497,9 +2953,11 @@ defmodule BrokenOaths.Game.WorldServer do
   # (or, since story 895, `do_attack_city/4`'s own immediate
   # resolution) changes: size, food, territory (growth), worked_tiles
   # (a settler's pop cost, or a pillage, un-working a tile), `hp`/
-  # `production_halted_until` (city combat — see `CityDefense`), and
+  # `production_halted_until` (city combat — see `CityDefense`),
   # (story 902) `has_granary` — `Production.complete/3`'s own Granary
-  # branch flips it the same tick a Granary item finishes banking.
+  # branch flips it the same tick a Granary item finishes banking —
+  # and (story 906) `occupied_by_player_id`, set the instant `Siege.
+  # materialize_captures/2` captures a broken city.
   defp persist_city_changes(old_cities, new_cities) do
     for {id, city} <- new_cities, Map.get(old_cities, id) != city do
       Repo.update_all(from(c in City, where: c.id == ^id),
@@ -2510,7 +2968,8 @@ defmodule BrokenOaths.Game.WorldServer do
           worked_tiles: city.worked_tiles,
           hp: city.hp,
           production_halted_until: city.production_halted_until,
-          has_granary: Map.get(city, :has_granary, false)
+          has_granary: Map.get(city, :has_granary, false),
+          occupied_by_player_id: Map.get(city, :occupied_by_player_id)
         ]
       )
     end
@@ -2897,6 +3356,7 @@ defmodule BrokenOaths.Game.WorldServer do
       hp: c.hp,
       production_halted_until: c.production_halted_until,
       has_granary: c.has_granary,
+      occupied_by_player_id: c.occupied_by_player_id,
       queue: Enum.map(c.production_items, &queue_item_map/1)
     }
   end
