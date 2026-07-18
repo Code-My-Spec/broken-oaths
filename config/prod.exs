@@ -22,5 +22,15 @@ config :swoosh, local: false
 # Do not print debug messages in production
 config :logger, level: :info
 
+# The in-progress feudal PvP batch (Siege player-city capture,
+# Vassalization, Tribute — stories 906-908) is built and wired into
+# `WorldServer`, but still missing its Bank/Stewardship/first-class
+# panels/QA/balance pass — stays dormant in prod until that lands.
+# Explicit here (redundant with `config/config.exs`'s own `false`
+# default) so a prod deploy is never one dropped line away from
+# accidentally shipping it live. See `BrokenOaths.Game.
+# feudal_enabled?/0`.
+config :broken_oaths, :feudal_enabled, false
+
 # Runtime production configuration, including reading
 # of environment variables, is done on config/runtime.exs.

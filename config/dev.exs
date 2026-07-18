@@ -70,6 +70,12 @@ config :broken_oaths, BrokenOathsWeb.Endpoint,
 # Enable dev routes for dashboard and mailbox
 config :broken_oaths, dev_routes: true
 
+# Fully active locally — the in-progress feudal PvP batch (Siege/
+# Vassalization/Tribute, stories 906-908) stays dormant only in prod
+# (`config/prod.exs`) until its Bank/Stewardship/panels/QA/balance
+# pass lands. See `BrokenOaths.Game.feudal_enabled?/0`.
+config :broken_oaths, :feudal_enabled, true
+
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"
 

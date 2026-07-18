@@ -71,6 +71,7 @@ defmodule BrokenOaths.Game.WorldServer do
     Yields
   }
 
+  alias BrokenOaths.Game
   alias BrokenOaths.Repo
   alias BrokenOaths.Users
   alias BrokenOaths.Worlds
@@ -1641,7 +1642,17 @@ defmodule BrokenOaths.Game.WorldServer do
   # movement checks: the attacker must be MILITARY, a civilian besieger
   # is refused outright (`:not_military`) rather than merely
   # ineffective — matching this story's own spec convention of a second
-  # real player standing in for a barbarian.
+  # real player standing in for a barbarian. `Game.feudal_enabled?/0`
+  # is checked LAST, only once the request is otherwise well-formed
+  # (owned attacker, real city target) — with the batch dormant
+  # (`config :broken_oaths, :feudal_enabled, false`, prod's own
+  # default), any city assault is refused exactly the way `Combat.
+  # hostile?/2` already refuses unit-vs-unit PvP: `{:error,
+  # :not_hostile}`, same "Stone Age players cannot fight each other"
+  # copy `combat_error_message/1` already renders for it — restoring
+  # the pre-906 no-PvP-city-capture behavior. Barbarian city assault
+  # (`CityDefense`'s pillage path, driven by `Turn`'s own barbarian-AI
+  # phase, never this "attack" surface) is untouched either way.
   defp do_attack_city(state, user, unit_id, city_id) do
     player = find_player(state, user.id)
     attacker = Map.get(state.units, unit_id)
@@ -1653,6 +1664,9 @@ defmodule BrokenOaths.Game.WorldServer do
 
       is_nil(city) ->
         {:error, :invalid_target}
+
+      not Game.feudal_enabled?() ->
+        {:error, :not_hostile}
 
       true ->
         adjacent_tile_ids = Regions.adjacent_tiles(state.world, attacker.tile_id)
@@ -1712,25 +1726,34 @@ defmodule BrokenOaths.Game.WorldServer do
   # here (`Vassalization.vassalization_events/2`), in the SAME pass —
   # the DB write happens immediately (mirrors `do_propose_alliance/3`'s
   # own "not tick-state, persisted immediately" status), never waiting
-  # on `persist_tick/2`'s own city/unit diff.
+  # on `persist_tick/2`'s own city/unit diff. A no-op while `Game.
+  # feudal_enabled?/0` reads `false` — belt-and-suspenders alongside
+  # `do_attack_city/4`'s own gate, which already keeps every city
+  # `Siege.broken?/1` (the only way `materialize_captures/2` ever finds
+  # anything to capture) from ever happening in the first place.
   defp apply_captures(state) do
-    {new_cities, capture_events} = Siege.materialize_captures(state.cities, state.units)
-    new_state = %{state | cities: new_cities}
+    if Game.feudal_enabled?() do
+      {new_cities, capture_events} = Siege.materialize_captures(state.cities, state.units)
+      new_state = %{state | cities: new_cities}
 
-    case capture_events do
-      [] ->
-        {new_state, []}
+      case capture_events do
+        [] ->
+          {new_state, []}
 
-      _ ->
-        vassalize_events =
-          Vassalization.vassalization_events(capture_events, Map.values(new_cities))
+        _ ->
+          vassalize_events =
+            Vassalization.vassalization_events(capture_events, Map.values(new_cities))
 
-        Enum.each(vassalize_events, &persist_vassalization(new_state, &1))
+          Enum.each(vassalize_events, &persist_vassalization(new_state, &1))
 
-        events =
-          [:cities_changed] ++ Enum.flat_map(vassalize_events, &vassalization_broadcast(new_state, &1))
+          events =
+            [:cities_changed] ++
+              Enum.flat_map(vassalize_events, &vassalization_broadcast(new_state, &1))
 
-        {new_state, events}
+          {new_state, events}
+      end
+    else
+      {state, []}
     end
   end
 
@@ -1782,19 +1805,32 @@ defmodule BrokenOaths.Game.WorldServer do
   # in-memory; the caller (`run_tick/1`) is responsible for persisting
   # the resulting `state.players` diff (via `persist_tick/2`, same as
   # every other in-tick gold change) and the returned `GoldLog` rows
-  # (`persist_gold_logs/1`, immediately after).
+  # (`persist_gold_logs/1`, immediately after). A no-op while `Game.
+  # feudal_enabled?/0` reads `false` — belt-and-suspenders alongside
+  # `apply_captures/1`'s own gate, which already keeps `active_vassalages/1`
+  # from ever finding a row to collect against.
   defp apply_tribute(state) do
-    case active_vassalages(state.world.id) do
-      [] ->
-        {state, []}
+    if Game.feudal_enabled?() do
+      case active_vassalages(state.world.id) do
+        [] ->
+          {state, []}
 
-      vassalages ->
-        income_by_player = Map.get(state, :test_gold_income, %{})
+        vassalages ->
+          income_by_player = Map.get(state, :test_gold_income, %{})
 
-        {new_players, logs} =
-          Tribute.collect_all(vassalages, state.players, income_by_player, state.world.id, state.turn)
+          {new_players, logs} =
+            Tribute.collect_all(
+              vassalages,
+              state.players,
+              income_by_player,
+              state.world.id,
+              state.turn
+            )
 
-        {%{state | players: new_players}, logs}
+          {%{state | players: new_players}, logs}
+      end
+    else
+      {state, []}
     end
   end
 

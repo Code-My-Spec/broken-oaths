@@ -47,6 +47,15 @@ config :broken_oaths, :texture_size, {128, 64}
 # `config/prod.exs`, so the gate keeps the routes out of a prod build.
 config :broken_oaths, dev_routes: true
 
+# Mirrors `config/dev.exs` — the whole feudal PvP batch (Siege/
+# Vassalization/Tribute, stories 906-908) stays fully exercisable by
+# `siege_test`/`vassalage_test`/`tribute_test`/`vassalization_test`
+# and the `test/spex/906|907|908` suites. Still `false` by default
+# (`config/config.exs`) and explicitly `false` in `config/prod.exs`,
+# so the batch stays dormant there. See `BrokenOaths.Game.
+# feudal_enabled?/0`.
+config :broken_oaths, :feudal_enabled, true
+
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
 

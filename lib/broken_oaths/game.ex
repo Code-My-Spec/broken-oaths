@@ -109,7 +109,8 @@ defmodule BrokenOaths.Game do
              | :out_of_movement
              | :not_adjacent
              | :own_city
-             | :not_military}
+             | :not_military
+             | :not_hostile}
   def attack_city(world, user, unit_id, city_id),
     do: WorldServer.call(world, {:attack_city, user, unit_id, city_id})
 
@@ -303,6 +304,33 @@ defmodule BrokenOaths.Game do
   # -------------------------------------------------------------------
   # Vassalage / Tribute (stories 907/908)
   # -------------------------------------------------------------------
+
+  @doc """
+  Whether the in-progress feudal PvP batch (Siege player-city capture —
+  story 906, Vassalization — story 907, Tribute — story 908) is
+  reachable at all right now. `config :broken_oaths, :feudal_enabled`
+  (`true` in `config/dev.exs` and `config/test.exs`, `false` in
+  `config/prod.exs`, `false` by default so anything unset stays safe) —
+  the batch is fully built and wired into `WorldServer`, but still
+  missing its Bank/Stewardship/first-class panels/QA/balance pass, so
+  it must stay dormant in prod until that lands. This is the single
+  check point every feudal entry point reads: `WorldServer.
+  do_attack_city/4`'s Siege path (attacking another player's city is
+  refused outright, `{:error, :not_hostile}`, restoring the pre-906
+  "no Stone Age PvP" rule, exactly like unit-vs-unit `Combat.
+  hostile?/2`), `apply_captures/1` (no vassalage), and `apply_tribute/1`
+  (no tribute collected) — each a no-op while this reads `false`. The
+  feudal LiveView UI (vassals panel, oath screen, vassal-status/
+  tribute-rate/levy badges, occupied-city status) never needs its own
+  separate check: with capture/vassalage/tribute never created, the
+  underlying reads (`vassals/2`, `vassal_status/2`, a city's own
+  `Siege.status/1`) stay empty/`:free` on their own. Barbarian city
+  assault (`BrokenOaths.Game.CityDefense`'s pillage path, driven
+  entirely by `BrokenOaths.Game.Turn`'s own barbarian-AI phase) never
+  touches this flag either way — it was never part of the feudal batch.
+  """
+  @spec feudal_enabled?() :: boolean()
+  def feudal_enabled?, do: Application.get_env(:broken_oaths, :feudal_enabled, false)
 
   @doc """
   The lord's own "Vassals" list in `world` (story 907/908):

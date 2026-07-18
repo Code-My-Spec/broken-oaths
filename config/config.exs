@@ -29,6 +29,17 @@ config :broken_oaths,
 # the only tick source specs ever see.
 config :broken_oaths, :game_auto_tick, true
 
+# The in-progress feudal PvP batch (Siege player-city capture — story
+# 906, Vassalization — story 907, Tribute — story 908) is built and
+# wired into WorldServer, but still missing its Bank/Stewardship/
+# first-class panels/QA/balance pass — this keeps it dormant anywhere
+# this default isn't explicitly overridden. `config/dev.exs` and
+# `config/test.exs` flip it on (full local play + the whole feudal
+# test/spex suite); `config/prod.exs` leaves it `false`. Read via
+# `BrokenOaths.Game.feudal_enabled?/0` — see that function's own doc
+# for every entry point this single flag gates.
+config :broken_oaths, :feudal_enabled, false
+
 # Configure the endpoint
 config :broken_oaths, BrokenOathsWeb.Endpoint,
   url: [host: "localhost"],
