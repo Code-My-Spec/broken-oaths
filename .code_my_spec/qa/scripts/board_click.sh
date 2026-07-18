@@ -25,6 +25,14 @@
 # board_state.sh to list them, and to check adjacency before choosing a
 # target for "in range" vs "out of range" attack scenarios.
 #
+# QA issue e25fb72f: the hook's own pointerdown/pointerup handlers
+# track active pointers in a `Map` keyed by `pointerId` — pointerdown
+# adds the down-event's id, and pointerup only fires `click`/`orderMove`
+# if it can delete that SAME id back out. The paired synthetic events
+# below therefore MUST share one fixed `pointerId` (computed once, not
+# regenerated per `fire()` call) or the up-event's delete always misses
+# and the click/order branch never runs.
+#
 # Usage:
 #   ./board_click.sh 14741 left
 #   ./board_click.sh 14742 right
@@ -54,10 +62,15 @@ vibium eval "(function(){
     const p = h.project(c[0], c[1], c[2]);
     const clientX = rect.left + p.px;
     const clientY = rect.top + p.py;
+    // Fixed once per click so the paired pointerdown/pointerup share
+    // the SAME pointerId — the hook's pointer Map keys on this id, and
+    // a mismatched id means pointerup's delete never finds the down
+    // event, so click()/orderMove() never fires.
+    const pointerId = 999001;
     function fire(type, opts) {
       const ev = new PointerEvent(type, Object.assign({
         bubbles: true, cancelable: true, composed: true,
-        clientX, clientY, pointerId: Math.floor(Math.random() * 100000) + 1,
+        clientX, clientY, pointerId,
         pointerType: 'mouse', isPrimary: true, view: window
       }, opts));
       h.el.dispatchEvent(ev);

@@ -50,10 +50,15 @@ defmodule BrokenOaths.Game.ProductionItemTest do
            } = errors_on(changeset)
   end
 
-  test "type must be settler, worker, or warrior" do
+  test "type must be settler, worker, warrior, or granary" do
     changeset = ProductionItem.changeset(%ProductionItem{}, %{valid_attrs() | type: :monument})
     refute changeset.valid?
     assert %{type: ["is invalid"]} = errors_on(changeset)
+  end
+
+  test "granary is a valid type (story 902)" do
+    changeset = ProductionItem.changeset(%ProductionItem{}, %{valid_attrs() | type: :granary})
+    assert changeset.valid?
   end
 
   test "banked cannot be negative" do

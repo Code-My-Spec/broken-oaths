@@ -26,6 +26,18 @@ defmodule BrokenOathsSpex.Fixtures do
   # player-created in the gameplay loop), so seeding one is sanctioned.
   defdelegate world_fixture(attrs \\ %{}), to: BrokenOaths.WorldsFixtures
 
+  # Read-by-id counterpart to `world_fixture/1` above, same sanctioned
+  # status as `tile_terrain/2` below (read-only, no player mutation).
+  # `world_fixture/1` is the "don't care how the row got there"
+  # shortcut most scenarios want; a scenario whose SUBJECT is world
+  # *creation itself* — driving `WorldLive.New`'s create form (story
+  # 905's resource-density slider) — instead only ever learns the new
+  # world's id, from the redirect the create form lands on. This reads
+  # the real row back by that id so later sanctioned reads
+  # (`resource_at/2`, `tile_class/2`, etc.) have a real
+  # `world.seed`/`world.frequency` struct to work from.
+  defdelegate get_world!(id), to: BrokenOaths.Worlds
+
   # --- Regions (sanctioned domain reads) ---
   # Region identity is deliberately invisible to players ("invisible
   # plumbing" — PM decision on story 877), so region-math criteria have
@@ -60,7 +72,7 @@ defmodule BrokenOathsSpex.Fixtures do
 
   # The fog-filtered "everything user can currently see" read (own units
   # always, another's — including a barbarian's — only while visible).
-  # Same sanctioned status as `player_units/2`; needed once a barbarian
+  # Same sanctioned status as `player_units/2`, needed once a barbarian
   # is a real, ownerless unit rather than a second player's, so a spec
   # can re-read its post-combat HP without a player of its own to ask.
   defdelegate visible_units(world, user), to: BrokenOaths.Game, as: :units_visible_to
@@ -101,6 +113,17 @@ defmodule BrokenOathsSpex.Fixtures do
     %{terrain: terrain} = BrokenOaths.Worlds.Generator.generate_maps(world.seed, mesh)
     Map.fetch!(terrain, tile_id)
   end
+
+  # A tile's bonus resource (story 905), or `nil` for a bare tile —
+  # `nil | :cattle | :sheep | :wheat | :stone`. Assumed contract for
+  # the not-yet-built `BrokenOaths.Worlds.Resources` module: an `at/2`
+  # read taking the same `(world, tile_id)` shape as `tile_terrain/2`
+  # above — resource placement is worldgen state, a pure function of
+  # `(world.seed, tile_id)` (and, per story 905's per-world density
+  # criterion, `world.resource_density`), never a player action. Same
+  # sanctioned, read-only status as `tile_terrain/2`; specs never call
+  # the generator directly, only this narrow read.
+  defdelegate resource_at(world, tile_id), to: BrokenOaths.Worlds.Resources, as: :at
 
   # A tile's completed improvement (`nil | :farm | :mine | :road`) —
   # gameplay state a worker creates BY playing, so read-only here too;

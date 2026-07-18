@@ -83,6 +83,15 @@ defmodule BrokenOaths.Game.Turn do
   way (`Map.get(unit, :camp_id)`) since ordinary player units never set
   it.
 
+  `player_research` (story 902) is read the same defensive way, via
+  `Map.get(state, :player_research, %{})` — one
+  `BrokenOaths.Game.Research.player_research()` map per player, created
+  at join (`WorldServer`, not this module) and advanced every tick by
+  this module's own "science accrual" phase (below). A player with no
+  entry is treated as `BrokenOaths.Game.Research.new/0` for that tick
+  only — most of this module's own tests build a state map without
+  this key.
+
   `unit_id`, `player_id`, and `city_id` are opaque keys (Ecto primary
   keys in production); `tile_id` is a `Worlds.Globe` mesh tile id.
 
@@ -176,6 +185,18 @@ defmodule BrokenOaths.Game.Turn do
        player is notified (story 896, criterion 7573). A player with no
        surviving city simply never gets their heir back — an edge case
        no story covers.
+    8. science accrual (story 902) -- every player's science income
+       this tick (`Research.science_per_turn/1`, `2 * size` summed over
+       every city they own, size being the SAME field growth/production
+       already treat as population) banks toward their
+       `current_research` (`Research.accrue_and_complete/2`). A tech
+       that reaches its cost completes automatically: it moves into
+       `completed_techs`, `current_research` clears (the player must
+       pick a next tech themselves), and a
+       `{:tech_completed, user_id, tech}` event fires so only that
+       player is notified. A player with `current_research: nil` simply
+       banks nothing this tick — the same no-op
+       `Research.accrue/2` already documents.
 
   Cities are always processed in ascending id order within a phase, so
   contested outcomes (two cities eligible for the same growth tile, two
@@ -188,6 +209,7 @@ defmodule BrokenOaths.Game.Turn do
   alias BrokenOaths.Game.Combat
   alias BrokenOaths.Game.Improvement
   alias BrokenOaths.Game.Production
+  alias BrokenOaths.Game.Research
   alias BrokenOaths.Game.Visibility
   alias BrokenOaths.Game.Yields
   alias BrokenOaths.Worlds.Regions
@@ -214,6 +236,7 @@ defmodule BrokenOaths.Game.Turn do
 
   @type city :: Production.city()
   @type improvement :: %{
+          optional(:duration) => pos_integer() | nil,
           tile_id: tile_id(),
           kind: Improvement.kind(),
           progress: non_neg_integer(),
@@ -268,6 +291,7 @@ defmodule BrokenOaths.Game.Turn do
     {state, camp_events, occupied} = resolve_camp_spawns(state, occupied)
     {state, attacked_cities} = resolve_barbarian_ai(state, occupied, new_turn)
     {state, heir_events} = resolve_heirs(state, new_turn)
+    {state, tech_events} = accrue_science(state)
 
     new_state =
       state
@@ -283,7 +307,7 @@ defmodule BrokenOaths.Game.Turn do
       [
         {:turn_advanced, new_turn}
         | Enum.map(spawn_events ++ camp_events, &{:unit_spawned, &1})
-      ] ++ heir_events
+      ] ++ heir_events ++ tech_events
 
     {new_state, events}
   end
@@ -311,7 +335,9 @@ defmodule BrokenOaths.Game.Turn do
         }
 
         positions = Map.new(state.units, fn {id, u} -> {id, u.tile_id} end)
-        {movers, positions} = run_rounds(movers, positions, state.units, garrisonable_tiles(state.cities))
+
+        {movers, positions} =
+          run_rounds(movers, positions, state.units, garrisonable_tiles(state.cities))
 
         %{
           state
@@ -351,7 +377,8 @@ defmodule BrokenOaths.Game.Turn do
 
     positions = Map.new(state.units, fn {id, unit} -> {id, unit.tile_id} end)
 
-    {movers, positions} = run_rounds(movers, positions, state.units, garrisonable_tiles(state.cities))
+    {movers, positions} =
+      run_rounds(movers, positions, state.units, garrisonable_tiles(state.cities))
 
     %{
       state
@@ -395,7 +422,9 @@ defmodule BrokenOaths.Game.Turn do
     cities
     |> Map.values()
     |> Enum.group_by(& &1.player_id)
-    |> Map.new(fn {player_id, owned} -> {player_id, MapSet.new(Enum.map(owned, & &1.tile_id))} end)
+    |> Map.new(fn {player_id, owned} ->
+      {player_id, MapSet.new(Enum.map(owned, & &1.tile_id))}
+    end)
   end
 
   defp attempt_step(unit_id, {movers, positions}, units, garrisonable) do
@@ -495,9 +524,16 @@ defmodule BrokenOaths.Game.Turn do
     end
   end
 
+  # Story 902, criterion 7628 — `improvement.duration` (set once, at
+  # build-start, by `WorldServer.persist_start_improvement!/3` — see
+  # `Improvement`'s own moduledoc) overrides the kind's hardcoded base
+  # when present; a hand-built tick-state map with no `:duration` key
+  # at all (most of this module's own unit tests, and any improvement
+  # kind that never gets a research-gated override) falls back to
+  # `Improvement.duration/1` exactly as before this story.
   defp finish_or_progress(improvement) do
     progress = improvement.progress + 1
-    duration = Improvement.duration(improvement.kind)
+    duration = Map.get(improvement, :duration) || Improvement.duration(improvement.kind)
 
     if progress >= duration do
       %{improvement | progress: duration, status: :complete, builder_unit_id: nil}
@@ -569,7 +605,11 @@ defmodule BrokenOaths.Game.Turn do
     ids = state.cities |> Map.keys() |> Enum.sort()
 
     {cities, events, occupied} =
-      Enum.reduce(ids, {state.cities, [], occupied}, &resolve_city_completion(state.world, &1, &2))
+      Enum.reduce(
+        ids,
+        {state.cities, [], occupied},
+        &resolve_city_completion(state.world, &1, &2)
+      )
 
     {%{state | cities: cities}, events, occupied}
   end
@@ -645,7 +685,13 @@ defmodule BrokenOaths.Game.Turn do
   # second warrior lands beside the first rather than failing to spawn.
   defp camp_landing_tile(world, camp, occupied) do
     candidates =
-      [camp.tile_id | world |> Regions.adjacent_tiles(camp.tile_id) |> Enum.filter(&land?(world, &1)) |> Enum.sort()]
+      [
+        camp.tile_id
+        | world
+          |> Regions.adjacent_tiles(camp.tile_id)
+          |> Enum.filter(&land?(world, &1))
+          |> Enum.sort()
+      ]
 
     Enum.find(candidates, &(not Map.has_key?(occupied, &1)))
   end
@@ -675,7 +721,11 @@ defmodule BrokenOaths.Game.Turn do
     occupied = MapSet.new(Map.keys(spawn_occupied))
 
     {state, _occupied, attacked_cities} =
-      Enum.reduce(Enum.sort(ids), {state, occupied, MapSet.new()}, &resolve_barbarian(&1, new_turn, &2))
+      Enum.reduce(
+        Enum.sort(ids),
+        {state, occupied, MapSet.new()},
+        &resolve_barbarian(&1, new_turn, &2)
+      )
 
     {state, attacked_cities}
   end
@@ -715,7 +765,14 @@ defmodule BrokenOaths.Game.Turn do
   # the position is the one place this can be caught for certain — the
   # DB's own unique index on `(world_id, tile_id)` would otherwise raise
   # mid-transaction. A blocked barbarian simply holds this boundary.
-  defp apply_barbarian_decision({:move, tile}, state, occupied, attacked_cities, barbarian, _new_turn) do
+  defp apply_barbarian_decision(
+         {:move, tile},
+         state,
+         occupied,
+         attacked_cities,
+         barbarian,
+         _new_turn
+       ) do
     if MapSet.member?(occupied, tile) do
       {state, occupied, attacked_cities}
     else
@@ -749,7 +806,14 @@ defmodule BrokenOaths.Game.Turn do
     end
   end
 
-  defp apply_barbarian_decision({:attack, target_id}, state, occupied, attacked_cities, barbarian, new_turn) do
+  defp apply_barbarian_decision(
+         {:attack, target_id},
+         state,
+         occupied,
+         attacked_cities,
+         barbarian,
+         new_turn
+       ) do
     case Map.get(state.units, target_id) do
       nil ->
         {state, occupied, attacked_cities}
@@ -840,8 +904,15 @@ defmodule BrokenOaths.Game.Turn do
   defp apply_combat_unit(units, id, %{hp: 0}), do: Map.delete(units, id)
   defp apply_combat_unit(units, id, unit), do: Map.put(units, id, unit)
 
-  defp pay_bounty_if_barbarian_fell(state, %{hp: 0}, %{player_id: payee_id}) when not is_nil(payee_id) do
-    update_in(state.players[payee_id].gold, &(&1 + BarbarianAI.bounty_gold()))
+  # Story 904: same career-total bump `WorldServer.pay_bounty_if_barbarian_fell/3`
+  # applies for a player-initiated kill — a barbarian-initiated exchange
+  # resolved here (this AI loop's own attack, felled by the defender's
+  # counter-blow) counts toward the progress panel's "Total barbarians
+  # killed" figure exactly the same way.
+  defp pay_bounty_if_barbarian_fell(state, %{hp: 0}, %{player_id: payee_id})
+       when not is_nil(payee_id) do
+    state = update_in(state.players[payee_id].gold, &(&1 + BarbarianAI.bounty_gold()))
+    update_in(state.players[payee_id].barbarians_killed, &(&1 + 1))
   end
 
   defp pay_bounty_if_barbarian_fell(state, _barbarian, _target), do: state
@@ -903,13 +974,20 @@ defmodule BrokenOaths.Game.Turn do
   # (including siblings already grown earlier in this same reduce), so
   # two cities eligible for the same tile in one tick resolve by
   # ascending city id — the same determinism rule the doc promises.
+  # Story 903: the size cap (4 Stone Age / 6 Bronze Age) is the city
+  # OWNER's own age (`Research.age/1`, read off this SAME tick's
+  # `state.player_research` — already advanced by `accrue_science/1`
+  # earlier in `tick/1`, so a Bronze Working completion lifts the cap
+  # the instant it lands, same turn), never the city's own state.
   defp grow_cities(state) do
     ids = state.cities |> Map.keys() |> Enum.sort()
+    player_research = Map.get(state, :player_research, %{})
 
     cities =
       Enum.reduce(ids, state.cities, fn id, cities ->
         city = Map.fetch!(cities, id)
-        grown = Yields.grow(city, Map.values(cities), state.world)
+        pr = Map.get(player_research, city.player_id, Research.new())
+        grown = Yields.grow(city, Map.values(cities), state.world, Research.age(pr))
         Map.put(cities, id, grown)
       end)
 
@@ -985,6 +1063,46 @@ defmodule BrokenOaths.Game.Turn do
     |> Map.values()
     |> Enum.filter(&(&1.player_id == player_id))
     |> Enum.min_by(& &1.id, fn -> nil end)
+  end
+
+  # -------------------------------------------------------------------
+  # Science accrual (story 902)
+  # -------------------------------------------------------------------
+
+  # Every player banks `Research.science_per_turn/1` (their OWN cities'
+  # `2 * size`) toward their `current_research`, auto-completing it via
+  # `Research.accrue_and_complete/2` the instant it reaches cost. A
+  # player missing from `state.player_research` (most of this module's
+  # own tests, and any player row created before this state key
+  # existed) is treated as `Research.new/0` for this tick only — a
+  # player with `current_research: nil` simply banks nothing, same
+  # no-op `Research.accrue/2` documents.
+  defp accrue_science(state) do
+    player_research = Map.get(state, :player_research, %{})
+    cities_by_player = Enum.group_by(Map.values(state.cities), & &1.player_id)
+
+    {new_player_research, events} =
+      Enum.reduce(state.players, {player_research, []}, fn {player_id, _player}, {acc, events} ->
+        accrue_one_player(state, player_id, cities_by_player, acc, events)
+      end)
+
+    {Map.put(state, :player_research, new_player_research), Enum.reverse(events)}
+  end
+
+  defp accrue_one_player(state, player_id, cities_by_player, acc, events) do
+    pr = Map.get(acc, player_id, Research.new())
+    income = Research.science_per_turn(Map.get(cities_by_player, player_id, []))
+    {new_pr, completed_tech} = Research.accrue_and_complete(pr, income)
+    acc = Map.put(acc, player_id, new_pr)
+
+    case completed_tech do
+      nil ->
+        {acc, events}
+
+      tech ->
+        user_id = Map.fetch!(state.players, player_id).user_id
+        {acc, [{:tech_completed, user_id, tech} | events]}
+    end
   end
 
   # -------------------------------------------------------------------

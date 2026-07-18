@@ -72,7 +72,7 @@ defmodule BrokenOaths.Game.Combat do
   """
 
   @type tile_id :: non_neg_integer()
-  @type unit_type :: :lord | :settler | :warrior | :worker | :barbarian_warrior
+  @type unit_type :: :lord | :settler | :warrior | :worker | :barbarian_warrior | :bronze_spearman
 
   @type unit :: %{
           id: term(),
@@ -94,7 +94,18 @@ defmodule BrokenOaths.Game.Combat do
 
   @type refusal :: :out_of_movement | :not_adjacent | :not_hostile
 
-  @base_strength %{lord: 12, warrior: 10, settler: 0, worker: 0, barbarian_warrior: 15}
+  @base_strength %{
+    lord: 12,
+    warrior: 10,
+    settler: 0,
+    worker: 0,
+    barbarian_warrior: 15,
+    # Story 903: the Bronze Age's own melee unit — single strength, no
+    # attack/defense split (`.code_my_spec/knowledge/civ6_tech_tree.md`
+    # §5's recommendation), comfortably above a Barbarian Warrior's 15
+    # so it reliably wins a 1v1 (criterion 7633).
+    bronze_spearman: 16
+  }
   @lord_aura_bonus 2
   @garrison_bonus 1.5
   @base_damage 30

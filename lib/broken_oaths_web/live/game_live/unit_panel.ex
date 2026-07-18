@@ -18,10 +18,12 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
     * `:order` - the unit's queued order, or `nil`. Expected to carry
       `:target_tile` and `:status` (`:pending` | `:interrupted`)
     * `:allowed_improvements` - improvement kinds (`:farm` | `:mine` |
-      `:road`) legal on the worker's own tile right now — `Play`
-      computes this (it needs world/terrain access this component
-      doesn't have) so only legal Build actions ever render (story 882,
-      criterion 7482: Farm is never offered on hills/forest)
+      `:road` | `:pasture`) legal on the worker's own tile right now —
+      `Play` computes this (it needs world/terrain/resource access this
+      component doesn't have) so only legal Build actions ever render
+      (story 882, criterion 7482: Farm is never offered on hills/
+      forest; story 905, criterion 7648: Pasture only once Animal
+      Husbandry is researched, and only on a Cattle/Sheep tile)
   """
 
   use BrokenOathsWeb, :live_component
@@ -113,6 +115,7 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
   defp improvement_label(:farm), do: "Farm"
   defp improvement_label(:mine), do: "Mine"
   defp improvement_label(:road), do: "Road"
+  defp improvement_label(:pasture), do: "Pasture"
 
   attr :order, :map, default: nil
 

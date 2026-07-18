@@ -63,6 +63,53 @@ defmodule BrokenOaths.Worlds.GeneratorTest do
     end
   end
 
+  describe "hills relief distribution (regression for QA issue 9ccba1be)" do
+    # Sheep and Stone resources are gated to hills-relief land (see
+    # Worlds.Resources). The original elevation cutoff (>= 0.74) produced
+    # hills at ~0% of land because the 6-octave fBm noise rarely climbs
+    # that high. This locks the widened band (>= 0.60) to a playable
+    # fraction of land, without touching the water/land boundary or the
+    # mountains cutoff.
+    test "hills relief appears at a playable rate across seeds" do
+      mesh = Globe.build(16)
+
+      for seed <- [42, 123, 4242] do
+        terrain_map = Generator.generate_terrain_map(seed, mesh)
+
+        land = terrain_map |> Map.values() |> Enum.reject(&Terrain.water?/1)
+        land_count = length(land)
+        hills_count = Enum.count(land, &(&1.relief == :hills))
+        hills_pct = hills_count / land_count * 100
+
+        assert hills_count > 0,
+               "seed #{seed}: expected some hills relief on land, got none " <>
+                 "(land_count=#{land_count})"
+
+        assert hills_pct >= 5.0 and hills_pct <= 20.0,
+               "seed #{seed}: hills relief is #{Float.round(hills_pct, 1)}% of land, " <>
+                 "outside the playable 5-20% band"
+      end
+    end
+
+    test "mountains relief is untouched by the hills widening" do
+      mesh = Globe.build(16)
+
+      for seed <- [42, 123, 4242] do
+        terrain_map = Generator.generate_terrain_map(seed, mesh)
+        land = terrain_map |> Map.values() |> Enum.reject(&Terrain.water?/1)
+        land_count = length(land)
+        mountains_pct = Enum.count(land, &(&1.relief == :mountains)) / land_count * 100
+
+        # Mountains cutoff (elevation >= 0.88) is unchanged; only the
+        # pentagon-forced peaks plus rare natural peaks should register,
+        # historically well under 5% of land.
+        assert mountains_pct < 5.0,
+               "seed #{seed}: mountains relief grew to #{Float.round(mountains_pct, 1)}% " <>
+                 "of land — the mountains threshold should not have moved"
+      end
+    end
+  end
+
   describe "generate_maps/2" do
     setup do
       %{mesh: Globe.build(8)}

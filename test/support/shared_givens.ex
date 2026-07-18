@@ -62,6 +62,31 @@ defmodule BrokenOathsSpex.SharedGivens do
     {:ok, Map.put(context, :world, Fixtures.world_fixture(%{seed: 424_242}))}
   end
 
+  # `context.user`'s freshly founded, size-1 city in `context.world`
+  # (`context.play_live`, `context.city`) — the common starting point
+  # for story 902's research specs (and any other story that just needs
+  # a bare city with no further setup): joins the world, mounts
+  # `GameLive.Play`, and founds a city with the player's starting
+  # settler. Requires `context.world` and `context.user`/`context.conn`
+  # — run `:a_world` and `:registered_player` first.
+  register_given :a_founded_city, context do
+    {:ok, join_live, _html} = live(context.conn, "/play")
+
+    join_live
+    |> element("[data-test='join-world-#{context.world.id}']")
+    |> render_click()
+
+    {:ok, play_live, _html} = live(context.conn, "/play/#{context.world.id}")
+
+    [settler | _] =
+      for u <- Fixtures.player_units(context.world, context.user), u.type == :settler, do: u
+
+    render_hook(play_live, "found_city", %{"unit_id" => settler.id})
+    [city] = Fixtures.player_cities(context.world, context.user)
+
+    {:ok, context |> Map.put(:play_live, play_live) |> Map.put(:city, city)}
+  end
+
   # Two players who have discovered each other in `context.world`:
   # `context.user`'s civilization has seen `context.other_user`'s (and
   # vice versa — discovery is mutual, story 899). Both join the world,
@@ -111,5 +136,79 @@ defmodule BrokenOathsSpex.SharedGivens do
     assert seen?, "the lord never scouted within sight of the other player's unit"
 
     {:ok, context}
+  end
+
+  # A player who has founded a first city and advanced to the Bronze
+  # Age (story 903) by selecting Bronze Working as their research and
+  # letting enough turns pass for its 100-science cost to bank in full.
+  #
+  # Real surface — story 902's `TechPanel`/`GameLive.Play` own the
+  # research-selection event contract this given drives:
+  # `"toggle_tech_panel"` opens the panel, `"select_research"` with
+  # `%{"tech" => "bronze_working"}` raises the `bronze-working-warning`
+  # confirm (`Play`'s own `select_research`/`bronze_working_pending?`
+  # handler — see `BrokenOathsWeb.GameLive.TechPanel`'s moduledoc for
+  # the full flow), and `"bronze_working_confirm"` is what actually
+  # calls `Game.set_research(world, user, :bronze_working)`. Story 903's
+  # own specs (this given's callers) drive the SAME event names story
+  # 902's specs already do — one consistent `TechPanel` contract for
+  # both stories, not two.
+  #
+  # `context.research_select_result` is kept as `:ok` for every caller
+  # that still asserts on it (`context.research_select_result == :ok`)
+  # — selecting Bronze Working through the real flow no longer crashes
+  # the LiveView, so this is now a genuine confirmation rather than a
+  # tolerated-crash placeholder.
+  #
+  # Turn math: Bronze Working costs 100 science (`Research.cost/1`,
+  # stone_age.md §6.1). A lone size-1 city already earns 2/turn
+  # (`Research.science_per_turn/1`, `2 * size`), so 50 turns already
+  # covers it even with zero growth; growth (an independent mechanic)
+  # only ever raises that rate further. 60 is a safe, generous
+  # overshoot, in the same scale existing specs already accept for long
+  # waits (e.g. `criterion_7477`'s 300-turn bound).
+  #
+  # Requires `context.world`, `context.user`/`context.conn` — run
+  # `:a_world` and `:registered_player` first.
+  register_given :player_reached_bronze_age, context do
+    {:ok, context} = a_founded_city(context)
+
+    render_hook(context.play_live, "toggle_tech_panel", %{})
+    render_hook(context.play_live, "select_research", %{"tech" => "bronze_working"})
+    render_hook(context.play_live, "bronze_working_confirm", %{})
+
+    for _ <- 1..60, do: Fixtures.advance_turn(context.world)
+
+    {:ok, Map.put(context, :research_select_result, :ok)}
+  end
+
+  # Trap-exit-guarded `render_hook/3` — generic version of
+  # `BrokenOathsSpex.Story891.Criterion7537Spex`'s `attempt_attack/3`.
+  # See that module's own doc for the full rationale. Returns `:ok` if
+  # `event` was handled without crashing the view, `:crashed` if
+  # calling it took the LiveView process down (no matching
+  # `handle_event` clause exists for `event` yet).
+  def attempt_event(live_view, event, params) do
+    original_trap = Process.flag(:trap_exit, true)
+
+    result =
+      try do
+        render_hook(live_view, event, params)
+        :ok
+      rescue
+        _ -> :crashed
+      catch
+        :exit, _ -> :crashed
+      end
+
+    result =
+      receive do
+        {:EXIT, _pid, _reason} -> :crashed
+      after
+        100 -> result
+      end
+
+    Process.flag(:trap_exit, original_trap)
+    result
   end
 end

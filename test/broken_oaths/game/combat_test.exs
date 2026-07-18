@@ -36,6 +36,10 @@ defmodule BrokenOaths.Game.CombatTest do
       assert Combat.base_strength(:settler) == 0
       assert Combat.base_strength(:worker) == 0
     end
+
+    test "the Bronze Spearman (story 903) matches civ6_tech_tree.md's recommendation" do
+      assert Combat.base_strength(:bronze_spearman) == 16
+    end
   end
 
   describe "effective_strength/2" do
@@ -149,6 +153,39 @@ defmodule BrokenOaths.Game.CombatTest do
       # less), never zero — the counter-blow always lands.
       assert dying_result.damage_to_attacker > 0
       assert dying_result.damage_to_attacker < full_hp_result.damage_to_attacker
+    end
+  end
+
+  describe "resolve/3 — Bronze Spearman vs Barbarian Warrior (story 903, criterion 7633)" do
+    test "a Bronze Spearman (16) always lands within its own asymmetric band against a Barbarian Warrior (15)" do
+      {lo, hi} = expected_band(16, 15)
+      {counter_lo, counter_hi} = expected_band(15, 16)
+
+      spearman = unit(1, type: :bronze_spearman, hp: 120, max_hp: 120)
+      barbarian = unit(2, type: :barbarian_warrior, hp: 120, max_hp: 120, player_id: nil)
+
+      for seed <- 1..100 do
+        %{damage_to_defender: dealt, damage_to_attacker: taken} =
+          Combat.resolve(spearman, barbarian, seed: {:bronze_spearman, seed})
+
+        assert dealt in lo..hi
+        assert taken in counter_lo..counter_hi
+      end
+    end
+
+    test "the Bronze Spearman's expected damage output exceeds the Barbarian Warrior's, on average, across a wide sample — the strength edge that lets it win a 1v1" do
+      spearman = unit(1, type: :bronze_spearman, hp: 120, max_hp: 120)
+      barbarian = unit(2, type: :barbarian_warrior, hp: 120, max_hp: 120, player_id: nil)
+
+      {dealt_total, taken_total} =
+        Enum.reduce(1..200, {0, 0}, fn seed, {dealt_acc, taken_acc} ->
+          %{damage_to_defender: dealt, damage_to_attacker: taken} =
+            Combat.resolve(spearman, barbarian, seed: {:bronze_spearman_avg, seed})
+
+          {dealt_acc + dealt, taken_acc + taken}
+        end)
+
+      assert dealt_total > taken_total
     end
   end
 

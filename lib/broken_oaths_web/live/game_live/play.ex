@@ -28,6 +28,13 @@ defmodule BrokenOathsWeb.GameLive.Play do
     * `game:cities`     — `%{cities: [%{id:, name:, tile_id:, size:}]}`, the
                            player's own cities (never fog-filtered — a city
                            is only ever seen by its owner here)
+    * `game:resources`  — `%{resources: [%{tile_id:, kind:}]}` (story 905),
+                           bonus-resource billboards for every currently
+                           known (visible ∪ explored) tile — resources are
+                           visible unconditionally (no reveal tech), the same
+                           fog rule as terrain itself, so this rides the same
+                           `known` set `game:window` already computes rather
+                           than a separate fog-gated `Game` read
     * `game:camps`      — `%{camps: [%{id:, tile_id:, hp:, warriors: [...]}]}`,
                            barbarian camps (story 892), fog-filtered by
                            `Game.camps_visible_to/2` — see that function's
@@ -45,6 +52,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
                            side the turn-boundary first-contact detection
                            (`Game.Discovery`) finds a new pair — player-scoped,
                            same shape as `game:alert`/`game:lineage`
+    * `game:age`        — `%{message: string}` (story 903), fired once when
+                           `{:tech_completed, user_id, :bronze_working}`
+                           lands for this player — player-scoped, same shape
+                           as `game:alert`/`game:discovery`/`game:lineage`
 
   Turn number, countdown, and the selected-unit's/-city's details are each
   their own `liveview_component` (`GameLive.TurnBar`, `GameLive.UnitPanel`,
@@ -93,9 +104,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   alias BrokenOaths.Chat
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.{Improvement, Yields}
+  alias BrokenOaths.Game.{Improvement, Research, Yields}
   alias BrokenOaths.Worlds
-  alias BrokenOaths.Worlds.{Generator, Globe, Regions, Terrain, Weather}
+  alias BrokenOaths.Worlds.{Generator, Globe, Regions, Resources, Terrain, Weather}
 
   @default_scale 700
   @max_pitch 1.50
@@ -161,6 +172,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
             confirm_abandon?: false,
             chat_open: false,
             chat_target_user_id: nil,
+            tech_panel_open?: false,
+            bronze_working_pending?: false,
+            player_research: Game.player_research(world, user),
+            player_stats: Game.player_stats(world, user),
             yaw: yaw,
             pitch: pitch,
             scale: @default_scale,
@@ -186,7 +201,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
         selected_unit_id: unit_id,
         selected_unit: unit,
         selected_order: unit && unit.order,
-        allowed_improvements: worker_allowed_improvements(socket.assigns.world, unit),
+        allowed_improvements:
+          worker_allowed_improvements(socket.assigns.world, unit, socket.assigns.player_research),
         current_dig: worker_current_dig(socket.assigns.improvements, unit),
         order_error: nil,
         improvement_error: nil,
@@ -210,7 +226,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
     %{world: world, improvements: improvements} = socket.assigns
     tile_id = parse_id(tile_id)
     terrain = Regions.terrain(world, tile_id)
-    yields = Yields.tile_yield(terrain)
+    resource = Resources.at(world, tile_id)
+    yields = Yields.tile_yield(terrain, resource)
     improvement = Enum.find(improvements, &(&1.tile_id == tile_id))
 
     {:noreply,
@@ -220,7 +237,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
          terrain: terrain_label(terrain),
          food: yields.food,
          production: yields.production,
-         improvement: improvement
+         improvement: improvement,
+         resource: resource
        },
        selected_unit_id: nil,
        selected_unit: nil,
@@ -473,12 +491,52 @@ defmodule BrokenOathsWeb.GameLive.Play do
     {:noreply, push_navigate(socket, to: ~p"/play")}
   end
 
+  # Story 902: `GameLive.TechPanel` is presentational (no `phx-target`,
+  # same bubbling pattern as `CityPanel`/`UnitPanel`) — every one of its
+  # clicks lands here. `"select_research"` commits immediately for every
+  # tech EXCEPT Bronze Working, which instead raises the confirm warning
+  # (`bronze_working_pending?`) the panel renders; only
+  # `"bronze_working_confirm"` actually calls `Game.set_research/3` for
+  # it (criterion 7630). Every commit re-pulls `player_research` inline
+  # rather than waiting on the `:research_changed` broadcast (below) —
+  # same "refresh inline so the click's own render sees it" reasoning
+  # `"start_improvement"` already documents for `improvement_error`.
+  def handle_event("toggle_tech_panel", _params, socket) do
+    {:noreply, assign(socket, tech_panel_open?: !socket.assigns.tech_panel_open?)}
+  end
+
+  def handle_event("select_research", %{"tech" => "bronze_working"}, socket) do
+    {:noreply, assign(socket, bronze_working_pending?: true)}
+  end
+
+  def handle_event("select_research", %{"tech" => tech}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.set_research(world, user, parse_tech(tech)) do
+      :ok -> {:noreply, refresh_research(socket)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("bronze_working_confirm", _params, socket) do
+    %{world: world, user: user} = socket.assigns
+    :ok = Game.set_research(world, user, :bronze_working)
+    {:noreply, socket |> assign(bronze_working_pending?: false) |> refresh_research()}
+  end
+
+  def handle_event("bronze_working_cancel", _params, socket) do
+    {:noreply, assign(socket, bronze_working_pending?: false)}
+  end
+
   # -------------------------------------------------------------------
   # Live updates
   # -------------------------------------------------------------------
 
   # WorldServer broadcasts this after every boundary — connected players
   # see the new turn and any resolved moves with no refresh (story 874).
+  # Story 902: every tick banks science toward `current_research` too
+  # (`Turn.tick/1` phase 8), so `player_research` is re-pulled here
+  # alongside the board.
   def handle_info({:turn_advanced, turn}, socket) do
     %{world: world} = socket.assigns
 
@@ -486,8 +544,19 @@ defmodule BrokenOathsWeb.GameLive.Play do
       socket
       |> assign(turn: turn, turn_ends_at: Game.turn_ends_at(world))
       |> refresh_board()
+      |> refresh_research()
 
     {:noreply, socket}
+  end
+
+  # Story 902: `WorldServer` broadcasts this world-wide after every
+  # `Game.set_research/3` — same "every connected view re-pulls its own
+  # state" pattern as `:units_changed`/`:cities_changed`. This view's own
+  # `"select_research"`/`"bronze_working_confirm"` handlers already
+  # refresh inline (see their own doc), so this mostly matters for a
+  # second connected tab on the same account.
+  def handle_info(:research_changed, socket) do
+    {:noreply, refresh_research(socket)}
   end
 
   # Any board mutation (a queued order executing immediately, a join, an
@@ -520,6 +589,38 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # crashes the LiveView (a future "your Warrior is ready" toast would
   # hook in here).
   def handle_info({:unit_spawned, _spawn_event}, socket) do
+    {:noreply, socket}
+  end
+
+  # Story 903: completing Bronze Working is the one tech completion
+  # that gets its own one-shot notification (the story's own
+  # acceptance text) — player-scoped, same `"game:<name>"` + `message`
+  # dispatch convention as `game:alert`/`game:discovery`/`game:lineage`
+  # below. `Turn.tick/1` orders `{:tech_completed, ...}` AFTER
+  # `{:turn_advanced, turn}` in the same event batch (`Turn.tick/1`'s
+  # own moduledoc), so `player_research` (and therefore `AgePanel`'s
+  # own `Research.age/1` read) is already refreshed to Bronze Age by
+  # the time this fires — no separate refresh needed here.
+  def handle_info({:tech_completed, user_id, :bronze_working}, socket) do
+    if user_id == socket.assigns.user.id do
+      {:noreply,
+       push_event(socket, "game:age", %{
+         message: "You have entered the Bronze Age! New units and buildings unlocked."
+       })}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # Story 902: `Turn.tick/1`'s science-accrual phase (phase 8) pairs a
+  # tech reaching its cost with its own `{:tech_completed, user_id,
+  # tech}` broadcast, alongside the SAME tick's `{:turn_advanced, turn}`
+  # this view already refreshes `player_research` on (see that handler's
+  # own doc) — so, like `{:unit_spawned, _}` above, every OTHER tech
+  # completion is a safe no-op; it exists so an unhandled event never
+  # crashes the LiveView (a future "Animal Husbandry researched!" toast
+  # would hook in here).
+  def handle_info({:tech_completed, _user_id, _tech}, socket) do
     {:noreply, socket}
   end
 
@@ -670,6 +771,13 @@ defmodule BrokenOathsWeb.GameLive.Play do
     %{visible: visible, explored: explored} = Game.visibility(world, user)
     selected_unit = selected_unit_id && Enum.find(units, &(&1.id == selected_unit_id))
     selected_city = selected_city_id && Enum.find(cities, &(&1.id == selected_city_id))
+    # Story 904: `science_per_turn` is derived from `cities` (`Research.
+    # science_per_turn/1`, `2 * size` per city) — re-pulled here, not
+    # just on `refresh_research/1`'s own turn-boundary/research-change
+    # triggers, so founding a city updates the progress panel's science
+    # figure in the SAME refresh that already re-pulls `cities`, with no
+    # turn boundary required (criterion 7639).
+    player_research = Game.player_research(world, user)
 
     socket
     |> assign(
@@ -682,14 +790,41 @@ defmodule BrokenOathsWeb.GameLive.Play do
       explored: explored,
       selected_unit: selected_unit,
       selected_order: selected_unit && selected_unit.order,
-      allowed_improvements: worker_allowed_improvements(world, selected_unit),
+      allowed_improvements: worker_allowed_improvements(world, selected_unit, player_research),
       current_dig: worker_current_dig(improvements, selected_unit),
       selected_city: selected_city,
       assignable_tiles: assignable_tiles(world, selected_city),
-      known_players: Game.known_players(world, user)
+      known_players: Game.known_players(world, user),
+      player_stats: Game.player_stats(world, user),
+      player_research: player_research
     )
     |> push_board_state()
     |> push_selected_path()
+  end
+
+  # Story 902: single source of truth for `player_research`, the same
+  # "re-fetch on every signal" status `refresh_board/1` gives the rest
+  # of the board — called at mount, on every turn boundary (science
+  # accrues each tick), on the `:research_changed` broadcast, and
+  # inline by every `TechPanel`-bubbled event that changes it.
+  defp refresh_research(socket) do
+    %{world: world, user: user} = socket.assigns
+    assign(socket, player_research: Game.player_research(world, user))
+  end
+
+  # `TechPanel`'s `phx-value-tech` arrives as a string — `Research`'s
+  # own catalog is a fixed, compile-time set of atoms, so
+  # `String.to_existing_atom/1` is always safe for a legitimate tech
+  # name (same safety argument `WorldServer.player_research_map/1`
+  # already makes for `banked_science`'s keys); anything else becomes
+  # an atom `Research.set_research/2` is guaranteed to refuse as
+  # `:invalid_tech`.
+  defp parse_tech(tech) when is_atom(tech), do: tech
+
+  defp parse_tech(tech) when is_binary(tech) do
+    String.to_existing_atom(tech)
+  rescue
+    ArgumentError -> :invalid_tech
   end
 
   # A queued order's remaining route renders whenever its unit is
@@ -708,7 +843,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   defp push_board_state(socket) do
     %{mesh: mesh, terrain_map: terrain_map, world: world} = socket.assigns
-    %{units: units, cities: cities, camps: camps, visible: visible, explored: explored} = socket.assigns
+
+    %{units: units, cities: cities, camps: camps, visible: visible, explored: explored} =
+      socket.assigns
+
     improvements = Map.get(socket.assigns, :improvements, [])
 
     known = Enum.uniq(visible ++ explored)
@@ -722,10 +860,23 @@ defmodule BrokenOathsWeb.GameLive.Play do
     |> push_event("game:cities", %{cities: Enum.map(cities, &city_marker/1)})
     |> push_camps(camps)
     |> push_improvements(improvements)
+    |> push_resources(known_resources(known, world))
     |> push_event("globe3d:airspace", %{
       levels: levels,
       arc: Float.round(1.1071 / mesh.frequency, 5)
     })
+  end
+
+  # Bonus-resource billboards (story 905) for every currently KNOWN
+  # tile — resources are visible from the first look, unconditionally
+  # (criterion 7649), so this reads off the very same `known` set
+  # `tile_row/3` already iterates rather than a separate fog-gated
+  # `Game` read the way camps/improvements need.
+  defp known_resources(known, world) do
+    for tile_id <- known,
+        resource = Resources.at(world, tile_id),
+        resource != nil,
+        do: %{tile_id: tile_id, kind: resource}
   end
 
   # Content-diffed against the last-pushed value: refresh_board/1 runs
@@ -783,6 +934,26 @@ defmodule BrokenOathsWeb.GameLive.Play do
     end
   end
 
+  # Same content-diff idiom as camps/improvements, for the same
+  # mailbox reason — the resource set only ever changes as fog reveals
+  # new tiles (resources themselves never move or disappear).
+  defp push_resources(socket, resources) do
+    last = Map.get(socket.assigns, :last_resources)
+
+    cond do
+      resources == last ->
+        socket
+
+      resources == [] and last in [nil, []] ->
+        socket
+
+      true ->
+        socket
+        |> assign(:last_resources, resources)
+        |> push_event("game:resources", %{resources: resources})
+    end
+  end
+
   # The board only needs enough to place and label a billboard —
   # territory/queue/food stay in the CityPanel assign, not the client.
   defp city_marker(city), do: Map.take(city, [:id, :name, :tile_id, :size])
@@ -803,6 +974,14 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   defp improvement_summary(%{kind: kind, status: :building, progress: progress}),
     do: "#{kind |> to_string() |> String.capitalize()} under construction (#{progress} banked)"
+
+  # Story 905, criterion 7649 — a resource is visible unconditionally,
+  # the instant the tile itself is looked at (no reveal tech, matching
+  # `civ6_resources.md` §3.5's "bonus resources have no reveal-tech").
+  defp resource_label(:cattle), do: "Cattle"
+  defp resource_label(:sheep), do: "Sheep"
+  defp resource_label(:wheat), do: "Wheat"
+  defp resource_label(:stone), do: "Stone"
 
   # Compact row for the client painter:
   # [id, color, decor, tex, cx, cy, cz, corner1x, corner1y, corner1z, ...]
@@ -873,17 +1052,37 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   defp worker_current_dig(_improvements, _unit), do: nil
 
-  defp worker_allowed_improvements(_world, nil), do: []
-  defp worker_allowed_improvements(_world, %{type: type}) when type != :worker, do: []
+  defp worker_allowed_improvements(_world, nil, _player_research), do: []
 
-  defp worker_allowed_improvements(world, %{tile_id: tile_id}) do
+  defp worker_allowed_improvements(_world, %{type: type}, _player_research) when type != :worker,
+    do: []
+
+  defp worker_allowed_improvements(world, %{tile_id: tile_id}, player_research) do
     if Regions.tile_class(world, tile_id) == :land do
       terrain = Regions.terrain(world, tile_id)
-      Enum.filter([:farm, :mine, :road], &Improvement.allowed?(&1, terrain))
+      terrain_kinds = Enum.filter([:farm, :mine, :road], &Improvement.allowed?(&1, terrain))
+
+      if pasture_offered?(world, tile_id, player_research) do
+        terrain_kinds ++ [:pasture]
+      else
+        terrain_kinds
+      end
     else
       []
     end
   end
+
+  # Pasture (story 905, criterion 7648) only ever renders once the tile
+  # carries an animal resource AND the selecting player has researched
+  # Animal Husbandry — mirrors the terrain gate above, just sourced from
+  # the resource layer + research instead of `Improvement.allowed?/2`.
+  defp pasture_offered?(world, tile_id, player_research) do
+    Improvement.resource_allowed?(Resources.at(world, tile_id)) and
+      pasture_enabled?(player_research)
+  end
+
+  defp pasture_enabled?(nil), do: false
+  defp pasture_enabled?(player_research), do: Research.pasture_enabled?(player_research)
 
   # Territory tiles `CityPanel` may offer a "Work" action for: not the
   # always-free center, not already worked, and workable terrain — the
@@ -953,6 +1152,20 @@ defmodule BrokenOathsWeb.GameLive.Play do
         <span class="badge badge-neutral gap-1" data-test="player-gold">
           <.icon name="hero-circle-stack" class="w-3 h-3" /> {@gold}
         </span>
+
+        <.live_component
+          module={BrokenOathsWeb.GameLive.AgePanel}
+          id="age-panel"
+          player_research={@player_research}
+        />
+
+        <.live_component
+          module={BrokenOathsWeb.GameLive.TechPanel}
+          id="tech-panel"
+          open?={@tech_panel_open?}
+          player_research={@player_research}
+          bronze_working_pending?={@bronze_working_pending?}
+        />
 
         <div class="flex-1"></div>
 
@@ -1064,6 +1277,22 @@ defmodule BrokenOathsWeb.GameLive.Play do
           </div>
         </div>
 
+        <%!-- Story 904: the Stone Age progress panel — always visible,
+             unrelated to unit/city selection, same "durable, not a
+             selection-triggered side panel" status `KnownPlayersPanel`
+             already has (see that component's own moduledoc). --%>
+        <div class="absolute bottom-4 left-4">
+          <.live_component
+            module={BrokenOathsWeb.GameLive.ProgressPanel}
+            id="progress-panel"
+            player_research={@player_research}
+            cities_founded={length(@cities)}
+            camps_destroyed={@player_stats.camps_destroyed}
+            barbarians_killed={@player_stats.barbarians_killed}
+            players_discovered={length(@known_players)}
+          />
+        </div>
+
         <div
           :if={@selected_tile}
           class="card bg-base-200/95 shadow-xl w-64"
@@ -1076,6 +1305,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
             </p>
             <p :if={@selected_tile.improvement} class="text-xs" data-test="tile-improvement">
               {improvement_summary(@selected_tile.improvement)}
+            </p>
+            <p :if={@selected_tile.resource} class="text-xs" data-test="tile-resource">
+              {resource_label(@selected_tile.resource)}
             </p>
           </div>
         </div>
@@ -1096,6 +1328,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
           id="city-panel"
           city={@selected_city}
           assignable_tiles={@assignable_tiles}
+          player_research={@player_research}
         />
       </div>
 
@@ -1123,6 +1356,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
             this.cities = []
             this.camps = []
             this.improvements = []
+            this.resources = []
             this.visibleSet = new Set()
             this.selectedId = null
             this.path = null
@@ -1189,6 +1423,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
               this.draw()
             })
             this.handleEvent("game:improvements", ({improvements}) => { this.improvements = improvements; this.draw() })
+            this.handleEvent("game:resources", ({resources}) => { this.resources = resources; this.draw() })
             this.handleEvent("game:selected", ({unit_id}) => { this.selectedId = unit_id; this.path = null; this.draw() })
             this.handleEvent("game:path", ({unit_id, tiles}) => {
               if (unit_id === this.selectedId) this.path = tiles
@@ -1217,6 +1452,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
             this.handleEvent("game:discovery", ({message}) => showToast(message))
             this.handleEvent("game:alert", ({message}) => showToast(message))
             this.handleEvent("game:lineage", ({message}) => showToast(message))
+            this.handleEvent("game:age", ({message}) => showToast(message))
 
             // Unified pointer input for mouse, pen and touch. One active
             // pointer pans (drag); two active pointers pinch-zoom and
@@ -1420,6 +1656,14 @@ defmodule BrokenOathsWeb.GameLive.Play do
             return window.GlobeRender.ready(key && this.sprites[key])
           },
 
+          // Fallback dot colors (story 905) — food resources warm, the
+          // one production resource (Stone) cool, so the two families
+          // read apart even before real icon art exists.
+          resourceColor(kind) {
+            const colors = {cattle: "#c2703d", sheep: "#e8dcc8", wheat: "#e8b923", stone: "#8a8f98"}
+            return colors[kind] || "#eab308"
+          },
+
           // Where a unit currently renders: mid-slide if animating,
           // otherwise its tile center.
           unitPos(u, now) {
@@ -1512,6 +1756,37 @@ defmodule BrokenOathsWeb.GameLive.Play do
                 GR.drawBillboard(ctx, img, cx, cy, decorSize)
               }
               ctx.globalAlpha = 1
+            }
+
+            // Bonus-resource markers (story 905): small, distinct dots
+            // so a resource tile reads as "special" at a glance from
+            // the very first look (criterion 7649 — no reveal tech, no
+            // city/improvement needed). Falls back to a flat colored
+            // dot when the real icon art isn't loaded yet — same
+            // "never block on an asset request" rule the city
+            // billboard's own fallback already follows below.
+            const resourceSize = Math.min(Math.max(this.scale * this.arc * 1.3, 8), 56)
+            if (resourceSize >= 8) {
+              for (const res of this.resources) {
+                const pos = this.center(res.tile_id)
+                if (!pos) continue
+                const {px, py, depth} = this.project(pos[0], pos[1], pos[2])
+                if (depth < 0.02) continue
+                ctx.globalAlpha = this.visibleSet.has(res.tile_id) ? 1 : 0.55
+                const img = this.spriteFor(res.kind)
+                if (img) {
+                  GR.drawBillboard(ctx, img, px, py, resourceSize)
+                } else {
+                  ctx.beginPath()
+                  ctx.arc(px, py, resourceSize * 0.22, 0, 2 * Math.PI)
+                  ctx.fillStyle = this.resourceColor(res.kind)
+                  ctx.fill()
+                  ctx.lineWidth = 1.5
+                  ctx.strokeStyle = "#1a1a1a"
+                  ctx.stroke()
+                }
+                ctx.globalAlpha = 1
+              }
             }
 
             // Improvement billboards (farms, mines): built ON the

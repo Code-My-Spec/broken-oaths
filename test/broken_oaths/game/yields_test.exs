@@ -147,6 +147,35 @@ defmodule BrokenOaths.Game.YieldsTest do
     end
   end
 
+  describe "threshold/2 and capped?/2 — age-aware (story 903)" do
+    test "arity-1/1 stay Stone Age by default, agreeing exactly with arity-2/2's :stone_age clause" do
+      for size <- 1..6 do
+        assert Yields.threshold(size) == Yields.threshold(size, :stone_age)
+        assert Yields.capped?(size) == Yields.capped?(size, :stone_age)
+      end
+    end
+
+    test "a Stone Age city still caps at 4, even asked explicitly" do
+      assert Yields.threshold(4, :stone_age) == nil
+      assert Yields.threshold(5, :stone_age) == nil
+      refute Yields.capped?(3, :stone_age)
+      assert Yields.capped?(4, :stone_age)
+    end
+
+    test "a Bronze Age city keeps growing past 4, up to the new size-6 cap" do
+      assert Yields.threshold(1, :bronze_age) == 20
+      assert Yields.threshold(2, :bronze_age) == 30
+      assert Yields.threshold(3, :bronze_age) == 40
+      assert Yields.threshold(4, :bronze_age) == 50
+      assert Yields.threshold(5, :bronze_age) == 60
+      assert Yields.threshold(6, :bronze_age) == nil
+
+      refute Yields.capped?(4, :bronze_age)
+      refute Yields.capped?(5, :bronze_age)
+      assert Yields.capped?(6, :bronze_age)
+    end
+  end
+
   # -------------------------------------------------------------------
   # Per-city accrual — needs real terrain, so a real (deterministic)
   # World struct rather than hand-built Terrain structs.
@@ -189,6 +218,30 @@ defmodule BrokenOaths.Game.YieldsTest do
       worked_food = Yields.worked_tile_yield(Regions.terrain(world(), worked_tile), nil).food
 
       assert Yields.accrue_food(city, world(), %{}).food == 3 + center_food + worked_food
+    end
+
+    test "a city with no has_granary key accrues exactly as before (defensive default)" do
+      city_tile = 0
+      city = %{tile_id: city_tile, food: 0, worked_tiles: []}
+
+      center_food = Yields.city_center_yield(Regions.terrain(world(), city_tile)).food
+      assert Yields.accrue_food(city, world(), %{}).food == center_food
+    end
+
+    test "a Granary adds a flat +2 food on top of everything else (story 902)" do
+      city_tile = 0
+      city = %{tile_id: city_tile, food: 0, worked_tiles: [], has_granary: true}
+
+      center_food = Yields.city_center_yield(Regions.terrain(world(), city_tile)).food
+      assert Yields.accrue_food(city, world(), %{}).food == center_food + 2
+    end
+
+    test "has_granary: false accrues the same as no key at all" do
+      city_tile = 0
+      city = %{tile_id: city_tile, food: 0, worked_tiles: [], has_granary: false}
+
+      center_food = Yields.city_center_yield(Regions.terrain(world(), city_tile)).food
+      assert Yields.accrue_food(city, world(), %{}).food == center_food
     end
   end
 
@@ -277,6 +330,44 @@ defmodule BrokenOaths.Game.YieldsTest do
 
       assert grown.size == 2
       assert grown.food == 55 - 20
+    end
+  end
+
+  describe "grow/4 — age-aware (story 903)" do
+    test "arity-3 stays Stone Age by default, agreeing exactly with arity-4's :stone_age clause" do
+      city = %{id: 1, tile_id: 0, size: 4, food: 999, territory: [0], worked_tiles: []}
+
+      assert Yields.grow(city, [city], world()) == Yields.grow(city, [city], world(), :stone_age)
+    end
+
+    test "a Stone Age city at size 4 still refuses to grow, explicit age or not" do
+      city = %{id: 1, tile_id: 0, size: 4, food: 999, territory: [0], worked_tiles: []}
+
+      assert Yields.grow(city, [city], world(), :stone_age) == city
+    end
+
+    test "a Bronze Age city at the old size-4 cap, with abundant food, grows to size 5" do
+      city = %{id: 1, tile_id: 0, size: 4, food: 999, territory: [0], worked_tiles: []}
+
+      grown = Yields.grow(city, [city], world(), :bronze_age)
+
+      assert grown.size == 5
+      assert grown.food == 999 - 50
+    end
+
+    test "a Bronze Age city at size 5, with abundant food, grows to size 6" do
+      city = %{id: 1, tile_id: 0, size: 5, food: 999, territory: [0], worked_tiles: []}
+
+      grown = Yields.grow(city, [city], world(), :bronze_age)
+
+      assert grown.size == 6
+      assert grown.food == 999 - 60
+    end
+
+    test "a Bronze Age city at the new size-6 cap stops growing — food still accrues" do
+      city = %{id: 1, tile_id: 0, size: 6, food: 999, territory: [0], worked_tiles: []}
+
+      assert Yields.grow(city, [city], world(), :bronze_age) == city
     end
   end
 end

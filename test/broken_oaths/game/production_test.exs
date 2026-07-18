@@ -23,11 +23,20 @@ defmodule BrokenOaths.Game.ProductionTest do
   end
 
   describe "catalog/0 and cost/1" do
-    test "Settler 100, Worker 60, Warrior 40 — no Monument" do
-      assert Production.catalog() == %{settler: 100, worker: 60, warrior: 40}
+    test "Settler 100, Worker 60, Warrior 40, Granary 60, Bronze Spearman 60 (stories 902/903) — no Monument, no Swordsman" do
+      assert Production.catalog() == %{
+               settler: 100,
+               worker: 60,
+               warrior: 40,
+               granary: 60,
+               bronze_spearman: 60
+             }
+
       assert Production.cost(:settler) == 100
       assert Production.cost(:worker) == 60
       assert Production.cost(:warrior) == 40
+      assert Production.cost(:granary) == 60
+      assert Production.cost(:bronze_spearman) == 60
     end
   end
 
@@ -37,6 +46,10 @@ defmodule BrokenOaths.Game.ProductionTest do
       assert Production.unit_stats(:settler) == %{hp: 50, movement: 2}
       assert Production.unit_stats(:warrior) == %{hp: 100, movement: 1}
       assert Production.unit_stats(:worker) == %{hp: 10, movement: 2}
+    end
+
+    test "the Bronze Spearman (story 903): 120 HP, 1 movement — mirrors the Warrior's mobility" do
+      assert Production.unit_stats(:bronze_spearman) == %{hp: 120, movement: 1}
     end
   end
 
@@ -59,6 +72,48 @@ defmodule BrokenOaths.Game.ProductionTest do
     test "Worker and Warrior are always queueable" do
       assert Production.can_queue?(city(size: 1), :worker) == :ok
       assert Production.can_queue?(city(size: 1), :warrior) == :ok
+    end
+
+    test "a Granary defaults to locked — arity-2 has no research context" do
+      assert Production.can_queue?(city(size: 1), :granary) == {:error, :locked}
+    end
+  end
+
+  describe "can_queue?/3 (story 902 — the Granary)" do
+    test "refused when Pottery isn't researched" do
+      assert Production.can_queue?(city([]), :granary, granary_available?: false) == {:error, :locked}
+    end
+
+    test "allowed once Pottery is researched" do
+      assert Production.can_queue?(city([]), :granary, granary_available?: true) == :ok
+    end
+
+    test "refused a second time once the city already has one" do
+      assert Production.can_queue?(city(has_granary: true), :granary, granary_available?: true) ==
+               {:error, :already_built}
+    end
+
+    test "every other buildable ignores the option entirely" do
+      assert Production.can_queue?(city(size: 2), :settler, granary_available?: false) == :ok
+    end
+  end
+
+  describe "can_queue?/3 (story 903 — the Bronze Spearman)" do
+    test "a Bronze Spearman defaults to locked — arity-2 has no research context" do
+      assert Production.can_queue?(city(size: 1), :bronze_spearman) == {:error, :locked}
+    end
+
+    test "refused outside the Bronze Age" do
+      assert Production.can_queue?(city([]), :bronze_spearman, bronze_age?: false) ==
+               {:error, :locked}
+    end
+
+    test "allowed once the Bronze Age is reached" do
+      assert Production.can_queue?(city([]), :bronze_spearman, bronze_age?: true) == :ok
+    end
+
+    test "every other buildable ignores the bronze_age? option entirely" do
+      assert Production.can_queue?(city(size: 2), :settler, bronze_age?: false) == :ok
     end
   end
 
@@ -100,6 +155,14 @@ defmodule BrokenOaths.Game.ProductionTest do
 
       assert new_city.queue == []
       assert events == [%{player_id: 1, type: :warrior, tile_id: 1}]
+    end
+
+    test "a Bronze Spearman completes and spawns exactly like a Warrior (story 903)" do
+      c = city(tile_id: 1, queue: [%{id: 1, type: :bronze_spearman, banked: 60, cost: 60}])
+      {new_city, events} = Production.complete(c, %{}, world())
+
+      assert new_city.queue == []
+      assert events == [%{player_id: 1, type: :bronze_spearman, tile_id: 1}]
     end
 
     test "a completed item lands on a free adjacent tile when the city tile is occupied" do
@@ -180,6 +243,37 @@ defmodule BrokenOaths.Game.ProductionTest do
 
       {new_city, _events} = Production.complete(c, %{}, world())
       assert new_city.territory == [1, @plains_tile]
+    end
+
+    test "a Granary completes into has_granary: true — no spawn event, no landing tile needed" do
+      c = city(tile_id: 1, queue: [%{id: 1, type: :granary, banked: 60, cost: 60}])
+      occupied_everywhere = %{1 => true}
+
+      {new_city, events} = Production.complete(c, occupied_everywhere, world())
+
+      assert new_city.has_granary == true
+      assert new_city.queue == []
+      assert events == []
+    end
+
+    test "a Granary's overflow still carries into the next queued item" do
+      c =
+        city(
+          tile_id: 1,
+          queue: [
+            %{id: 1, type: :granary, banked: 65, cost: 60},
+            %{id: 2, type: :worker, banked: 0, cost: 60}
+          ]
+        )
+
+      {new_city, _events} = Production.complete(c, %{}, world())
+      assert new_city.has_granary == true
+      assert [%{id: 2, banked: 5}] = new_city.queue
+    end
+
+    test "a below-cost Granary item does not complete" do
+      c = city(tile_id: 1, queue: [%{id: 1, type: :granary, banked: 59, cost: 60}])
+      assert Production.complete(c, %{}, world()) == {c, []}
     end
   end
 

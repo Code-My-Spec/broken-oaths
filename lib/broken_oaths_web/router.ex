@@ -28,6 +28,7 @@ defmodule BrokenOathsWeb.Router do
       layout: {BrokenOathsWeb.Layouts, :app_full},
       on_mount: [{BrokenOathsWeb.UserAuth, :mount_current_scope}] do
       live "/worlds", WorldLive.Index, :index
+      live "/worlds/new", WorldLive.New, :new
       live "/worlds/:id", WorldLive.Show, :show
     end
   end

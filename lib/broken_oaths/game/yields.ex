@@ -34,10 +34,38 @@ defmodule BrokenOaths.Game.Yields do
   city's own tile, then a fixed compass order (N, NE, SE, S, SW, NW —
   the six hex directions, by great-circle bearing from the city tile),
   then lowest tile id as a final, always-decisive tiebreak.
+
+  ## The Granary bonus (story 902, criterion 7629)
+
+  A city with `has_granary: true` (`BrokenOaths.Game.Production`'s
+  `:granary` buildable, gated on the owner having completed Pottery)
+  banks a flat +2 food every turn on top of the center's floor and
+  every worked tile's food — `accrue_food/3`'s own read of `Map.get(
+  city, :has_granary, false)`, the same defensive-default idiom
+  `worked_yields/3` already uses for `improvements`.
+
+  ## Bonus resources (story 905)
+
+  `resource_bonus/1` is the resource layer's own additive term —
+  Cattle/Sheep/Wheat +1 food, Stone +1 production, no resource nothing
+  (`.code_my_spec/knowledge/civ6_resources.md` §5) — stacking on top of
+  raw terrain exactly the way an improvement's bonus already does,
+  never gated behind any tech or improvement itself (a bonus resource's
+  OWN yield is visible/worked the moment a citizen sits on the tile;
+  only its IMPROVEMENT's extra yield, e.g. Pasture, needs research).
+  The arity-1/2 building blocks (`tile_yield/1`, `city_center_yield/1`,
+  `worked_tile_yield/2`) stay deliberately resource-BLIND — several
+  callers (story 905's own criterion 7650 chief among them) need the
+  raw terrain score on its own — so resource stacking lives in the
+  arity-3/2 siblings (`worked_tile_yield/3`, `city_center_yield/2`)
+  and in the `world`-aware readers below (`worked_yields/3`,
+  `center_yield/2`, and the deterministic tile-picking keys), which
+  already have a `tile_id` to resolve a resource from.
   """
 
   alias BrokenOaths.Worlds.Globe
   alias BrokenOaths.Worlds.Regions
+  alias BrokenOaths.Worlds.Resources
   alias BrokenOaths.Worlds.Terrain
   alias BrokenOaths.Worlds.World
 
@@ -51,7 +79,7 @@ defmodule BrokenOaths.Game.Yields do
           required(:worked_tiles) => [tile_id()],
           optional(atom()) => term()
         }
-  @type improvement :: %{kind: :farm | :mine | :road, status: :building | :complete}
+  @type improvement :: %{kind: :farm | :mine | :road | :pasture, status: :building | :complete}
 
   # -------------------------------------------------------------------
   # Raw terrain yield
@@ -71,10 +99,33 @@ defmodule BrokenOaths.Game.Yields do
     }
   end
 
+  @doc """
+  A tile's yield including its bonus resource (story 905): raw terrain
+  plus resource, stacked — e.g. a Cattle tile on flat grassland is
+  `2 (terrain) + 1 (resource) = 3` food, with no improvement involved.
+  The resource-blind sibling above (`tile_yield/1`) stays untouched —
+  several callers (not least criterion 7650's own spec) need the raw
+  terrain score on its own.
+  """
+  @spec tile_yield(Terrain.t(), Resources.kind() | nil) :: yield()
+  def tile_yield(terrain, resource), do: add_yield(tile_yield(terrain), resource_bonus(resource))
+
   @doc "The city center's yield: raw terrain, floored at 2 food / 1 production."
   @spec city_center_yield(Terrain.t()) :: yield()
   def city_center_yield(terrain) do
     yield = tile_yield(terrain)
+    %{food: max(yield.food, 2), production: max(yield.production, 1)}
+  end
+
+  @doc """
+  The city center's yield including its own bonus resource (story
+  905), if it happens to be settled on one — still floored at 2 food /
+  1 production. The resource-blind sibling above (`city_center_yield/1`)
+  stays untouched for callers that only ever have a bare `Terrain.t()`.
+  """
+  @spec city_center_yield(Terrain.t(), Resources.kind() | nil) :: yield()
+  def city_center_yield(terrain, resource) do
+    yield = add_yield(tile_yield(terrain), resource_bonus(resource))
     %{food: max(yield.food, 2), production: max(yield.production, 1)}
   end
 
@@ -84,19 +135,52 @@ defmodule BrokenOaths.Game.Yields do
   def workable?(%Terrain{feature: :ice}), do: false
   def workable?(%Terrain{}), do: true
 
-  @doc "A completed improvement's yield bonus (farm +2 food, mine +2 production, road none)."
-  @spec improvement_bonus(nil | :farm | :mine | :road) :: yield()
+  @doc "A completed improvement's yield bonus (farm/pasture +food, mine +production, road none)."
+  @spec improvement_bonus(nil | :farm | :mine | :road | :pasture) :: yield()
   def improvement_bonus(:farm), do: %{food: 2, production: 0}
   def improvement_bonus(:mine), do: %{food: 0, production: 2}
   def improvement_bonus(:road), do: %{food: 0, production: 0}
+  def improvement_bonus(:pasture), do: %{food: 2, production: 0}
   def improvement_bonus(nil), do: %{food: 0, production: 0}
 
+  @doc """
+  A bonus resource's own additive yield (story 905): Cattle, Sheep, and
+  Wheat each add +1 food; Stone adds +1 production; no resource adds
+  nothing. Never gated on research or an improvement — a resource's OWN
+  bonus is visible/worked unconditionally (only its IMPROVEMENT's extra
+  yield, e.g. Pasture, needs a tech).
+  """
+  @spec resource_bonus(Resources.kind() | nil) :: yield()
+  def resource_bonus(kind) when kind in [:cattle, :sheep, :wheat], do: %{food: 1, production: 0}
+  def resource_bonus(:stone), do: %{food: 0, production: 1}
+  def resource_bonus(nil), do: %{food: 0, production: 0}
+
   @doc "A worked (non-center) tile's yield: raw terrain plus its completed improvement, if any."
-  @spec worked_tile_yield(Terrain.t(), nil | :farm | :mine | :road) :: yield()
+  @spec worked_tile_yield(Terrain.t(), nil | :farm | :mine | :road | :pasture) :: yield()
   def worked_tile_yield(terrain, improvement_kind) do
     base = tile_yield(terrain)
     bonus = improvement_bonus(improvement_kind)
     %{food: base.food + bonus.food, production: base.production + bonus.production}
+  end
+
+  @doc """
+  A worked (non-center) tile's yield including its bonus resource
+  (story 905): raw terrain + resource + completed improvement, all
+  additive — e.g. a Pasture-improved Cattle tile on grassland is
+  `2 (terrain) + 1 (resource) + 2 (pasture) = 5` food. The resource-
+  blind sibling above (`worked_tile_yield/2`) stays untouched for
+  callers that only have a bare terrain + improvement kind.
+  """
+  @spec worked_tile_yield(
+          Terrain.t(),
+          nil | :farm | :mine | :road | :pasture,
+          Resources.kind() | nil
+        ) ::
+          yield()
+  def worked_tile_yield(terrain, improvement_kind, resource) do
+    terrain
+    |> worked_tile_yield(improvement_kind)
+    |> add_yield(resource_bonus(resource))
   end
 
   @doc "Citizen auto-assign score: food weighted double (2F + P) — growth is the win condition."
@@ -111,45 +195,98 @@ defmodule BrokenOaths.Game.Yields do
   # Per-city accrual
   # -------------------------------------------------------------------
 
-  @doc "Yields for every currently worked (non-center) tile, in `worked_tiles` order."
+  @doc """
+  Yields for every currently worked (non-center) tile, in
+  `worked_tiles` order — terrain + bonus resource (story 905) +
+  completed improvement, all stacked (`worked_tile_yield/3`).
+  """
   @spec worked_yields(city(), World.t(), %{tile_id() => improvement()}) :: [yield()]
   def worked_yields(city, world, improvements) do
     for tile_id <- city.worked_tiles do
       terrain = Regions.terrain(world, tile_id)
-      worked_tile_yield(terrain, completed_kind(improvements, tile_id))
+      resource = Resources.at(world, tile_id)
+      worked_tile_yield(terrain, completed_kind(improvements, tile_id), resource)
     end
   end
 
-  @doc "The city center's own yield (always active, never assignable/unassignable)."
+  @doc """
+  The city center's own yield (always active, never assignable/
+  unassignable), including its bonus resource (story 905) if it's
+  settled on one.
+  """
   @spec center_yield(city(), World.t()) :: yield()
-  def center_yield(city, world), do: city_center_yield(Regions.terrain(world, city.tile_id))
+  def center_yield(city, world),
+    do: city_center_yield(Regions.terrain(world, city.tile_id), Resources.at(world, city.tile_id))
 
   @doc """
-  Bank this turn's food income: the center's floor plus every worked
-  tile's food. Production income is a separate concern —
+  Bank this turn's food income: the center's floor, every worked
+  tile's food, plus the Granary's flat +2 (story 902) if `city` has
+  one. Production income is a separate concern —
   `BrokenOaths.Game.Production.accrue/3`.
   """
   @spec accrue_food(city(), World.t(), %{tile_id() => improvement()}) :: city()
   def accrue_food(city, world, improvements) do
     center = center_yield(city, world)
     worked_food = worked_yields(city, world, improvements) |> Enum.map(& &1.food) |> Enum.sum()
-    %{city | food: city.food + center.food + worked_food}
+    %{city | food: city.food + center.food + worked_food + granary_bonus(city)}
+  end
+
+  @granary_food_bonus 2
+
+  defp granary_bonus(city) do
+    if Map.get(city, :has_granary, false), do: @granary_food_bonus, else: 0
   end
 
   # -------------------------------------------------------------------
   # Growth
   # -------------------------------------------------------------------
 
-  @doc "Food needed to grow FROM this size to size + 1. `nil` at the Stone Age cap (size 4)."
-  @spec threshold(pos_integer()) :: pos_integer() | nil
-  def threshold(1), do: 20
-  def threshold(2), do: 30
-  def threshold(3), do: 40
-  def threshold(_capped), do: nil
+  @type age :: :stone_age | :bronze_age
 
-  @doc "True at the Stone Age size cap — growth stops quietly, food still accrues."
+  @doc """
+  Food needed to grow FROM this size to size + 1 in the Stone Age
+  (arity-1 shorthand for `threshold/2` with `:stone_age` — every
+  existing Stone Age caller keeps working unchanged). `nil` at the
+  Stone Age cap (size 4).
+  """
+  @spec threshold(pos_integer()) :: pos_integer() | nil
+  def threshold(size), do: threshold(size, :stone_age)
+
+  @doc """
+  Food needed to grow FROM this size to size + 1, age-aware (story
+  903): the Bronze Age raises the size cap from 4 to 6 — `50` for
+  4->5, `60` for 5->6, continuing the Stone Age's own clean +10 curve
+  (`.code_my_spec/knowledge/stone_age_yields.md`). `nil` once a Stone
+  Age city hits 4 or a Bronze Age city hits 6.
+  """
+  @spec threshold(pos_integer(), age()) :: pos_integer() | nil
+  def threshold(1, _age), do: 20
+  def threshold(2, _age), do: 30
+  def threshold(3, _age), do: 40
+  def threshold(4, :bronze_age), do: 50
+  def threshold(5, :bronze_age), do: 60
+  def threshold(_capped, _age), do: nil
+
+  @doc "True at the Stone Age size cap (arity-1 shorthand for `capped?/2` with `:stone_age`)."
   @spec capped?(pos_integer()) :: boolean()
-  def capped?(size), do: size >= 4
+  def capped?(size), do: capped?(size, :stone_age)
+
+  @doc """
+  True at `age`'s own size cap (story 903: 4 in the Stone Age, 6 in
+  the Bronze Age) — growth stops quietly, food still accrues.
+  """
+  @spec capped?(pos_integer(), age()) :: boolean()
+  def capped?(size, :bronze_age), do: size >= 6
+  def capped?(size, :stone_age), do: size >= 4
+
+  @doc """
+  Apply at most one growth to `city` if its banked food has reached
+  threshold, at the Stone Age cap (arity-3 shorthand for `grow/4` with
+  `:stone_age` — every existing Stone Age caller keeps working
+  unchanged). See `grow/4` for the full behavior.
+  """
+  @spec grow(city(), [city()], World.t()) :: city()
+  def grow(city, all_cities, world), do: grow(city, all_cities, world, :stone_age)
 
   @doc """
   Apply at most one growth to `city` if its banked food has reached
@@ -159,11 +296,13 @@ defmodule BrokenOaths.Game.Yields do
   is available. A no-op below threshold, at the cap, or exactly at
   threshold with nothing left to claim/work (size and food still
   advance; territory/worked_tiles simply don't gain anything that
-  turn).
+  turn). `age` (story 903) decides whether the cap is 4 (Stone Age) or
+  6 (Bronze Age) — `Research.age/1` over the city's OWNER, not the city
+  itself, since a city has no age of its own.
   """
-  @spec grow(city(), [city()], World.t()) :: city()
-  def grow(city, all_cities, world) do
-    case threshold(city.size) do
+  @spec grow(city(), [city()], World.t(), age()) :: city()
+  def grow(city, all_cities, world, age) do
+    case threshold(city.size, age) do
       nil ->
         city
 
@@ -241,19 +380,33 @@ defmodule BrokenOaths.Game.Yields do
   # Deterministic tiebreak keys
   # -------------------------------------------------------------------
 
+  # Both keys fold in the tile's bonus resource (story 905, criterion
+  # 7650: "a city works its resource tile first") on top of raw
+  # terrain — a resource tile's own additive bonus can only ever raise
+  # its score, never lower a plain tile's, so ties still resolve the
+  # same deterministic way whether or not either candidate happens to
+  # carry one.
   defp growth_key(world, center_tile, tile_id) do
-    yield = tile_yield(Regions.terrain(world, tile_id))
+    yield = candidate_yield(world, tile_id)
 
     {-growth_score(yield), -yield.food, ring_distance(world, center_tile, tile_id),
      compass_bucket(world, center_tile, tile_id), tile_id}
   end
 
   defp assignment_key(world, center_tile, tile_id) do
-    yield = tile_yield(Regions.terrain(world, tile_id))
+    yield = candidate_yield(world, tile_id)
 
     {-assignment_score(yield), ring_distance(world, center_tile, tile_id),
      compass_bucket(world, center_tile, tile_id), tile_id}
   end
+
+  defp candidate_yield(world, tile_id) do
+    terrain = Regions.terrain(world, tile_id)
+    add_yield(tile_yield(terrain), resource_bonus(Resources.at(world, tile_id)))
+  end
+
+  defp add_yield(%{food: f1, production: p1}, %{food: f2, production: p2}),
+    do: %{food: f1 + f2, production: p1 + p2}
 
   # Unfiltered mesh-hop BFS distance — candidates are always within a
   # handful of rings of `from` (a Stone Age city tops out at size 4),

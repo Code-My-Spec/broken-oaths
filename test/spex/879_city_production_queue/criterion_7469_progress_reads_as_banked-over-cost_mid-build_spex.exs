@@ -42,8 +42,16 @@ defmodule BrokenOathsSpex.Story879.Criterion7469Spex do
         {:ok, context}
       end
 
-      then_ "the current production reads Warrior 25/40 with a progress bar", context do
-        assert has_element?(context.play_live, "[data-test='city-production-current']", "25/40")
+      # 26, not a flat 25 (5 turns * flat-base-5): a freshly founded
+      # size-1 city already works its center plus one assigned tile from
+      # turn zero (story 878/880's `persist_found_city!/3`), and within
+      # this scenario's 5 turns the city also grows to size 2, which
+      # auto-assigns a second worked tile the same way founding does
+      # (`Yields.pick_worked_tile/2`). Four turns bank the flat-5 rate
+      # before growth lands, the fifth turn banks flat-5 plus the new
+      # tile's +1 production: 4*5 + 6 = 26.
+      then_ "the current production reads Warrior 26/40 with a progress bar", context do
+        assert has_element?(context.play_live, "[data-test='city-production-current']", "26/40")
         assert has_element?(context.play_live, "[data-test='city-production-current']", "Warrior")
         assert has_element?(context.play_live, "[data-test='city-production-progress']")
         {:ok, context}

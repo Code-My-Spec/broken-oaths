@@ -81,7 +81,11 @@ defmodule BrokenOaths.Worlds.Generator do
       cond do
         pentagon? -> :mountains
         elevation >= 0.88 -> :mountains
-        elevation >= 0.74 -> :hills
+        # Hills band widened 0.74 -> 0.60 (QA issue 9ccba1be): 6-octave fBm
+        # concentrates near 0.5, so the original [0.74, 0.88) band produced
+        # hills at ~0% of land, starving Sheep/Stone resources. 0.60 yields
+        # ~8-13% of land as hills across seeds, keeping mountains untouched.
+        elevation >= 0.60 -> :hills
         true -> :flat
       end
 

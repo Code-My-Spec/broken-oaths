@@ -108,6 +108,28 @@ defmodule BrokenOaths.Game.ImprovementTest do
     assert paused.builder_unit_id == nil
   end
 
+  describe "duration (story 902, Mining's 3-turn unlock)" do
+    test "duration is nil by default — WorldServer resolves it explicitly at build-start" do
+      world = WorldsFixtures.world_fixture()
+      {:ok, improvement} = %Improvement{} |> Improvement.changeset(valid_attrs(world)) |> Repo.insert()
+      assert improvement.duration == nil
+    end
+
+    test "duration can be set to a research-resolved override" do
+      world = WorldsFixtures.world_fixture()
+      attrs = Map.merge(valid_attrs(world), %{kind: :mine, duration: 3})
+      {:ok, improvement} = %Improvement{} |> Improvement.changeset(attrs) |> Repo.insert()
+      assert improvement.duration == 3
+    end
+
+    test "duration must be positive" do
+      world = WorldsFixtures.world_fixture()
+      changeset = Improvement.changeset(%Improvement{}, Map.put(valid_attrs(world), :duration, 0))
+      refute changeset.valid?
+      assert %{duration: ["must be greater than 0"]} = errors_on(changeset)
+    end
+  end
+
   describe "duration/1" do
     test "matches the story 882 yield table" do
       assert Improvement.duration(:farm) == 3

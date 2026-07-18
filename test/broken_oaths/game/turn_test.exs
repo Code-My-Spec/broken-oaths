@@ -1,6 +1,7 @@
 defmodule BrokenOaths.Game.TurnTest do
   use ExUnit.Case, async: true
 
+  alias BrokenOaths.Game.Research
   alias BrokenOaths.Game.Turn
   alias BrokenOaths.Game.Visibility
   alias BrokenOaths.Worlds.Regions
@@ -280,7 +281,10 @@ defmodule BrokenOaths.Game.TurnTest do
     end
 
     test "a fully blocked city keeps its item queued without losing banked production" do
-      land_neighbors = world() |> Regions.adjacent_tiles(1) |> Enum.filter(&(Regions.tile_class(world(), &1) == :land))
+      land_neighbors =
+        world()
+        |> Regions.adjacent_tiles(1)
+        |> Enum.filter(&(Regions.tile_class(world(), &1) == :land))
 
       blockers =
         [1 | land_neighbors]
@@ -301,7 +305,15 @@ defmodule BrokenOaths.Game.TurnTest do
   describe "tick/1 improvement progress" do
     test "advances progress when the declared builder is still on the tile" do
       worker = unit(1, tile: 100, type: :worker)
-      improvement = %{tile_id: 100, kind: :farm, progress: 1, status: :building, builder_unit_id: 1}
+
+      improvement = %{
+        tile_id: 100,
+        kind: :farm,
+        progress: 1,
+        status: :building,
+        builder_unit_id: 1
+      }
+
       state = %{base_state(%{1 => worker}) | improvements: %{100 => improvement}}
 
       {new_state, _events} = Turn.tick(state)
@@ -312,7 +324,15 @@ defmodule BrokenOaths.Game.TurnTest do
 
     test "completes once progress reaches the kind's duration, clearing the builder" do
       worker = unit(1, tile: 100, type: :worker)
-      improvement = %{tile_id: 100, kind: :road, progress: 1, status: :building, builder_unit_id: 1}
+
+      improvement = %{
+        tile_id: 100,
+        kind: :road,
+        progress: 1,
+        status: :building,
+        builder_unit_id: 1
+      }
+
       state = %{base_state(%{1 => worker}) | improvements: %{100 => improvement}}
 
       {new_state, _events} = Turn.tick(state)
@@ -322,11 +342,63 @@ defmodule BrokenOaths.Game.TurnTest do
       assert new_state.improvements[100].builder_unit_id == nil
     end
 
+    # Story 902, criterion 7628 — `improvement.duration`, when present,
+    # overrides `Improvement.duration(kind)` (`WorldServer.
+    # persist_start_improvement!/3` is what actually resolves it from
+    # research; here we only need to prove `Turn` HONORS it).
+    test "a stored :duration overrides the kind's base duration" do
+      worker = unit(1, tile: 100, type: :worker)
+
+      improvement = %{
+        tile_id: 100,
+        kind: :mine,
+        progress: 2,
+        status: :building,
+        duration: 3,
+        builder_unit_id: 1
+      }
+
+      state = %{base_state(%{1 => worker}) | improvements: %{100 => improvement}}
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.improvements[100].status == :complete
+      assert new_state.improvements[100].progress == 3
+      assert new_state.improvements[100].builder_unit_id == nil
+    end
+
+    test "no :duration key falls back to the kind's base — the mine still needs 5" do
+      worker = unit(1, tile: 100, type: :worker)
+
+      improvement = %{
+        tile_id: 100,
+        kind: :mine,
+        progress: 3,
+        status: :building,
+        builder_unit_id: 1
+      }
+
+      state = %{base_state(%{1 => worker}) | improvements: %{100 => improvement}}
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.improvements[100].status == :building
+      assert new_state.improvements[100].progress == 4
+    end
+
     test "a builder that moves away this tick freezes progress and clears the builder" do
       [target | _] = Regions.adjacent_tiles(world(), 100)
       worker = unit(1, tile: 100, type: :worker, max_movement: 2)
       order = %{kind: :move, path: [target], status: :pending}
-      improvement = %{tile_id: 100, kind: :mine, progress: 2, status: :building, builder_unit_id: 1}
+
+      improvement = %{
+        tile_id: 100,
+        kind: :mine,
+        progress: 2,
+        status: :building,
+        builder_unit_id: 1
+      }
+
       state = %{base_state(%{1 => worker}, %{1 => order}) | improvements: %{100 => improvement}}
 
       {new_state, _events} = Turn.tick(state)
@@ -336,7 +408,14 @@ defmodule BrokenOaths.Game.TurnTest do
     end
 
     test "no builder present leaves progress untouched" do
-      improvement = %{tile_id: 100, kind: :mine, progress: 3, status: :building, builder_unit_id: nil}
+      improvement = %{
+        tile_id: 100,
+        kind: :mine,
+        progress: 3,
+        status: :building,
+        builder_unit_id: nil
+      }
+
       state = %{base_state(%{}) | improvements: %{100 => improvement}}
 
       {new_state, _events} = Turn.tick(state)
@@ -345,7 +424,14 @@ defmodule BrokenOaths.Game.TurnTest do
     end
 
     test "a complete improvement never advances further" do
-      improvement = %{tile_id: 100, kind: :farm, progress: 3, status: :complete, builder_unit_id: nil}
+      improvement = %{
+        tile_id: 100,
+        kind: :farm,
+        progress: 3,
+        status: :complete,
+        builder_unit_id: nil
+      }
+
       state = %{base_state(%{}) | improvements: %{100 => improvement}}
 
       {new_state, _events} = Turn.tick(state)
@@ -429,6 +515,92 @@ defmodule BrokenOaths.Game.TurnTest do
       {new_state, _events} = Turn.tick(state)
 
       assert new_state.units[1].hp == 100
+    end
+  end
+
+  describe "tick/1 science accrual (story 902)" do
+    defp research_state(city, player_research) do
+      %{base_state(%{}) | cities: %{1 => city}}
+      |> Map.put(:players, %{1 => %{id: 1, user_id: 1, region_id: 0, gold: 50}})
+      |> Map.put(:player_research, %{1 => player_research})
+    end
+
+    test "banks 2 science per population point toward current_research" do
+      c = city(1, tile: 1, size: 3)
+      state = research_state(c, %{Research.new() | current_research: :pottery})
+
+      {new_state, _events} = Turn.tick(state)
+
+      # size 3 * 2 science/pop = 6 banked toward pottery.
+      assert Research.banked(new_state.player_research[1], :pottery) == 6
+    end
+
+    test "a player with no current_research banks nothing" do
+      c = city(1, tile: 1, size: 4)
+      state = research_state(c, Research.new())
+
+      {new_state, events} = Turn.tick(state)
+
+      assert new_state.player_research[1] == Research.new()
+      refute Enum.any?(events, &match?({:tech_completed, _, _}, &1))
+    end
+
+    test "auto-completes a tech the instant its cost is banked, and clears current_research" do
+      c = city(1, tile: 1, size: 4)
+      pr = %{Research.new() | current_research: :pottery} |> Research.accrue(42)
+      state = research_state(c, pr)
+
+      {new_state, events} = Turn.tick(state)
+
+      completed = new_state.player_research[1]
+      assert :pottery in completed.completed_techs
+      assert completed.current_research == nil
+      assert {:tech_completed, 1, :pottery} in events
+    end
+
+    test "a tech below cost keeps banking without completing" do
+      c = city(1, tile: 1, size: 1)
+      pr = %{Research.new() | current_research: :bronze_working}
+      state = research_state(c, pr)
+
+      {new_state, events} = Turn.tick(state)
+
+      not_yet = new_state.player_research[1]
+      assert Research.banked(not_yet, :bronze_working) == 2
+      assert not_yet.current_research == :bronze_working
+      refute Enum.any?(events, &match?({:tech_completed, _, _}, &1))
+    end
+
+    test "each player accrues independently against their own cities' population" do
+      city_a = city(1, tile: 1, player_id: 1, size: 2)
+      city_b = city(2, tile: 10, player_id: 2, size: 4)
+      state = %{base_state(%{}) | cities: %{1 => city_a, 2 => city_b}}
+
+      state =
+        state
+        |> Map.put(:players, %{
+          1 => %{id: 1, user_id: 1, region_id: 0, gold: 50},
+          2 => %{id: 2, user_id: 2, region_id: 1, gold: 50}
+        })
+        |> Map.put(:player_research, %{
+          1 => %{Research.new() | current_research: :mining},
+          2 => %{Research.new() | current_research: :mining}
+        })
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert Research.banked(new_state.player_research[1], :mining) == 4
+      assert Research.banked(new_state.player_research[2], :mining) == 8
+    end
+
+    test "a player missing from player_research entirely is treated as a fresh, unstarted player" do
+      c = city(1, tile: 1, size: 2)
+      state = %{base_state(%{}) | cities: %{1 => c}}
+      state = Map.put(state, :players, %{1 => %{id: 1, user_id: 1, region_id: 0, gold: 50}})
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.player_research[1] == Research.new()
     end
   end
 end

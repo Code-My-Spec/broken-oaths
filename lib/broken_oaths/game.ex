@@ -243,8 +243,7 @@ defmodule BrokenOaths.Game do
   """
   @spec propose_alliance(map(), map(), map()) ::
           :ok
-          | {:error,
-             :not_a_player | :already_proposed | :already_allied | Ecto.Changeset.t()}
+          | {:error, :not_a_player | :already_proposed | :already_allied | Ecto.Changeset.t()}
   def propose_alliance(world, user, other_user),
     do: WorldServer.call(world, {:propose_alliance, user, other_user})
 
@@ -423,4 +422,61 @@ defmodule BrokenOaths.Game do
   @spec set_camp_hp_for_test(map(), term(), non_neg_integer()) :: :ok
   def set_camp_hp_for_test(world, camp_id, hp),
     do: WorldServer.call(world, {:set_camp_hp_for_test, camp_id, hp})
+
+  # -------------------------------------------------------------------
+  # Research (story 902)
+  # -------------------------------------------------------------------
+
+  @doc """
+  The Stone Age tech catalog: `%{tech => %{cost:, unlock:}}` — every
+  tech's science cost and unlock description, unrelated to any single
+  world (`BrokenOaths.Game.Research.catalog/0`). What a future
+  TechPanel lists.
+  """
+  @spec tech_catalog() :: map()
+  def tech_catalog, do: BrokenOaths.Game.Research.catalog()
+
+  @doc """
+  `user`'s research state in `world` (story 902): `%{completed_techs:,
+  current_research:, banked_science:, progress:, science_per_turn:}`,
+  or `nil` if `user` hasn't joined `world` — `progress` is
+  `%{tech:, banked:, cost:}` for `current_research`, or `nil` with
+  nothing selected (see `BrokenOaths.Game.Research.progress/1`).
+  `science_per_turn` is `2 * population` summed over every one of
+  `user`'s cities, right now (`BrokenOaths.Game.Research.science_per_turn/1`).
+  `banked_science` and `completed_techs` are both keyed/valued by tech
+  atom (`:animal_husbandry | :pottery | :mining | :bronze_working`).
+  """
+  @spec player_research(map(), map()) :: map() | nil
+  def player_research(world, user), do: WorldServer.call(world, {:player_research, user})
+
+  @doc """
+  Select `tech` as `user`'s `current_research` in `world`, retaining
+  whatever science was already banked toward it
+  (`BrokenOaths.Game.Research.set_research/2`). Refuses an unknown tech
+  or one already completed. Persists immediately, like
+  `rename_city/4` — no turn boundary required.
+  """
+  @spec set_research(map(), map(), atom()) ::
+          :ok | {:error, :not_a_player | :invalid_tech | :already_completed}
+  def set_research(world, user, tech), do: WorldServer.call(world, {:set_research, user, tech})
+
+  # -------------------------------------------------------------------
+  # Progress panel (story 904)
+  # -------------------------------------------------------------------
+
+  @doc """
+  `user`'s lifetime combat totals in `world` (story 904): `%{
+  barbarians_killed:, camps_destroyed:}`, or `nil` if `user` hasn't
+  joined `world` — the two running counts a `BrokenOaths.Game.Player`
+  row itself has to carry (unlike cities founded, which is just
+  `length(player_cities/2)`; no city is ever deleted in this
+  codebase). Bumped alongside the gold a barbarian bounty or a camp's
+  destroy-reward already pays (`attack/4`, `attack_camp/4`, and
+  `Turn`'s own barbarian-initiated exchanges), so this always stays in
+  lockstep with `gold/2`.
+  """
+  @spec player_stats(map(), map()) ::
+          %{barbarians_killed: non_neg_integer(), camps_destroyed: non_neg_integer()} | nil
+  def player_stats(world, user), do: WorldServer.call(world, {:player_stats, user})
 end

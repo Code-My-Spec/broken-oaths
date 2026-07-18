@@ -64,14 +64,20 @@ defmodule BrokenOaths.Game.CityTest do
     assert %{name: ["can't be blank"]} = errors_on(changeset)
   end
 
-  test "size must be within the Stone Age range of 1 to 4" do
+  test "size must be within 1 to 6 — the Bronze Age's own cap (story 903), not just the Stone Age's 4" do
     changeset = City.changeset(%City{}, %{valid_attrs() | size: 0})
     refute changeset.valid?
     assert %{size: ["must be greater than or equal to 1"]} = errors_on(changeset)
 
-    changeset = City.changeset(%City{}, %{valid_attrs() | size: 5})
+    changeset = City.changeset(%City{}, %{valid_attrs() | size: 7})
     refute changeset.valid?
-    assert %{size: ["must be less than or equal to 4"]} = errors_on(changeset)
+    assert %{size: ["must be less than or equal to 6"]} = errors_on(changeset)
+
+    changeset = City.changeset(%City{}, %{valid_attrs() | size: 5})
+    assert changeset.valid?
+
+    changeset = City.changeset(%City{}, %{valid_attrs() | size: 6})
+    assert changeset.valid?
   end
 
   test "food cannot be negative" do
@@ -101,6 +107,20 @@ defmodule BrokenOaths.Game.CityTest do
 
     {:error, changeset} = %City{} |> City.changeset(dup_attrs) |> Repo.insert()
     assert %{world_id: ["has already been taken"]} = errors_on(changeset)
+  end
+
+  describe "has_granary (story 902)" do
+    test "defaults to false" do
+      {:ok, city} = %City{} |> City.changeset(valid_attrs()) |> Repo.insert()
+      assert city.has_granary == false
+    end
+
+    test "can be set to true once the Granary buildable completes" do
+      changeset = City.changeset(%City{}, Map.put(valid_attrs(), :has_granary, true))
+      assert changeset.valid?
+      {:ok, city} = Repo.insert(changeset)
+      assert city.has_granary == true
+    end
   end
 
   test "a city's production_items preload as an empty list until items are queued" do

@@ -3,8 +3,10 @@ defmodule BrokenOaths.Game.ProductionItem do
   One entry in a city's production queue — what's being built, how much
   production is banked toward it, and its total cost. The lowest-id
   item for a city is the current (head) item; `BrokenOaths.Game.Production`
-  accrues into it each turn and, once `banked >= cost`, resolves it into
-  a spawned unit.
+  accrues into it each turn and, once `banked >= cost`, resolves it —
+  into a spawned unit for `:settler`/`:worker`/`:warrior`, or (story
+  902) into the city's own `has_granary` flag flipping for `:granary`,
+  a BUILDING with no unit/tile to land on.
 
   Reordering the queue is free (story 879): items carry an explicit
   `position` (lowest = current/head), appended at max+1 and swapped by
@@ -17,7 +19,7 @@ defmodule BrokenOaths.Game.ProductionItem do
 
   alias BrokenOaths.Game.City
 
-  @type item_type :: :settler | :worker | :warrior
+  @type item_type :: :settler | :worker | :warrior | :granary | :bronze_spearman
 
   @type t :: %__MODULE__{
           id: integer() | nil,
@@ -31,7 +33,7 @@ defmodule BrokenOaths.Game.ProductionItem do
         }
 
   schema "game_production_items" do
-    field :type, Ecto.Enum, values: [:settler, :worker, :warrior]
+    field :type, Ecto.Enum, values: [:settler, :worker, :warrior, :granary, :bronze_spearman]
     field :banked, :integer, default: 0
     field :position, :integer
     field :cost, :integer

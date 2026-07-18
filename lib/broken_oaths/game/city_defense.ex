@@ -18,7 +18,7 @@ defmodule BrokenOaths.Game.CityDefense do
   (`defensive_strength/2`). Civilians (`:settler`, `:worker`) shelter
   on the tile for free: `garrison/2` finds every unit standing there,
   but `military_garrison/2` (and therefore the defense total) only
-  ever counts `:lord`/`:warrior`.
+  ever counts `:lord`/`:warrior`/`:bronze_spearman` (story 903).
 
   ## Garrison stacking (the one stacking exception in the game)
 
@@ -119,7 +119,7 @@ defmodule BrokenOaths.Game.CityDefense do
         }
   @type refusal :: :out_of_movement | :not_adjacent | :own_city
 
-  @military_types [:lord, :warrior]
+  @military_types [:lord, :warrior, :bronze_spearman]
 
   @max_hp 100
   @base_defense 20
@@ -154,7 +154,7 @@ defmodule BrokenOaths.Game.CityDefense do
   @spec approach_range() :: pos_integer()
   def approach_range, do: @approach_range
 
-  @doc "Whether `unit` is a combat-capable (garrison-eligible) type — `:lord` or `:warrior`."
+  @doc "Whether `unit` is a combat-capable (garrison-eligible) type — `:lord`, `:warrior`, or `:bronze_spearman` (story 903)."
   @spec military?(unit()) :: boolean()
   def military?(%{type: type}), do: type in @military_types
 

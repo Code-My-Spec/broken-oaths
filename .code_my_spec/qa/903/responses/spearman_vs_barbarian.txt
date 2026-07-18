@@ -1,0 +1,5 @@
+ id | type | hp | max_hp 
+----+------+----+--------
+(0 rows)
+
+spearman survived at 47/120 hp; barbarian_warrior id 380 no longer present in game_units (destroyed)

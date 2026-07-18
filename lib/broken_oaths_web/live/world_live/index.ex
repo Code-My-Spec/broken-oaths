@@ -38,9 +38,14 @@ defmodule BrokenOathsWeb.WorldLive.Index do
     <div class="container mx-auto p-8 max-w-5xl">
       <div class="flex justify-between items-center mb-8">
         <h1 class="text-3xl font-bold">Hex Worlds</h1>
-        <button phx-click="new_world" class="btn btn-primary">
-          <.icon name="hero-plus" class="w-5 h-5" /> New World
-        </button>
+        <div class="flex gap-2">
+          <.link navigate={~p"/worlds/new"} class="btn btn-outline" data-test="new-world-link">
+            <.icon name="hero-adjustments-horizontal" class="w-5 h-5" /> New World (density options)
+          </.link>
+          <button phx-click="new_world" class="btn btn-primary">
+            <.icon name="hero-plus" class="w-5 h-5" /> New World
+          </button>
+        </div>
       </div>
 
       <div :if={@worlds == []} class="text-center py-20 opacity-50">

@@ -1,7 +1,8 @@
 defmodule BrokenOaths.Game.Unit do
   @moduledoc """
   A unit on the board — type (lord/settler/warrior/worker/barbarian
-  warrior), owner, tile id, hp, movement points.
+  warrior/bronze spearman, story 903), owner, tile id, hp, movement
+  points.
 
   `player_id` is nullable: a barbarian warrior (`type: :barbarian_warrior`,
   spawned by `BrokenOaths.Game.Camps`, story 892) has no owning player —
@@ -32,7 +33,7 @@ defmodule BrokenOaths.Game.Unit do
   alias BrokenOaths.Game.Player
   alias BrokenOaths.Worlds.World
 
-  @type unit_type :: :lord | :settler | :warrior | :worker | :barbarian_warrior
+  @type unit_type :: :lord | :settler | :warrior | :worker | :barbarian_warrior | :bronze_spearman
 
   @type t :: %__MODULE__{
           id: integer() | nil,
@@ -53,7 +54,8 @@ defmodule BrokenOaths.Game.Unit do
         }
 
   schema "game_units" do
-    field :type, Ecto.Enum, values: [:lord, :settler, :warrior, :worker, :barbarian_warrior]
+    field :type, Ecto.Enum,
+      values: [:lord, :settler, :warrior, :worker, :barbarian_warrior, :bronze_spearman]
     field :tile_id, :integer
     field :hp, :integer
     field :max_hp, :integer

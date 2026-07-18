@@ -26,19 +26,38 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
     * `:assignable_tiles` - territory tiles Play has already filtered
       to "not the center, not already worked, workable terrain" — this
       component has no world/terrain access to compute that itself
+    * `:player_research` - the city owner's research state (`Game.
+      player_research/2`'s shape), used ONLY to gate the Build
+      catalog — `Research.granary_enabled?/1` (story 902) and
+      `Research.age/1 == :bronze_age` (story 903). `nil`/missing reads
+      as "nothing unlocked yet", the same posture a fresh player's
+      `Research.new/0` would produce.
 
-  The production catalog's costs and the size-1 Settler guard are read
-  straight from `BrokenOaths.Game.Production` (a pure, dependency-free
-  core module) rather than duplicated here — one source of truth for
-  what's buildable and what it costs.
+  The production catalog is dynamic, not a fixed compile-time list
+  (QA issue 846e0c96 — Bronze Spearman never appeared in the Build UI
+  because the catalog was hardcoded to Settler/Worker/Warrior and
+  never extended): `Production.available_items/1` decides which TYPES
+  are worth offering at all, reading the identical `opts`
+  (`granary_available?`, `bronze_age?`) `Production.can_queue?/3`
+  itself reads, so this component can never offer — or hide — a
+  buildable the `queue_production` command would disagree with. Each
+  offered type's cost and its remaining `disabled?` state (the size-1
+  Settler guard, an already-built Granary) are still read straight
+  from `BrokenOaths.Game.Production` (a pure, dependency-free core
+  module) rather than duplicated here — one source of truth for what's
+  buildable and what it costs. `Research` is likewise read directly
+  (also pure/dependency-free) to resolve `player_research` into those
+  `opts` — this stays within the "reads pure core modules directly"
+  latitude `Production`/`CityDefense` already establish; the
+  component still never round-trips through the stateful
+  `BrokenOaths.Game` context itself.
   """
 
   use BrokenOathsWeb, :live_component
 
   alias BrokenOaths.Game.CityDefense
   alias BrokenOaths.Game.Production
-
-  @catalog [:settler, :worker, :warrior]
+  alias BrokenOaths.Game.Research
 
   def render(%{city: nil} = assigns) do
     ~H"""
@@ -47,10 +66,13 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
   end
 
   def render(assigns) do
+    production_opts = production_opts(Map.get(assigns, :player_research))
+
     assigns =
       assigns
       |> assign(:assignable_tiles, Map.get(assigns, :assignable_tiles, []))
-      |> assign(:catalog, @catalog)
+      |> assign(:production_opts, production_opts)
+      |> assign(:catalog, Production.available_items(production_opts))
 
     ~H"""
     <div id={@id} data-test="city-panel" class="card bg-base-200 shadow-sm w-72">
@@ -74,7 +96,12 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
 
         <div class="divider my-0 text-xs opacity-60">Build</div>
         <div class="flex flex-col gap-1">
-          <.catalog_option :for={type <- @catalog} type={type} city={@city} />
+          <.catalog_option
+            :for={type <- @catalog}
+            type={type}
+            city={@city}
+            production_opts={@production_opts}
+          />
         </div>
 
         <div :if={length(@city.queue) > 1} class="divider my-0 text-xs opacity-60">Queue</div>
@@ -166,9 +193,10 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
 
   attr :type, :atom, required: true
   attr :city, :map, required: true
+  attr :production_opts, :list, required: true
 
   defp catalog_option(assigns) do
-    disabled? = Production.can_queue?(assigns.city, assigns.type) != :ok
+    disabled? = Production.can_queue?(assigns.city, assigns.type, assigns.production_opts) != :ok
     assigns = assign(assigns, disabled?: disabled?, cost: Production.cost(assigns.type))
 
     ~H"""
@@ -279,7 +307,23 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
   defp food_label(nil), do: "Capped"
   defp food_label(threshold), do: threshold
 
+  # Resolves `player_research` into the `opts` both `Production.
+  # available_items/1` (which types to OFFER) and `Production.
+  # can_queue?/3` (whether an offered type is currently `disabled?`)
+  # read — `nil`/missing reads as "nothing unlocked", same as a fresh
+  # `Research.new/0` player.
+  defp production_opts(nil), do: []
+
+  defp production_opts(player_research) do
+    [
+      granary_available?: Research.granary_enabled?(player_research),
+      bronze_age?: Research.age(player_research) == :bronze_age
+    ]
+  end
+
   defp catalog_label(:settler), do: "Settler"
   defp catalog_label(:worker), do: "Worker"
   defp catalog_label(:warrior), do: "Warrior"
+  defp catalog_label(:granary), do: "Granary"
+  defp catalog_label(:bronze_spearman), do: "Bronze Spearman"
 end

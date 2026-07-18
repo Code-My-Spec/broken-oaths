@@ -101,6 +101,11 @@ const GlobeRender = {
     camp: "/images/game/decor/camp.png",
     farm: "/images/game/decor/farm.png",
     mine: "/images/game/decor/mine.png",
+    pasture: "/images/game/decor/pasture.png",
+    cattle: "/images/game/decor/cattle.png",
+    sheep: "/images/game/decor/sheep.png",
+    wheat: "/images/game/decor/wheat.png",
+    stone: "/images/game/decor/stone.png",
   },
 
   TERRAIN_TEXTURES: ["grassland", "plains", "desert", "tundra", "snow", "ocean",

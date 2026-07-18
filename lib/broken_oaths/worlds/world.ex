@@ -19,6 +19,15 @@ defmodule BrokenOaths.Worlds.World do
   though `WorldServer.call(world, :advance_turn)` still steps it
   manually. Persisted so a paused QA world stays frozen across a
   server restart.
+
+  `resource_density` (story 905) is the same kind of launch-only
+  decision as `turn_seconds`: how thickly `BrokenOaths.Worlds.Resources`
+  scatters bonus resources (Cattle/Sheep/Wheat/Stone) across this
+  world's land tiles, one of `:sparse | :standard | :dense`. Only ever
+  set by `creation_changeset/2` — resource placement is a pure function
+  of `(seed, frequency, resource_density)`, so letting it drift after
+  worldgen has already been observed/cached would silently invalidate
+  every previously-computed resource map.
   """
 
   use Ecto.Schema
@@ -33,6 +42,7 @@ defmodule BrokenOaths.Worlds.World do
     field :turn_started_at, :utc_datetime
     field :turn_seconds, :integer, default: 60
     field :paused, :boolean, default: false
+    field :resource_density, Ecto.Enum, values: [:sparse, :standard, :dense], default: :standard
 
     timestamps()
   end
@@ -46,11 +56,11 @@ defmodule BrokenOaths.Worlds.World do
     |> unique_constraint(:seed)
   end
 
-  @doc "Changeset for a brand-new world — the only place `turn_seconds` may ever be set."
+  @doc "Changeset for a brand-new world — the only place `turn_seconds`/`resource_density` may ever be set."
   def creation_changeset(world, attrs) do
     world
     |> changeset(attrs)
-    |> cast(attrs, [:turn_seconds])
+    |> cast(attrs, [:turn_seconds, :resource_density])
     |> validate_number(:turn_seconds, greater_than: 0)
   end
 end

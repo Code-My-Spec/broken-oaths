@@ -41,6 +41,7 @@ defmodule BrokenOaths.Game.City do
           worked_tiles: [integer()],
           hp: non_neg_integer(),
           production_halted_until: integer() | nil,
+          has_granary: boolean(),
           world_id: integer() | nil,
           player_id: integer() | nil,
           world: World.t() | Ecto.Association.NotLoaded.t(),
@@ -63,6 +64,11 @@ defmodule BrokenOaths.Game.City do
     # pillaged; the turn number its frozen production resumes at).
     field :hp, :integer, default: @max_hp
     field :production_halted_until, :integer
+    # Story 902, criterion 7629 — flips once the Pottery-gated Granary
+    # buildable completes (`BrokenOaths.Game.Production`'s `:granary`
+    # catalog entry); read back by `BrokenOaths.Game.Yields.accrue_food/3`
+    # for its +2 food/turn bonus.
+    field :has_granary, :boolean, default: false
 
     belongs_to :world, World
     belongs_to :player, Player
@@ -84,11 +90,12 @@ defmodule BrokenOaths.Game.City do
       :territory,
       :worked_tiles,
       :hp,
-      :production_halted_until
+      :production_halted_until,
+      :has_granary
     ])
     |> validate_required([:world_id, :player_id, :tile_id, :name, :size, :food])
     |> validate_length(:name, min: 1, max: 100)
-    |> validate_number(:size, greater_than_or_equal_to: 1, less_than_or_equal_to: 4)
+    |> validate_number(:size, greater_than_or_equal_to: 1, less_than_or_equal_to: 6)
     |> validate_number(:food, greater_than_or_equal_to: 0)
     |> validate_number(:hp, greater_than_or_equal_to: 0, less_than_or_equal_to: @max_hp)
     |> validate_worked_tiles_within_size()

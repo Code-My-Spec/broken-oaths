@@ -18,6 +18,8 @@ defmodule BrokenOaths.Game.Player do
           region_id: integer() | nil,
           gold: integer(),
           joined_turn: integer() | nil,
+          barbarians_killed: integer(),
+          camps_destroyed: integer(),
           world_id: integer() | nil,
           user_id: integer() | nil,
           world: World.t() | Ecto.Association.NotLoaded.t(),
@@ -34,6 +36,15 @@ defmodule BrokenOaths.Game.Player do
     # — persisted so a WorldServer restart mid-wait can't lose the
     # lineage (QA issue 0b7e82cd). Nil when no heir is pending.
     field :heir_arrives_turn, :integer
+    # Story 904: the progress panel's career totals — running counts a
+    # WorldServer restart must not lose, same status as
+    # `heir_arrives_turn` above. Bumped alongside the gold bounty/reward
+    # they already ride next to (`WorldServer.pay_bounty_if_barbarian_fell/3`,
+    # `WorldServer.pay_shares/2`, `Turn.pay_bounty_if_barbarian_fell/3`) —
+    # never cast through `changeset/2` (system-incremented state, not a
+    # player-supplied attribute, same as `heir_arrives_turn`).
+    field :barbarians_killed, :integer, default: 0
+    field :camps_destroyed, :integer, default: 0
 
     belongs_to :world, World
     belongs_to :user, User

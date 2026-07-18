@@ -54,8 +54,10 @@ defmodule BrokenOaths.Game.WorldServer do
     KnownPlayer,
     Order,
     Player,
+    PlayerResearch,
     Production,
     ProductionItem,
+    Research,
     Spawner,
     Turn,
     Unit,
@@ -67,6 +69,7 @@ defmodule BrokenOaths.Game.WorldServer do
   alias BrokenOaths.Users
   alias BrokenOaths.Worlds
   alias BrokenOaths.Worlds.Regions
+  alias BrokenOaths.Worlds.Resources
   alias BrokenOaths.Worlds.World
 
   # Story 897: no more single process-wide cadence — every tick/catch-up/
@@ -191,6 +194,13 @@ defmodule BrokenOaths.Game.WorldServer do
   def handle_call({:gold, user}, _from, state) do
     gold = state |> find_player(user.id) |> gold_of()
     {:reply, gold, state}
+  end
+
+  # Story 904: the progress panel's career totals — `nil` for a user
+  # who hasn't joined this world, same "no player, no data" shape
+  # `player_research_summary/2` already returns.
+  def handle_call({:player_stats, user}, _from, state) do
+    {:reply, player_stats(state, user), state}
   end
 
   def handle_call({:queue_move, user, unit_id, to_tile}, _from, state) do
@@ -422,6 +432,29 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
+  # Story 902: `user`'s research state, plus their CURRENT science
+  # income (`Research.science_per_turn/1` over their own cities right
+  # now — not a value banked anywhere, so this is always freshly
+  # computed, never persisted).
+  def handle_call({:player_research, user}, _from, state) do
+    {:reply, player_research_summary(state, user), state}
+  end
+
+  # Story 902: selecting/switching research is not tick-state the way
+  # science accrual is — same non-tick-state status as
+  # `:propose_alliance`/`:accept_alliance` above, persisted immediately
+  # via its own changeset rather than waiting for a turn boundary.
+  def handle_call({:set_research, user, tech}, _from, state) do
+    case do_set_research(state, user, tech) do
+      {:ok, new_state} ->
+        broadcast(new_state.world.id, [:research_changed])
+        {:reply, :ok, new_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   # Ground truth, unfiltered — see `BrokenOathsSpex.Fixtures.list_camps/1`'s
   # doc for why this is a sanctioned exception to the fog-filtered board
   # surface (region math has the same status).
@@ -462,7 +495,12 @@ defmodule BrokenOaths.Game.WorldServer do
   def handle_call({:recharge_unit_for_test, unit_id}, _from, state) do
     unit = Map.fetch!(state.units, unit_id)
     Repo.update_all(from(u in Unit, where: u.id == ^unit_id), set: [movement: unit.max_movement])
-    new_state = %{state | units: Map.put(state.units, unit_id, %{unit | movement: unit.max_movement})}
+
+    new_state = %{
+      state
+      | units: Map.put(state.units, unit_id, %{unit | movement: unit.max_movement})
+    }
+
     {:reply, :ok, new_state}
   end
 
@@ -481,7 +519,15 @@ defmodule BrokenOaths.Game.WorldServer do
     stats = Production.unit_stats(:barbarian_warrior)
 
     {:ok, unit} =
-      insert_unit(state.world.id, nil, :barbarian_warrior, tile_id, stats.hp, stats.movement, camp_id)
+      insert_unit(
+        state.world.id,
+        nil,
+        :barbarian_warrior,
+        tile_id,
+        stats.hp,
+        stats.movement,
+        camp_id
+      )
 
     unit_data = unit_map(unit)
     new_state = %{state | units: Map.put(state.units, unit.id, unit_data)}
@@ -566,6 +612,7 @@ defmodule BrokenOaths.Game.WorldServer do
               kind: kind,
               progress: duration,
               status: :complete,
+              duration: duration,
               builder_unit_id: nil
             })
             |> Repo.insert()
@@ -579,6 +626,7 @@ defmodule BrokenOaths.Game.WorldServer do
               kind: kind,
               progress: duration,
               status: :complete,
+              duration: duration,
               builder_unit_id: nil
             })
             |> Repo.update()
@@ -653,7 +701,9 @@ defmodule BrokenOaths.Game.WorldServer do
         if id in other_camp_ids, do: {id, %{camp | destroyed_at: destroyed_at}}, else: {id, camp}
       end)
 
-    Repo.update_all(from(c in Camp, where: c.id in ^other_camp_ids), set: [destroyed_at: destroyed_at])
+    Repo.update_all(from(c in Camp, where: c.id in ^other_camp_ids),
+      set: [destroyed_at: destroyed_at]
+    )
 
     removed_unit_ids =
       for {id, u} <- state.units, Map.get(u, :camp_id) in other_camp_ids, do: id
@@ -847,7 +897,9 @@ defmodule BrokenOaths.Game.WorldServer do
     contacts = Discovery.new_contacts(ticked, known)
 
     Enum.reduce(contacts, {ticked, []}, fn {a, b}, {acc_state, acc_events} ->
-      updated_known = acc_state |> Map.get(:known_players, known) |> MapSet.put({a, b}) |> MapSet.put({b, a})
+      updated_known =
+        acc_state |> Map.get(:known_players, known) |> MapSet.put({a, b}) |> MapSet.put({b, a})
+
       new_acc_state = Map.put(acc_state, :known_players, updated_known)
       {new_acc_state, acc_events ++ discovery_events(acc_state, a, b)}
     end)
@@ -879,9 +931,12 @@ defmodule BrokenOaths.Game.WorldServer do
   defp approach_alert_events(old_state, new_state) do
     old_pairs = threat_pairs(old_state)
 
-    for {city_id, _unit_id} <- MapSet.difference(threat_pairs(new_state), old_pairs), uniq: true do
+    for {city_id, _unit_id} <- MapSet.difference(threat_pairs(new_state), old_pairs),
+        uniq: true do
       city = Map.fetch!(new_state.cities, city_id)
-      {:city_alert, owner_user_id(new_state, city.player_id), CityDefense.approach_alert(city.name)}
+
+      {:city_alert, owner_user_id(new_state, city.player_id),
+       CityDefense.approach_alert(city.name)}
     end
   end
 
@@ -918,10 +973,16 @@ defmodule BrokenOaths.Game.WorldServer do
     end)
   end
 
-  defp insert_spawned_unit!(world_id, %{player_id: player_id, type: type, tile_id: tile_id} = event) do
+  defp insert_spawned_unit!(
+         world_id,
+         %{player_id: player_id, type: type, tile_id: tile_id} = event
+       ) do
     stats = Production.unit_stats(type)
     camp_id = Map.get(event, :camp_id)
-    {:ok, unit} = insert_unit(world_id, player_id, type, tile_id, stats.hp, stats.movement, camp_id)
+
+    {:ok, unit} =
+      insert_unit(world_id, player_id, type, tile_id, stats.hp, stats.movement, camp_id)
+
     unit_map(unit)
   end
 
@@ -939,13 +1000,14 @@ defmodule BrokenOaths.Game.WorldServer do
   defp spawn_new_player(state, user) do
     with :ok <- check_membership_cap(user),
          {:ok, spawn} <- Spawner.spawn_player(state.world, taken_region_ids(state)) do
-      {player, units, explored} = persist_join!(state, user, spawn)
+      {player, units, explored, player_research} = persist_join!(state, user, spawn)
 
       new_state = %{
         state
         | players: Map.put(state.players, player.id, player),
           units: Enum.reduce(units, state.units, &Map.put(&2, &1.id, &1)),
-          explored: Map.put(state.explored, player.id, explored)
+          explored: Map.put(state.explored, player.id, explored),
+          player_research: Map.put(state.player_research, player.id, player_research)
       }
 
       {:ok, player, new_state}
@@ -1008,7 +1070,13 @@ defmodule BrokenOaths.Game.WorldServer do
           })
           |> Repo.insert()
 
-        {player_map(player), [unit_map(lord), unit_map(settler)], explored}
+        {:ok, player_research} =
+          %PlayerResearch{}
+          |> PlayerResearch.changeset(%{world_id: state.world.id, player_id: player.id})
+          |> Repo.insert()
+
+        {player_map(player), [unit_map(lord), unit_map(settler)], explored,
+         player_research_map(player_research)}
       end)
 
     result
@@ -1122,7 +1190,9 @@ defmodule BrokenOaths.Game.WorldServer do
     own_units_here =
       for {_id, u} <- state.units, u.tile_id == tile_id, u.player_id == player_id, do: u
 
-    case Enum.find(state.cities, fn {_id, c} -> c.tile_id == tile_id and c.player_id == player_id end) do
+    case Enum.find(state.cities, fn {_id, c} ->
+           c.tile_id == tile_id and c.player_id == player_id
+         end) do
       nil -> own_units_here != []
       _own_city -> not CityDefense.garrison_room?(mover, own_units_here)
     end
@@ -1249,10 +1319,13 @@ defmodule BrokenOaths.Game.WorldServer do
   # barbarian is always the defender there) and a barbarian-initiated
   # exchange resolved by `Turn`'s own AI loop through this same
   # function's sibling in that module (the barbarian is the attacker
-  # there, killed by the defender's counter-blow).
+  # there, killed by the defender's counter-blow). Story 904: the same
+  # kill also bumps the payee's own `barbarians_killed` career total —
+  # the progress panel's "Total barbarians killed" figure.
   defp pay_bounty_if_barbarian_fell(state, %{player_id: nil, hp: 0}, %{player_id: payee_id})
        when not is_nil(payee_id) do
-    update_in(state.players[payee_id].gold, &(&1 + BarbarianAI.bounty_gold()))
+    state = update_in(state.players[payee_id].gold, &(&1 + BarbarianAI.bounty_gold()))
+    update_in(state.players[payee_id].barbarians_killed, &(&1 + 1))
   end
 
   defp pay_bounty_if_barbarian_fell(state, _fallen, _other), do: state
@@ -1345,9 +1418,14 @@ defmodule BrokenOaths.Game.WorldServer do
     %{state | camps: Map.put(state.camps, camp.id, camp)}
   end
 
+  # Story 904: every contributor paid a reward share also gets their
+  # own `camps_destroyed` career total bumped — the same "credit
+  # everyone who struck it, not just the killing blow" philosophy
+  # `Cooperation.split_bounty/3` already applies to the gold itself.
   defp pay_shares(state, shares) do
     Enum.reduce(shares, state, fn {player_id, gold}, acc ->
-      update_in(acc.players[player_id].gold, &(&1 + gold))
+      acc = update_in(acc.players[player_id].gold, &(&1 + gold))
+      update_in(acc.players[player_id].camps_destroyed, &(&1 + 1))
     end)
   end
 
@@ -1381,7 +1459,11 @@ defmodule BrokenOaths.Game.WorldServer do
         case CityDefense.validate_attack(attacker, city, adjacent_tile_ids) do
           :ok ->
             {result, new_state} = resolve_city_attack(state, attacker, city)
-            alert = {:city_alert, owner_user_id(state, city.player_id), CityDefense.under_attack_alert(city.name)}
+
+            alert =
+              {:city_alert, owner_user_id(state, city.player_id),
+               CityDefense.under_attack_alert(city.name)}
+
             {:ok, result, new_state, alert}
 
           {:error, reason} ->
@@ -1470,7 +1552,9 @@ defmodule BrokenOaths.Game.WorldServer do
             {:error, reason}
 
           :ok ->
-            first_founding? = not Enum.any?(state.cities, fn {_id, c} -> c.player_id == player.id end)
+            first_founding? =
+              not Enum.any?(state.cities, fn {_id, c} -> c.player_id == player.id end)
+
             {:ok, city} = persist_found_city!(state, player, unit)
 
             new_state = %{
@@ -1514,7 +1598,9 @@ defmodule BrokenOaths.Game.WorldServer do
 
     seed = {state.world.seed, city_tile_id}
 
-    tiles = Camps.place_wilderness(state.world, city_tile_id, home_region, explored, occupied, seed)
+    tiles =
+      Camps.place_wilderness(state.world, city_tile_id, home_region, explored, occupied, seed)
+
     camps = Enum.map(tiles, &persist_camp!(state.world.id, &1))
 
     %{state | camps: Enum.reduce(camps, Map.get(state, :camps, %{}), &Map.put(&2, &1.id, &1))}
@@ -1523,7 +1609,12 @@ defmodule BrokenOaths.Game.WorldServer do
   defp persist_camp!(world_id, tile_id) do
     {:ok, camp} =
       %Camp{}
-      |> Camp.changeset(%{world_id: world_id, tile_id: tile_id, hp: Camp.max_hp(), spawn_counter: 0})
+      |> Camp.changeset(%{
+        world_id: world_id,
+        tile_id: tile_id,
+        hp: Camp.max_hp(),
+        spawn_counter: 0
+      })
       |> Repo.insert()
 
     camp_map(camp)
@@ -1583,7 +1674,11 @@ defmodule BrokenOaths.Game.WorldServer do
   defp do_queue_production(state, user, city_id, type) do
     with {:ok, city} <- owned_city(state, user, city_id),
          {:ok, type} <- parse_item_type(type),
-         :ok <- Production.can_queue?(city, type) do
+         :ok <-
+           Production.can_queue?(city, type,
+             granary_available?: granary_available?(state, city),
+             bronze_age?: bronze_age?(state, city)
+           ) do
       next_position =
         city.queue |> Enum.map(&Map.get(&1, :position, 0)) |> Enum.max(fn -> 0 end) |> Kernel.+(1)
 
@@ -1662,10 +1757,15 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
-  defp parse_item_type(type) when type in [:settler, :worker, :warrior], do: {:ok, type}
+  defp parse_item_type(type)
+       when type in [:settler, :worker, :warrior, :granary, :bronze_spearman],
+       do: {:ok, type}
+
   defp parse_item_type("settler"), do: {:ok, :settler}
   defp parse_item_type("worker"), do: {:ok, :worker}
   defp parse_item_type("warrior"), do: {:ok, :warrior}
+  defp parse_item_type("granary"), do: {:ok, :granary}
+  defp parse_item_type("bronze_spearman"), do: {:ok, :bronze_spearman}
   defp parse_item_type(_other), do: {:error, :invalid_item}
 
   # -------------------------------------------------------------------
@@ -1740,7 +1840,7 @@ defmodule BrokenOaths.Game.WorldServer do
   defp do_start_improvement(state, user, unit_id, kind) do
     with {:ok, unit} <- owned_worker(state, user, unit_id),
          {:ok, kind} <- parse_kind(kind),
-         :ok <- validate_improvement_terrain(state.world, unit.tile_id, kind),
+         :ok <- validate_improvement_terrain(state, unit.tile_id, kind, unit.player_id),
          :ok <- validate_improvement_slot(state.improvements, unit.tile_id, kind) do
       improvement = persist_start_improvement!(state, unit, kind)
       {:ok, %{state | improvements: Map.put(state.improvements, unit.tile_id, improvement)}}
@@ -1758,18 +1858,40 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
-  defp parse_kind(kind) when kind in [:farm, :mine, :road], do: {:ok, kind}
+  defp parse_kind(kind) when kind in [:farm, :mine, :road, :pasture], do: {:ok, kind}
   defp parse_kind("farm"), do: {:ok, :farm}
   defp parse_kind("mine"), do: {:ok, :mine}
   defp parse_kind("road"), do: {:ok, :road}
+  defp parse_kind("pasture"), do: {:ok, :pasture}
   defp parse_kind(_other), do: {:error, :invalid_improvement}
 
-  defp validate_improvement_terrain(world, tile_id, kind) do
+  # Pasture (story 905) gates on the tile's RESOURCE
+  # (`Improvement.resource_allowed?/1` — Cattle/Sheep only) and the
+  # building worker's OWNER having researched Animal Husbandry
+  # (`Research.pasture_enabled?/1`), never on `Improvement.allowed?/2`'s
+  # terrain table — that table is Farm/Mine/Road's own gate only.
+  defp validate_improvement_terrain(state, tile_id, :pasture, player_id) do
     cond do
-      Regions.tile_class(world, tile_id) != :land ->
+      Regions.tile_class(state.world, tile_id) != :land ->
         {:error, :invalid_terrain}
 
-      not Improvement.allowed?(kind, Regions.terrain(world, tile_id)) ->
+      not Improvement.resource_allowed?(Resources.at(state.world, tile_id)) ->
+        {:error, :invalid_terrain}
+
+      not Research.pasture_enabled?(player_research_for(state, player_id)) ->
+        {:error, :invalid_terrain}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_improvement_terrain(state, tile_id, kind, _player_id) do
+    cond do
+      Regions.tile_class(state.world, tile_id) != :land ->
+        {:error, :invalid_terrain}
+
+      not Improvement.allowed?(kind, Regions.terrain(state.world, tile_id)) ->
         {:error, :invalid_terrain}
 
       true ->
@@ -1794,6 +1916,13 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
+  # A truly NEW improvement (no row yet on this tile) resolves its
+  # `duration` once, here, from the BUILDING WORKER'S OWNER's research
+  # (story 902, criterion 7628 — see `Improvement`'s own moduledoc,
+  # "Mining's 3-turn unlock") — a worker resuming an EXISTING row
+  # (interrupted, or pillaged-and-repairing) never re-resolves it, so a
+  # dig's target pace is fixed at build-start regardless of who later
+  # finishes it.
   defp persist_start_improvement!(state, unit, kind) do
     case Repo.get_by(Improvement, world_id: state.world.id, tile_id: unit.tile_id) do
       nil ->
@@ -1805,6 +1934,7 @@ defmodule BrokenOaths.Game.WorldServer do
             kind: kind,
             progress: 0,
             status: :building,
+            duration: improvement_duration(state, unit, kind),
             builder_unit_id: unit.id
           })
           |> Repo.insert()
@@ -1818,6 +1948,11 @@ defmodule BrokenOaths.Game.WorldServer do
         improvement_map(improvement)
     end
   end
+
+  defp improvement_duration(state, unit, :mine),
+    do: Research.mine_duration(player_research_for(state, unit.player_id))
+
+  defp improvement_duration(_state, _unit, kind), do: Improvement.duration(kind)
 
   # -------------------------------------------------------------------
   # Reads
@@ -1912,13 +2047,15 @@ defmodule BrokenOaths.Game.WorldServer do
       |> Enum.map(& &1.production)
       |> Enum.sum()
 
+    age = Research.age(player_research_for(state, city.player_id))
+
     %{
       id: city.id,
       name: city.name,
       tile_id: city.tile_id,
       size: city.size,
       food: city.food,
-      food_threshold: Yields.threshold(city.size),
+      food_threshold: Yields.threshold(city.size, age),
       production: Production.flat_base() + worked_production,
       queue: city.queue,
       territory: city.territory,
@@ -1961,7 +2098,8 @@ defmodule BrokenOaths.Game.WorldServer do
         Alliance
         |> where(
           [a],
-          a.world_id == ^state.world.id and (a.player_a_id == ^player.id or a.player_b_id == ^player.id)
+          a.world_id == ^state.world.id and
+            (a.player_a_id == ^player.id or a.player_b_id == ^player.id)
         )
         |> Repo.all()
         |> Enum.map(&format_alliance(state, &1, player.id))
@@ -1970,7 +2108,9 @@ defmodule BrokenOaths.Game.WorldServer do
 
   defp format_alliance(state, alliance, my_player_id) do
     other_player_id =
-      if alliance.player_a_id == my_player_id, do: alliance.player_b_id, else: alliance.player_a_id
+      if alliance.player_a_id == my_player_id,
+        do: alliance.player_b_id,
+        else: alliance.player_a_id
 
     other_player = Map.fetch!(state.players, other_player_id)
     other_user = Users.get_user!(other_player.user_id)
@@ -1988,7 +2128,8 @@ defmodule BrokenOaths.Game.WorldServer do
     with {:ok, player} <- fetch_player(state, user.id),
          {:ok, other_player} <- fetch_player(state, other_user.id),
          existing = find_alliance(state.world.id, player.id, other_player.id),
-         {:ok, changeset} <- Cooperation.propose(existing, state.world.id, player.id, other_player.id) do
+         {:ok, changeset} <-
+           Cooperation.propose(existing, state.world.id, player.id, other_player.id) do
       Repo.insert_or_update(changeset)
     end
   end
@@ -2000,6 +2141,77 @@ defmodule BrokenOaths.Game.WorldServer do
       Repo.update(changeset)
     end
   end
+
+  # -------------------------------------------------------------------
+  # Research (story 902)
+  # -------------------------------------------------------------------
+
+  defp player_research_summary(state, user) do
+    case find_player(state, user.id) do
+      nil ->
+        nil
+
+      player ->
+        pr = player_research_for(state, player.id)
+        cities = for {_id, city} <- state.cities, city.player_id == player.id, do: city
+
+        %{
+          completed_techs: pr.completed_techs,
+          current_research: pr.current_research,
+          banked_science: pr.banked_science,
+          progress: Research.progress(pr),
+          science_per_turn: Research.science_per_turn(cities)
+        }
+    end
+  end
+
+  # Story 904: `barbarians_killed`/`camps_destroyed` ride the player
+  # row directly (see `Player`'s own moduledoc) — no derivation needed,
+  # unlike `player_cities/2`'s "just count them" story for cities
+  # founded.
+  defp player_stats(state, user) do
+    case find_player(state, user.id) do
+      nil ->
+        nil
+
+      player ->
+        %{barbarians_killed: player.barbarians_killed, camps_destroyed: player.camps_destroyed}
+    end
+  end
+
+  # Upserts (QA issue 957f4e55) rather than a blind `update_all` — a
+  # player who joined before story 902 (or whose row is otherwise
+  # missing) gets a row created here instead of the write silently
+  # no-opping. `load_state/1`'s `backfill_player_research/3` already
+  # covers the common case at boot; this is the defensive backstop for
+  # any row still missing when a write actually happens.
+  defp do_set_research(state, user, tech) do
+    with {:ok, player} <- fetch_player(state, user.id),
+         {:ok, updated} <- Research.set_research(player_research_for(state, player.id), tech) do
+      upsert_player_research(state.world.id, player.id, updated)
+
+      {:ok, %{state | player_research: Map.put(state.player_research, player.id, updated)}}
+    end
+  end
+
+  # A player who joined before this state key existed (or whose row is
+  # somehow missing) is treated as `Research.new/0` — same defensive
+  # fallback `Turn.accrue_science/1` uses.
+  defp player_research_for(state, player_id),
+    do: Map.get(state.player_research, player_id, Research.new())
+
+  # Story 902, criterion 7629 — whether `city`'s OWNER has completed
+  # Pottery, the option `Production.can_queue?/3` needs to gate
+  # `:granary` on (`Production` itself never touches `Research`).
+  defp granary_available?(state, city),
+    do: Research.granary_enabled?(player_research_for(state, city.player_id))
+
+  # Story 903 — whether `city`'s OWNER is in the Bronze Age
+  # (`Research.age/1`), the option `Production.can_queue?/3` needs to
+  # gate `:bronze_spearman` on, same "Production never touches
+  # Research" split `granary_available?/2` already establishes.
+  defp bronze_age?(state, city),
+    do: Research.age(player_research_for(state, city.player_id)) == :bronze_age
 
   defp fetch_player(state, user_id) do
     case find_player(state, user_id) do
@@ -2020,7 +2232,9 @@ defmodule BrokenOaths.Game.WorldServer do
   # that same order regardless of which of the two is "me" here.
   defp find_alliance(world_id, player_a_id, player_b_id) do
     {lo, hi} =
-      if player_a_id <= player_b_id, do: {player_a_id, player_b_id}, else: {player_b_id, player_a_id}
+      if player_a_id <= player_b_id,
+        do: {player_a_id, player_b_id},
+        else: {player_b_id, player_a_id}
 
     Repo.get_by(Alliance, world_id: world_id, player_a_id: lo, player_b_id: hi)
   end
@@ -2070,7 +2284,9 @@ defmodule BrokenOaths.Game.WorldServer do
         state.camps
         |> Map.values()
         |> Enum.reject(&(!is_nil(&1.destroyed_at)))
-        |> Enum.filter(&(MapSet.member?(home, &1.tile_id) or MapSet.member?(explored, &1.tile_id)))
+        |> Enum.filter(
+          &(MapSet.member?(home, &1.tile_id) or MapSet.member?(explored, &1.tile_id))
+        )
         |> Enum.map(&format_camp(&1, state))
     end
   end
@@ -2132,6 +2348,12 @@ defmodule BrokenOaths.Game.WorldServer do
             Map.get(new_state, :known_players, MapSet.new())
           )
 
+          persist_player_research_changes(
+            new_state.world.id,
+            Map.get(old_state, :player_research, %{}),
+            Map.get(new_state, :player_research, %{})
+          )
+
         :stale ->
           Repo.rollback(:stale)
       end
@@ -2165,8 +2387,10 @@ defmodule BrokenOaths.Game.WorldServer do
   # "Rename city" above) — this only ever catches what the TICK itself
   # (or, since story 895, `do_attack_city/4`'s own immediate
   # resolution) changes: size, food, territory (growth), worked_tiles
-  # (a settler's pop cost, or a pillage, un-working a tile), and `hp`/
-  # `production_halted_until` (city combat — see `CityDefense`).
+  # (a settler's pop cost, or a pillage, un-working a tile), `hp`/
+  # `production_halted_until` (city combat — see `CityDefense`), and
+  # (story 902) `has_granary` — `Production.complete/3`'s own Granary
+  # branch flips it the same tick a Granary item finishes banking.
   defp persist_city_changes(old_cities, new_cities) do
     for {id, city} <- new_cities, Map.get(old_cities, id) != city do
       Repo.update_all(from(c in City, where: c.id == ^id),
@@ -2176,7 +2400,8 @@ defmodule BrokenOaths.Game.WorldServer do
           territory: city.territory,
           worked_tiles: city.worked_tiles,
           hp: city.hp,
-          production_halted_until: city.production_halted_until
+          production_halted_until: city.production_halted_until,
+          has_granary: Map.get(city, :has_granary, false)
         ]
       )
     end
@@ -2220,13 +2445,22 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
-  # Gold is the only mutable field on a player once joined — bounty
+  # Gold was the only mutable field on a player once joined — bounty
   # kills (story 893, criterion 7557) and camp-destroy rewards (story
-  # 894, criterion 7560) are the first things that ever change it after
-  # `spawn_new_player/2`'s initial 50.
+  # 894, criterion 7560) were the first things that ever changed it
+  # after `spawn_new_player/2`'s initial 50. Story 904 adds two more,
+  # riding the same diff-and-persist path: `barbarians_killed` (bumped
+  # alongside every bounty payout) and `camps_destroyed` (bumped
+  # alongside every reward-share payout, `pay_shares/2`).
   defp persist_player_changes(old_players, new_players) do
     for {id, player} <- new_players, Map.get(old_players, id) != player do
-      Repo.update_all(from(p in Player, where: p.id == ^id), set: [gold: player.gold])
+      Repo.update_all(from(p in Player, where: p.id == ^id),
+        set: [
+          gold: player.gold,
+          barbarians_killed: player.barbarians_killed,
+          camps_destroyed: player.camps_destroyed
+        ]
+      )
     end
   end
 
@@ -2266,15 +2500,24 @@ defmodule BrokenOaths.Game.WorldServer do
   # move, not a tick boundary).
   defp maybe_pillage_for_test(improvements, tile_id) do
     case Map.get(improvements, tile_id) do
-      nil -> improvements
-      %{status: :complete} = improvement -> Map.put(improvements, tile_id, Improvement.pillage(improvement))
-      improvement -> Map.put(improvements, tile_id, improvement)
+      nil ->
+        improvements
+
+      %{status: :complete} = improvement ->
+        Map.put(improvements, tile_id, Improvement.pillage(improvement))
+
+      improvement ->
+        Map.put(improvements, tile_id, improvement)
     end
   end
 
   defp persist_pillage_for_test(%{status: :complete} = existing, %{status: :pillaged} = pillaged) do
     existing
-    |> Improvement.changeset(%{status: pillaged.status, progress: pillaged.progress, builder_unit_id: nil})
+    |> Improvement.changeset(%{
+      status: pillaged.status,
+      progress: pillaged.progress,
+      builder_unit_id: nil
+    })
     |> Repo.update()
   end
 
@@ -2325,6 +2568,40 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
+  # Story 902: research state is created at join (`persist_join!/3`) or
+  # backfilled at boot (`backfill_player_research/3`), but this
+  # reconciles what the tick's own science-accrual phase advances
+  # (banked science, completion, `current_research` clearing) alongside
+  # whatever `do_set_research/3` already wrote immediately outside the
+  # tick. Upserts (QA issue 957f4e55) rather than a blind `update_all`
+  # so a still-missing row never silently swallows progress.
+  defp persist_player_research_changes(world_id, old_player_research, new_player_research) do
+    for {player_id, pr} <- new_player_research, Map.get(old_player_research, player_id) != pr do
+      upsert_player_research(world_id, player_id, pr)
+    end
+  end
+
+  # Shared upsert for both write paths above — `on_conflict: :replace`
+  # on the mutable fields keeps this a true upsert (insert when the row
+  # is missing, update when it isn't) while leaving `world_id`/`player_id`
+  # untouched on conflict, the same `{:replace, fields}` shape
+  # `BrokenOaths.Integrations.IntegrationRepository.upsert_integration/3`
+  # already uses for its own (user_id, provider) upsert.
+  defp upsert_player_research(world_id, player_id, pr) do
+    %PlayerResearch{}
+    |> PlayerResearch.changeset(%{
+      world_id: world_id,
+      player_id: player_id,
+      completed_techs: pr.completed_techs,
+      current_research: pr.current_research,
+      banked_science: stringify_banked_science(pr.banked_science)
+    })
+    |> Repo.insert(
+      on_conflict: {:replace, [:completed_techs, :current_research, :banked_science]},
+      conflict_target: [:world_id, :player_id]
+    )
+  end
+
   defp persist_world_turn(expected_turn, state) do
     {count, _} =
       Repo.update_all(
@@ -2363,8 +2640,39 @@ defmodule BrokenOaths.Game.WorldServer do
       # Story 899: every directional `{viewer_player_id, discovered_player_id}`
       # pair already recorded for this world — the baseline
       # `Discovery.new_contacts/2` diffs each tick's sightings against.
-      known_players: load_known_players(world.id)
+      known_players: load_known_players(world.id),
+      # Story 902: one `Research.player_research()` map per player,
+      # created at join (`persist_join!/3`) and advanced every tick by
+      # `Turn`'s own "science accrual" phase. Backfilled for any player
+      # who joined BEFORE story 902 shipped (QA issue 957f4e55) so
+      # `do_set_research/3`/`persist_player_research_changes/2` always
+      # have a row to upsert through, instead of silently losing
+      # progress every restart.
+      player_research: backfill_player_research(world, players, load_player_research(world.id))
     }
+  end
+
+  # A `game_player_research` row is only ever created at join
+  # (`persist_join!/3`) — any player who joined a world BEFORE story
+  # 902 shipped has none. Backfilled here with the same defaults
+  # `persist_join!/3` itself inserts, mirroring how `pending_heirs_from/1`
+  # re-derives its own state from a column that's always present.
+  # `on_conflict: :nothing` guards the same race `persist_known_player_changes/3`
+  # already guards against: a second WorldServer instance for this world
+  # booting concurrently.
+  defp backfill_player_research(world, players, player_research) do
+    Enum.reduce(players, player_research, fn {player_id, _player}, acc ->
+      if Map.has_key?(acc, player_id) do
+        acc
+      else
+        {:ok, pr} =
+          %PlayerResearch{}
+          |> PlayerResearch.changeset(%{world_id: world.id, player_id: player_id})
+          |> Repo.insert(on_conflict: :nothing, conflict_target: [:world_id, :player_id])
+
+        Map.put(acc, player_id, player_research_map(pr))
+      end
+    end)
   end
 
   defp pending_heirs_from(players) do
@@ -2436,13 +2744,21 @@ defmodule BrokenOaths.Game.WorldServer do
     |> MapSet.new()
   end
 
+  defp load_player_research(world_id) do
+    from(pr in PlayerResearch, where: pr.world_id == ^world_id)
+    |> Repo.all()
+    |> Map.new(&{&1.player_id, player_research_map(&1)})
+  end
+
   defp player_map(%Player{} = p),
     do: %{
       id: p.id,
       user_id: p.user_id,
       region_id: p.region_id,
       gold: p.gold,
-      heir_arrives_turn: p.heir_arrives_turn
+      heir_arrives_turn: p.heir_arrives_turn,
+      barbarians_killed: p.barbarians_killed,
+      camps_destroyed: p.camps_destroyed
     }
 
   defp unit_map(%Unit{} = u) do
@@ -2471,6 +2787,7 @@ defmodule BrokenOaths.Game.WorldServer do
       worked_tiles: c.worked_tiles,
       hp: c.hp,
       production_halted_until: c.production_halted_until,
+      has_granary: c.has_granary,
       queue: Enum.map(c.production_items, &queue_item_map/1)
     }
   end
@@ -2490,11 +2807,39 @@ defmodule BrokenOaths.Game.WorldServer do
       kind: i.kind,
       progress: i.progress,
       status: i.status,
+      duration: i.duration,
       builder_unit_id: i.builder_unit_id
     }
   end
 
   defp camp_map(%Camp{} = c) do
-    %{id: c.id, tile_id: c.tile_id, hp: c.hp, spawn_counter: c.spawn_counter, destroyed_at: c.destroyed_at}
+    %{
+      id: c.id,
+      tile_id: c.tile_id,
+      hp: c.hp,
+      spawn_counter: c.spawn_counter,
+      destroyed_at: c.destroyed_at
+    }
+  end
+
+  # Story 902: `PlayerResearch.banked_science` round-trips jsonb as a
+  # string-keyed map — this is the one place that converts it into the
+  # tech-atom-keyed map every `Research` function works with. Safe via
+  # `String.to_existing_atom/1` since every tech name is already a
+  # compile-time atom in `Research`'s own catalog.
+  defp player_research_map(%PlayerResearch{} = pr) do
+    %{
+      completed_techs: pr.completed_techs,
+      current_research: pr.current_research,
+      banked_science: atomize_banked_science(pr.banked_science)
+    }
+  end
+
+  defp atomize_banked_science(banked_science) do
+    Map.new(banked_science, fn {tech, amount} -> {String.to_existing_atom(tech), amount} end)
+  end
+
+  defp stringify_banked_science(banked_science) do
+    Map.new(banked_science, fn {tech, amount} -> {Atom.to_string(tech), amount} end)
   end
 end
