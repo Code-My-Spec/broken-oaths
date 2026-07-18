@@ -12,6 +12,13 @@ defmodule BrokenOaths.Worlds.World do
   `changeset/2` (`Worlds.update_world/2`) — a world's pace is a launch
   decision, not something that can drift out from under a game already
   in progress.
+
+  `paused` is a dev-only QA control flag (see
+  `BrokenOathsWeb.DevQaController` and `BrokenOaths.Game.WorldServer`'s
+  ticking doc) — a paused world's turn clock never advances on its own,
+  though `WorldServer.call(world, :advance_turn)` still steps it
+  manually. Persisted so a paused QA world stays frozen across a
+  server restart.
   """
 
   use Ecto.Schema
@@ -25,13 +32,14 @@ defmodule BrokenOaths.Worlds.World do
     field :turn, :integer, default: 0
     field :turn_started_at, :utc_datetime
     field :turn_seconds, :integer, default: 60
+    field :paused, :boolean, default: false
 
     timestamps()
   end
 
   def changeset(world, attrs) do
     world
-    |> cast(attrs, [:name, :seed, :frequency, :status, :turn, :turn_started_at])
+    |> cast(attrs, [:name, :seed, :frequency, :status, :turn, :turn_started_at, :paused])
     |> validate_required([:name, :seed])
     |> validate_number(:frequency, greater_than: 0, less_than_or_equal_to: 80)
     |> validate_number(:turn, greater_than_or_equal_to: 0)

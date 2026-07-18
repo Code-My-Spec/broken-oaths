@@ -110,6 +110,27 @@ defmodule BrokenOaths.Game do
   @doc "Run one deterministic turn tick — exactly what the 60s timer fires."
   def advance_turn(world), do: WorldServer.call(world, :advance_turn)
 
+  @doc """
+  Dev-only QA control surface (see `BrokenOathsWeb.DevQaController`):
+  freeze `world`'s turn clock — cancels any pending automatic tick and
+  persists `paused: true` so it stays frozen across a server restart.
+  `advance_turn/1` (the manual step) still works while paused.
+  """
+  @spec pause_ticks(map()) :: :ok
+  def pause_ticks(world), do: WorldServer.call(world, :pause_ticks)
+
+  @doc """
+  Dev-only QA control surface: resume `world`'s turn clock. Resets the
+  current turn's start time to now, so resuming never triggers a big
+  catch-up for time spent paused.
+  """
+  @spec resume_ticks(map()) :: :ok
+  def resume_ticks(world), do: WorldServer.call(world, :resume_ticks)
+
+  @doc "Dev-only QA control surface: whether `world`'s turn clock is currently paused."
+  @spec paused?(map()) :: boolean()
+  def paused?(world), do: WorldServer.call(world, :paused?)
+
   @doc "Stop and lazily-restart `world`'s server; state rehydrates from the DB."
   def restart_world_server(world), do: WorldServer.restart(world)
 
@@ -192,6 +213,55 @@ defmodule BrokenOaths.Game do
 
   @doc "All of `user`'s cities in `world` (see `BrokenOaths.Game.WorldServer` for the shape)."
   def player_cities(world, user), do: WorldServer.call(world, {:player_cities, user})
+
+  @doc """
+  Every civilization `user` has discovered in `world` (story 899):
+  `[%{user_id:, email:}]`. Permanent once recorded — unrelated to
+  current fog of war, see `BrokenOaths.Game.Discovery` and
+  `BrokenOaths.Game.KnownPlayer`.
+  """
+  def known_players(world, user), do: WorldServer.call(world, {:known_players, user})
+
+  @doc """
+  Every alliance (`:proposed` or `:accepted`) `user` is a party to in
+  `world` (story 901) — `[%{id:, status:, proposed_by_me?:,
+  other_user_id:, other_email:}]`, the OTHER party's identity resolved
+  for each row so `GameLive.AlliancePanel` never has to cross-reference
+  a raw `player_id` itself. See `BrokenOaths.Game.Alliance` and
+  `BrokenOaths.Game.Cooperation`'s propose/accept business rules —
+  cooperative bounty splitting on a shared barbarian kill never
+  requires one of these rows to exist (criterion 7624); an alliance is
+  purely the player-facing coordination signal this panel surfaces.
+  """
+  @spec alliances(map(), map()) :: [map()]
+  def alliances(world, user), do: WorldServer.call(world, {:alliances, user})
+
+  @doc """
+  Propose an alliance between `user` and `other_user` in `world` —
+  refused if either isn't a member, or a proposal/alliance between the
+  two already exists (`BrokenOaths.Game.Cooperation.propose/4`).
+  """
+  @spec propose_alliance(map(), map(), map()) ::
+          :ok
+          | {:error,
+             :not_a_player | :already_proposed | :already_allied | Ecto.Changeset.t()}
+  def propose_alliance(world, user, other_user),
+    do: WorldServer.call(world, {:propose_alliance, user, other_user})
+
+  @doc """
+  Accept `alliance_id`, a pending alliance `user` is the (non-proposing)
+  other party to (`BrokenOaths.Game.Cooperation.accept/2`).
+  """
+  @spec accept_alliance(map(), map(), term()) ::
+          :ok
+          | {:error,
+             :not_found
+             | :not_a_party
+             | :self_accept
+             | :already_accepted
+             | Ecto.Changeset.t()}
+  def accept_alliance(world, user, alliance_id),
+    do: WorldServer.call(world, {:accept_alliance, user, alliance_id})
 
   @doc """
   Every barbarian camp in `world`, unfiltered ground truth (never
@@ -320,4 +390,37 @@ defmodule BrokenOaths.Game do
         world,
         {:resolve_barbarian_attack_for_test, attacker_unit_id, target_unit_id}
       )
+
+  @doc """
+  Dev-only QA control surface: place a REAL player-owned unit
+  (`:warrior | :worker | :settler | :lord`) at `tile_id` with that
+  type's starting stats (`BrokenOaths.Game.Production.unit_stats/1`) —
+  see `BrokenOaths.Game.WorldServer`'s `:spawn_unit_for_test` handler
+  for the same documented, narrow-exception status
+  `spawn_barbarian_for_test/2` has. Returns the spawned unit's map
+  (`id`, `tile_id`, `hp`, ...).
+  """
+  @spec spawn_unit_for_test(map(), term(), atom(), term()) :: map()
+  def spawn_unit_for_test(world, player_id, type, tile_id),
+    do: WorldServer.call(world, {:spawn_unit_for_test, player_id, type, tile_id})
+
+  @doc """
+  Dev-only QA control surface: hard-delete `unit_id` outright — needed
+  to clear a camp's barbarian garrison without waiting for combat. See
+  `BrokenOaths.Game.WorldServer`'s `:remove_unit_for_test` handler for
+  the same documented, narrow-exception status.
+  """
+  @spec remove_unit_for_test(map(), term()) :: :ok
+  def remove_unit_for_test(world, unit_id),
+    do: WorldServer.call(world, {:remove_unit_for_test, unit_id})
+
+  @doc """
+  Dev-only QA control surface: set `camp_id`'s HP directly, bypassing
+  combat — see `BrokenOaths.Game.WorldServer`'s `:set_camp_hp_for_test`
+  handler for the same documented, narrow-exception status
+  `set_unit_hp_for_test/3` has.
+  """
+  @spec set_camp_hp_for_test(map(), term(), non_neg_integer()) :: :ok
+  def set_camp_hp_for_test(world, camp_id, hp),
+    do: WorldServer.call(world, {:set_camp_hp_for_test, camp_id, hp})
 end

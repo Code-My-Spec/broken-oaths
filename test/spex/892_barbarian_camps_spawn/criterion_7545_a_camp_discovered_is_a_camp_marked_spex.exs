@@ -18,11 +18,16 @@ defmodule BrokenOathsSpex.Story892.Criterion7545Spex do
   surface produces, the same technique criterion 7441 (story 875)
   established for orders into unexplored terrain.
 
-  Every turn advanced while marching re-pushes the whole board, so
-  "game:camps" is drained turn-by-turn (matching the latest snapshot,
-  not a stale one from turn 1) rather than asserted once after the
-  loop — the same staleness pitfall criterion 7442 documents for
-  "game:path".
+  `"game:camps"` is content-diffed against its last-pushed value (QA
+  issue dbcbd478): a turn (or a `queue_move`, which executes
+  immediately and broadcasts `:units_changed` on its own) only
+  re-pushes when the camp SET itself actually changed, unlike
+  "game:units"/"game:cities", which still push unconditionally on
+  every board refresh. `latest_camps/2` (not `assert_push_event`)
+  tracks the running snapshot turn-by-turn, falling back to the last
+  KNOWN state whenever a given march step produces no push at all —
+  the correct read now, since a quiet mailbox means the camp set
+  genuinely didn't change that step.
   """
 
   use BrokenOathsSpex.Case
@@ -73,7 +78,8 @@ defmodule BrokenOathsSpex.Story892.Criterion7545Spex do
          |> Map.put(:play_live, play_live)
          |> Map.put(:target_camp, target_camp)
          |> Map.put(:land_neighbor, land_neighbor)
-         |> Map.put(:scout, scout)}
+         |> Map.put(:scout, scout)
+         |> Map.put(:camps, initial_camps)}
       end
 
       when_ "the lord marches to the camp's doorstep", context do
@@ -88,7 +94,12 @@ defmodule BrokenOathsSpex.Story892.Criterion7545Spex do
           "to_point" => [x, y, z]
         })
 
-        assert_push_event(context.play_live, "game:camps", %{camps: camps_before})
+        # `queue_move` executes immediately and broadcasts
+        # `:units_changed`, but a plain move never changes the camp
+        # SET — content-diffed `push_camps/2` (QA issue dbcbd478)
+        # produces no push here, so the running snapshot is still
+        # `context.camps` unchanged.
+        camps_before = latest_camps(context.play_live, context.camps)
 
         scout_now = fn ->
           [u] =
@@ -105,7 +116,7 @@ defmodule BrokenOathsSpex.Story892.Criterion7545Spex do
               {:halt, {unit, camps}}
             else
               Fixtures.advance_turn(context.world)
-              assert_push_event(context.play_live, "game:camps", %{camps: new_camps}, 500)
+              new_camps = latest_camps(context.play_live, camps)
               {:cont, {scout_now.(), new_camps}}
             end
           end)

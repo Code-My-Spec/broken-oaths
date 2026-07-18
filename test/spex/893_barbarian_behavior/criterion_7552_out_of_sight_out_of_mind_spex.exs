@@ -26,6 +26,13 @@ defmodule BrokenOathsSpex.Story893.Criterion7552Spex do
   2 hexes — the same kind of documented judgment call criterion 7540
   (story 891) made for "game:combat"'s shape, since no story or spec
   doc gives roaming an exact radius.
+
+  Truth surface "game:camps" is content-diffed against its last-pushed
+  value (QA issue dbcbd478), so not every turn is guaranteed to
+  produce a push — `latest_camps/2` (not `assert_push_event`) tracks
+  the running snapshot, carrying the last-known state forward on a
+  quiet turn (which, by construction, means nothing about the camp/
+  warrior changed that turn).
   """
 
   use BrokenOathsSpex.Case
@@ -64,7 +71,8 @@ defmodule BrokenOathsSpex.Story893.Criterion7552Spex do
          |> Map.put(:city, city)
          |> Map.put(:camp_id, camp.id)
          |> Map.put(:camp_tile, camp.tile_id)
-         |> Map.put(:camp_warrior_baseline_ids, MapSet.new(camp.warriors, & &1.id))}
+         |> Map.put(:camp_warrior_baseline_ids, MapSet.new(camp.warriors, & &1.id))
+         |> Map.put(:camps, camps0)}
       end
 
       given_ "every player unit and city sits beyond the camp's 5-hex aggro range", context do
@@ -83,29 +91,29 @@ defmodule BrokenOathsSpex.Story893.Criterion7552Spex do
       end
 
       given_ "a barbarian warrior has spawned at the camp", context do
-        warrior =
-          Enum.reduce_while(1..12, nil, fn _turn, _acc ->
+        {warrior, camps} =
+          Enum.reduce_while(1..12, {nil, context.camps}, fn _turn, {_acc, camps} ->
             Fixtures.advance_turn(context.world)
-            assert_push_event(context.play_live, "game:camps", %{camps: camps}, 500)
+            camps = latest_camps(context.play_live, camps)
             camp = Enum.find(camps, &(&1.id == context.camp_id))
 
             new_warrior =
               Enum.find(camp.warriors, &(&1.id not in context.camp_warrior_baseline_ids))
 
-            if new_warrior, do: {:halt, new_warrior}, else: {:cont, nil}
+            if new_warrior, do: {:halt, {new_warrior, camps}}, else: {:cont, {nil, camps}}
           end)
 
-        {:ok, Map.put(context, :barbarian, warrior)}
+        {:ok, context |> Map.put(:barbarian, warrior) |> Map.put(:camps, camps)}
       end
 
       when_ "several more turn boundaries pass with nothing ever coming into range", context do
-        snapshots =
-          Enum.reduce(1..5, [], fn _turn, acc ->
+        {snapshots, _camps} =
+          Enum.reduce(1..5, {[], context.camps}, fn _turn, {acc, camps} ->
             Fixtures.advance_turn(context.world)
-            assert_push_event(context.play_live, "game:camps", %{camps: camps}, 500)
+            camps = latest_camps(context.play_live, camps)
             camp = Enum.find(camps, &(&1.id == context.camp_id))
             warrior = Enum.find(camp.warriors, &(&1.id == context.barbarian.id))
-            [warrior | acc]
+            {[warrior | acc], camps}
           end)
 
         {:ok, Map.put(context, :warrior_snapshots, Enum.reverse(snapshots))}

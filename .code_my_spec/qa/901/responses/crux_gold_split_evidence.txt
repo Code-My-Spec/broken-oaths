@@ -1,0 +1,45 @@
+Story 901 QA — Cooperative Barbarian Fighting — crux evidence
+World 3 "QA World (Multiplayer)", kept PAUSED throughout (turn 288, verified unchanged before/after).
+
+Baseline (before any attacks):
+  game_units:  id=376 player=11 tile=347 hp=100 movement=1 (warrior A)
+               id=377 player=12 tile=348 hp=100 movement=1 (warrior B)
+  game_camps:  id=47  world=3 tile=352 hp=40 destroyed_at=NULL
+  game_players: id=11 gold=50 | id=12 gold=50
+  game_alliances: id=1 world=3 proposer=11 status=accepted (pre-verified prior attempt)
+  barbarian_warrior count in world 3: 0
+
+Per-hit trace (unit_id 376 = Player A, unit_id 377 = Player B), attack pushed via
+h.pushEvent("attack", {unit_id, target_camp_id: 47}) against the live LiveView socket,
+movement recharged between A's hits via PATCH .../units/376 -d recharge=true (no turn
+boundary, no barbarian spawn risk):
+
+  Hit 1 (A, unit 376): camp hp 40 -> 30 | unit 376 hp unchanged 100 (camps never counter) | gold 11=50 12=50
+  Hit 2 (A, unit 376): camp hp 30 -> 20 | unit 376 hp unchanged 100                        | gold 11=50 12=50
+  Hit 3 (A, unit 376): camp hp 20 -> 10 | unit 376 hp unchanged 100                        | gold 11=50 12=50   <- A's cumulative damage = 30
+  [identity switch: log out A, log in B]
+  Hit 4 (B, unit 377): camp hp 10 -> 0  | destroyed_at set 2026-07-18 02:57:04             | gold 11=50->73 (+23) 12=50->57 (+7)  <- B's cumulative damage = 10
+
+Damage totals:  A = 30 (3 hits x 10 flat camp_damage)   B = 10 (1 hit x 10)
+Ratio:          A:B = 30:10 = 3:1  (75% : 25% of total 40 damage)
+Bounty:         flat 30 gold on camp destroy (Camps.destroy_reward/0)
+Observed split: A +23 gold, B +7 gold.  23 + 7 = 30 (full bounty accounted for, no leak).
+Proportionality check: A's share 23/30 = 76.7% vs A's damage share 75% — B's share 7/30 =
+23.3% vs B's damage share 25%. NOT a 50/50 split; tracks each player's damage contribution
+(largest-remainder rounding on an exact .5/.5 tie in the naive 22.5/7.5 split explains the
+23/7 vs a hypothetical 22/8 — either satisfies "proportional, not equal", and the sum is
+exact either way).
+
+Post-kill state:
+  game_camps id=47: hp=0, destroyed_at=2026-07-18 02:57:04
+  board_state.sh (both players, after reload): camp id 47 absent from the `camps` array
+    entirely (fog-filtered visible-camps list no longer includes a destroyed camp).
+  Tile 352 walkability: unit 377 successfully moved ONTO tile 352 via
+    h.pushEvent("queue_move", {unit_id: 377, to_point: <center of 352>}) — psql confirms
+    game_units.id=377 tile_id 348 -> 352, movement 1 -> 0. A destroyed camp's former tile
+    is ordinary, walkable land again (criterion 7616).
+
+World state unchanged/undrifted throughout: GET /dev/qa/worlds/3 -> {"id":3,"turn":288,
+"paused":true,"turn_seconds":60} identical before and after this entire session (no /step
+calls issued) — zero barbarian_warrior units in world 3 the whole time (no spawns to
+contaminate the damage/gold trace).

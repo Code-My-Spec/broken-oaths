@@ -40,14 +40,18 @@ defmodule BrokenOaths.Game.WorldServer do
   import Ecto.Query
 
   alias BrokenOaths.Game.{
+    Alliance,
     BarbarianAI,
     Camp,
     Camps,
     City,
     CityDefense,
     Combat,
+    Cooperation,
+    Discovery,
     Exploration,
     Improvement,
+    KnownPlayer,
     Order,
     Player,
     Production,
@@ -60,6 +64,7 @@ defmodule BrokenOaths.Game.WorldServer do
   }
 
   alias BrokenOaths.Repo
+  alias BrokenOaths.Users
   alias BrokenOaths.Worlds
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
@@ -137,9 +142,11 @@ defmodule BrokenOaths.Game.WorldServer do
     world = Worlds.get_world!(world.id)
 
     state = load_state(world) |> catch_up()
-    if auto_tick?(), do: schedule_tick(state.world.turn_seconds)
 
-    {:ok, state}
+    tick_timer =
+      if auto_tick?() and not state.world.paused, do: schedule_tick(state.world.turn_seconds)
+
+    {:ok, Map.put(state, :tick_timer, tick_timer)}
   end
 
   @impl true
@@ -368,6 +375,53 @@ defmodule BrokenOaths.Game.WorldServer do
     {:reply, player_cities(state, user), state}
   end
 
+  # Story 899: every civilization `user` has discovered in this world —
+  # permanent once recorded, unrelated to current fog of war (see
+  # `Discovery`'s and `KnownPlayer`'s docs). Ordered by `viewer_player_id`'s
+  # own directional `KnownPlayer` rows, not fog-filtered current
+  # visibility.
+  def handle_call({:known_players, user}, _from, state) do
+    {:reply, known_players(state, user), state}
+  end
+
+  # Story 901: every alliance `user` is a party to — reads straight from
+  # `Repo` rather than an in-memory `state` cache the way `known_players`
+  # does, since (unlike discovery) nothing on the tick hot-path ever
+  # needs to check alliance status — `Cooperation.split_bounty/3`
+  # explicitly does NOT gate on one (criterion 7624).
+  def handle_call({:alliances, user}, _from, state) do
+    {:reply, list_alliances(state, user), state}
+  end
+
+  # Builds (or updates, if a `:proposed` row already exists for this
+  # pair) an `Alliance` changeset via `Cooperation.propose/4` and
+  # persists it directly — an alliance is world-membership-scoped
+  # coordination state, not tick-state, so unlike a move/attack/build
+  # order this never touches `persist_tick/2` or the optimistic
+  # turn-guard those use.
+  def handle_call({:propose_alliance, user, other_user}, _from, state) do
+    case do_propose_alliance(state, user, other_user) do
+      {:ok, _alliance} ->
+        broadcast(state.world.id, [:alliances_changed])
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Same non-tick-state status as `:propose_alliance` above.
+  def handle_call({:accept_alliance, user, alliance_id}, _from, state) do
+    case do_accept_alliance(state, user, alliance_id) do
+      {:ok, _alliance} ->
+        broadcast(state.world.id, [:alliances_changed])
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   # Ground truth, unfiltered — see `BrokenOathsSpex.Fixtures.list_camps/1`'s
   # doc for why this is a sanctioned exception to the fog-filtered board
   # surface (region math has the same status).
@@ -432,6 +486,40 @@ defmodule BrokenOaths.Game.WorldServer do
     unit_data = unit_map(unit)
     new_state = %{state | units: Map.put(state.units, unit.id, unit_data)}
     {:reply, unit_data, new_state}
+  end
+
+  # Dev-only QA control surface (see `BrokenOathsWeb.DevQaController`):
+  # place a REAL player-owned unit at `tile_id` with `type`'s starting
+  # stats (`Production.unit_stats/1`) — mirrors `:spawn_barbarian_for_test`
+  # above, but owned by `player_id` instead of ownerless/camp-tied.
+  # Returns the spawned unit's map (`id`, `tile_id`, `hp`, ...).
+  def handle_call({:spawn_unit_for_test, player_id, type, tile_id}, _from, state) do
+    stats = Production.unit_stats(type)
+    {:ok, unit} = insert_unit(state.world.id, player_id, type, tile_id, stats.hp, stats.movement)
+
+    unit_data = unit_map(unit)
+    new_state = %{state | units: Map.put(state.units, unit.id, unit_data)}
+    {:reply, unit_data, new_state}
+  end
+
+  # Dev-only QA control surface: hard-delete `unit_id` outright (a
+  # player's unit or a barbarian) — needed to clear a camp's garrison
+  # without waiting for combat. Unlike `:clear_camp_warriors_for_test`
+  # (camp-scoped, clears every warrior tied to one camp), this targets
+  # exactly one unit by id.
+  def handle_call({:remove_unit_for_test, unit_id}, _from, state) do
+    Repo.delete_all(from(u in Unit, where: u.id == ^unit_id))
+    {:reply, :ok, %{state | units: Map.delete(state.units, unit_id)}}
+  end
+
+  # Dev-only QA control surface: set `camp_id`'s HP directly, bypassing
+  # combat entirely — same narrow, documented-bridge status as
+  # `:set_unit_hp_for_test` above.
+  def handle_call({:set_camp_hp_for_test, camp_id, hp}, _from, state) do
+    Repo.update_all(from(c in Camp, where: c.id == ^camp_id), set: [hp: hp])
+    camp = Map.fetch!(state.camps, camp_id)
+    new_state = %{state | camps: Map.put(state.camps, camp_id, %{camp | hp: hp})}
+    {:reply, :ok, new_state}
   end
 
   # Test-only: instantly relocate `unit_id` (any player's own unit) to
@@ -629,6 +717,35 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
+  # Dev-only QA control surface (see `BrokenOathsWeb.DevQaController`):
+  # freeze this world's turn clock. Cancels any pending `:tick` timer
+  # and persists `paused: true` so a restart mid-pause stays frozen —
+  # `catch_up/1` and `handle_info(:tick, ...)` below both check
+  # `state.world.paused` before ever advancing. `:advance_turn` (the
+  # manual step, right below) is a SEPARATE handler unaffected by this
+  # flag — pausing only stops the AUTOMATIC clock.
+  def handle_call(:pause_ticks, _from, state) do
+    cancel_tick_timer(state)
+    persist_paused(state.world.id, true)
+    new_state = %{state | world: %{state.world | paused: true}, tick_timer: nil}
+    {:reply, :ok, new_state}
+  end
+
+  # Resets `turn_started_at` to now — rather than leaving it however
+  # stale it went into the pause — so resuming does NOT trigger a big
+  # catch-up; the paused interval is deliberately never "owed" time.
+  def handle_call(:resume_ticks, _from, state) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    persist_resumed(state.world.id, now)
+    new_world = %{state.world | paused: false}
+    timer = if auto_tick?(), do: schedule_tick(new_world.turn_seconds)
+
+    new_state = %{state | world: new_world, turn_started_at: now, tick_timer: timer}
+    {:reply, :ok, new_state}
+  end
+
+  def handle_call(:paused?, _from, state), do: {:reply, state.world.paused, state}
+
   def handle_call(:advance_turn, _from, state) do
     {:reply, :ok, run_tick(state)}
   end
@@ -641,9 +758,12 @@ defmodule BrokenOaths.Game.WorldServer do
 
   @impl true
   def handle_info(:tick, state) do
-    new_state = run_tick(state)
-    schedule_tick(new_state.world.turn_seconds)
-    {:noreply, new_state}
+    if state.world.paused do
+      {:noreply, %{state | tick_timer: nil}}
+    else
+      new_state = run_tick(state)
+      {:noreply, %{new_state | tick_timer: schedule_tick(new_state.world.turn_seconds)}}
+    end
   end
 
   # -------------------------------------------------------------------
@@ -654,26 +774,53 @@ defmodule BrokenOaths.Game.WorldServer do
 
   defp schedule_tick(turn_seconds), do: Process.send_after(self(), :tick, turn_seconds * 1_000)
 
+  # Story: dev-only QA control surface — a paused world's boot-time
+  # dormancy catch-up must NEVER replay missed turns (checked first,
+  # independent of `auto_tick?/0`), so a paused QA world stays frozen
+  # across a server restart exactly like it was before the restart.
   defp catch_up(state) do
-    if auto_tick?() do
-      elapsed = DateTime.diff(DateTime.utc_now(), state.turn_started_at, :second)
-      run_missed(state, div(elapsed, state.world.turn_seconds))
-    else
-      state
+    cond do
+      state.world.paused ->
+        state
+
+      auto_tick?() ->
+        elapsed = DateTime.diff(DateTime.utc_now(), state.turn_started_at, :second)
+        run_missed(state, div(elapsed, state.world.turn_seconds))
+
+      true ->
+        state
     end
   end
 
   defp run_missed(state, missed) when missed <= 0, do: state
   defp run_missed(state, missed), do: run_missed(run_tick(state), missed - 1)
 
+  defp cancel_tick_timer(%{tick_timer: ref}) when is_reference(ref), do: Process.cancel_timer(ref)
+  defp cancel_tick_timer(_state), do: :ok
+
+  defp persist_paused(world_id, paused?) do
+    Repo.update_all(from(w in World, where: w.id == ^world_id), set: [paused: paused?])
+  end
+
+  defp persist_resumed(world_id, turn_started_at) do
+    Repo.update_all(from(w in World, where: w.id == ^world_id),
+      set: [paused: false, turn_started_at: turn_started_at]
+    )
+  end
+
   defp run_tick(state) do
     {ticked, events} = Turn.tick(state)
     {events, ticked} = materialize_spawns(events, ticked)
-    new_state = %{ticked | turn_started_at: DateTime.utc_now()}
+    ticked = %{ticked | turn_started_at: DateTime.utc_now()}
+    {new_state, discovery_events} = apply_discoveries(state, ticked)
 
     case persist_tick(state, new_state) do
       :ok ->
-        broadcast(new_state.world.id, events ++ approach_alert_events(state, new_state))
+        broadcast(
+          new_state.world.id,
+          events ++ discovery_events ++ approach_alert_events(state, new_state)
+        )
+
         new_state
 
       :stale ->
@@ -683,6 +830,39 @@ defmodule BrokenOaths.Game.WorldServer do
         # state and resync from the row instead of clobbering it.
         resync(state)
     end
+  end
+
+  # Story 899: first-contact detection is evaluated once per turn
+  # boundary — the same place every other cross-player/AI decision in
+  # this codebase resolves (heir succession, city alerts, barbarian AI).
+  # `Discovery.new_contacts/2` reports each NEW pair against the
+  # PRE-tick known set (`state.known_players`) using the POST-tick
+  # (`ticked`) unit/city positions — a unit that moved into sight THIS
+  # tick is what triggers it. Each contact folds both directions into
+  # `known_players` (discovery is mutual — see `KnownPlayer`'s doc) and
+  # produces one `{:discovery, user_id, message}` event per side,
+  # mirroring `:city_alert`'s player-scoped push shape.
+  defp apply_discoveries(state, ticked) do
+    known = Map.get(state, :known_players, MapSet.new())
+    contacts = Discovery.new_contacts(ticked, known)
+
+    Enum.reduce(contacts, {ticked, []}, fn {a, b}, {acc_state, acc_events} ->
+      updated_known = acc_state |> Map.get(:known_players, known) |> MapSet.put({a, b}) |> MapSet.put({b, a})
+      new_acc_state = Map.put(acc_state, :known_players, updated_known)
+      {new_acc_state, acc_events ++ discovery_events(acc_state, a, b)}
+    end)
+  end
+
+  defp discovery_events(state, player_a_id, player_b_id) do
+    user_a_id = Map.fetch!(state.players, player_a_id).user_id
+    user_b_id = Map.fetch!(state.players, player_b_id).user_id
+    email_a = Users.get_user!(user_a_id).email
+    email_b = Users.get_user!(user_b_id).email
+
+    [
+      {:discovery, user_a_id, "You have discovered #{email_b}'s civilization!"},
+      {:discovery, user_b_id, "#{email_a} has discovered your civilization!"}
+    ]
   end
 
   # Story 895: any foreign unit (barbarian, or per this story's own
@@ -1117,25 +1297,58 @@ defmodule BrokenOaths.Game.WorldServer do
 
     state =
       %{state | units: Map.put(state.units, attacker.id, new_attacker)}
-      |> apply_camp_damage(new_camp, attacker.player_id)
+      |> record_camp_damage(camp.id, attacker.player_id, dealt)
+      |> apply_camp_damage(new_camp)
 
     {%{damage_dealt: dealt, damage_taken: 0}, state}
   end
 
-  # Story 894, criterion 7560: 0 HP destroys the camp — `destroyed_at`
-  # stops `Camps.advance/2` from ever spawning again (already handled,
-  # story 892) and drops it from `visible_camps/2`'s fog-filtered
-  # surface; the destroying player's owner is paid `Camps.destroy_reward/0`.
-  # Orphaned warriors are untouched — they're separate `Unit` rows, not
-  # nested under the camp in `state.units` (criterion 7561).
-  defp apply_camp_damage(state, %{hp: 0} = camp, payee_id) do
-    destroyed = %{camp | destroyed_at: NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)}
-    state = %{state | camps: Map.put(state.camps, camp.id, destroyed)}
-    update_in(state.players[payee_id].gold, &(&1 + Camps.destroy_reward()))
+  # Story 901: every hit against a camp — from ANY player, not just
+  # whoever eventually lands the killing blow — accumulates in the
+  # in-memory damage ledger `split_bounty/2` (below) reads once the
+  # camp falls. Kept only in memory (`state.camp_contributions`), never
+  # persisted — same known, narrow limitation `WorldServer`'s own
+  # `pending_heirs` doc calls out for equally ephemeral cross-tick
+  # bookkeeping: a restart mid-siege loses the running tally (the
+  # camp's own HP, being a real persisted column, is unaffected).
+  defp record_camp_damage(state, camp_id, player_id, dealt) do
+    contributions =
+      Cooperation.record_damage(camp_contributions(state), camp_id, player_id, dealt)
+
+    Map.put(state, :camp_contributions, contributions)
   end
 
-  defp apply_camp_damage(state, camp, _payee_id) do
+  defp camp_contributions(state), do: Map.get(state, :camp_contributions, %{})
+
+  # Story 894/901, criterion 7560/7614/7615: 0 HP destroys the camp —
+  # `destroyed_at` stops `Camps.advance/2` from ever spawning again
+  # (already handled, story 892) and drops it from `visible_camps/2`'s
+  # fog-filtered surface. `Camps.destroy_reward/0` splits proportionally
+  # across every player who ever struck THIS camp
+  # (`Cooperation.split_bounty/3`, reading the ledger `record_camp_damage/3`
+  # built above) — a sole attacker's own 100% share is still the WHOLE
+  # reward, never a smaller "default" cut (criterion 7615). The ledger
+  # entry is forgotten immediately after: a camp is destroyed exactly
+  # once, and nothing else ever reads its history. Orphaned warriors are
+  # untouched — they're separate `Unit` rows, not nested under the camp
+  # in `state.units` (criterion 7561).
+  defp apply_camp_damage(state, %{hp: 0} = camp) do
+    destroyed = %{camp | destroyed_at: NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)}
+    shares = Cooperation.split_bounty(camp_contributions(state), camp.id, Camps.destroy_reward())
+
+    %{state | camps: Map.put(state.camps, camp.id, destroyed)}
+    |> pay_shares(shares)
+    |> Map.put(:camp_contributions, Cooperation.forget(camp_contributions(state), camp.id))
+  end
+
+  defp apply_camp_damage(state, camp) do
     %{state | camps: Map.put(state.camps, camp.id, camp)}
+  end
+
+  defp pay_shares(state, shares) do
+    Enum.reduce(shares, state, fn {player_id, gold}, acc ->
+      update_in(acc.players[player_id].gold, &(&1 + gold))
+    end)
   end
 
   # -------------------------------------------------------------------
@@ -1715,6 +1928,103 @@ defmodule BrokenOaths.Game.WorldServer do
     }
   end
 
+  # `%{user_id:, email:}` for every player `user` has discovered — the
+  # future `KnownPlayersPanel`'s own read, exposed here (not built
+  # there yet, story 899 scope) the same way `player_cities/2` was
+  # exposed well before `GameLive.CityPanel` consumed it.
+  defp known_players(state, user) do
+    case find_player(state, user.id) do
+      nil ->
+        []
+
+      player ->
+        known = Map.get(state, :known_players, MapSet.new())
+
+        for {viewer_id, discovered_id} <- known, viewer_id == player.id do
+          discovered_player = Map.fetch!(state.players, discovered_id)
+          discovered_user = Users.get_user!(discovered_player.user_id)
+          %{user_id: discovered_user.id, email: discovered_user.email}
+        end
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Alliances (story 901)
+  # -------------------------------------------------------------------
+
+  defp list_alliances(state, user) do
+    case find_player(state, user.id) do
+      nil ->
+        []
+
+      player ->
+        Alliance
+        |> where(
+          [a],
+          a.world_id == ^state.world.id and (a.player_a_id == ^player.id or a.player_b_id == ^player.id)
+        )
+        |> Repo.all()
+        |> Enum.map(&format_alliance(state, &1, player.id))
+    end
+  end
+
+  defp format_alliance(state, alliance, my_player_id) do
+    other_player_id =
+      if alliance.player_a_id == my_player_id, do: alliance.player_b_id, else: alliance.player_a_id
+
+    other_player = Map.fetch!(state.players, other_player_id)
+    other_user = Users.get_user!(other_player.user_id)
+
+    %{
+      id: alliance.id,
+      status: alliance.status,
+      proposed_by_me?: alliance.proposer_player_id == my_player_id,
+      other_user_id: other_user.id,
+      other_email: other_user.email
+    }
+  end
+
+  defp do_propose_alliance(state, user, other_user) do
+    with {:ok, player} <- fetch_player(state, user.id),
+         {:ok, other_player} <- fetch_player(state, other_user.id),
+         existing = find_alliance(state.world.id, player.id, other_player.id),
+         {:ok, changeset} <- Cooperation.propose(existing, state.world.id, player.id, other_player.id) do
+      Repo.insert_or_update(changeset)
+    end
+  end
+
+  defp do_accept_alliance(state, user, alliance_id) do
+    with {:ok, player} <- fetch_player(state, user.id),
+         {:ok, alliance} <- fetch_alliance(alliance_id),
+         {:ok, changeset} <- Cooperation.accept(alliance, player.id) do
+      Repo.update(changeset)
+    end
+  end
+
+  defp fetch_player(state, user_id) do
+    case find_player(state, user_id) do
+      nil -> {:error, :not_a_player}
+      player -> {:ok, player}
+    end
+  end
+
+  defp fetch_alliance(alliance_id) do
+    case Repo.get(Alliance, alliance_id) do
+      nil -> {:error, :not_found}
+      alliance -> {:ok, alliance}
+    end
+  end
+
+  # Same canonical (lowest id, highest id) pair `Alliance.changeset/2`
+  # itself normalizes to — reading it back requires the query to match
+  # that same order regardless of which of the two is "me" here.
+  defp find_alliance(world_id, player_a_id, player_b_id) do
+    {lo, hi} =
+      if player_a_id <= player_b_id, do: {player_a_id, player_b_id}, else: {player_b_id, player_a_id}
+
+    Repo.get_by(Alliance, world_id: world_id, player_a_id: lo, player_b_id: hi)
+  end
+
   defp tile_improvement_at(state, tile_id) do
     case Map.get(state.improvements, tile_id) do
       %{status: :complete, kind: kind} -> kind
@@ -1814,6 +2124,12 @@ defmodule BrokenOaths.Game.WorldServer do
             new_state.world.id,
             old_state.improvements,
             new_state.improvements
+          )
+
+          persist_known_player_changes(
+            new_state.world.id,
+            Map.get(old_state, :known_players, MapSet.new()),
+            Map.get(new_state, :known_players, MapSet.new())
           )
 
         :stale ->
@@ -1985,6 +2301,30 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
+  # Story 899: a permanent record once written (`KnownPlayer`'s own
+  # doc) — only ever INSERTED, never updated or removed. `on_conflict:
+  # :nothing` is the same defensive backstop `Player`'s unique indexes
+  # already are for the rest of this module: this WorldServer process
+  # is the single serialization point for `state.known_players`, so a
+  # genuine duplicate insert should never happen, but a second
+  # WorldServer instance for this world racing the same first-contact
+  # (see `run_tick/1`'s `:stale` handling) is the one scenario where it
+  # could.
+  defp persist_known_player_changes(world_id, old_known, new_known) do
+    for {viewer_id, discovered_id} <- MapSet.difference(new_known, old_known) do
+      %KnownPlayer{}
+      |> KnownPlayer.changeset(%{
+        world_id: world_id,
+        viewer_player_id: viewer_id,
+        discovered_player_id: discovered_id
+      })
+      |> Repo.insert(
+        on_conflict: :nothing,
+        conflict_target: [:world_id, :viewer_player_id, :discovered_player_id]
+      )
+    end
+  end
+
   defp persist_world_turn(expected_turn, state) do
     {count, _} =
       Repo.update_all(
@@ -2019,7 +2359,11 @@ defmodule BrokenOaths.Game.WorldServer do
       camps: load_camps(world.id),
       # Hydrated from game_players.heir_arrives_turn so a restart
       # mid-wait re-derives every pending heir (QA issue 0b7e82cd).
-      pending_heirs: pending_heirs_from(players)
+      pending_heirs: pending_heirs_from(players),
+      # Story 899: every directional `{viewer_player_id, discovered_player_id}`
+      # pair already recorded for this world — the baseline
+      # `Discovery.new_contacts/2` diffs each tick's sightings against.
+      known_players: load_known_players(world.id)
     }
   end
 
@@ -2081,6 +2425,15 @@ defmodule BrokenOaths.Game.WorldServer do
     from(c in Camp, where: c.world_id == ^world_id)
     |> Repo.all()
     |> Map.new(&{&1.id, camp_map(&1)})
+  end
+
+  defp load_known_players(world_id) do
+    from(k in KnownPlayer,
+      where: k.world_id == ^world_id,
+      select: {k.viewer_player_id, k.discovered_player_id}
+    )
+    |> Repo.all()
+    |> MapSet.new()
   end
 
   defp player_map(%Player{} = p),

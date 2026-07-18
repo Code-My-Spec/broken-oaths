@@ -1,0 +1,5 @@
+ id | player_id | tile_id | hp 
+----+-----------+---------+----
+(0 rows)
+
+no rows = confirmed dead/deleted for both

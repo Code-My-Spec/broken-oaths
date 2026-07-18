@@ -40,6 +40,13 @@ config :broken_oaths, :game_auto_tick, false
 # Tiny impostor textures keep texture tests fast
 config :broken_oaths, :texture_size, {128, 64}
 
+# Mirrors `config/dev.exs` — mounts the same dev-only routes (including
+# `BrokenOathsWeb.DevQaController`'s QA control surface) so
+# `router.ex`'s `Application.compile_env(:broken_oaths, :dev_routes)`
+# gate is actually exercisable by `ConnCase` tests. Still never set in
+# `config/prod.exs`, so the gate keeps the routes out of a prod build.
+config :broken_oaths, dev_routes: true
+
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
 

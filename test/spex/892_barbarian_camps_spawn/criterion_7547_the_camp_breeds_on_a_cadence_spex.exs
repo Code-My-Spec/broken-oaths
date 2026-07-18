@@ -19,9 +19,12 @@ defmodule BrokenOathsSpex.Story892.Criterion7547Spex do
   tolerate.
 
   Truth surface is the "game:camps" push (inferred shape, see the
-  Fixtures moduledoc for `list_camps/1`), drained turn-by-turn so each
-  snapshot reflects that turn's state rather than a stale backlog
-  entry (the same staleness pitfall criterion 7442 documents).
+  Fixtures moduledoc for `list_camps/1`). It is content-diffed against
+  its last-pushed value (QA issue dbcbd478), so not every turn is
+  guaranteed to produce one — `latest_camps/2` (not `assert_push_event`)
+  tracks the running snapshot, carrying the last-known warrior count
+  forward on a quiet turn (which, by construction, means the count
+  hasn't changed).
   """
 
   use BrokenOathsSpex.Case
@@ -57,24 +60,28 @@ defmodule BrokenOathsSpex.Story892.Criterion7547Spex do
          context
          |> Map.put(:play_live, play_live)
          |> Map.put(:camp_id, visible_camp.tile_id)
-         |> Map.put(:starting_warriors, length(visible_camp.warriors))}
+         |> Map.put(:starting_warriors, length(visible_camp.warriors))
+         |> Map.put(:camps, camps0)}
       end
 
       when_ "turns pass until the camp's warrior count first increases", context do
         {elapsed, marker} =
-          Enum.reduce_while(1..12, {0, %{warriors: List.duplicate(:seed, context.starting_warriors)}}, fn
-            _turn, {elapsed, last_marker} ->
+          Enum.reduce_while(
+            1..12,
+            {0, %{warriors: List.duplicate(:seed, context.starting_warriors)}, context.camps},
+            fn _turn, {elapsed, last_marker, camps} ->
               Fixtures.advance_turn(context.world)
-              assert_push_event(context.play_live, "game:camps", %{camps: camps}, 500)
+              camps = latest_camps(context.play_live, camps)
               marker = Enum.find(camps, &(&1.tile_id == context.camp_id))
               elapsed = elapsed + 1
 
               if length(marker.warriors) > length(last_marker.warriors) do
                 {:halt, {elapsed, marker}}
               else
-                {:cont, {elapsed, marker}}
+                {:cont, {elapsed, marker, camps}}
               end
-          end)
+            end
+          )
 
         {:ok, context |> Map.put(:turns_to_first_respawn, elapsed) |> Map.put(:marker_after, marker)}
       end

@@ -12,7 +12,8 @@ routes (`/`, `/worlds`, `/worlds/:id`, `/worlds/:id/{texture,airspace}.png`,
 auth pages), an authenticated live_session (`/users/settings`,
 `/accounts*`, `/integrations`), an authenticated OAuth controller scope
 (`/integrations/oauth/:provider`), and dev-only routes
-(`/dev/dashboard`, `/dev/mailbox`). Probed status codes: public routes
+(`/dev/dashboard`, `/dev/mailbox`, `/dev/qa/worlds/:id/*` — the QA
+control surface, see Tools Registry below). Probed status codes: public routes
 200; authenticated routes 302 → `/users/log-in`; `/health` and `/up`
 answer 200 from an endpoint plug ahead of the router (used by
 kamal-proxy and UptimeRobot in deployed envs).
@@ -56,6 +57,49 @@ There is no header/token auth surface in this app: authenticated routes
 use the session cookie, and the login POST requires a CSRF token — use
 Vibium for anything behind `require_authenticated_user` rather than
 scripting cookie jars.
+
+### curl (dev-only QA control surface — `BrokenOathsWeb.DevQaController`)
+
+Dev-gated (mounted only inside `router.ex`'s `dev_routes` compile_env
+block — same gate as LiveDashboard; never exists in a prod build), no
+auth, rooted at `/dev/qa/worlds/:id`. Lets a QA agent construct and
+control a live multiplayer scenario deterministically — most
+importantly, pause the turn clock so staged units never die to
+catch-up/AI before you act, then step turns on demand. See the
+"Deterministic multiplayer QA" recipe below.
+
+| Method | Path | Body params | What it does |
+|---|---|---|---|
+| GET    | `/dev/qa/worlds/:id`               | —                             | `{id, turn, turn_seconds, paused}` |
+| POST   | `/dev/qa/worlds/:id/pause`          | —                             | Freeze the turn clock |
+| POST   | `/dev/qa/worlds/:id/resume`         | —                             | Unfreeze the turn clock (resets the current turn's clock, no catch-up owed) |
+| POST   | `/dev/qa/worlds/:id/step`           | —                             | Advance exactly one turn — works even while paused |
+| POST   | `/dev/qa/worlds/:id/units`          | `player_id, type, tile_id`    | Spawn a player-owned unit (`type`: warrior/worker/settler/lord) |
+| POST   | `/dev/qa/worlds/:id/barbarians`     | `tile_id, camp_id?`           | Spawn a barbarian warrior (`camp_id` optional — ties it to a real camp's AI) |
+| PATCH  | `/dev/qa/worlds/:id/units/:unit_id` | `hp?, tile_id?, recharge?`    | Any combination: set HP, relocate, and/or recharge movement |
+| DELETE | `/dev/qa/worlds/:id/units/:unit_id` | —                             | Hard-delete a unit (e.g. clear a camp's garrison) |
+| PATCH  | `/dev/qa/worlds/:id/camps/:camp_id` | `hp`                          | Set a camp's HP directly |
+
+Example calls:
+
+    curl -X POST http://localhost:4050/dev/qa/worlds/1/pause
+    curl http://localhost:4050/dev/qa/worlds/1
+    curl -X POST http://localhost:4050/dev/qa/worlds/1/units \
+      -d player_id=3 -d type=warrior -d tile_id=120
+    curl -X POST http://localhost:4050/dev/qa/worlds/1/barbarians -d tile_id=121
+    curl -X PATCH http://localhost:4050/dev/qa/worlds/1/units/42 -d hp=10
+    curl -X PATCH http://localhost:4050/dev/qa/worlds/1/units/42 -d tile_id=121
+    curl -X DELETE http://localhost:4050/dev/qa/worlds/1/units/42
+    curl -X PATCH http://localhost:4050/dev/qa/worlds/1/camps/7 -d hp=1
+    curl -X POST http://localhost:4050/dev/qa/worlds/1/step
+    curl -X POST http://localhost:4050/dev/qa/worlds/1/resume
+
+`player_id`/`camp_id`/`unit_id` are the real DB ids — read them off a
+`GET /dev/qa/worlds/:id`-adjacent read (there's no listing endpoint
+here by design; find ids via the browser's own state pushes, or
+`psql broken_oaths_dev` for a one-off lookup) or capture them from a
+prior `POST .../units` / `POST .../barbarians` response, which returns
+the full spawned unit (`id`, `tile_id`, `hp`, ...).
 
 ### mix run (seeds and setup)
 
@@ -178,6 +222,43 @@ path allowlist (only `~/.cache`, `~/.npm`, `~/.mix`, etc. are). Run
 vibium commands with the sandbox disabled for this session (bash tool
 `dangerouslyDisableSandbox: true`) rather than retrying in-sandbox.
 Status: open (environmental, not an app bug).
+
+## Deterministic Multiplayer QA (pause → spawn/position/heal → step → assert)
+
+The live `WorldServer` runs a real wall-clock turn timer and barbarian
+AI — staged units can die to catch-up/AI before a tester acts unless
+the clock is frozen first. Recipe for any multiplayer flow (e.g. story
+901 cooperative combat / alliances):
+
+1. **Pause**: `curl -X POST .../dev/qa/worlds/:id/pause`. Confirm with
+   `curl .../dev/qa/worlds/:id` (`"paused": true`). Nothing on the
+   board changes on its own from here on — `advance_turn` (the `/step`
+   endpoint) is the ONLY thing that moves the clock.
+2. **Construct the scenario**: spawn player units for each account
+   under test (`POST .../units` — needs each account's `player_id`,
+   read via the browser session or `psql`), spawn/position barbarians
+   (`POST .../barbarians`), heal or relocate existing units (`PATCH
+   .../units/:unit_id`), clear an inconvenient garrison (`DELETE
+   .../units/:unit_id`), or pre-damage a camp (`PATCH
+   .../camps/:camp_id`). Every write here is synchronous and
+   immediately visible — no turn boundary required.
+3. **Drive the actual UI/browser flow under test** (Vibium) against
+   this now-fully-controlled board — click, attack, propose/accept
+   alliances, whatever the story needs.
+4. **Step turns on demand**: `POST .../dev/qa/worlds/:id/step` advances
+   exactly one turn (production accrual, barbarian AI, healing, etc.)
+   without waiting out the real `turn_seconds` countdown, and without
+   any of the OTHER missed-time replay a real dormant boot would do.
+   Repeat as needed between assertions.
+5. **Resume** (`POST .../dev/qa/worlds/:id/resume`) only once the
+   scripted portion of the scenario is done and you want the world
+   back on its normal live cadence — resuming resets the turn clock so
+   the world doesn't immediately "owe" a catch-up for the paused
+   interval.
+
+`paused` is persisted on the `worlds` row, so a paused QA world stays
+frozen even across a dev server restart (mid-`mix compile`, a crash,
+etc.) — no need to re-pause after every restart mid-session.
 
 ## Notes
 

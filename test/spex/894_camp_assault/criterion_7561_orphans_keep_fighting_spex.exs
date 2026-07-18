@@ -12,8 +12,8 @@ defmodule BrokenOathsSpex.Story894.Criterion7561Spex do
   `region_partition`) is used only to plan the scenario — to know
   *when* a warrior has already spawned and *which* id to track — never
   to assert the outcome. The outcome itself is asserted purely through
-  the real "game:units" push (fog-filtered, mirrors "game:cities") and
-  a live re-attack through the same `"attack"` hook story 891
+  the real "game:units" push (fog-filtered, mirrors "game:cities")
+  and a live re-attack through the same `"attack"` hook story 891
   established, exactly the technique criterion 7539 (story 891, "zero
   HP means gone") used to prove a destroyed unit leaves the board —
   mirrored here to prove a surviving one doesn't.
@@ -36,12 +36,24 @@ defmodule BrokenOathsSpex.Story894.Criterion7561Spex do
   uses `Fixtures.recharge_unit/2`, not a real `advance_turn` — see
   criterion 7559's moduledoc for why a live tick's worth of exposure to
   nearby camps' natural spawn cadence isn't safe across a long combat
-  sequence. `drain/1` clears the "game:camps"/"game:units" pushes each
-  `queue_production`/`advance_turn`/"attack" broadcasts, so the `then_`
-  blocks' own `assert_push_event` calls see fresh post-fight state
-  instead of a stale pre-fight one (the same mailbox hazard already
-  fixed across story 893's and this story's other restructured
-  criteria).
+  sequence.
+
+  "game:camps" is content-diffed against its last-pushed value (QA
+  issue dbcbd478); "game:units" is not (it pushes unconditionally on
+  every board refresh, same as "game:cities"/"game:window"). `drain/1`
+  reflects that split: it flushes whatever "game:camps" pushes DID
+  accumulate (`drain_events/2`, no assertion — a quiet action
+  legitimately produces none) while still asserting exactly one fresh
+  "game:units" push per action (still guaranteed, so still safe to
+  block on). The first `then_` block's own "game:camps" read uses
+  `settle_camps/1` rather than a bare `assert_push_event`: under load,
+  a single action has occasionally been observed to produce a stale,
+  pre-mutation "game:camps" push immediately followed by the fresh,
+  post-mutation one (an artifact of the async broadcast -> LiveView ->
+  test-process relay) — `assert_push_event` would match the OLDEST
+  (stale) one; `settle_camps/1` coalesces forward to the LAST one
+  actually pushed, so the killing blow's own final state is what gets
+  read even if attack #10 produced two.
   """
 
   use BrokenOathsSpex.Case
@@ -142,11 +154,12 @@ defmodule BrokenOathsSpex.Story894.Criterion7561Spex do
             "target_camp_id" => to_string(context.camp.id)
           })
 
-          # Every attack broadcasts `:units_changed` (fresh
-          # "game:camps"/"game:units" pushes on top of the direct
-          # "game:combat" one) — drain the first nine so the `then_`
-          # block's own `assert_push_event` sees the TENTH (killing)
-          # blow's fresh state, not a stale mid-fight one.
+          # Every attack broadcasts `:units_changed` — a fresh
+          # "game:units" push (unconditional) plus a "game:camps" push
+          # IF the camp's hp actually changed (it does, every hit) —
+          # drain the first nine so the `then_` block's own
+          # `assert_push_event` sees the TENTH (killing) blow's fresh
+          # state, not a stale mid-fight one.
           if i < 10 do
             drain(context.play_live)
 
@@ -165,7 +178,7 @@ defmodule BrokenOathsSpex.Story894.Criterion7561Spex do
 
       then_ "the camp is destroyed but the previously-spawned warrior still stands on the board",
             context do
-        assert_push_event(context.play_live, "game:camps", %{camps: camps_after}, 500)
+        camps_after = settle_camps(context.play_live)
         refute Enum.any?(camps_after, &(&1.id == context.camp.id))
 
         assert_push_event(context.play_live, "game:units", %{units: units_after}, 500)
@@ -214,15 +227,19 @@ defmodule BrokenOathsSpex.Story894.Criterion7561Spex do
     end
   end
 
-  # `assert_push_event` always matches the FIRST matching message still
-  # sitting in the mailbox — every `queue_production`/`advance_turn`/
-  # "attack" broadcasts its own fresh "game:camps"/"game:units" push
-  # (`refresh_board/1` fires on `:cities_changed`/`{:turn_advanced, _}`/
-  # `:units_changed` alike), so leaving them undrained would make this
-  # criterion's own `then_` assertions see a stale, pre-fight state
-  # instead of the fresh one their own action produced.
+  # `Phoenix.LiveViewTest.assert_push_event/3,4` always matches the
+  # OLDEST message still sitting in the mailbox for its event — every
+  # `queue_production`/`advance_turn`/"attack" broadcasts its own fresh
+  # "game:units" push (`refresh_board/1` fires on `:cities_changed`/
+  # `{:turn_advanced, _}`/`:units_changed` alike, and "game:units"
+  # pushes unconditionally, unlike content-diffed "game:camps" — QA
+  # issue dbcbd478), so leaving it undrained would make this
+  # criterion's own `then_` assertions see stale, pre-fight state
+  # instead of the fresh one their own action produced. "game:camps"
+  # only pushes when the camp set itself changed, so it's flushed
+  # (`drain_events/2`, no assertion) rather than asserted.
   defp drain(play_live) do
-    assert_push_event(play_live, "game:camps", %{camps: _}, 500)
+    drain_events(play_live, "game:camps")
     assert_push_event(play_live, "game:units", %{units: _}, 500)
   end
 

@@ -85,6 +85,14 @@ defmodule BrokenOathsSpex.Story893.Criterion7556Spex do
   one-turn repair tick) now run with either zero or exactly one
   barbarian actor in the entire world — a faithful "one clean tick"
   test of each SUBJECT, not a race against a living system.
+
+  "game:camps" is content-diffed against its last-pushed value (QA
+  issue dbcbd478): `queue_production` and a tick with no camp-state
+  change may push nothing at all, so the setup below flushes whatever
+  DOES accumulate (`drain_events/2`, not `assert_push_event`) rather
+  than asserting exactly one push per action — neither drain's content
+  is ever read, so this is a pure mailbox-hygiene concern, not a
+  behavioral one.
   """
 
   use BrokenOathsSpex.Case
@@ -189,21 +197,20 @@ defmodule BrokenOathsSpex.Story893.Criterion7556Spex do
           "item" => "worker"
         })
 
-        # `queue_production` broadcasts `:cities_changed`, which also
-        # triggers a "game:camps" push — drain it too, same reasoning
-        # as the loop below.
-        assert_push_event(context.play_live, "game:camps", %{camps: _}, 500)
+        # `queue_production` broadcasts `:cities_changed`, which may
+        # also trigger a "game:camps" push if the camp set changed since
+        # the last one — drain whatever's there, same reasoning as the
+        # loop below.
+        drain_events(context.play_live, "game:camps")
 
-        # Each `advance_turn` broadcasts a fresh "game:camps" push to
-        # `play_live` — `assert_push_event` always matches the FIRST
-        # matching message still sitting in the mailbox, so leaving
-        # eleven of these twelve undrained would make the later
-        # `when_` block's own `assert_push_event` see turn 1's camp
-        # state (before this scenario's own barbarian even exists)
-        # instead of the fresh state its own `advance_turn` produced.
+        # Content-diffed "game:camps" (QA issue dbcbd478) only re-pushes
+        # when the camp SET actually changes, so not every one of these
+        # twelve ticks is guaranteed to push at all — `drain_events/2`
+        # flushes whatever DOES accumulate without asserting a count, so
+        # nothing piles up stale ahead of a later, meaningful read.
         for _ <- 1..12 do
           Fixtures.advance_turn(context.world)
-          assert_push_event(context.play_live, "game:camps", %{camps: _}, 500)
+          drain_events(context.play_live, "game:camps")
         end
 
         [worker] =

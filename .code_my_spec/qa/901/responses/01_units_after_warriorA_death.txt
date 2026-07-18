@@ -1,0 +1,57 @@
+ id  | player_id | tile_id | hp  | max_hp | movement |       type        | camp_id 
+-----+-----------+---------+-----+--------+----------+-------------------+---------
+ 212 |        11 |     506 | 150 |    150 |        2 | lord              |        
+ 214 |        12 |     266 | 150 |    150 |        2 | lord              |        
+ 346 |           |     158 | 120 |    120 |        0 | barbarian_warrior |      61
+ 347 |           |     343 | 104 |    120 |        0 | barbarian_warrior |      60
+ 348 |           |     574 | 120 |    120 |        1 | barbarian_warrior |      59
+ 349 |           |      64 | 120 |    120 |        0 | barbarian_warrior |      58
+ 350 |           |     228 | 120 |    120 |        0 | barbarian_warrior |      57
+ 351 |           |     553 | 120 |    120 |        0 | barbarian_warrior |      56
+ 352 |           |     435 | 120 |    120 |        0 | barbarian_warrior |      55
+ 353 |           |     180 | 120 |    120 |        0 | barbarian_warrior |      54
+ 354 |           |     335 |  93 |    120 |        0 | barbarian_warrior |      53
+ 355 |           |      42 | 120 |    120 |        0 | barbarian_warrior |      52
+ 356 |           |     116 | 120 |    120 |        0 | barbarian_warrior |      51
+ 357 |           |     306 | 120 |    120 |        0 | barbarian_warrior |      50
+ 358 |           |     183 | 120 |    120 |        1 | barbarian_warrior |      49
+ 359 |           |     599 | 120 |    120 |        1 | barbarian_warrior |      48
+ 360 |           |     352 |  32 |    120 |        1 | barbarian_warrior |      47
+ 361 |           |      40 | 120 |    120 |        0 | barbarian_warrior |      61
+ 362 |           |     328 | 120 |    120 |        0 | barbarian_warrior |      60
+ 363 |           |     587 | 120 |    120 |        0 | barbarian_warrior |      59
+ 364 |           |      76 | 120 |    120 |        0 | barbarian_warrior |      58
+ 365 |           |      77 | 120 |    120 |        0 | barbarian_warrior |      57
+ 366 |           |     414 | 120 |    120 |        0 | barbarian_warrior |      56
+ 367 |           |     571 | 120 |    120 |        0 | barbarian_warrior |      55
+ 368 |           |     172 | 120 |    120 |        0 | barbarian_warrior |      54
+ 369 |           |     334 | 120 |    120 |        0 | barbarian_warrior |      53
+ 370 |           |      30 | 120 |    120 |        0 | barbarian_warrior |      52
+ 371 |           |      50 | 120 |    120 |        0 | barbarian_warrior |      51
+ 372 |           |     318 | 120 |    120 |        0 | barbarian_warrior |      50
+ 373 |           |      41 | 120 |    120 |        1 | barbarian_warrior |      49
+ 374 |           |     591 | 120 |    120 |        0 | barbarian_warrior |      48
+ 375 |           |     348 | 120 |    120 |        0 | barbarian_warrior |      47
+(32 rows)
+
+ id | tile_id | hp | spawn_counter | destroyed_at 
+----+---------+----+---------------+--------------
+ 47 |     352 | 40 |             0 | 
+(1 row)
+
+ id | gold 
+----+------
+ 11 |   50
+ 12 |   50
+(2 rows)
+
+ id | world_id | player_a_id | player_b_id | proposer_player_id |  status  |     inserted_at     |     updated_at      
+----+----------+-------------+-------------+--------------------+----------+---------------------+---------------------
+  1 |        3 |          11 |          12 |                 11 | proposed | 2026-07-18 02:14:48 | 2026-07-18 02:14:48
+(1 row)
+
+ turn |   turn_started_at   
+------+---------------------
+  265 | 2026-07-18 02:28:30
+(1 row)
+

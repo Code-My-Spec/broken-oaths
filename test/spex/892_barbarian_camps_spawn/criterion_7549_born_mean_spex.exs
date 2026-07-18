@@ -16,7 +16,11 @@ defmodule BrokenOathsSpex.Story892.Criterion7549Spex do
   Uses one of the 1-2 camps that spawn already inside the player's
   own (already-visible) territory (criterion 7543), so a spawned
   warrior is observable from turn 0 through the "game:camps" push
-  with no marching detour.
+  with no marching detour. That push is content-diffed against its
+  last-pushed value (QA issue dbcbd478), so not every turn is
+  guaranteed to produce one — `latest_camps/2` (not `assert_push_event`)
+  tracks the running snapshot, carrying the last-known (empty) roster
+  forward on a quiet turn.
   """
 
   use BrokenOathsSpex.Case
@@ -48,19 +52,23 @@ defmodule BrokenOathsSpex.Story892.Criterion7549Spex do
         assert_push_event(play_live, "game:camps", %{camps: camps0})
         [visible_camp | _] = camps0
 
-        {:ok, context |> Map.put(:play_live, play_live) |> Map.put(:camp_id, visible_camp.tile_id)}
+        {:ok,
+         context
+         |> Map.put(:play_live, play_live)
+         |> Map.put(:camp_id, visible_camp.tile_id)
+         |> Map.put(:camps, camps0)}
       end
 
       when_ "turns pass until the camp spawns its first warrior", context do
-        warrior =
-          Enum.reduce_while(1..6, nil, fn _turn, _acc ->
+        {warrior, _camps} =
+          Enum.reduce_while(1..6, {nil, context.camps}, fn _turn, {_acc, camps} ->
             Fixtures.advance_turn(context.world)
-            assert_push_event(context.play_live, "game:camps", %{camps: camps}, 500)
+            camps = latest_camps(context.play_live, camps)
             camp = Enum.find(camps, &(&1.tile_id == context.camp_id))
 
             case camp.warriors do
-              [w | _] -> {:halt, w}
-              [] -> {:cont, nil}
+              [w | _] -> {:halt, {w, camps}}
+              [] -> {:cont, {nil, camps}}
             end
           end)
 

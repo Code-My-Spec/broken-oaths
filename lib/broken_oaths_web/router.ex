@@ -55,6 +55,25 @@ defmodule BrokenOathsWeb.Router do
       live_dashboard "/dashboard", metrics: BrokenOathsWeb.Telemetry
       forward "/mailbox", Plug.Swoosh.MailboxPreview
     end
+
+    # Dev-only QA control surface (see `BrokenOathsWeb.DevQaController`'s
+    # moduledoc for the full endpoint list and example curl calls) —
+    # gated behind the same `:dev_routes` compile_env flag as
+    # LiveDashboard above, so it never exists in a production build
+    # (false in `config/prod.exs`). No auth: dev-only, localhost.
+    scope "/dev/qa", BrokenOathsWeb do
+      pipe_through :api
+
+      get "/worlds/:id", DevQaController, :show
+      post "/worlds/:id/pause", DevQaController, :pause
+      post "/worlds/:id/resume", DevQaController, :resume
+      post "/worlds/:id/step", DevQaController, :step
+      post "/worlds/:id/units", DevQaController, :spawn_unit
+      post "/worlds/:id/barbarians", DevQaController, :spawn_barbarian
+      patch "/worlds/:id/units/:unit_id", DevQaController, :update_unit
+      delete "/worlds/:id/units/:unit_id", DevQaController, :delete_unit
+      patch "/worlds/:id/camps/:camp_id", DevQaController, :update_camp
+    end
   end
 
   ## Authentication routes

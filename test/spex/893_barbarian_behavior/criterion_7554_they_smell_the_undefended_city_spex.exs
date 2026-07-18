@@ -79,6 +79,14 @@ defmodule BrokenOathsSpex.Story893.Criterion7554Spex do
   before city1 even starts growing — so no other actor exists to
   interfere for the rest of this scenario. The tracked camp itself is
   untouched and still spawns/decides for real.
+
+  "game:camps" is content-diffed against its last-pushed value (QA
+  issue dbcbd478): a tick/production event only re-pushes when the
+  camp SET itself actually changed, so the long growth/production/
+  march waits below no longer assume exactly one push per action —
+  `drain_events/2` flushes whatever DID accumulate (zero, one, or
+  several) without asserting a count, and the one meaningful read at
+  the end (`when_`) trusts the mailbox is clean going in.
   """
 
   use BrokenOathsSpex.Case
@@ -159,12 +167,12 @@ defmodule BrokenOathsSpex.Story893.Criterion7554Spex do
 
         # Grow the first city to size 2 (settlers need size >= 2),
         # produce a settler, place it directly on `city_target`, found
-        # there. Every tick pushes a fresh "game:camps" once any camp
-        # exists (it does, from turn 1) — draining each one as it comes
-        # (rather than letting dozens pile up in the mailbox) is what
-        # keeps the LATER `assert_push_event` calls in this scenario
-        # from matching a stale, empty-warriors snapshot from early in
-        # this wait instead of the current one.
+        # there. Content-diffed "game:camps" (QA issue dbcbd478) only
+        # re-pushes when the camp SET actually changes, so not every
+        # tick here is guaranteed to produce one — `drain_events/2`
+        # flushes whatever DOES accumulate (rather than asserting an
+        # exact count) so it never piles up stale messages ahead of the
+        # scenario's own later, meaningful read.
         Enum.reduce_while(1..60, :ok, fn _, :ok ->
           [c] =
             for cc <- Fixtures.player_cities(context.world, context.user),
@@ -175,25 +183,26 @@ defmodule BrokenOathsSpex.Story893.Criterion7554Spex do
             {:halt, :ok}
           else
             Fixtures.advance_turn(context.world)
-            assert_push_event(context.play_live, "game:camps", %{camps: _}, 500)
+            drain_events(context.play_live, "game:camps")
             {:cont, :ok}
           end
         end)
 
         # `queue_production`/`found_city` each broadcast `:cities_changed`
-        # too (not just a tick's own `:turn_advanced`), which ALSO
-        # triggers a "game:camps" push — one more stale message to
-        # drain right after each, same reasoning as the tick loops.
+        # too (not just a tick's own `:turn_advanced`), which MAY also
+        # trigger a "game:camps" push if the camp set changed since the
+        # last one — drain whatever's there, same reasoning as the tick
+        # loop above.
         render_hook(context.play_live, "queue_production", %{
           "city_id" => to_string(context.city1.id),
           "item" => "settler"
         })
 
-        assert_push_event(context.play_live, "game:camps", %{camps: _}, 500)
+        drain_events(context.play_live, "game:camps")
 
         for _ <- 1..20 do
           Fixtures.advance_turn(context.world)
-          assert_push_event(context.play_live, "game:camps", %{camps: _}, 500)
+          drain_events(context.play_live, "game:camps")
         end
 
         [new_settler] =
@@ -206,7 +215,7 @@ defmodule BrokenOathsSpex.Story893.Criterion7554Spex do
         # rather than assuming it's still free.
         :ok = relocate_when_free(context.world, context.play_live, new_settler.id, city_target)
         render_hook(context.play_live, "found_city", %{"unit_id" => to_string(new_settler.id)})
-        assert_push_event(context.play_live, "game:camps", %{camps: _}, 500)
+        drain_events(context.play_live, "game:camps")
 
         [city2] =
           for c <- Fixtures.player_cities(context.world, context.user), c.id != context.city1.id,
@@ -240,6 +249,11 @@ defmodule BrokenOathsSpex.Story893.Criterion7554Spex do
       end
 
       when_ "one more turn boundary passes", context do
+        # The long setup above leaves `play_live`'s "game:camps" mailbox
+        # clean (every accumulated push was drained as it came) — this
+        # turn boundary is the first one since, and the barbarian's own
+        # step changes its `tile_id` inside the pushed payload, so a
+        # fresh push is guaranteed here.
         Fixtures.advance_turn(context.world)
         assert_push_event(context.play_live, "game:camps", %{camps: camps}, 500)
         camp = Enum.find(camps, &(&1.id == context.camp_id))
@@ -281,8 +295,9 @@ defmodule BrokenOathsSpex.Story893.Criterion7554Spex do
   # smaller exposure than the multi-turn march this replaces, since the
   # unit being placed doesn't exist (or doesn't need to be anywhere in
   # particular) until right before this call. Drains each retry's own
-  # "game:camps" push (same reasoning as the wait loops above) so it
-  # never piles up stale messages ahead of a later assertion either.
+  # "game:camps" push, if any (same reasoning as the wait loops above)
+  # so it never piles up stale messages ahead of a later assertion
+  # either.
   defp relocate_when_free(world, play_live, unit_id, tile_id, retries \\ 10)
   defp relocate_when_free(_world, _play_live, _unit_id, _tile_id, 0), do: {:error, :occupied}
 
@@ -293,7 +308,7 @@ defmodule BrokenOathsSpex.Story893.Criterion7554Spex do
 
       {:error, :occupied} ->
         Fixtures.advance_turn(world)
-        assert_push_event(play_live, "game:camps", %{camps: _}, 500)
+        drain_events(play_live, "game:camps")
         relocate_when_free(world, play_live, unit_id, tile_id, retries - 1)
     end
   end

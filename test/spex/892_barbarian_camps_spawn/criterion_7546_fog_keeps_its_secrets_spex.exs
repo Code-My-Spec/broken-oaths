@@ -21,6 +21,16 @@ defmodule BrokenOathsSpex.Story892.Criterion7546Spex do
   no-UI-surface shortcut criterion 7543 uses — never used here to
   assert what the player *sees*, only to know which camps the
   assertions below must never find leaking.
+
+  `"game:camps"` is content-diffed against its last-pushed value (QA
+  issue dbcbd478): a turn only re-pushes when the player's own
+  fog-filtered camp set actually changed, so NOT every one of the six
+  turns below is guaranteed to produce a push (a hidden camp spawning
+  a warrior, by construction, never changes what the player's own
+  push contains). `latest_camps/2` (not `assert_push_event`) collects
+  whatever pushes DO arrive, carrying the last-known snapshot forward
+  on a quiet turn — the assertions below only care that every push
+  that DOES happen omits hidden data, not that one happens every turn.
   """
 
   use BrokenOathsSpex.Case
@@ -55,15 +65,16 @@ defmodule BrokenOathsSpex.Story892.Criterion7546Spex do
          context
          |> Map.put(:play_live, play_live)
          |> Map.put(:city, city)
+         |> Map.put(:camps, camps0)
          |> Map.put(:camps_pushes, [camps0])}
       end
 
       when_ "six turns pass while the wilderness camps stay unscouted", context do
-        pushes =
-          Enum.reduce(1..6, context.camps_pushes, fn _turn, acc ->
+        {pushes, _camps} =
+          Enum.reduce(1..6, {context.camps_pushes, context.camps}, fn _turn, {acc, camps} ->
             Fixtures.advance_turn(context.world)
-            assert_push_event(context.play_live, "game:camps", %{camps: camps}, 500)
-            [camps | acc]
+            camps = latest_camps(context.play_live, camps)
+            {[camps | acc], camps}
           end)
 
         {:ok, Map.put(context, :camps_pushes, pushes)}

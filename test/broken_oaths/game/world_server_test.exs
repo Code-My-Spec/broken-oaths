@@ -5,8 +5,10 @@ defmodule BrokenOaths.Game.WorldServerTest do
   import Ecto.Query
 
   alias BrokenOaths.Game
+  alias BrokenOaths.Game.Unit
   alias BrokenOaths.Game.WorldServer
   alias BrokenOaths.Repo
+  alias BrokenOaths.UsersFixtures
   alias BrokenOaths.Worlds.World
   alias BrokenOaths.WorldsFixtures
 
@@ -38,5 +40,183 @@ defmodule BrokenOaths.Game.WorldServerTest do
     assert Repo.one(from(w in World, where: w.id == ^world.id, select: w.turn)) == 6
 
     WorldServer.restart(world)
+  end
+
+  # -------------------------------------------------------------------
+  # Dev-only QA control surface: pause/resume (see `BrokenOathsWeb.DevQaController`)
+  # -------------------------------------------------------------------
+
+  describe "pause_ticks/1" do
+    test "stops the automatic :tick handler but advance_turn still steps, and persists across a restart" do
+      world = WorldsFixtures.world_fixture()
+      refute Game.paused?(world)
+      assert Game.turn_number(world) == 0
+
+      :ok = Game.pause_ticks(world)
+      assert Game.paused?(world)
+      assert Repo.one(from(w in World, where: w.id == ^world.id, select: w.paused))
+
+      # A stray `:tick` — exactly what the real timer would send — must
+      # be a no-op while paused. `send/2` is async, but the very next
+      # `GenServer.call` (via `Game.turn_number/1`) only gets processed
+      # after this mailbox message, so no sleep is needed to observe it.
+      {:ok, pid} = WorldServer.ensure_started(world)
+      send(pid, :tick)
+      assert Game.turn_number(world) == 0
+
+      # The manual step (`:advance_turn`) is a SEPARATE handler and
+      # still works while paused.
+      :ok = Game.advance_turn(world)
+      assert Game.turn_number(world) == 1
+
+      # Persists across a restart — a paused QA world stays frozen.
+      WorldServer.restart(world)
+      assert Game.paused?(world)
+      assert Game.turn_number(world) == 1
+
+      WorldServer.restart(world)
+    end
+  end
+
+  describe "resume_ticks/1" do
+    test "clears paused and the :tick handler advances turns again" do
+      world = WorldsFixtures.world_fixture()
+      :ok = Game.pause_ticks(world)
+      assert Game.paused?(world)
+
+      :ok = Game.resume_ticks(world)
+      refute Game.paused?(world)
+      refute Repo.one(from(w in World, where: w.id == ^world.id, select: w.paused))
+
+      {:ok, pid} = WorldServer.ensure_started(world)
+      send(pid, :tick)
+      assert Game.turn_number(world) == 1
+
+      WorldServer.restart(world)
+    end
+
+    test "resets turn_started_at so resuming never owes a catch-up" do
+      world = WorldsFixtures.world_fixture(%{turn_seconds: 100})
+      :ok = Game.pause_ticks(world)
+
+      # Backdate turn_started_at, simulating a long pause.
+      Repo.update_all(from(w in World, where: w.id == ^world.id),
+        set: [turn_started_at: DateTime.add(DateTime.utc_now(), -10_000, :second)]
+      )
+
+      :ok = Game.resume_ticks(world)
+
+      ends_at = Game.turn_ends_at(world)
+      seconds_left = DateTime.diff(ends_at, DateTime.utc_now(), :second)
+      # A fresh 100s window, not "already overdue by 9900s".
+      assert seconds_left in 90..100
+
+      WorldServer.restart(world)
+    end
+  end
+
+  describe "boot-time dormancy catch-up" do
+    test "never replays missed turns for a paused world" do
+      # `catch_up/1`'s dormancy replay only fires when `game_auto_tick`
+      # is on — `config/test.exs` turns it off so ordinary specs drive
+      # turns deterministically via `advance_turn/1` instead of a real
+      # wall-clock timer. Briefly flip it on here, for exactly the
+      # width of this test, to exercise the REAL boot path a live
+      # (non-test) server takes — restored in `on_exit` even if an
+      # assertion below fails.
+      Application.put_env(:broken_oaths, :game_auto_tick, true)
+      on_exit(fn -> Application.put_env(:broken_oaths, :game_auto_tick, false) end)
+
+      stale_started_at =
+        DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.add(-1000, :second)
+
+      paused_world = WorldsFixtures.world_fixture(%{turn_seconds: 60})
+      running_world = WorldsFixtures.world_fixture(%{turn_seconds: 60})
+
+      Repo.update_all(from(w in World, where: w.id == ^paused_world.id),
+        set: [turn_started_at: stale_started_at, paused: true]
+      )
+
+      Repo.update_all(from(w in World, where: w.id == ^running_world.id),
+        set: [turn_started_at: stale_started_at]
+      )
+
+      # Control: an equally-stale, NOT paused world DOES replay its
+      # missed turns on boot — proves the staleness fixture is real,
+      # not that catch-up is simply disabled altogether.
+      assert Game.turn_number(running_world) > 0
+
+      # The paused world, exactly as stale, replays nothing.
+      assert Game.turn_number(paused_world) == 0
+      assert Game.paused?(paused_world)
+
+      # Disarm whatever real tick timers booting under
+      # `game_auto_tick: true` just armed, before restoring the
+      # ordinary test config — a live 60s timer firing well after this
+      # test (and its DB sandbox connection) ends would otherwise crash
+      # in the background.
+      :ok = Game.pause_ticks(running_world)
+      :ok = Game.pause_ticks(paused_world)
+
+      Application.put_env(:broken_oaths, :game_auto_tick, false)
+      WorldServer.restart(paused_world)
+      WorldServer.restart(running_world)
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Dev-only QA control surface: unit/camp fixtures
+  # -------------------------------------------------------------------
+
+  describe "spawn_unit_for_test/4" do
+    test "places a real player-owned unit with that type's starting stats" do
+      world = WorldsFixtures.world_fixture()
+      user = UsersFixtures.user_fixture()
+      {:ok, player} = Game.join_world(world, user)
+
+      unit = Game.spawn_unit_for_test(world, player.id, :warrior, 42)
+
+      assert unit.type == :warrior
+      assert unit.tile_id == 42
+      assert unit.hp == 100
+      assert unit.max_hp == 100
+      assert unit.movement == 1
+      assert Enum.any?(Game.player_units(world, user), &(&1.id == unit.id))
+
+      WorldServer.restart(world)
+    end
+  end
+
+  describe "remove_unit_for_test/2" do
+    test "hard-deletes a unit" do
+      world = WorldsFixtures.world_fixture()
+      unit = Game.spawn_barbarian_for_test(world, 10)
+
+      :ok = Game.remove_unit_for_test(world, unit.id)
+
+      assert Repo.get(Unit, unit.id) == nil
+      refute Enum.any?(Game.list_camps(world), fn camp -> unit.id in Enum.map(camp.warriors, & &1.id) end)
+
+      WorldServer.restart(world)
+    end
+  end
+
+  describe "set_camp_hp_for_test/3" do
+    test "sets a camp's HP directly, bypassing combat" do
+      world = WorldsFixtures.world_fixture(%{frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, _player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+
+      [camp | _] = Game.list_camps(world)
+
+      :ok = Game.set_camp_hp_for_test(world, camp.id, 1)
+
+      assert Enum.find(Game.list_camps(world), &(&1.id == camp.id)).hp == 1
+
+      WorldServer.restart(world)
+    end
   end
 end

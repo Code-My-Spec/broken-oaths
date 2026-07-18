@@ -43,6 +43,13 @@ defmodule BrokenOathsSpex.Story893.Criterion7555Spex do
   now matches that actual, documented radius; the criterion's own
   `then_` assertion (neither barbarian ever loses HP or disappears)
   is untouched.
+
+  Truth surface "game:camps" is content-diffed against its last-pushed
+  value (QA issue dbcbd478), so not every turn is guaranteed to
+  produce a push — `latest_camps/2` (not `assert_push_event`) tracks
+  the running snapshot, carrying the last-known roster forward on a
+  quiet turn (which, by construction, means nothing about the camp
+  changed that turn).
   """
 
   use BrokenOathsSpex.Case
@@ -80,7 +87,8 @@ defmodule BrokenOathsSpex.Story893.Criterion7555Spex do
          |> Map.put(:play_live, play_live)
          |> Map.put(:city, city)
          |> Map.put(:camp_id, camp.id)
-         |> Map.put(:camp_tile, camp.tile_id)}
+         |> Map.put(:camp_tile, camp.tile_id)
+         |> Map.put(:camps, camps0)}
       end
 
       given_ "everything the player owns sits beyond the camp's 5-hex aggro range", context do
@@ -94,13 +102,13 @@ defmodule BrokenOathsSpex.Story893.Criterion7555Spex do
       end
 
       given_ "the camp has spawned both of its barbarian warriors", context do
-        camp =
-          Enum.reduce_while(1..24, nil, fn _turn, _acc ->
+        {camp, camps} =
+          Enum.reduce_while(1..24, {nil, context.camps}, fn _turn, {_acc, camps} ->
             Fixtures.advance_turn(context.world)
-            assert_push_event(context.play_live, "game:camps", %{camps: camps}, 500)
+            camps = latest_camps(context.play_live, camps)
             camp = Enum.find(camps, &(&1.id == context.camp_id))
 
-            if length(camp.warriors) >= 2, do: {:halt, camp}, else: {:cont, nil}
+            if length(camp.warriors) >= 2, do: {:halt, {camp, camps}}, else: {:cont, {nil, camps}}
           end)
 
         # Anchor: the 2-warrior cap really was reached, and both really
@@ -112,17 +120,17 @@ defmodule BrokenOathsSpex.Story893.Criterion7555Spex do
           assert land_distance(context.world, context.camp_tile, warrior.tile_id, 4) <= 2
         end
 
-        {:ok, context |> Map.put(:warriors0, camp.warriors)}
+        {:ok, context |> Map.put(:warriors0, camp.warriors) |> Map.put(:camps, camps)}
       end
 
       when_ "several more turn boundaries pass with both barbarians still shoulder to shoulder",
             context do
-        snapshots =
-          Enum.reduce(1..5, [], fn _turn, acc ->
+        {snapshots, _camps} =
+          Enum.reduce(1..5, {[], context.camps}, fn _turn, {acc, camps} ->
             Fixtures.advance_turn(context.world)
-            assert_push_event(context.play_live, "game:camps", %{camps: camps}, 500)
+            camps = latest_camps(context.play_live, camps)
             camp = Enum.find(camps, &(&1.id == context.camp_id))
-            [camp.warriors | acc]
+            {[camp.warriors | acc], camps}
           end)
 
         {:ok, Map.put(context, :warrior_snapshots, Enum.reverse(snapshots))}

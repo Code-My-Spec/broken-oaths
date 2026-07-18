@@ -51,6 +51,23 @@ defmodule BrokenOathsSpex.Story894.Criterion7560Spex do
   immediately — the `then_` block's own "game:camps"/"game:cities"
   pushes are already fresh without an extra boundary, and skipping it
   removes one more turn's worth of unrelated exposure.
+
+  "game:camps" is content-diffed against its last-pushed value (QA
+  issue dbcbd478); "game:cities" is not (it pushes unconditionally on
+  every board refresh, same as "game:units"/"game:window"). `drain/1`
+  below reflects that split: it flushes whatever "game:camps" pushes
+  DID accumulate (`drain_events/2`, no assertion — a quiet action
+  legitimately produces none) while still asserting exactly one fresh
+  "game:cities" push per action (still guaranteed, so still safe to
+  block on). The `then_` block's own "game:camps" read uses
+  `settle_camps/1` rather than a bare `assert_push_event`: under load,
+  a single action has occasionally been observed to produce a stale,
+  pre-mutation "game:camps" push immediately followed by the fresh,
+  post-mutation one (an artifact of the async broadcast -> LiveView ->
+  test-process relay) — `assert_push_event` would match the OLDEST
+  (stale) one; `settle_camps/1` coalesces forward to the LAST one
+  actually pushed, so the killing blow's own final state is what gets
+  read even if attack #10 produced two.
   """
 
   use BrokenOathsSpex.Case
@@ -131,11 +148,12 @@ defmodule BrokenOathsSpex.Story894.Criterion7560Spex do
             "target_camp_id" => to_string(context.camp.id)
           })
 
-          # Every attack broadcasts `:units_changed` (fresh
-          # "game:camps"/"game:cities"/"game:units" pushes on top of the
-          # direct "game:combat" one) — drain the first nine so the
-          # `then_` block's own `assert_push_event` sees the TENTH
-          # (killing) blow's fresh state, not a stale mid-fight one.
+          # Every attack broadcasts `:units_changed` — a fresh
+          # "game:cities"/"game:units" push (unconditional) plus a
+          # "game:camps" push IF the camp's hp actually changed (it
+          # does, every hit) — drain the first nine so the `then_`
+          # block's own `assert_push_event` sees the TENTH (killing)
+          # blow's fresh state, not a stale mid-fight one.
           if i < 10 do
             drain(context.play_live)
 
@@ -155,7 +173,7 @@ defmodule BrokenOathsSpex.Story894.Criterion7560Spex do
       end
 
       then_ "the camp is gone from the board", context do
-        assert_push_event(context.play_live, "game:camps", %{camps: camps_after}, 500)
+        camps_after = settle_camps(context.play_live)
         assert_push_event(context.play_live, "game:cities", %{cities: cities_after}, 500)
 
         # Anchor: the push pipeline itself is healthy (my own city still
@@ -198,15 +216,19 @@ defmodule BrokenOathsSpex.Story894.Criterion7560Spex do
     end
   end
 
-  # `assert_push_event` always matches the FIRST matching message still
-  # sitting in the mailbox — every `queue_production`/`advance_turn`/
-  # "attack" broadcasts its own fresh "game:camps"/"game:cities" push
-  # (`refresh_board/1` fires on `:cities_changed`/`{:turn_advanced, _}`/
-  # `:units_changed` alike), so leaving them undrained would make this
-  # criterion's own `then_` assertions see a stale, pre-fight state
-  # instead of the fresh one their own action produced.
+  # `Phoenix.LiveViewTest.assert_push_event/3,4` always matches the
+  # OLDEST message still sitting in the mailbox for its event — every
+  # `queue_production`/`advance_turn`/"attack" broadcasts its own fresh
+  # "game:cities" push (`refresh_board/1` fires on `:cities_changed`/
+  # `{:turn_advanced, _}`/`:units_changed` alike, and "game:cities"
+  # pushes unconditionally, unlike content-diffed "game:camps" — QA
+  # issue dbcbd478), so leaving it undrained would make this
+  # criterion's own `then_` assertions see stale, pre-fight state
+  # instead of the fresh one their own action produced. "game:camps"
+  # only pushes when the camp set itself changed, so it's flushed
+  # (`drain_events/2`, no assertion) rather than asserted.
   defp drain(play_live) do
-    assert_push_event(play_live, "game:camps", %{camps: _}, 500)
+    drain_events(play_live, "game:camps")
     assert_push_event(play_live, "game:cities", %{cities: _}, 500)
   end
 

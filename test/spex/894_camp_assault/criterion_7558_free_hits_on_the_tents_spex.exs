@@ -32,17 +32,21 @@ defmodule BrokenOathsSpex.Story894.Criterion7558Spex do
   arriving), the extra turn boundary the old version needed just to
   recharge before attacking is no longer necessary either. `clear_tile/2`
   evicts any real, camp-driven squatter already sitting on the
-  warrior's target tile.
+  warrior's target tile. (`Fixtures.relocate_unit/3` is a direct DB/
+  in-memory write with no broadcast of its own — nothing to drain.)
 
-  Also fixed (not a restructuring change, a genuine pre-existing bug in
-  this spec): `queue_production` and each of the setup's 8 production-wait
-  `advance_turn` calls broadcast their own fresh "game:camps" push
-  (`refresh_board/1` fires on `:cities_changed` and `{:turn_advanced, _}`
-  alike) — left undrained, the `then_` block's own `assert_push_event`
-  matched the STALE, pre-attack push instead of the fresh post-attack
-  one (the exact same "first-match-in-mailbox" hazard already documented
-  and fixed across story 893's restructured criteria), making
-  `camp_after.hp` read as unchanged even though the attack landed.
+  "game:camps" is content-diffed against its last-pushed value (QA
+  issue dbcbd478): `queue_production` and a turn boundary with no camp
+  change now push nothing at all, so `assert_push_event` can no longer
+  assume one after every action — `drain_events/2` flushes whatever
+  DID accumulate (zero, one, or several) instead, with no assertion.
+  The `then_` block's own read uses `settle_camps/1` rather than a
+  bare `assert_push_event`: under load, a single action has
+  occasionally been observed to produce a stale, pre-mutation
+  "game:camps" push immediately followed by the fresh, post-mutation
+  one (an artifact of the async broadcast -> LiveView -> test-process
+  relay) — `assert_push_event` would match the OLDEST (stale) one;
+  `settle_camps/1` coalesces forward to the LAST one actually pushed.
   """
 
   use BrokenOathsSpex.Case
@@ -74,20 +78,11 @@ defmodule BrokenOathsSpex.Story894.Criterion7558Spex do
         [camp | _] = pushed_camps
         [city] = Fixtures.player_cities(context.world, context.user)
         render_hook(play_live, "queue_production", %{"city_id" => city.id, "item" => "warrior"})
-
-        # `queue_production` broadcasts `:cities_changed`, and every
-        # `advance_turn` broadcasts `{:turn_advanced, _}` — both trigger
-        # `refresh_board/1`, which pushes a FRESH "game:camps" every
-        # time. `assert_push_event` always matches the FIRST matching
-        # message still in the mailbox, so leaving these nine pushes
-        # undrained would make the `then_` block's own `assert_push_event`
-        # see the camp's UNDAMAGED, pre-attack state from here instead
-        # of the fresh state its own attack produces.
-        assert_push_event(play_live, "game:camps", %{camps: _}, 500)
+        drain_events(play_live, "game:camps")
 
         for _ <- 1..8 do
           Fixtures.advance_turn(context.world)
-          assert_push_event(play_live, "game:camps", %{camps: _}, 500)
+          drain_events(play_live, "game:camps")
         end
 
         [warrior] =
@@ -146,7 +141,7 @@ defmodule BrokenOathsSpex.Story894.Criterion7558Spex do
 
         assert warrior.hp == context.warrior_hp0
 
-        assert_push_event(context.play_live, "game:camps", %{camps: camps_after}, 500)
+        camps_after = settle_camps(context.play_live)
         camp_after = Enum.find(camps_after, &(&1.id == context.camp.id))
 
         assert camp_after != nil

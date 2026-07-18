@@ -41,6 +41,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
                            hexes of one of the player's own cities, or one
                            of their cities taking a hit — player-scoped,
                            same shape as `game:lineage` below
+    * `game:discovery`  — `%{message: string}` (story 899), fired once per
+                           side the turn-boundary first-contact detection
+                           (`Game.Discovery`) finds a new pair — player-scoped,
+                           same shape as `game:alert`/`game:lineage`
 
   Turn number, countdown, and the selected-unit's/-city's details are each
   their own `liveview_component` (`GameLive.TurnBar`, `GameLive.UnitPanel`,
@@ -87,6 +91,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   use BrokenOathsWeb, :live_view
 
+  alias BrokenOaths.Chat
   alias BrokenOaths.Game
   alias BrokenOaths.Game.{Improvement, Yields}
   alias BrokenOaths.Worlds
@@ -113,7 +118,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
         {:ok, push_navigate(socket, to: ~p"/play")}
 
       _region ->
-        if connected?(socket), do: Game.subscribe(world)
+        if connected?(socket) do
+          Game.subscribe(world)
+          Chat.subscribe(world, user)
+        end
 
         mesh = Globe.get(world.frequency)
         %{terrain: terrain_map} = Generator.generate_maps(world.seed, mesh)
@@ -134,6 +142,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
             cities: [],
             camps: [],
             improvements: [],
+            known_players: Game.known_players(world, user),
             selected_tile: nil,
             visible: [],
             explored: [],
@@ -150,6 +159,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
             city_error: nil,
             improvement_error: nil,
             confirm_abandon?: false,
+            chat_open: false,
+            chat_target_user_id: nil,
             yaw: yaw,
             pitch: pitch,
             scale: @default_scale,
@@ -438,6 +449,16 @@ defmodule BrokenOathsWeb.GameLive.Play do
     end
   end
 
+  # Story 899, criterion 7601: a Known Players row's "chat-link"
+  # affordance opens the chat panel straight onto that contact's
+  # thread — full conversation-loading behavior lands with
+  # `GameLive.ChatPanel` (story 900); this just carries which contact
+  # was picked, in `:chat_target_user_id`, into that component's own
+  # assigns.
+  def handle_event("open_chat", %{"user_id" => user_id}, socket) do
+    {:noreply, assign(socket, chat_open: true, chat_target_user_id: parse_id(user_id))}
+  end
+
   def handle_event("abandon_world", _params, socket) do
     {:noreply, assign(socket, confirm_abandon?: true)}
   end
@@ -525,6 +546,55 @@ defmodule BrokenOathsWeb.GameLive.Play do
     else
       {:noreply, socket}
     end
+  end
+
+  # Story 899: `WorldServer`'s turn-boundary first-contact detection
+  # (`Game.Discovery`) broadcasts this world-wide, once per side of a
+  # newly-discovered pair — same player-scoped shape as
+  # `:lineage_continued`/`:city_alert` above, just a `"game:discovery"`
+  # push instead.
+  def handle_info({:discovery, user_id, message}, socket) do
+    if user_id == socket.assigns.user.id do
+      {:noreply, push_event(socket, "game:discovery", %{message: message})}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # Story 900: `Chat.subscribe/2` (called at mount, above) puts THIS
+  # view's own process on `user`'s per-world chat inbox topic — a
+  # message lands here the instant `Chat.send_message/4` delivers it to
+  # either side of a conversation this player is part of. Forwarded
+  # into `GameLive.ChatPanel`'s own `update/2` via `send_update/2`
+  # (a component has no mailbox of its own) rather than handled here,
+  # since the panel — not this view — owns the contact list, unread
+  # counts, and the open thread's message window (see that module's
+  # own "Real-time delivery" doc).
+  def handle_info({:chat_message, message}, socket) do
+    send_update(BrokenOathsWeb.GameLive.ChatPanel, id: "chat-panel", new_message: message)
+    {:noreply, socket}
+  end
+
+  # Story 900: `GameLive.ChatPanel` owns its own open/closed state
+  # locally, but this view still needs to know it changed so it can
+  # hide `GameLive.KnownPlayersPanel` while the chat panel's own
+  # contact list is showing (see `ChatPanel`'s own "Talking back to
+  # Play" doc for why the two must never both render a `"known-player-
+  # ID"` row at once).
+  def handle_info({:chat_open_changed, open?}, socket) do
+    {:noreply, assign(socket, chat_open: open?)}
+  end
+
+  # Story 901: `WorldServer` broadcasts this world-wide after every
+  # successful `Game.propose_alliance/3`/`Game.accept_alliance/3` —
+  # forwarded straight into `GameLive.AlliancePanel` via `send_update/2`
+  # (same "component has no mailbox of its own" pattern `ChatPanel`'s
+  # own `{:chat_message, message}` forwarding already establishes), so
+  # the OTHER party to a proposal sees it live rather than waiting on
+  # their next turn-boundary refresh.
+  def handle_info(:alliances_changed, socket) do
+    send_update(BrokenOathsWeb.GameLive.AlliancePanel, id: "alliance-panel", refresh: true)
+    {:noreply, socket}
   end
 
   # -------------------------------------------------------------------
@@ -615,7 +685,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
       allowed_improvements: worker_allowed_improvements(world, selected_unit),
       current_dig: worker_current_dig(improvements, selected_unit),
       selected_city: selected_city,
-      assignable_tiles: assignable_tiles(world, selected_city)
+      assignable_tiles: assignable_tiles(world, selected_city),
+      known_players: Game.known_players(world, user)
     )
     |> push_board_state()
     |> push_selected_path()
@@ -657,26 +728,60 @@ defmodule BrokenOathsWeb.GameLive.Play do
     })
   end
 
-  # A no-camps push is a no-op for the client (nothing was ever known,
-  # nothing to paint) — unlike "game:cities"/"game:units", skipped
-  # rather than sent unconditionally. Every mount pushes SOME board
-  # state even before the player's ever acted (a returning player
-  # reloading mid-game), and camps genuinely are empty right up until
-  # a first founding reveals any (story 892) — sending that empty
-  # payload anyway would sit in a spec's mailbox ahead of the first
-  # MEANINGFUL "game:camps" push, and `assert_push_event` matches
-  # whichever arrives first (story 892 criteria 7543/7545/etc. assert
-  # the push immediately after the action that reveals a camp, with no
-  # prior drain — the same one-shot idiom `game:cities`/`game:units`
-  # already use elsewhere).
-  defp push_camps(socket, []), do: socket
-  defp push_camps(socket, camps), do: push_event(socket, "game:camps", %{camps: camps})
+  # Content-diffed against the last-pushed value: refresh_board/1 runs
+  # on every turn boundary and unit change, but an unchanged camp list
+  # must NOT re-queue an identical push — a stale duplicate sitting in
+  # a spec's mailbox is matched ahead of the next MEANINGFUL push by
+  # `assert_push_event` (QA issue dbcbd478).
+  #
+  # The empty-payload case is NOT a blanket skip, despite camps
+  # genuinely starting out empty (every mount pushes SOME board state
+  # even before the player's ever founded a city — story 892) and
+  # despite an empty snapshot being reachable again for real once a
+  # player's last visible camp is destroyed (story 894 criterion
+  # 7560): only "nothing has EVER been known" (no prior push, or the
+  # prior push was already empty) is the mount-time no-op that avoids
+  # sitting in a spec's mailbox ahead of the first MEANINGFUL push —
+  # a KNOWN-nonempty set collapsing to empty is itself a real change
+  # the client must still hear about (the same way "game:cities"/
+  # "game:units" would push an emptied list unconditionally), so that
+  # case still pushes even though the new payload is `[]`.
+  defp push_camps(socket, camps) do
+    last = Map.get(socket.assigns, :last_camps)
 
-  # Same skip-when-empty idiom as camps, for the same mailbox reason.
-  defp push_improvements(socket, []), do: socket
+    cond do
+      camps == last ->
+        socket
 
-  defp push_improvements(socket, improvements),
-    do: push_event(socket, "game:improvements", %{improvements: improvements})
+      camps == [] and last in [nil, []] ->
+        socket
+
+      true ->
+        socket
+        |> assign(:last_camps, camps)
+        |> push_event("game:camps", %{camps: camps})
+    end
+  end
+
+  # Same content-diff idiom as camps (including the "empty is only a
+  # no-op when nothing was EVER known" refinement above), for the same
+  # mailbox reason.
+  defp push_improvements(socket, improvements) do
+    last = Map.get(socket.assigns, :last_improvements)
+
+    cond do
+      improvements == last ->
+        socket
+
+      improvements == [] and last in [nil, []] ->
+        socket
+
+      true ->
+        socket
+        |> assign(:last_improvements, improvements)
+        |> push_event("game:improvements", %{improvements: improvements})
+    end
+  end
 
   # The board only needs enough to place and label a billboard —
   # territory/queue/food stay in the CityPanel assign, not the client.
@@ -880,7 +985,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
       <div class="flex flex-1 min-h-0 relative">
         <div
           id="board-viewport"
-          class="flex-1 overflow-hidden space-bg relative"
+          class="flex-1 overflow-hidden space-bg relative touch-none"
           phx-hook=".Board"
           data-yaw={@yaw}
           data-pitch={@pitch}
@@ -892,6 +997,44 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
           <div class="fog-layer pointer-events-none absolute inset-0" data-test="fog-layer"></div>
           <div class="weather-layer pointer-events-none absolute inset-0" data-test="weather-layer">
+          </div>
+        </div>
+
+        <%!-- Story 899/900/901: the durable Known Players roster +
+             discovery toast affordance, the chat button/panel beside it,
+             and the alliance button/panel beside that. `KnownPlayersPanel`
+             is hidden while `ChatPanel` is open — its own contact list
+             reuses the same "known-player-ID" row shape, so only one of
+             the two is ever on the page at once (the same "one side panel
+             at a time" rule Play already applies to unit/city selection).
+             `AlliancePanel` uses its own distinct "ally-candidate-ID"/
+             "alliance-ID" naming (see its own moduledoc), so it never
+             needs that same exclusion — both button rows stay reachable
+             together. --%>
+        <div class="absolute top-4 right-4 flex flex-col gap-2 items-end">
+          <.live_component
+            :if={!@chat_open}
+            module={BrokenOathsWeb.GameLive.KnownPlayersPanel}
+            id="known-players-panel"
+            known_players={@known_players}
+          />
+
+          <div class="flex gap-2">
+            <.live_component
+              module={BrokenOathsWeb.GameLive.ChatPanel}
+              id="chat-panel"
+              world={@world}
+              user={@user}
+              chat_target_user_id={@chat_target_user_id}
+            />
+
+            <.live_component
+              module={BrokenOathsWeb.GameLive.AlliancePanel}
+              id="alliance-panel"
+              world={@world}
+              user={@user}
+              known_players={@known_players}
+            />
           </div>
         </div>
 
@@ -1052,38 +1195,140 @@ defmodule BrokenOathsWeb.GameLive.Play do
               this.draw()
             })
 
-            this.dragging = false
+            // Transient player-scoped notifications (story 895 alert,
+            // 896 lineage, 899 discovery) arrive as one-shot pushes with
+            // no socket assign — render each as an auto-dismissing toast.
+            const showToast = (message) => {
+              if (!message) return
+              let wrap = document.getElementById("game-toasts")
+              if (!wrap) {
+                wrap = document.createElement("div")
+                wrap.id = "game-toasts"
+                wrap.className = "toast toast-top toast-center z-50"
+                document.body.appendChild(wrap)
+              }
+              const el = document.createElement("div")
+              el.className = "alert alert-info shadow-lg"
+              el.setAttribute("data-test", "game-toast")
+              el.textContent = message
+              wrap.appendChild(el)
+              setTimeout(() => el.remove(), 6000)
+            }
+            this.handleEvent("game:discovery", ({message}) => showToast(message))
+            this.handleEvent("game:alert", ({message}) => showToast(message))
+            this.handleEvent("game:lineage", ({message}) => showToast(message))
+
+            // Unified pointer input for mouse, pen and touch. One active
+            // pointer pans (drag); two active pointers pinch-zoom and
+            // pan by their midpoint. `touch-action: none` on the element
+            // keeps the browser from stealing the gesture for page scroll
+            // or its own pinch-zoom. Wheel (below) stays for desktop.
+            this.pointers = new Map()
             this.moved = false
+            this.button = 0
+
+            const pinchDist = () => {
+              const [a, b] = [...this.pointers.values()]
+              return Math.hypot(a.x - b.x, a.y - b.y)
+            }
+            const pinchMid = () => {
+              const [a, b] = [...this.pointers.values()]
+              return {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2}
+            }
+            const panBy = (dx, dy) => {
+              this.yaw -= dx / this.scale / Math.max(Math.cos(this.pitch), 0.25)
+              this.pitch = Math.max(-this.maxPitch, Math.min(this.maxPitch, this.pitch + dy / this.scale))
+            }
 
             this.el.addEventListener("pointerdown", (e) => {
-              this.dragging = true
-              this.moved = false
+              // Synthetic/edge pointer ids (e.g. QA-script-injected
+              // events) can make the browser throw NotFoundError here —
+              // never let that abort the rest of pointer handling below.
+              try {
+                this.el.setPointerCapture(e.pointerId)
+              } catch (_) {}
+              this.pointers.set(e.pointerId, {x: e.clientX, y: e.clientY})
               this.button = e.button
-              this.last = {x: e.clientX, y: e.clientY}
-              this.el.setPointerCapture(e.pointerId)
+              this.moved = false
+              clearTimeout(this.lpTimer)
+              if (this.pointers.size === 2) {
+                this.pinchLast = pinchDist()
+                this.midLast = pinchMid()
+              } else {
+                this.last = {x: e.clientX, y: e.clientY}
+                this.longPressed = false
+                // Touch has no right-click: a long press (held in place)
+                // queues a move order — the touch equivalent of the RTS
+                // right-click. Desktop keeps right-click for this.
+                if (e.pointerType === "touch") {
+                  const at = {clientX: e.clientX, clientY: e.clientY}
+                  this.lpTimer = setTimeout(() => {
+                    if (this.pointers.size === 1 && !this.moved) {
+                      this.longPressed = true
+                      if (navigator.vibrate) navigator.vibrate(30)
+                      this.orderMove(at)
+                    }
+                  }, 500)
+                }
+              }
             })
 
             // Right-click is a game action (queue move), not a menu
             this.el.addEventListener("contextmenu", (e) => e.preventDefault())
 
             this.el.addEventListener("pointermove", (e) => {
-              if (!this.dragging) return
+              if (!this.pointers.has(e.pointerId)) return
+              this.pointers.set(e.pointerId, {x: e.clientX, y: e.clientY})
+
+              if (this.pointers.size >= 2) {
+                this.moved = true
+                clearTimeout(this.lpTimer)
+                const dist = pinchDist()
+                if (this.pinchLast > 0) {
+                  this.scale = Math.max(200, Math.min(this.scale * (dist / this.pinchLast), 4000))
+                }
+                this.pinchLast = dist
+                const mid = pinchMid()
+                if (this.midLast) panBy(mid.x - this.midLast.x, mid.y - this.midLast.y)
+                this.midLast = mid
+                this.draw()
+                return
+              }
+
               const dx = e.clientX - this.last.x
               const dy = e.clientY - this.last.y
               if (!this.moved && Math.abs(dx) + Math.abs(dy) < 4) return
               this.moved = true
+              clearTimeout(this.lpTimer)
               this.last = {x: e.clientX, y: e.clientY}
-              this.yaw -= dx / this.scale / Math.max(Math.cos(this.pitch), 0.25)
-              this.pitch = Math.max(-this.maxPitch, Math.min(this.maxPitch, this.pitch + dy / this.scale))
+              panBy(dx, dy)
               this.draw()
             })
 
+            const removePointer = (e) => {
+              clearTimeout(this.lpTimer)
+              const had = this.pointers.delete(e.pointerId)
+              if (this.pointers.size < 2) {
+                this.pinchLast = 0
+                this.midLast = null
+              }
+              if (this.pointers.size === 1) {
+                const [p] = [...this.pointers.values()]
+                this.last = {x: p.x, y: p.y}
+              }
+              return had
+            }
+
             this.el.addEventListener("pointerup", (e) => {
-              this.dragging = false
-              if (this.moved) return
-              if (this.button === 2) this.orderMove(e)
-              else this.click(e)
+              const had = removePointer(e)
+              // A tap (no drag, last finger up, not already a long-press)
+              // is a board action
+              if (had && this.pointers.size === 0 && !this.moved && !this.longPressed) {
+                if (this.button === 2) this.orderMove(e)
+                else this.click(e)
+              }
             })
+            this.el.addEventListener("pointercancel", removePointer)
 
             this.el.addEventListener("wheel", (e) => {
               e.preventDefault()

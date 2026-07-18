@@ -15,8 +15,13 @@ defmodule BrokenOathsSpex.Story892.Criterion7548Spex do
   2-warrior cap, covering several cycles' worth of "would it have
   overshot by now" margin ("holds overnight"). Truth surface is the
   "game:camps" push (inferred shape, see the Fixtures moduledoc for
-  `list_camps/1`), drained turn-by-turn so every single snapshot —
-  not just the last — is checked against the cap.
+  `list_camps/1`). It is content-diffed against its last-pushed value
+  (QA issue dbcbd478), so not every turn is guaranteed to produce
+  one — `latest_camps/2` (not `assert_push_event`) tracks the running
+  snapshot, carrying the last-known warrior count forward on a quiet
+  turn (which, by construction, means the count hasn't changed) so
+  every one of the 21 recorded counts — not just the ones a push
+  happened to arrive on — is still checked against the cap.
   """
 
   use BrokenOathsSpex.Case
@@ -48,16 +53,20 @@ defmodule BrokenOathsSpex.Story892.Criterion7548Spex do
         assert_push_event(play_live, "game:camps", %{camps: camps0})
         [visible_camp | _] = camps0
 
-        {:ok, context |> Map.put(:play_live, play_live) |> Map.put(:camp_id, visible_camp.tile_id)}
+        {:ok,
+         context
+         |> Map.put(:play_live, play_live)
+         |> Map.put(:camp_id, visible_camp.tile_id)
+         |> Map.put(:camps, camps0)}
       end
 
       when_ "twenty-one turns pass with no player intervention", context do
-        warrior_counts =
-          Enum.map(1..21, fn _turn ->
+        {warrior_counts, _camps} =
+          Enum.map_reduce(1..21, context.camps, fn _turn, camps ->
             Fixtures.advance_turn(context.world)
-            assert_push_event(context.play_live, "game:camps", %{camps: camps}, 500)
+            camps = latest_camps(context.play_live, camps)
             camp = Enum.find(camps, &(&1.tile_id == context.camp_id))
-            length(camp.warriors)
+            {length(camp.warriors), camps}
           end)
 
         {:ok, Map.put(context, :warrior_counts, warrior_counts)}
