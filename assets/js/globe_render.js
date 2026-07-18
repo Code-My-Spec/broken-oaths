@@ -108,6 +108,11 @@ const GlobeRender = {
     sheep: "/images/game/decor/sheep.png",
     wheat: "/images/game/decor/wheat.png",
     stone: "/images/game/decor/stone.png",
+    // Story 911 — Copper, the map's first STRATEGIC resource (Bronze
+    // Spearman's access gate). Placeholder art: a straight copy of the
+    // Stone decor sprite (same "rock on hills" silhouette) until a
+    // bespoke Copper billboard exists — flagged for real art.
+    copper: "/images/game/decor/copper.png",
   },
 
   TERRAIN_TEXTURES: ["grassland", "plains", "desert", "tundra", "snow", "ocean",

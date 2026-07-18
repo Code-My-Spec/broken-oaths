@@ -76,4 +76,9 @@ defmodule BrokenOathsSpex.Story905.Criterion7645Spex do
 
   defp eligible?(:stone, %{relief: :hills, feature: feature}), do: feature != :woods
   defp eligible?(:stone, _terrain), do: false
+
+  # Story 911 — Copper (a STRATEGIC resource) shares Sheep/Stone's own
+  # hills-no-woods terrain gate.
+  defp eligible?(:copper, %{relief: :hills, feature: feature}), do: feature != :woods
+  defp eligible?(:copper, _terrain), do: false
 end

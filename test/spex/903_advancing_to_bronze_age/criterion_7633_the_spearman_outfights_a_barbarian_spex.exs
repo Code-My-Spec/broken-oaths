@@ -49,6 +49,16 @@ defmodule BrokenOathsSpex.Story903.Criterion7633Spex do
         # way a player reloading the page would.
         {:ok, play_live, _html} = live(context.conn, "/play/#{context.world.id}")
 
+        # Story 911 — the Bronze Spearman now ALSO needs Copper access,
+        # a fact independent of this criterion's own subject (combat
+        # outcome, not resource placement). `player_reached_bronze_age`
+        # founds the city wherever the starting settler happens to
+        # land, with no guarantee a real Copper tile sits in its own
+        # (small, 7-ish tile) territory — grant it directly, the same
+        # "deliberate, narrow test-only exception" class every other
+        # `_for_test` fixture already establishes.
+        :ok = Fixtures.grant_copper_access(context.world, context.city.id)
+
         render_hook(play_live, "queue_production", %{
           "city_id" => context.city.id,
           "item" => "bronze_spearman"

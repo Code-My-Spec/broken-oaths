@@ -103,17 +103,43 @@ defmodule BrokenOaths.Game.ProductionTest do
       assert Production.can_queue?(city(size: 1), :bronze_spearman) == {:error, :locked}
     end
 
-    test "refused outside the Bronze Age" do
-      assert Production.can_queue?(city([]), :bronze_spearman, bronze_age?: false) ==
-               {:error, :locked}
+    test "refused outside the Bronze Age, even with Copper access" do
+      assert Production.can_queue?(city([]), :bronze_spearman,
+               bronze_age?: false,
+               copper_access?: true
+             ) == {:error, :locked}
     end
 
-    test "allowed once the Bronze Age is reached" do
-      assert Production.can_queue?(city([]), :bronze_spearman, bronze_age?: true) == :ok
+    test "allowed once the Bronze Age is reached AND Copper access is met" do
+      assert Production.can_queue?(city([]), :bronze_spearman,
+               bronze_age?: true,
+               copper_access?: true
+             ) == :ok
     end
 
     test "every other buildable ignores the bronze_age? option entirely" do
       assert Production.can_queue?(city(size: 2), :settler, bronze_age?: false) == :ok
+    end
+  end
+
+  describe "can_queue?/3 (story 911 — the Bronze Spearman's Copper gate)" do
+    test "refused for lack of Copper access, even in the Bronze Age" do
+      assert Production.can_queue?(city([]), :bronze_spearman,
+               bronze_age?: true,
+               copper_access?: false
+             ) == {:error, :copper_required}
+    end
+
+    test "arity-2 (no opts at all) also refuses on the copper_access? default" do
+      # bronze_age? is checked first, so the arity-2 shorthand — with
+      # NEITHER option supplied — still reports the age lock, not the
+      # Copper one; the Copper-specific refusal only ever surfaces once
+      # bronze_age? is separately satisfied (see the test above).
+      assert Production.can_queue?(city([]), :bronze_spearman) == {:error, :locked}
+    end
+
+    test "every other buildable ignores the copper_access? option entirely" do
+      assert Production.can_queue?(city(size: 2), :settler, copper_access?: false) == :ok
     end
   end
 

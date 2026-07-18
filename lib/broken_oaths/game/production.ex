@@ -42,6 +42,24 @@ defmodule BrokenOaths.Game.Production do
   never touches `BrokenOaths.Game.Research`, so the caller, `WorldServer`,
   resolves that flag and passes it in) and on the city not already
   having one (`:already_built` — a Granary is built once, ever).
+
+  ## The Bronze Spearman's Copper gate (story 911)
+
+  `:bronze_spearman` needs TWO independent opts to queue, not one:
+  `opts[:bronze_age?]` (story 903 — the owner has completed Bronze
+  Working) AND `opts[:copper_access?]` (story 911 — the CITY itself
+  has a Copper tile somewhere in its own `territory`, worked or not —
+  a pure ACCESS GATE, no stockpile/consumption). Missing Bronze Working
+  reports `{:error, :locked}` (unchanged from story 903 — the option
+  never even appears in a Build UI until then, per `available_items/1`
+  below); missing Copper with Bronze Working already done reports the
+  more specific `{:error, :copper_required}`, so a caller can render
+  "Requires Copper" rather than a generic locked message. `Production`
+  itself never touches `BrokenOaths.Worlds.Resources` or a city's
+  territory geometry — the same "resolve the flag, pass it in" split
+  `granary_available?`/`bronze_age?` already establish; the caller
+  (`WorldServer`) computes `copper_access?` from the city's own
+  `territory` and the world's resource placement.
   """
 
   alias BrokenOaths.Game.Yields
@@ -72,7 +90,7 @@ defmodule BrokenOaths.Game.Production do
         }
 
   @type spawn_event :: %{player_id: term(), type: unit_buildable(), tile_id: tile_id()}
-  @type can_queue_error :: :size_one | :locked | :already_built
+  @type can_queue_error :: :size_one | :locked | :already_built | :copper_required
 
   @flat_production 5
   @min_founding_spacing 4
@@ -111,9 +129,9 @@ defmodule BrokenOaths.Game.Production do
 
   @doc """
   Whether `type` can be queued right now (arity-2, backward-compatible
-  shorthand for `can_queue?/3` with no options — `granary_available?`
-  simply defaults to `false`, so a Granary is refused unless the
-  caller explicitly opts it in).
+  shorthand for `can_queue?/3` with no options — `granary_available?`/
+  `copper_access?` simply default to `false`, so a Granary or a Bronze
+  Spearman is refused unless the caller explicitly opts them in).
   """
   @spec can_queue?(city(), buildable()) :: :ok | {:error, can_queue_error()}
   def can_queue?(city, type), do: can_queue?(city, type, [])
@@ -124,10 +142,11 @@ defmodule BrokenOaths.Game.Production do
   and — for `:granary` only (story 902) — the city's owner having
   completed Pottery (`opts[:granary_available?]`, since this
   dependency-free module never calls `BrokenOaths.Game.Research`
-  itself) and not already having one (`:already_built`). Story 903:
-  `:bronze_spearman` is gated the same dependency-free way, on
-  `opts[:bronze_age?]` — the caller (`WorldServer`) resolves the
-  city owner's `Research.age/1` and passes it in.
+  itself) and not already having one (`:already_built`). Story 903/911:
+  `:bronze_spearman` needs BOTH `opts[:bronze_age?]` (Bronze Working
+  completed) and `opts[:copper_access?]` (a Copper tile somewhere in
+  the city's own territory) — see this module's own moduledoc, "The
+  Bronze Spearman's Copper gate."
   """
   @spec can_queue?(city(), buildable(), keyword()) :: :ok | {:error, can_queue_error()}
   def can_queue?(%{size: 1}, :settler, _opts), do: {:error, :size_one}
@@ -141,7 +160,11 @@ defmodule BrokenOaths.Game.Production do
   end
 
   def can_queue?(_city, :bronze_spearman, opts) do
-    if Keyword.get(opts, :bronze_age?, false), do: :ok, else: {:error, :locked}
+    cond do
+      not Keyword.get(opts, :bronze_age?, false) -> {:error, :locked}
+      not Keyword.get(opts, :copper_access?, false) -> {:error, :copper_required}
+      true -> :ok
+    end
   end
 
   def can_queue?(_city, _type, _opts), do: :ok
@@ -157,8 +180,9 @@ defmodule BrokenOaths.Game.Production do
   (story 903). Deliberately narrower than `catalog/0` (never `:lord`)
   but NOT the same question as `can_queue?/3`: an item stays in this
   list even when `can_queue?/3` would still refuse it for another
-  reason (a size-1 city's Settler, an already-built city's Granary) —
-  those refusals are `disabled` states in the UI, not list exclusions.
+  reason (a size-1 city's Settler, an already-built city's Granary, or
+  — story 911 — a Bronze Age city with no Copper access) — those
+  refusals are `disabled` states in the UI, not list exclusions.
   This is the one gate a caller (`BrokenOathsWeb.GameLive.CityPanel`)
   must apply to avoid offering — or hiding — anything
   `can_queue?/3`/`WorldServer`'s `queue_production` command wouldn't

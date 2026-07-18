@@ -34,7 +34,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
                            visible unconditionally (no reveal tech), the same
                            fog rule as terrain itself, so this rides the same
                            `known` set `game:window` already computes rather
-                           than a separate fog-gated `Game` read
+                           than a separate fog-gated `Game` read. Copper
+                           (story 911, the map's first STRATEGIC resource)
+                           is the one exception: it stays out of this list
+                           until the viewing player has completed Bronze
+                           Working (`visible_resource/3`), mirroring Civ 6's
+                           own "Bronze Working reveals Iron" convention
     * `game:camps`      — `%{camps: [%{id:, tile_id:, hp:, warriors: [...]}]}`,
                            barbarian camps (story 892), fog-filtered by
                            `Game.camps_visible_to/2` — see that function's
@@ -168,6 +173,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
             selected_city_id: nil,
             selected_city: nil,
             assignable_tiles: [],
+            copper_access?: false,
             selected_camp_id: nil,
             selected_camp: nil,
             city_error: nil,
@@ -253,10 +259,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # reach the client, so no fog check is needed here beyond membership
   # in the pushed window.
   def handle_event("select_tile", %{"tile_id" => tile_id}, socket) do
-    %{world: world, improvements: improvements} = socket.assigns
+    %{world: world, improvements: improvements, player_research: player_research} = socket.assigns
     tile_id = parse_id(tile_id)
     terrain = Regions.terrain(world, tile_id)
-    resource = Resources.at(world, tile_id)
+    resource = visible_resource(world, tile_id, player_research)
     yields = Yields.tile_yield(terrain, resource)
     improvement = Enum.find(improvements, &(&1.tile_id == tile_id))
 
@@ -296,6 +302,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         selected_city_id: city_id,
         selected_city: city,
         assignable_tiles: assignable_tiles(world, city),
+        copper_access?: copper_access?(world, city),
         city_error: nil,
         selected_unit_id: nil,
         selected_unit: nil,
@@ -1087,6 +1094,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
       current_dig: worker_current_dig(improvements, selected_unit),
       selected_city: selected_city,
       assignable_tiles: assignable_tiles(world, selected_city),
+      copper_access?: copper_access?(world, selected_city),
       selected_camp: selected_camp,
       known_players: Game.known_players(world, user),
       player_stats: Game.player_stats(world, user),
@@ -1191,6 +1199,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
       socket.assigns
 
     improvements = Map.get(socket.assigns, :improvements, [])
+    player_research = socket.assigns.player_research
 
     known = Enum.uniq(visible ++ explored)
     tiles = Enum.map(known, &tile_row(&1, mesh, terrain_map))
@@ -1203,23 +1212,47 @@ defmodule BrokenOathsWeb.GameLive.Play do
     |> push_event("game:cities", %{cities: Enum.map(cities, &city_marker/1)})
     |> push_camps(camps)
     |> push_improvements(improvements)
-    |> push_resources(known_resources(known, world))
+    |> push_resources(known_resources(known, world, player_research))
     |> push_event("globe3d:airspace", %{
       levels: levels,
       arc: Float.round(1.1071 / mesh.frequency, 5)
     })
   end
 
-  # Bonus-resource billboards (story 905) for every currently KNOWN
-  # tile — resources are visible from the first look, unconditionally
-  # (criterion 7649), so this reads off the very same `known` set
-  # `tile_row/3` already iterates rather than a separate fog-gated
-  # `Game` read the way camps/improvements need.
-  defp known_resources(known, world) do
+  # Bonus/strategic-resource billboards (stories 905/911) for every
+  # currently KNOWN tile — every bonus resource is visible from the
+  # first look, unconditionally (criterion 7649), so this reads off
+  # the very same `known` set `tile_row/3` already iterates rather
+  # than a separate fog-gated `Game` read the way camps/improvements
+  # need. Copper (story 911's strategic resource) is the one
+  # exception: `visible_resource/3` filters it out of a tile that IS
+  # otherwise known until the viewing player has completed Bronze
+  # Working (`Research.copper_revealed?/1`) — see that helper's own
+  # doc for the full reveal rule.
+  defp known_resources(known, world, player_research) do
     for tile_id <- known,
-        resource = Resources.at(world, tile_id),
+        resource = visible_resource(world, tile_id, player_research),
         resource != nil,
         do: %{tile_id: tile_id, kind: resource}
+  end
+
+  # Story 911 — the one reveal-tech exception to "resources are visible
+  # unconditionally" (criterion 7649): Copper stays invisible to a
+  # player until they've completed Bronze Working, mirroring Civ 6's
+  # own "Bronze Working reveals Iron" convention. Every OTHER resource
+  # kind passes straight through unchanged.
+  # `BrokenOaths.Worlds.Resources.at/2` itself places Copper on the map
+  # unconditionally (it has no concept of a viewing player) — this is
+  # the ONE place that ground truth gets filtered down to what a
+  # specific player currently knows, shared by both the `"game:
+  # resources"` push (`known_resources/3` above) and the `select_tile`
+  # handler's own single-tile read below, so the two surfaces can never
+  # disagree about whether a given player has seen Copper yet.
+  defp visible_resource(world, tile_id, player_research) do
+    case Resources.at(world, tile_id) do
+      :copper -> if Research.copper_revealed?(player_research), do: :copper, else: nil
+      other -> other
+    end
   end
 
   # Content-diffed against the last-pushed value: refresh_board/1 runs
@@ -1318,13 +1351,19 @@ defmodule BrokenOathsWeb.GameLive.Play do
   defp improvement_summary(%{kind: kind, status: :building, progress: progress}),
     do: "#{kind |> to_string() |> String.capitalize()} under construction (#{progress} banked)"
 
-  # Story 905, criterion 7649 — a resource is visible unconditionally,
-  # the instant the tile itself is looked at (no reveal tech, matching
-  # `civ6_resources.md` §3.5's "bonus resources have no reveal-tech").
+  # Story 905, criterion 7649 — a bonus resource is visible
+  # unconditionally, the instant the tile itself is looked at (no
+  # reveal tech, matching `civ6_resources.md` §3.5's "bonus resources
+  # have no reveal-tech"). Copper (story 911) is the one exception —
+  # `visible_resource/3` already filters it to `nil` until Bronze
+  # Working is done, so `select_tile`'s own `resource` field never
+  # reaches this label with `:copper` for a player who hasn't unlocked
+  # it yet; this clause only ever fires once it's genuinely revealed.
   defp resource_label(:cattle), do: "Cattle"
   defp resource_label(:sheep), do: "Sheep"
   defp resource_label(:wheat), do: "Wheat"
   defp resource_label(:stone), do: "Stone"
+  defp resource_label(:copper), do: "Copper"
 
   # Compact row for the client painter:
   # [id, color, decor, tex, cx, cy, cz, corner1x, corner1y, corner1z, ...]
@@ -1510,6 +1549,18 @@ defmodule BrokenOathsWeb.GameLive.Play do
     |> Enum.filter(&Yields.workable?(Regions.terrain(world, &1)))
   end
 
+  # Story 911 — whether `city` currently has Copper access: a Copper
+  # tile anywhere in its own `territory` (worked or not — a pure
+  # ACCESS GATE, no stockpile/consumption). `CityPanel` has no world
+  # access of its own (purely presentational, same reason
+  # `assignable_tiles/2` above is pre-computed here), so this is
+  # computed alongside it whenever the selected city changes and
+  # handed down as the `:copper_access?` assign.
+  defp copper_access?(_world, nil), do: false
+
+  defp copper_access?(world, city),
+    do: Enum.any?(city.territory, &(Resources.at(world, &1) == :copper))
+
   defp parse_id(nil), do: nil
   defp parse_id(""), do: nil
   defp parse_id(id) when is_integer(id), do: id
@@ -1527,6 +1578,13 @@ defmodule BrokenOathsWeb.GameLive.Play do
   defp city_error_message(:invalid_tile), do: "The city center can't be reassigned."
   defp city_error_message(:not_territory), do: "That tile isn't part of the city."
   defp city_error_message(:already_worked), do: "That tile already has a citizen."
+  # Story 911 — the Bronze Spearman's Copper access gate, distinct from
+  # the plain `:locked` a missing Bronze Age reports (unchanged, story
+  # 903) — mirrors the exact "Requires Copper" wording
+  # `GameLive.CityPanel`'s own always-visible requirement note already
+  # renders (criterion 7708), so the toast and the production menu
+  # never disagree about the reason.
+  defp city_error_message(:copper_required), do: "Requires Copper."
 
   defp city_error_message(:size_exceeded),
     do: "This city has no idle citizen — unassign a worked tile first."
@@ -1895,6 +1953,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
             city={@selected_city}
             assignable_tiles={@assignable_tiles}
             player_research={@player_research}
+            copper_access?={@copper_access?}
           />
         </div>
       </div>

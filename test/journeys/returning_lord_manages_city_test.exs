@@ -152,6 +152,13 @@ defmodule BrokenOaths.Journeys.ReturningLordManagesCityTest do
 
     for _ <- 1..60, do: Fixtures.advance_turn(context.world)
 
+    # Story 911 — the Bronze Spearman now ALSO needs Copper access, a
+    # fact unrelated to this journey's own regression subject (QA
+    # issue b8f4ce10's UnitPanel crash) — grant it directly, same
+    # "deliberate, narrow test-only exception" class every other
+    # `_for_test` fixture already establishes.
+    :ok = Fixtures.grant_copper_access(context.world, city.id)
+
     render_hook(reloaded_live, "queue_production", %{
       "city_id" => city.id,
       "item" => "bronze_spearman"

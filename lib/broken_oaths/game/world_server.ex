@@ -75,6 +75,7 @@ defmodule BrokenOaths.Game.WorldServer do
   alias BrokenOaths.Repo
   alias BrokenOaths.Users
   alias BrokenOaths.Worlds
+  alias BrokenOaths.Worlds.Globe
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.Resources
   alias BrokenOaths.Worlds.World
@@ -814,6 +815,40 @@ defmodule BrokenOaths.Game.WorldServer do
     improvement_data = improvement_map(improvement)
     new_state = %{state | improvements: Map.put(state.improvements, tile_id, improvement_data)}
     {:reply, improvement_data, new_state}
+  end
+
+  # Test-only: grant `city_id` Copper access (story 911) by appending a
+  # REAL Copper tile's id (found anywhere on the map via
+  # `Resources.at/2`) onto that city's own `territory` — same narrow,
+  # documented-bridge status as `:complete_improvement_for_test` above.
+  # A city's Copper access is a genuine geometric fact (a Copper tile
+  # somewhere in ITS OWN territory), which most specs have no reason to
+  # steer deterministically — a scenario whose SUBJECT is something
+  # else entirely (e.g. story 903's "the Spearman outfights a
+  # barbarian" combat spec) still needs a real, spawned Bronze Spearman
+  # to exist, and story 911 makes that now depend on an access fact no
+  # earlier story had to arrange. This sidesteps hunting for (or
+  # engineering a founding spot near) a real Copper tile the way
+  # `:relocate_unit_for_test` sidesteps a real march. Refuses with
+  # `{:error, :no_copper_on_map}` if the world's own placement rolled
+  # no Copper anywhere (vanishingly rare at real gameplay scale, but a
+  # possible outcome of any seed-deterministic placement).
+  def handle_call({:grant_copper_access_for_test, city_id}, _from, state) do
+    case Map.get(state.cities, city_id) do
+      nil ->
+        {:reply, {:error, :not_found}, state}
+
+      city ->
+        case find_any_copper_tile(state.world) do
+          nil ->
+            {:reply, {:error, :no_copper_on_map}, state}
+
+          tile_id ->
+            new_territory = Enum.uniq([tile_id | city.territory])
+            new_city = %{city | territory: new_territory}
+            {:reply, :ok, %{state | cities: Map.put(state.cities, city_id, new_city)}}
+        end
+    end
   end
 
   # Test-only: move a barbarian warrior directly onto `tile_id`,
@@ -2030,7 +2065,8 @@ defmodule BrokenOaths.Game.WorldServer do
          :ok <-
            Production.can_queue?(city, type,
              granary_available?: granary_available?(state, city),
-             bronze_age?: bronze_age?(state, city)
+             bronze_age?: bronze_age?(state, city),
+             copper_access?: copper_access?(state, city)
            ) do
       next_position =
         city.queue |> Enum.map(&Map.get(&1, :position, 0)) |> Enum.max(fn -> 0 end) |> Kernel.+(1)
@@ -2831,6 +2867,29 @@ defmodule BrokenOaths.Game.WorldServer do
   # Research" split `granary_available?/2` already establishes.
   defp bronze_age?(state, city),
     do: Research.age(player_research_for(state, city.player_id)) == :bronze_age
+
+  # Story 911 — whether `city` itself has Copper access: a Copper tile
+  # anywhere in its own `territory` (worked or not — a pure ACCESS
+  # GATE), the option `Production.can_queue?/3` needs to gate
+  # `:bronze_spearman` on ALONGSIDE `bronze_age?/2` above. Unlike
+  # `granary_available?/2`/`bronze_age?/2` (both resolve `Research`
+  # over the city's OWNER), this reads `Resources.at/2` over the
+  # CITY's own territory — Copper access is a per-city fact, not a
+  # per-player one (two cities belonging to the same player can differ:
+  # one may sit on Copper hills, the other may not).
+  defp copper_access?(state, city),
+    do: Enum.any?(city.territory, &(Resources.at(state.world, &1) == :copper))
+
+  # Test-only helper for `:grant_copper_access_for_test` above: the
+  # first tile id (mesh order) anywhere on `world` carrying Copper, or
+  # `nil` if this particular seed/density placed none at all.
+  defp find_any_copper_tile(world) do
+    mesh = Globe.get(world.frequency)
+
+    Enum.find_value(mesh.tiles, fn {tile_id, _tile} ->
+      if Resources.at(world, tile_id) == :copper, do: tile_id
+    end)
+  end
 
   defp fetch_player(state, user_id) do
     case find_player(state, user_id) do

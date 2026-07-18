@@ -61,6 +61,19 @@ defmodule BrokenOaths.Game.Yields do
   and in the `world`-aware readers below (`worked_yields/3`,
   `center_yield/2`, and the deterministic tile-picking keys), which
   already have a `tile_id` to resolve a resource from.
+
+  ## Copper — a strategic resource with NO yield (story 911)
+
+  Copper (`BrokenOaths.Worlds.Resources`'s first STRATEGIC resource)
+  reads through this exact same `resource_bonus/1`/`Resources.at/2`
+  plumbing as every bonus resource (a worked or growth-scored Copper
+  tile is a completely ordinary candidate, and `candidate_yield/2`
+  below would crash without a matching clause the instant Copper
+  starts appearing on the map), but its own additive term is `0F 0P`
+  — Copper is a pure ACCESS GATE for the Bronze Spearman
+  (`BrokenOaths.Game.Production.can_queue?/3`'s `copper_access?`
+  option), never a tile-yield bonus a citizen benefits from by working
+  it.
   """
 
   alias BrokenOaths.Worlds.Globe
@@ -148,11 +161,14 @@ defmodule BrokenOaths.Game.Yields do
   Wheat each add +1 food; Stone adds +1 production; no resource adds
   nothing. Never gated on research or an improvement — a resource's OWN
   bonus is visible/worked unconditionally (only its IMPROVEMENT's extra
-  yield, e.g. Pasture, needs a tech).
+  yield, e.g. Pasture, needs a tech). Copper (story 911, a STRATEGIC
+  resource) adds nothing at all — see this module's own moduledoc
+  section "Copper — a strategic resource with NO yield."
   """
   @spec resource_bonus(Resources.kind() | nil) :: yield()
   def resource_bonus(kind) when kind in [:cattle, :sheep, :wheat], do: %{food: 1, production: 0}
   def resource_bonus(:stone), do: %{food: 0, production: 1}
+  def resource_bonus(:copper), do: %{food: 0, production: 0}
   def resource_bonus(nil), do: %{food: 0, production: 0}
 
   @doc "A worked (non-center) tile's yield: raw terrain plus its completed improvement, if any."

@@ -109,7 +109,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanelTest do
 
   describe "Bronze Age reached" do
     test "offers the Bronze Spearman, alongside the always-available types" do
-      html = render_panel(player_research: @bronze_age)
+      html = render_panel(player_research: @bronze_age, copper_access?: true)
 
       assert html =~ ~s(data-test="production-option-bronze_spearman")
       assert html =~ "Bronze Spearman"
@@ -119,10 +119,54 @@ defmodule BrokenOathsWeb.GameLive.CityPanelTest do
       refute html =~ ~s(data-test="production-option-granary")
     end
 
-    test "Bronze Spearman renders enabled" do
+    test "Bronze Spearman is still offered (but disabled) without copper_access? at all" do
       html = render_panel(player_research: @bronze_age)
 
+      assert html =~ ~s(data-test="production-option-bronze_spearman")
+    end
+  end
+
+  # Story 911 — Bronze Spearman needs Copper access, ON TOP of the
+  # Bronze Age itself (story 903), to actually be queueable.
+  describe "story 911 — the Bronze Spearman's Copper gate" do
+    test "renders enabled once both the Bronze Age and Copper access are met" do
+      html = render_panel(player_research: @bronze_age, copper_access?: true)
+
       assert html =~ ~s(data-test="production-option-bronze_spearman" data-disabled="false")
+    end
+
+    test "renders disabled in the Bronze Age without Copper access" do
+      html = render_panel(player_research: @bronze_age, copper_access?: false)
+
+      assert html =~ ~s(data-test="production-option-bronze_spearman" data-disabled="true")
+    end
+
+    test "renders disabled when copper_access? is omitted entirely (defaults to false)" do
+      html = render_panel(player_research: @bronze_age)
+
+      assert html =~ ~s(data-test="production-option-bronze_spearman" data-disabled="true")
+    end
+
+    test "the requirement is legible and shows MET once Copper access is present" do
+      html = render_panel(player_research: @bronze_age, copper_access?: true)
+
+      assert html =~ ~s(data-test="production-requirement-bronze_spearman" data-copper-met="true")
+      assert html =~ "Requires Copper"
+    end
+
+    test "the requirement is legible and shows NOT MET without Copper access" do
+      html = render_panel(player_research: @bronze_age, copper_access?: false)
+
+      assert html =~ ~s(data-test="production-requirement-bronze_spearman" data-copper-met="false")
+      assert html =~ "Requires Copper"
+    end
+
+    test "the requirement note is absent for every other buildable" do
+      html = render_panel(player_research: @bronze_age, copper_access?: true)
+
+      refute html =~ ~s(data-test="production-requirement-settler")
+      refute html =~ ~s(data-test="production-requirement-worker")
+      refute html =~ ~s(data-test="production-requirement-warrior")
     end
   end
 end

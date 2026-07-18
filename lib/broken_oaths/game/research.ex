@@ -398,4 +398,24 @@ defmodule BrokenOaths.Game.Research do
   def age(player_research) do
     if completed?(player_research, :bronze_working), do: :bronze_age, else: :stone_age
   end
+
+  @doc """
+  Bronze Working's OTHER unlock (story 911): whether Copper, the map's
+  first strategic resource, is revealed to this player yet. Mirrors
+  Civ 6's own convention (Bronze Working reveals Iron there) — the
+  same tech that flips `age/1` to `:bronze_age` also lifts Copper's
+  fog. `BrokenOaths.Worlds.Resources.at/2` itself places Copper on the
+  map unconditionally (it has no concept of a viewing player); THIS is
+  the read `BrokenOathsWeb.GameLive.Play` gates a pushed
+  `"game:resources"`/`select_tile` read on before a player ever learns
+  a tile carries Copper. Never gates `BrokenOaths.Game.Production`'s
+  own `copper_access?` check — a city's ACCESS to Copper (needed to
+  train a Bronze Spearman) is a territory fact, independent of whether
+  the player has yet unlocked the tech that makes Copper VISIBLE on
+  the map; in practice a Bronze Spearman is only ever offered once
+  Bronze Working is already done (`age/1 == :bronze_age`), so by the
+  time access matters, Copper is already revealed anyway.
+  """
+  @spec copper_revealed?(player_research()) :: boolean()
+  def copper_revealed?(player_research), do: completed?(player_research, :bronze_working)
 end

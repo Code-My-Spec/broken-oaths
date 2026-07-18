@@ -497,6 +497,19 @@ defmodule BrokenOaths.Game do
     do: WorldServer.call(world, {:complete_improvement_for_test, tile_id, kind})
 
   @doc """
+  Test-only: grant `city_id` Copper access (story 911) by appending a
+  real Copper tile onto its own territory — see
+  `BrokenOaths.Game.WorldServer`'s `:grant_copper_access_for_test`
+  handler for the same documented, narrow-exception status
+  `complete_improvement_for_test/3` already has. `:ok`, or
+  `{:error, :no_copper_on_map}` if this world's own placement rolled
+  no Copper anywhere.
+  """
+  @spec grant_copper_access_for_test(map(), term()) :: :ok | {:error, :no_copper_on_map | :not_found}
+  def grant_copper_access_for_test(world, city_id),
+    do: WorldServer.call(world, {:grant_copper_access_for_test, city_id})
+
+  @doc """
   Test-only: move a barbarian directly onto `tile_id`, applying
   `Turn`'s own pillage-on-entry rule as a single isolated write rather
   than a full tick boundary — see `BrokenOaths.Game.WorldServer`'s

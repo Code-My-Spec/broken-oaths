@@ -191,4 +191,10 @@ defmodule BrokenOaths.Worlds.ResourcesTest do
 
   defp eligible?(:stone, %{relief: :hills, feature: feature}), do: feature != :woods
   defp eligible?(:stone, _terrain), do: false
+
+  # Story 911 — Copper (a STRATEGIC resource) shares Sheep/Stone's own
+  # hills-no-woods terrain gate (see `Resources`'s own moduledoc for
+  # why it reuses that terrain rather than inventing a new one).
+  defp eligible?(:copper, %{relief: :hills, feature: feature}), do: feature != :woods
+  defp eligible?(:copper, _terrain), do: false
 end

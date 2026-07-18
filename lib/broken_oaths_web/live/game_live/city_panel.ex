@@ -37,6 +37,14 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
       `Research.age/1 == :bronze_age` (story 903). `nil`/missing reads
       as "nothing unlocked yet", the same posture a fresh player's
       `Research.new/0` would produce.
+    * `:copper_access?` - story 911: whether `city` itself currently has
+      Copper access (a Copper tile anywhere in its own `territory`,
+      worked or not) — Play computes this from `world` + `city.
+      territory` (`BrokenOaths.Worlds.Resources.at/2`), since this
+      component has no world access of its own, the same reason
+      `assignable_tiles` arrives pre-computed. Defaults to `false` when
+      omitted (no city selected yet), the same "missing reads as not
+      unlocked" posture `player_research` already has.
 
   The production catalog is dynamic, not a fixed compile-time list
   (QA issue 846e0c96 — Bronze Spearman never appeared in the Build UI
@@ -47,15 +55,33 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
   itself reads, so this component can never offer — or hide — a
   buildable the `queue_production` command would disagree with. Each
   offered type's cost and its remaining `disabled?` state (the size-1
-  Settler guard, an already-built Granary) are still read straight
-  from `BrokenOaths.Game.Production` (a pure, dependency-free core
-  module) rather than duplicated here — one source of truth for what's
+  Settler guard, an already-built Granary, or — story 911 — a Bronze
+  Age city with no Copper access) are still read straight from
+  `BrokenOaths.Game.Production` (a pure, dependency-free core module)
+  rather than duplicated here — one source of truth for what's
   buildable and what it costs. `Research` is likewise read directly
   (also pure/dependency-free) to resolve `player_research` into those
   `opts` — this stays within the "reads pure core modules directly"
   latitude `Production`/`CityDefense` already establish; the
   component still never round-trips through the stateful
   `BrokenOaths.Game` context itself.
+
+  ## The Bronze Spearman's Copper requirement (story 911)
+
+  Whenever `:bronze_spearman` is offered (only once Bronze Working is
+  done — `Production.available_items/1`), its own catalog row ALSO
+  renders `[data-test="production-requirement-bronze_spearman"]`
+  unconditionally — "Requires Copper", plus a `data-copper-met`
+  attribute and a checkmark once `copper_access?` is true — so the
+  requirement is legible in the production menu whether or not it is
+  currently met (criterion 7708), not only in its disabled state. When
+  `copper_access?` is false, `can_queue?/3` returns
+  `{:error, :copper_required}` and the button itself renders `disabled`
+  (`data-disabled="true"`, the same `[data-test="production-option-
+  bronze_spearman"]` hook story 903 already established) alongside
+  that same requirement note — no separate "reason" paragraph is
+  needed, unlike the Settler's size-1 guard, since the requirement note
+  already carries the reason text.
   """
 
   use BrokenOathsWeb, :live_component
@@ -72,7 +98,11 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
   end
 
   def render(assigns) do
-    production_opts = production_opts(Map.get(assigns, :player_research))
+    production_opts =
+      production_opts(
+        Map.get(assigns, :player_research),
+        Map.get(assigns, :copper_access?, false)
+      )
 
     assigns =
       assigns
@@ -238,8 +268,16 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
   attr :production_opts, :list, required: true
 
   defp catalog_option(assigns) do
-    disabled? = Production.can_queue?(assigns.city, assigns.type, assigns.production_opts) != :ok
-    assigns = assign(assigns, disabled?: disabled?, cost: Production.cost(assigns.type))
+    result = Production.can_queue?(assigns.city, assigns.type, assigns.production_opts)
+    disabled? = result != :ok
+    copper_access? = Keyword.get(assigns.production_opts, :copper_access?, false)
+
+    assigns =
+      assign(assigns,
+        disabled?: disabled?,
+        cost: Production.cost(assigns.type),
+        copper_access?: copper_access?
+      )
 
     ~H"""
     <div>
@@ -262,6 +300,22 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
         class="text-xs text-warning"
       >
         Needs a second citizen to spare
+      </p>
+      <%!-- Story 911, criterion 7708 — the Copper requirement is
+           legible whether or not it's currently met: this renders
+           whenever Bronze Spearman is offered at all (only once
+           Bronze Working is done), with `data-copper-met` and a
+           checkmark once `copper_access?` is true, and doubles as the
+           disabled-reason note when it isn't (the button itself is
+           already `disabled` above via `can_queue?/3`'s
+           `{:error, :copper_required}`). --%>
+      <p
+        :if={@type == :bronze_spearman}
+        data-test="production-requirement-bronze_spearman"
+        data-copper-met={to_string(@copper_access?)}
+        class={["text-xs", if(@copper_access?, do: "text-success", else: "text-warning")]}
+      >
+        Requires Copper{if @copper_access?, do: " ✓", else: ""}
       </p>
     </div>
     """
@@ -349,17 +403,23 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
   defp food_label(nil), do: "Capped"
   defp food_label(threshold), do: threshold
 
-  # Resolves `player_research` into the `opts` both `Production.
-  # available_items/1` (which types to OFFER) and `Production.
-  # can_queue?/3` (whether an offered type is currently `disabled?`)
-  # read — `nil`/missing reads as "nothing unlocked", same as a fresh
-  # `Research.new/0` player.
-  defp production_opts(nil), do: []
+  # Resolves `player_research` + `copper_access?` into the `opts` both
+  # `Production.available_items/1` (which types to OFFER) and
+  # `Production.can_queue?/3` (whether an offered type is currently
+  # `disabled?`) read — `nil`/missing `player_research` reads as
+  # "nothing unlocked", same as a fresh `Research.new/0` player.
+  # `copper_access?` (story 911) is passed straight through regardless
+  # of `player_research`'s own presence — `Production.can_queue?/3`
+  # already refuses `:bronze_spearman` on `bronze_age?` alone whenever
+  # research is unknown, so a stray `copper_access?: true` with no
+  # research can never enable it early.
+  defp production_opts(nil, copper_access?), do: [copper_access?: copper_access?]
 
-  defp production_opts(player_research) do
+  defp production_opts(player_research, copper_access?) do
     [
       granary_available?: Research.granary_enabled?(player_research),
-      bronze_age?: Research.age(player_research) == :bronze_age
+      bronze_age?: Research.age(player_research) == :bronze_age,
+      copper_access?: copper_access?
     ]
   end
 
