@@ -279,6 +279,8 @@
 
 ### 6.1 Stone Age Technology Tree
 
+> ✅ Imported to CodeMySpec 2026-07-18 — story 902 "Stone Age Technology Tree" (batch 5). Bronze Age transition lives in story 903; progress UI in story 904.
+
 **As a** player  
 **I want to** research technologies  
 **So that** I can unlock new units, buildings, and advance to Bronze Age
@@ -298,6 +300,8 @@
 - Researching Bronze Working shows warning: "This will advance you to Bronze Age. Continue?"
 
 ### 6.2 Advancing to Bronze Age
+
+> ✅ Imported to CodeMySpec 2026-07-18 — story 903 "Advancing to Bronze Age" (batch 5).
 
 **As a** player  
 **I want to** advance to Bronze Age  
@@ -515,6 +519,8 @@
 ## 12. Victory/Progress Tracking
 
 ### 12.1 Stone Age Progress Indicators
+
+> ✅ Imported to CodeMySpec 2026-07-18 — story 904 "Stone Age Progress Indicators" (batch 5).
 
 **As a** player  
 **I want to** see my progress toward Bronze Age  
