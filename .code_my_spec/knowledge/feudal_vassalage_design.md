@@ -225,6 +225,47 @@ Build defaults chosen to unblock implementation (documented, correctable):
   status, honor hooks}`. Built this batch carrying the forward-looking fields so the
   rebellion batch doesn't rebuild it.
 
+## Engagement layer — Gold Bank + Feudal Stewardship (stories 909, 910)
+
+Added 2026-07-18. Turns the persistent-world "everyone is offline sometimes" reality
+into an engagement + retention loop AND a concrete *benefit* of being in a household.
+
+### Gold Bank (909)
+- Gold has a **capped bank** = the bank's size. Offline earnings accrue into the bank
+  up to the cap, then **stop** (no loss, just idle waste until collected) — the reason
+  to return or be tended.
+- **Logged in → gold flows to the usable treasury**; **offline → accrues into the
+  capped bank**. **Collect** = a click that sweeps bank → treasury (a deliberate
+  engagement tap; an always-bank/always-collect variant is acceptable tuning if we
+  want the tap every session).
+- **Upgrade the bank** to raise the cap (costs gold/production) — a real economy
+  decision; bigger bank = more offline earnings retained.
+
+### Feudal Stewardship (910) — the upside of vassalage
+- **Who stewards whom:** a player's **lord + fellow vassals of the same lord** can
+  steward them **while offline**. **Lords are never stewarded by vassals** (protection
+  flows down, not up).
+- **Bank collection:** a steward sweeps the offline player's bank — **all to the
+  owner** (pure stewardship; steward gets nothing; tribute still skims separately).
+  Keeps an absent player's economy from capping out.
+- **Production stewardship:** a steward may set the offline player's production queue,
+  **constructive-only** (a safe whitelist of economic/defensive builds) — no
+  disbanding, no cancel-griefing, no nonsense.
+- **Emergency defense:** normally stewards cannot move the offline player's units; but
+  **if that player is under attack**, a steward may command their units to **defend**
+  — defensive orders only, active only while under attack, never to launch aggression
+  or march the army off. Stops absent players from being farmed; the Protection theme
+  made concrete.
+- **Anti-sabotage:** every steward action is **logged** for the owner to review on
+  return; provable sabotage **dings the steward's Honor** (engine-enforced).
+  Constructive-only + Honor stakes keep stewardship a benefit, not a grief vector.
+
+### Placement
+909 (Gold Bank) is a near-independent economy story and a prerequisite for 910. 910
+(Feudal Stewardship) depends on 907 (the lord/vassal relationship), 909 (the bank), and
+the production-queue (879) / unit-combat (891) systems. Both extend the feudal
+foundation batch.
+
 ## Sources
 See `feudal_vassalage_prior_art.md` (CK3/EU4/Civ VI/Travian/EVE mechanics + numbers)
 and `feudal_vassalage_novel_design.md` (Neptune's Pride, Nemesis, EVE heists,
