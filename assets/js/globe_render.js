@@ -150,7 +150,15 @@ const GlobeRender = {
         if (!img) return null
         if (!patterns[key]) patterns[key] = ctx.createPattern(img, "repeat")
         const k = Math.max(zoomScale / 1400, 0.25)
-        patterns[key].setTransform(new DOMMatrix([k, 0, 0, k, px, py]))
+        // QA issue 551f9a55 — the anchor itself was the other half of
+        // the ripple (nearest-neighbor sampling in the board hook's own
+        // `draw()` fixes the bilinear-resample half): `px`/`py` are the
+        // tile's projected screen center, which drifts by sub-pixel
+        // amounts every single frame during a pan/rotate. Snapping the
+        // anchor to the nearest whole pixel removes that jitter — the
+        // pattern still tracks the tile (the rounding error is under a
+        // pixel, well below what's visible), it just stops "swimming".
+        patterns[key].setTransform(new DOMMatrix([k, 0, 0, k, Math.round(px), Math.round(py)]))
         return patterns[key]
       },
     }

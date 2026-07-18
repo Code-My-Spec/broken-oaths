@@ -1,0 +1,85 @@
+defmodule BrokenOathsWeb.GameLive.BoardHookSourceTest do
+  @moduledoc """
+  Regression guard for the board's client-side canvas hook (QA issues
+  d80792c6 "long press selects text", 551f9a55 "textures ripple on
+  panning", 46047ea6 "hexes not super obvious") — same "the canvas
+  board itself is never asserted, but plain server-side source IS"
+  status `SpriteManifestTest`'s own moduledoc already establishes for
+  `assets/js/globe_render.js`.
+
+  `BrokenOathsWeb.GameLive.Play`'s `.Board` colocated hook is extracted
+  to a separate compiled JS asset at build time (`Phoenix.LiveView.
+  ColocatedHook`) — it never appears in a rendered LiveView's own HTML,
+  so it can't be asserted via `Phoenix.LiveViewTest`. These tests read
+  `play.ex`'s own source instead, the same "parse the plain artifact
+  this test CAN read directly" move `SpriteManifestTest` already makes
+  for `globe_render.js`. Actual visual confirmation (no shimmer, a
+  faint grid, no native callout on a real touch device) is a human/
+  Vibium QA pass, not something ExUnit can see.
+  """
+
+  use ExUnit.Case, async: true
+
+  @play_path Path.join([File.cwd!(), "lib", "broken_oaths_web", "live", "game_live", "play.ex"])
+  @globe_render_path Path.join([File.cwd!(), "assets", "js", "globe_render.js"])
+
+  setup_all do
+    {:ok,
+     play_source: File.read!(@play_path), globe_render_source: File.read!(@globe_render_path)}
+  end
+
+  describe "QA issue d80792c6 — long press selects text" do
+    test "the board hook's pointerdown handler suppresses the native touch gesture at its source",
+         %{play_source: source} do
+      [_before, after_pointerdown] =
+        String.split(source, ~s[addEventListener("pointerdown", (e) => {], parts: 2)
+
+      assert after_pointerdown =~ ~s{e.pointerType === "touch"}
+      assert after_pointerdown =~ "e.preventDefault()"
+    end
+
+    test "the board hook still prevents the desktop right-click menu", %{play_source: source} do
+      assert source =~ ~s{addEventListener("contextmenu", (e) => e.preventDefault())}
+    end
+  end
+
+  describe "QA issue 551f9a55 — textures ripple on panning" do
+    test "the frame disables image smoothing before the terrain pattern fill runs", %{
+      play_source: source
+    } do
+      smoothing_index = :binary.match(source, "ctx.imageSmoothingEnabled = false") |> elem(0)
+      fill_index = :binary.match(source, "GR.tracePolygon(ctx, R, row, 7)") |> elem(0)
+
+      assert smoothing_index < fill_index,
+             "expected `ctx.imageSmoothingEnabled = false` to run before the terrain fill loop, so the pattern fill itself gets nearest-neighbor sampling instead of the shimmering default"
+
+      # Only ONE assignment left — it used to be set again, redundantly,
+      # right before the decor billboard loop; the ripple fix moved it
+      # to the top of `draw()` so it covers the terrain layer too.
+      assert length(:binary.matches(source, "ctx.imageSmoothingEnabled = false")) == 1
+    end
+
+    test "the pattern pool anchors its zoom-transform to a pixel-snapped tile center", %{
+      globe_render_source: source
+    } do
+      assert source =~ "Math.round(px)"
+      assert source =~ "Math.round(py)"
+    end
+  end
+
+  describe "QA issue 46047ea6 — hexes not super obvious" do
+    test "every drawn tile gets its own faint edge stroke", %{play_source: source} do
+      [_before, terrain_loop] =
+        String.split(source, "for (const {row, cx, cy} of order) {", parts: 2)
+
+      [tile_loop_body, _rest] =
+        String.split(terrain_loop, "// Terrain decor billboards", parts: 2)
+
+      assert tile_loop_body =~ "ctx.stroke()"
+      assert tile_loop_body =~ "ctx.strokeStyle ="
+      # Subtle, per the issue's own ask — a low alpha, not a bold line.
+      assert tile_loop_body =~ ~r/rgba\(\s*\d+,\s*\d+,\s*\d+,\s*0\.\d+\)/
+      assert tile_loop_body =~ "ctx.lineWidth = 1"
+    end
+  end
+end

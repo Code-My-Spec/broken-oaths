@@ -945,6 +945,23 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # Helpers
   # -------------------------------------------------------------------
 
+  # QA issue 3525f2ba — the mobile drawer toggle for the Known Players/
+  # Progress panels (see their own wrappers in `render/1`): pure client
+  # `Phoenix.LiveView.JS`, no server round trip, since neither panel's
+  # OWN state changes — only which one is visible. Opening either closes
+  # the other, so a phone never has both durable panels open at once
+  # (criterion: "Mobile can only support a single contextual menu").
+  # `md:` and up never calls this at all — the toggle buttons that
+  # invoke it are themselves `md:hidden`.
+  defp toggle_mobile_panel(id) do
+    other =
+      if id == "mobile-known-players", do: "mobile-progress-panel", else: "mobile-known-players"
+
+    %JS{}
+    |> JS.toggle(to: "##{id}")
+    |> JS.hide(to: "##{other}")
+  end
+
   # Camera aimed at the centroid of the player's own units at spawn
   # (criterion: returning player resumes with the camera on their
   # civilization). Never recomputed after mount — later refreshes must
@@ -1510,10 +1527,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   def render(assigns) do
     ~H"""
-    <div class="flex flex-col h-[calc(100vh-64px)]">
+    <div class="flex flex-col h-[calc(100vh-64px)] select-none [-webkit-touch-callout:none]">
       <Layouts.flash_group flash={@flash} />
 
-      <div class="flex items-center gap-3 px-4 py-2 bg-base-200 border-b border-base-300 flex-wrap">
+      <div class="flex items-center gap-3 px-4 py-2 bg-base-200 border-b border-base-300 flex-nowrap overflow-x-auto md:flex-wrap md:overflow-visible">
         <.live_component
           module={BrokenOathsWeb.GameLive.TurnBar}
           id="turn-bar"
@@ -1643,14 +1660,42 @@ defmodule BrokenOathsWeb.GameLive.Play do
              `AlliancePanel` uses its own distinct "ally-candidate-ID"/
              "alliance-ID" naming (see its own moduledoc), so it never
              needs that same exclusion — both button rows stay reachable
-             together. --%>
+             together.
+
+             QA issue 3525f2ba: below `md` (a phone) the always-on w-64
+             Known Players card, stacked against the Progress panel and
+             the top status bar, left no room for the board at all. The
+             SAME single `KnownPlayersPanel` mount below just gets a
+             `hidden md:block` wrapper — one instance, never duplicated
+             (a second copy would collide on `known-player-ID`, breaking
+             the very one-match-per-selector contract the `ChatPanel`
+             exclusion above already depends on) — collapsed behind a
+             small `md:hidden` toggle button that shows/hides it and
+             closes the Progress drawer in turn (`toggle_mobile_panel/1`),
+             so a phone never has both durable panels open together.
+             `md:` and up ignores all of this — the toggle button itself
+             never renders there, and `md:block` always wins regardless
+             of the toggle's last mobile-only state. --%>
         <div class="absolute top-4 right-4 flex flex-col gap-2 items-end">
-          <.live_component
+          <button
             :if={!@chat_open}
-            module={BrokenOathsWeb.GameLive.KnownPlayersPanel}
-            id="known-players-panel"
-            known_players={@known_players}
-          />
+            type="button"
+            phx-click={toggle_mobile_panel("mobile-known-players")}
+            class="btn btn-sm btn-circle btn-ghost bg-base-200 shadow-sm md:hidden"
+            data-test="mobile-known-players-toggle"
+            aria-label="Known Players"
+          >
+            <.icon name="hero-users" class="w-4 h-4" />
+          </button>
+
+          <div id="mobile-known-players" class="hidden md:block">
+            <.live_component
+              :if={!@chat_open}
+              module={BrokenOathsWeb.GameLive.KnownPlayersPanel}
+              id="known-players-panel"
+              known_players={@known_players}
+            />
+          </div>
 
           <div class="flex gap-2">
             <.live_component
@@ -1700,17 +1745,34 @@ defmodule BrokenOathsWeb.GameLive.Play do
         <%!-- Story 904: the Stone Age progress panel — always visible,
              unrelated to unit/city selection, same "durable, not a
              selection-triggered side panel" status `KnownPlayersPanel`
-             already has (see that component's own moduledoc). --%>
-        <div class="absolute bottom-4 left-4">
-          <.live_component
-            module={BrokenOathsWeb.GameLive.ProgressPanel}
-            id="progress-panel"
-            player_research={@player_research}
-            cities_founded={length(@cities)}
-            camps_destroyed={@player_stats.camps_destroyed}
-            barbarians_killed={@player_stats.barbarians_killed}
-            players_discovered={length(@known_players)}
-          />
+             already has (see that component's own moduledoc).
+
+             QA issue 3525f2ba: the same mobile-drawer treatment as the
+             Known Players panel above — one `ProgressPanel` mount,
+             `hidden md:block`, collapsed behind a `md:hidden` toggle
+             that closes the Known Players drawer in turn. --%>
+        <div class="absolute bottom-4 left-4 flex flex-col gap-2 items-start">
+          <button
+            type="button"
+            phx-click={toggle_mobile_panel("mobile-progress-panel")}
+            class="btn btn-sm btn-circle btn-ghost bg-base-200 shadow-sm md:hidden"
+            data-test="mobile-progress-toggle"
+            aria-label="Progress"
+          >
+            <.icon name="hero-chart-bar" class="w-4 h-4" />
+          </button>
+
+          <div id="mobile-progress-panel" class="hidden md:block">
+            <.live_component
+              module={BrokenOathsWeb.GameLive.ProgressPanel}
+              id="progress-panel"
+              player_research={@player_research}
+              cities_founded={length(@cities)}
+              camps_destroyed={@player_stats.camps_destroyed}
+              barbarians_killed={@player_stats.barbarians_killed}
+              players_discovered={length(@known_players)}
+            />
+          </div>
         </div>
 
         <%!-- QA issue e51a31be "UI issues" — the selection detail pane
@@ -1956,6 +2018,14 @@ defmodule BrokenOathsWeb.GameLive.Play do
             }
 
             this.el.addEventListener("pointerdown", (e) => {
+              // QA issue d80792c6 — a touch long-press must never win
+              // the race against the browser's own text-selection/
+              // callout gesture; `select-none`/`[-webkit-touch-callout:
+              // none]` on Play's own root (see `render/1`) cover the
+              // visual side, this stops the native gesture at its
+              // source. Desktop mouse/pen input is untouched.
+              if (e.pointerType === "touch") e.preventDefault()
+
               // Synthetic/edge pointer ids (e.g. QA-script-injected
               // events) can make the browser throw NotFoundError here —
               // never let that abort the rest of pointer handling below.
@@ -2195,6 +2265,15 @@ defmodule BrokenOathsWeb.GameLive.Play do
             const dpr = this.dpr || 1
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
             ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+            // QA issue 551f9a55 — nearest-neighbor for the WHOLE frame,
+            // not just decor onward as before: the terrain pattern fill
+            // below is the one layer that used to render with the
+            // canvas default (bilinear) smoothing, which is exactly
+            // what made it shimmer/ripple as `patternPool.for`'s own
+            // zoom-anchored offset drifts by sub-pixel amounts every
+            // frame during a pan. Also matches the pixel-art sprites/
+            // decor this game already renders with it below.
+            ctx.imageSmoothingEnabled = false
 
             // Fog of war: the unexplored planet is a flat, opaque,
             // colorless cloud shroud — the "cloud-wrapped" globe. Known
@@ -2226,12 +2305,27 @@ defmodule BrokenOathsWeb.GameLive.Play do
                 ctx.fillStyle = "rgba(168,172,181,0.45)"
                 ctx.fill()
               }
+
+              // QA issue 46047ea6 — a faint per-tile edge so the hex
+              // grid itself reads at a glance, not just wherever terrain
+              // colors happen to differ. Deliberately every tile's OWN
+              // polygon, not `GlobeRender.computeBorderEdges` (that only
+              // traces the OUTER perimeter of a group — right below, for
+              // the selected city's territory outline); interior hex
+              // seams need to show too, and a shared edge simply gets
+              // stroked twice, once from each side, at the same spot.
+              // Reuses the SAME open path `ctx.fill()` already traced
+              // above — free to stroke. Kept subtle (low alpha, hairline
+              // width): legible grid, not a busy overlay.
+              ctx.strokeStyle = "rgba(10, 12, 18, 0.16)"
+              ctx.lineWidth = 1
+              ctx.stroke()
             }
 
             // Terrain decor billboards (mountains, hills, tree cover) at
             // projected tile centers, back-to-front, dimmed on remembered
-            // tiles. Skipped entirely below readability size.
-            ctx.imageSmoothingEnabled = false
+            // tiles. Skipped entirely below readability size. (Already
+            // nearest-neighbor from the top of `draw()` — see above.)
             const decorSize = Math.min(Math.max(this.scale * this.arc * 1.7, 10), 72)
             if (decorSize >= 10) {
               for (const {row, cx, cy} of order) {

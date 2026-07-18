@@ -53,7 +53,7 @@ defmodule BrokenOathsWeb.GameLive.HelpPanel do
       </button>
 
       <div :if={@open?} class="modal modal-open" data-test="help-modal">
-        <div class="modal-box max-w-2xl max-h-[85vh] overflow-y-auto">
+        <div class="modal-box max-w-2xl max-h-[85vh] overflow-y-auto select-text [-webkit-touch-callout:default]">
           <div class="flex items-center justify-between mb-2">
             <h3 class="font-bold text-lg">How to Play</h3>
             <button

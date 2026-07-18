@@ -301,7 +301,7 @@ defmodule BrokenOathsWeb.GameLive.ChatPanel do
       <div
         :if={@open?}
         data-test="chat-panel"
-        class="card bg-base-200 shadow-xl w-80 absolute top-full right-0 mt-1 z-10"
+        class="card bg-base-200 shadow-xl w-80 absolute top-full right-0 mt-1 z-10 select-text [-webkit-touch-callout:default]"
       >
         <div class="card-body p-3 gap-2">
           <h3 class="card-title text-sm">Chat</h3>
