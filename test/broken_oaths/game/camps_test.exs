@@ -18,7 +18,10 @@ defmodule BrokenOaths.Game.CampsTest do
   end
 
   describe "place_wilderness/6" do
-    test "returns 5-8 tiles total: 1-2 inside the region, 4-6 outside it" do
+    # Ranges narrowed 5..8/4..6 -> 5..7/4..5 (v0.2.1 playtest balance
+    # pass, issue 04931763): one fewer far camp on average, easing
+    # peak simultaneous wilderness pressure. See `Camps`'s own doc.
+    test "returns 5-7 tiles total: 1-2 inside the region, 4-5 outside it" do
       {home, city_tile} = home_region_and_city_tile()
 
       tiles =
@@ -27,10 +30,27 @@ defmodule BrokenOaths.Game.CampsTest do
       near = Enum.filter(tiles, &MapSet.member?(home, &1))
       far = Enum.reject(tiles, &MapSet.member?(home, &1))
 
-      assert length(tiles) in 5..8
+      assert length(tiles) in 5..7
       assert length(near) in 1..2
-      assert length(far) in 4..6
+      assert length(far) in 4..5
       assert length(tiles) == length(Enum.uniq(tiles))
+    end
+
+    # Regression for the v0.2.1 playtest report "camps too close
+    # together" (issue 04931763): every pair of camps from the SAME
+    # founding must sit at least `@min_camp_spacing` (3) raw-adjacency
+    # hexes apart — near-to-near, far-to-far, and near-to-far.
+    test "no two camps from the same founding land within the minimum spacing" do
+      {home, city_tile} = home_region_and_city_tile()
+
+      for seed <- [{@seed, city_tile}, {@seed, :other_founding}, {@seed, :a_third}] do
+        tiles = Camps.place_wilderness(world(), city_tile, home, MapSet.new(), MapSet.new(), seed)
+
+        for a <- tiles, b <- tiles, a < b do
+          assert hex_distance(a, b) >= 3,
+                 "camps #{a} and #{b} landed #{hex_distance(a, b)} hexes apart (seed #{inspect(seed)})"
+        end
+      end
     end
 
     test "far tiles sit 8-15 hexes out over raw mesh adjacency" do
@@ -140,6 +160,17 @@ defmodule BrokenOaths.Game.CampsTest do
       assert Camps.spawned(camp(%{spawn_counter: 5})).spawn_counter == 0
     end
   end
+
+  # Raw mesh-adjacency (hex) distance between two tiles — smallest ring
+  # depth from `a` that contains `b`. Used only by the spacing
+  # regression above; the module under test has no public "distance
+  # between two arbitrary tiles" read of its own (it only ever grows a
+  # ring around a single, known start).
+  defp hex_distance(a, b) do
+    Enum.find(0..30, fn depth -> MapSet.member?(ring(a, depth), b) end)
+  end
+
+  defp ring(start, 0), do: MapSet.new([start])
 
   defp ring(start, depth) do
     Enum.reduce(1..depth, {[start], MapSet.new([start])}, fn _, {frontier, seen} ->

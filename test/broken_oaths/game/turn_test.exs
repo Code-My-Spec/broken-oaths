@@ -214,6 +214,74 @@ defmodule BrokenOaths.Game.TurnTest do
     end
   end
 
+  # v0.2.1 playtest issue 5df5de88 — "1 non-combat unit should stack
+  # with 1 combat unit". `unit/2` defaults to `:settler` (non-combat);
+  # these tests spell out `:warrior` (combat) explicitly for clarity.
+  describe "tick/1 field civilian/combat stacking (issue 5df5de88)" do
+    test "a non-combat mover joins a tile already holding its owner's lone combat unit" do
+      warrior = unit(2, tile: 20, type: :warrior, max_movement: 0)
+      mover = unit(1, tile: 5, type: :settler, max_movement: 1)
+      order = %{kind: :move, path: [20], status: :pending}
+      state = base_state(%{1 => mover, 2 => warrior}, %{1 => order})
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.units[1].tile_id == 20
+      refute Map.has_key?(new_state.orders, 1)
+      assert new_state.units[2].tile_id == 20
+    end
+
+    test "a combat mover joins a tile already holding its owner's lone non-combat unit" do
+      settler = unit(2, tile: 20, type: :settler, max_movement: 0)
+      mover = unit(1, tile: 5, type: :warrior, max_movement: 1)
+      order = %{kind: :move, path: [20], status: :pending}
+      state = base_state(%{1 => mover, 2 => settler}, %{1 => order})
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.units[1].tile_id == 20
+      refute Map.has_key?(new_state.orders, 1)
+      assert new_state.units[2].tile_id == 20
+    end
+
+    test "two units of the same combat class still do not stack" do
+      blocker = unit(2, tile: 20, type: :warrior, max_movement: 0)
+      mover = unit(1, tile: 5, type: :warrior, max_movement: 1)
+      order = %{kind: :move, path: [20], status: :pending}
+      state = base_state(%{1 => mover, 2 => blocker}, %{1 => order})
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.units[1].tile_id == 5
+      assert new_state.orders[1] == %{kind: :move, path: [20], status: :interrupted}
+    end
+
+    test "a tile already holding one of each class is full — a third mover is blocked" do
+      warrior = unit(2, tile: 20, type: :warrior, max_movement: 0)
+      settler = unit(3, tile: 20, type: :settler, max_movement: 0)
+      mover = unit(1, tile: 5, type: :worker, max_movement: 1)
+      order = %{kind: :move, path: [20], status: :pending}
+      state = base_state(%{1 => mover, 2 => warrior, 3 => settler}, %{1 => order})
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.units[1].tile_id == 5
+      assert new_state.orders[1] == %{kind: :move, path: [20], status: :interrupted}
+    end
+
+    test "an opposite-class occupant belonging to ANOTHER player grants no stacking room" do
+      enemy_warrior = unit(2, tile: 20, type: :warrior, player_id: 2, max_movement: 0)
+      mover = unit(1, tile: 5, type: :settler, player_id: 1, max_movement: 1)
+      order = %{kind: :move, path: [20], status: :pending}
+      state = base_state(%{1 => mover, 2 => enemy_warrior}, %{1 => order})
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.units[1].tile_id == 5
+      assert new_state.orders[1] == %{kind: :move, path: [20], status: :interrupted}
+    end
+  end
+
   describe "tick/1 exploration" do
     test "explored grows to cover the unit's post-move vision" do
       mover = unit(1, tile: 0, max_movement: 1, type: :lord)

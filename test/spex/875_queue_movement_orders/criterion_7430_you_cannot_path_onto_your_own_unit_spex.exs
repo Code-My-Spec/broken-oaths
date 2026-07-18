@@ -6,6 +6,15 @@ defmodule BrokenOathsSpex.Story875.Criterion7430Spex do
   The globe board has no tile DOM; orders travel as LiveView events
   (render_hook) and results come back as pushed payloads and unit
   positions — per the board doctrine.
+
+  Updated for the v0.2.1 playtest "stacking non-combat units" fix
+  (issue 5df5de88): a Lord and a Settler — the only two units a fresh
+  spawn provides, which this scenario originally paired — are now a
+  DELIBERATELY allowed stack (one combat, one non-combat unit; see
+  `BrokenOaths.Game.WorldServer.field_stack_room?/2`). This scenario's
+  own subject is still real and enforced — a player can never stack
+  two of their own units of the SAME combat class — so it now spawns a
+  second Settler (`Fixtures.spawn_unit/4`) to exercise that.
   """
 
   use BrokenOathsSpex.Case
@@ -14,8 +23,8 @@ defmodule BrokenOathsSpex.Story875.Criterion7430Spex do
 
   alias BrokenOathsSpex.Fixtures
 
-  spex "you cannot path onto your own unit" do
-    scenario "targeting your own unit's tile is rejected" do
+  spex "you cannot path onto your own unit of the same combat class" do
+    scenario "targeting your own same-class unit's tile is rejected" do
       given_(:a_world)
       given_(:registered_player)
 
@@ -30,17 +39,31 @@ defmodule BrokenOathsSpex.Story875.Criterion7430Spex do
         {:ok, Map.put(context, :play_live, play_live)}
       end
 
-      when_ "the player targets their settler onto the lord's tile", context do
+      given_ "a second settler stands nearby (same combat class as the first)", context do
+        {:ok, player} = Fixtures.join_world(context.world, context.user)
         units = Fixtures.player_units(context.world, context.user)
         [settler | _] = for u <- units, u.type == :settler, do: u
-        [lord | _] = for u <- units, u.type == :lord, do: u
 
+        [second_tile | _] =
+          context.world
+          |> Fixtures.adjacent_tiles(settler.tile_id)
+          |> Enum.filter(&(Fixtures.tile_class(context.world, &1) == :land))
+
+        second_settler = Fixtures.spawn_unit(context.world, player.id, :settler, second_tile)
+
+        {:ok,
+         context
+         |> Map.put(:settler, settler)
+         |> Map.put(:second_settler, second_settler)}
+      end
+
+      when_ "the player targets their first settler onto the second settler's tile", context do
         render_hook(context.play_live, "queue_move", %{
-          "unit_id" => settler.id,
-          "to_tile" => lord.tile_id
+          "unit_id" => context.settler.id,
+          "to_tile" => context.second_settler.tile_id
         })
 
-        {:ok, context |> Map.put(:settler, settler) |> Map.put(:lord, lord)}
+        {:ok, context}
       end
 
       then_ "the order is rejected and nothing moves at the boundary", context do

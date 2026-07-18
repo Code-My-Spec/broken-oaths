@@ -492,6 +492,18 @@ defmodule BrokenOaths.Game.WorldServerTest do
   # -------------------------------------------------------------------
 
   describe "start_improvement/4 resolves mine duration from the worker's owner's research" do
+    # `hills_tile/1` picks the lowest-id land+hills tile in the whole
+    # mesh — independent of where this player's own city/camps landed,
+    # so it can end up within an ordinary wilderness camp's roam/hunt
+    # reach (story 892/893) purely by chance. Neither test here ever
+    # moves or defends the worker it plants there, so a roaming
+    # barbarian killing it mid-build (measured: it does, intermittently)
+    # fails the assertion for a reason that has nothing to do with
+    # mine-duration math — the same class of incidental interference
+    # `BrokenOathsSpex.SharedGivens.clear_all_camps/1` and this story's
+    # own spex (`Fixtures.isolate_camp/2`) already guard against.
+    # `Game.isolate_camp_for_test/2` with an id no real camp can match
+    # tears every camp down the same way.
     test "a mine takes the base 5 turns without Mining researched" do
       world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
       user = UsersFixtures.user_fixture()
@@ -499,6 +511,7 @@ defmodule BrokenOaths.Game.WorldServerTest do
 
       [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
       :ok = Game.found_city(world, user, settler.id)
+      :ok = Game.isolate_camp_for_test(world, -1)
 
       hills_tile = hills_tile(world)
       worker = Game.spawn_unit_for_test(world, player.id, :worker, hills_tile)
@@ -520,6 +533,7 @@ defmodule BrokenOaths.Game.WorldServerTest do
 
       [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
       :ok = Game.found_city(world, user, settler.id)
+      :ok = Game.isolate_camp_for_test(world, -1)
 
       :ok = Game.set_research(world, user, :mining)
       complete_current_research(world, user)

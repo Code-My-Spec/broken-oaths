@@ -45,8 +45,20 @@ defmodule BrokenOaths.Worlds.Resources do
 
   # Bump whenever the cached shape changes: persistent_term survives
   # code reloads, so a stale-shaped entry would otherwise leak into new
-  # code (mirrors `Regions.@cache_version`).
-  @cache_version 1
+  # code (mirrors `Regions.@cache_version`). Bumped 1 -> 2 for the
+  # v0.2.1 playtest "resources missing" bug (issue 335f265c): this
+  # module's own placement math (verified: cattle/wheat/sheep/stone all
+  # roll at the expected rate on a fresh BEAM, see ResourcesTest) was
+  # never wrong, but a long-lived, hot-reloaded server can have cached
+  # an EARLIER, incomplete build of `candidates/1` under version 1 (see
+  # the `game-state-persistence` ADR: "hot reloads and generator changes
+  # invalidate cleanly" via a version bump, precisely for this case) —
+  # a world visited during that window would keep serving whatever
+  # narrower resource set (in the field report: wheat only) got cached
+  # for its `{seed, frequency, density}` key forever, since nothing
+  # about a placement bugfix itself changes those key inputs. Bumping
+  # forces every world to recompute under the current, correct logic.
+  @cache_version 2
 
   # Per-eligible-tile placement chance. `:standard` echoes Civ VI's own
   # `iStandardPercentage` (~28%, `civ6_resources.md` §3); `:sparse` and

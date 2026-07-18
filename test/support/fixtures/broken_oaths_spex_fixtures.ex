@@ -270,6 +270,32 @@ defmodule BrokenOathsSpex.Fixtures do
     to: BrokenOaths.Game,
     as: :resolve_barbarian_attack_for_test
 
+  # Deliberate, narrow exception to "read-only" above, same status as
+  # `spawn_barbarian/2`: places a REAL, additional player-owned unit at
+  # `tile_id` with that type's starting stats — needed to exercise a
+  # SAME-CLASS stacking/collision scenario (e.g. two settlers, two
+  # warriors) once the field-stacking allowance (v0.2.1 playtest issue
+  # 5df5de88) means the only two units a fresh spawn actually provides
+  # (a Lord and a Settler) are of DIFFERENT combat classes and so no
+  # longer collide with each other. `player_id` — not `user` — since
+  # `Game.player_units/2`'s own returned unit maps never expose a
+  # player id to spex-land (own-vs-foreign is already resolved by the
+  # time a unit map exists); callers get it back from `join_world/2`'s
+  # own `{:ok, player}`, idempotent for an already-joined user.
+  defdelegate spawn_unit(world, player_id, type, tile_id),
+    to: BrokenOaths.Game,
+    as: :spawn_unit_for_test
+
+  # Deliberate, narrow exception to "read-only" above, same status as
+  # `spawn_unit/4`: hard-deletes ANY unit outright (player-owned or a
+  # barbarian) — story 895's criterion 7568 needs to retire an
+  # already-served-its-purpose tracked barbarian so it can never
+  # muddy a LATER observation window with a second, untracked attack
+  # (relocating it is not enough: the barbarian's own camp sits within
+  # its own roam radius of the very city under test, so it would
+  # simply wander back within striking range on its own).
+  defdelegate remove_unit(world, unit_id), to: BrokenOaths.Game, as: :remove_unit_for_test
+
   # --- Barbarian camps (story 892): sanctioned narrow read ---
   # A camp's existence, tile, hp, and warrior roster are spawn-time
   # server decisions — exactly the same status as region identity

@@ -493,9 +493,13 @@ defmodule BrokenOaths.Game.Turn do
   # UNLESS `target` is `mover_unit`'s own city's own tile with garrison
   # room for it (story 895 — `CityDefense.garrison_room?/2`), OR `target`
   # is another player's BROKEN city (story 906 — `Siege.
-  # enterable_despite_garrison?/2`, the fallen-garrison walk-in); every
-  # other occupied tile, city or not, mine or another player's, keeps
-  # the original all-or-nothing rule.
+  # enterable_despite_garrison?/2`, the fallen-garrison walk-in), OR
+  # `target` holds exactly one of the mover's own units of the OTHER
+  # combat class (v0.2.1 playtest issue 5df5de88 — a civilian may stack
+  # with a combat escort, either direction, out in the open field —
+  # `entering_field_stack_with_room?/2`); every other occupied tile,
+  # city or not, mine or another player's, keeps the original
+  # all-or-nothing rule.
   defp blocked?(target, positions, units, mover_unit, garrisonable, broken_cities) do
     occupants =
       for {id, tile} <- positions, tile == target, id != mover_unit.id, do: Map.fetch!(units, id)
@@ -506,9 +510,23 @@ defmodule BrokenOaths.Game.Turn do
 
       _ ->
         not (entering_own_garrison_with_room?(target, occupants, mover_unit, garrisonable) or
-               entering_broken_enemy_city?(target, mover_unit, broken_cities))
+               entering_broken_enemy_city?(target, mover_unit, broken_cities) or
+               entering_field_stack_with_room?(occupants, mover_unit))
     end
   end
+
+  # Mirrors `WorldServer.field_stack_room?/2`'s queue-time allowance for
+  # the dynamic, tick-time check: exactly one existing occupant, owned
+  # by the SAME player as `mover_unit`, of the OTHER combat class
+  # (`CityDefense.military?/1` — the same combat/civilian split story
+  # 895's own garrison rule uses). Two or more occupants, a foreign
+  # occupant, or a same-class occupant all stay blocked.
+  defp entering_field_stack_with_room?([only], mover_unit) do
+    only.player_id == mover_unit.player_id and
+      CityDefense.military?(only) != CityDefense.military?(mover_unit)
+  end
+
+  defp entering_field_stack_with_room?(_occupants, _mover_unit), do: false
 
   defp entering_own_garrison_with_room?(target, occupants, mover_unit, garrisonable) do
     MapSet.member?(Map.get(garrisonable, mover_unit.player_id, MapSet.new()), target) and

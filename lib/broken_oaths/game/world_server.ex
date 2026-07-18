@@ -1362,11 +1362,16 @@ defmodule BrokenOaths.Game.WorldServer do
   # A player can never stack their own units, but a tile another player
   # currently holds is still a valid target — Turn's dynamic collision
   # check (not this queue-time check) is what halts the mover if the
-  # tile is still occupied when they actually arrive. Story 895's one
+  # tile is still occupied when they actually arrive. Story 895's
   # exception: `mover`'s own city's own tile allows up to
   # `CityDefense.garrison_cap/0` military units (civilians always fit,
-  # uncounted) — see `CityDefense.garrison_room?/2`. Every other tile
-  # keeps the original all-or-nothing rule.
+  # uncounted) — see `CityDefense.garrison_room?/2`. Every OTHER own
+  # tile keeps a tighter, but not all-or-nothing, rule (v0.2.1 playtest
+  # issue 5df5de88): exactly one non-combat unit may stack with exactly
+  # one combat unit out in the open field — `field_stack_room?/2` below
+  # — so a worker/settler can walk with a warrior escort without a
+  # city underfoot. `Turn.blocked?/6` mirrors this same allowance for
+  # the dynamic, tick-time collision check.
   defp occupied_by_own?(state, tile_id, player_id, mover) do
     own_units_here =
       for {_id, u} <- state.units, u.tile_id == tile_id, u.player_id == player_id, do: u
@@ -1374,10 +1379,22 @@ defmodule BrokenOaths.Game.WorldServer do
     case Enum.find(state.cities, fn {_id, c} ->
            c.tile_id == tile_id and c.player_id == player_id
          end) do
-      nil -> own_units_here != []
+      nil -> not field_stack_room?(mover, own_units_here)
       _own_city -> not CityDefense.garrison_room?(mover, own_units_here)
     end
   end
+
+  # Room for `mover` on a non-city tile already holding `own_units_here`
+  # (all same-owner, by construction — see `occupied_by_own?/4`'s own
+  # `own_units_here` filter): empty is always room; a lone existing unit
+  # leaves room only for the OTHER combat class (one civilian + one
+  # combat, either order); two or more units already there is always
+  # full. `CityDefense.military?/1` is the same combat/civilian split
+  # story 895's own garrison rule uses (`:lord`/`:warrior`/
+  # `:bronze_spearman` are combat; everything else is civilian).
+  defp field_stack_room?(_mover, []), do: true
+  defp field_stack_room?(mover, [only]), do: CityDefense.military?(only) != CityDefense.military?(mover)
+  defp field_stack_room?(_mover, _units), do: false
 
   defp persist_order!(unit_id, path) do
     attrs = %{unit_id: unit_id, kind: :move, path: path, status: :pending}

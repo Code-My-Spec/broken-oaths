@@ -9,6 +9,16 @@ defmodule BrokenOathsSpex.Story875.Criterion7426Spex do
   points partway, a blocker took its NEXT tile, and the recharge
   attempt hits the occupied step. The construction is confirmed against
   the server's own pushed path so route ambiguity can't fake it.
+
+  Updated for the v0.2.1 playtest "stacking non-combat units" fix
+  (issue 5df5de88): the blocker here is now a SECOND, freshly spawned
+  Settler (`Fixtures.spawn_unit/4`) rather than the player's Lord — a
+  Lord (combat) and a Settler (non-combat) are now a DELIBERATELY
+  allowed stack (see `BrokenOaths.Game.WorldServer.
+  field_stack_room?/2`), so a Lord claiming the walker's next step
+  would no longer collide with it at all. Two Settlers are the same
+  combat class, so this scenario's own subject — a genuine collision —
+  is still real and enforced.
   """
 
   use BrokenOathsSpex.Case
@@ -18,7 +28,7 @@ defmodule BrokenOathsSpex.Story875.Criterion7426Spex do
   alias BrokenOathsSpex.Fixtures
 
   spex "a path blocked mid-journey halts the unit without losing it" do
-    scenario "a blocker moves in and the walker stops short" do
+    scenario "a same-class blocker moves in and the walker stops short" do
       given_(:a_world)
       given_(:registered_player)
 
@@ -37,7 +47,6 @@ defmodule BrokenOathsSpex.Story875.Criterion7426Spex do
         land? = fn tile -> Fixtures.tile_class(context.world, tile) == :land end
         units = Fixtures.player_units(context.world, context.user)
         [settler | _] = for u <- units, u.type == :settler, do: u
-        [lord | _] = for u <- units, u.type == :lord, do: u
         occupied = MapSet.new(for u <- units, do: u.tile_id)
 
         # Burn the settler's movement on a two-hex walk so it rests with
@@ -66,52 +75,61 @@ defmodule BrokenOathsSpex.Story875.Criterion7426Spex do
 
         assert settler_now.movement == 0
 
-        # Find (next_step, dest) DETERMINISTICALLY: next_step adjacent to
-        # both the resting settler and the lord; dest one hex beyond,
-        # not adjacent to the settler, and — crucially — next_step is the
-        # ONLY unoccupied land tile adjacent to both settler and dest,
-        # so the server's shortest path can only be [next_step, dest].
         settler_adj = Fixtures.adjacent_tiles(context.world, settler_now.tile_id)
-        lord_adj = Fixtures.adjacent_tiles(context.world, lord.tile_id)
+        passable = fn tile -> land?.(tile) and tile != settler_now.tile_id end
 
-        passable = fn tile ->
-          land?.(tile) and tile != lord.tile_id and tile != settler_now.tile_id
-        end
-
+        # Find (next_step, dest) DETERMINISTICALLY: next_step adjacent to
+        # the resting settler; dest one hex beyond, not itself adjacent
+        # to the settler, and — crucially — next_step is the ONLY
+        # passable land tile adjacent to both settler and dest, so the
+        # server's shortest path can only be [next_step, dest].
         {n3, dest} =
-          Enum.find_value(settler_adj, fn n3 ->
-            with true <- n3 in lord_adj,
-                 true <- passable.(n3),
-                 dest when not is_nil(dest) <-
-                   context.world
-                   |> Fixtures.adjacent_tiles(n3)
-                   |> Enum.filter(passable)
-                   |> Enum.reject(&(&1 in settler_adj))
-                   |> Enum.find(fn dest ->
-                     common =
-                       context.world
-                       |> Fixtures.adjacent_tiles(dest)
-                       |> Enum.filter(&(&1 in settler_adj))
-                       |> Enum.filter(passable)
+          settler_adj
+          |> Enum.filter(passable)
+          |> Enum.find_value(fn n3 ->
+            found_dest =
+              context.world
+              |> Fixtures.adjacent_tiles(n3)
+              |> Enum.filter(passable)
+              |> Enum.reject(&(&1 in settler_adj))
+              |> Enum.find(fn candidate_dest ->
+                common =
+                  context.world
+                  |> Fixtures.adjacent_tiles(candidate_dest)
+                  |> Enum.filter(&(&1 in settler_adj))
+                  |> Enum.filter(passable)
 
-                     common == [n3]
-                   end) do
-              {n3, dest}
-            else
-              _ -> nil
-            end
+                common == [n3]
+              end)
+
+            if found_dest, do: {n3, found_dest}
           end) ||
             raise "no blockable construction exists for this seed — pick a different fixture seed"
 
+        # A second settler — same combat class as the walker, so this
+        # genuinely collides rather than stacking (the field-stacking
+        # allowance is scoped to OPPOSITE combat classes) — is spawned
+        # adjacent to `n3` so it can claim it in exactly one step, the
+        # same tick the walker tries to pass through.
+        blocker_start =
+          context.world
+          |> Fixtures.adjacent_tiles(n3)
+          |> Enum.filter(&(land?.(&1) and &1 not in [settler_now.tile_id, dest]))
+          |> List.first() ||
+            raise "no room to place a same-class blocker next to next_step for this seed"
+
+        {:ok, player} = Fixtures.join_world(context.world, context.user)
+        blocker = Fixtures.spawn_unit(context.world, player.id, :settler, blocker_start)
+
         render_hook(context.play_live, "queue_move", %{"unit_id" => settler.id, "to_tile" => dest})
 
-        # The lord claims the settler's pending next step immediately.
-        render_hook(context.play_live, "queue_move", %{"unit_id" => lord.id, "to_tile" => n3})
+        # The blocker claims the settler's pending next step.
+        render_hook(context.play_live, "queue_move", %{"unit_id" => blocker.id, "to_tile" => n3})
 
         context =
           context
           |> Map.put(:settler, settler)
-          |> Map.put(:lord, lord)
+          |> Map.put(:blocker, blocker)
           |> Map.put(:resting_tile, settler_now.tile_id)
           |> Map.put(:next_step, n3)
 
@@ -126,11 +144,11 @@ defmodule BrokenOathsSpex.Story875.Criterion7426Spex do
       then_ "the settler halted without being lost, its path interrupted", context do
         units = Fixtures.player_units(context.world, context.user)
         [settler] = for u <- units, u.id == context.settler.id, do: u
-        [lord] = for u <- units, u.id == context.lord.id, do: u
+        [blocker] = for u <- units, u.id == context.blocker.id, do: u
 
-        assert lord.tile_id == context.next_step
+        assert blocker.tile_id == context.next_step
         assert settler.tile_id == context.resting_tile
-        refute lord.tile_id == settler.tile_id
+        refute blocker.tile_id == settler.tile_id
 
         render_hook(context.play_live, "select_unit", %{"unit_id" => context.settler.id})
         assert has_element?(context.play_live, "[data-test='order-interrupted']")

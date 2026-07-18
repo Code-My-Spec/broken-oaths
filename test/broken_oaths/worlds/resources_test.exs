@@ -86,6 +86,40 @@ defmodule BrokenOaths.Worlds.ResourcesTest do
       refute is_nil(ocean_tile)
       assert Resources.at(w, ocean_tile) == nil
     end
+
+    # Regression for the v0.2.1 playtest "resources missing" report
+    # (issue 335f265c): the field symptom was "I've only seen wheat
+    # resources... no Cattle, no Sheep, no Stone" on live, already-
+    # running worlds. The placement math here was never actually wrong
+    # (this whole describe block already covers it); the real failure
+    # mode was a long-lived, hot-reloaded server serving an EARLIER,
+    # incomplete `candidates/1` build out of the `:persistent_term`
+    # cache forever, because nothing about a placement bugfix changes
+    # a world's `{seed, frequency, density}` cache key (see
+    # `Resources.@cache_version`'s own comment and the
+    # `game-state-persistence` ADR). This locks in the actual
+    # observable contract at real gameplay scale (`World.frequency`'s
+    # own schema default, 54) across more than one seed, so a future
+    # regression to "everything rolls the same kind" fails loudly.
+    test "a real-scale world rolls more than one resource kind, not just wheat" do
+      frequency = 54
+      total = Globe.tile_count(frequency)
+
+      for seed <- [7, 99, 20_260_718] do
+        w = %World{seed: seed, frequency: frequency, resource_density: :standard}
+
+        kinds =
+          for tile_id <- 0..(total - 1),
+              resource = Resources.at(w, tile_id),
+              resource != nil,
+              do: resource
+
+        distinct_kinds = Enum.uniq(kinds)
+
+        assert length(distinct_kinds) > 1,
+               "seed #{seed}: only rolled #{inspect(distinct_kinds)} across the whole map"
+      end
+    end
   end
 
   defp eligible?(:cattle, %{base: :grassland, relief: :flat, feature: nil}), do: true

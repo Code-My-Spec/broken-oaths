@@ -1,11 +1,16 @@
 defmodule BrokenOathsSpex.Story892.Criterion7543Spex do
   @moduledoc """
   Story 892 — Barbarian Camps Spawn
-  Criterion 7543 — founding a player's first city spawns 5-8 barbarian
+  Criterion 7543 — founding a player's first city spawns 5-7 barbarian
   camps total: 1-2 already inside the player's own (already-visible)
-  region, and 4-6 more 8-15 hexes out, unexplored, and outside the
+  region, and 4-5 more 8-15 hexes out, unexplored, and outside the
   player's claimed region (the region-boundary bias — see Three Amigos
-  notes on story 892).
+  notes on story 892). Total/far ranges narrowed from 5-8/4-6 in the
+  v0.2.1 playtest balance pass (issue 04931763, "barbarians spawn too
+  quickly, or are too strong") — see `BrokenOaths.Game.Camps`'s own
+  moduledoc for the full before/after numbers and the same pass's
+  minimum-spacing rule (covered by `CampsTest`, unit-level; no UI
+  surface exists to assert inter-camp distance through here).
 
   Camp existence/placement has no UI surface until a camp is actually
   scouted (fog of war, criterion 7546 — a hard constraint), so this
@@ -30,7 +35,7 @@ defmodule BrokenOathsSpex.Story892.Criterion7543Spex do
   alias BrokenOathsSpex.Fixtures
 
   spex "the wilderness answers the first city" do
-    scenario "founding the first city spawns 5-8 camps split near/far" do
+    scenario "founding the first city spawns 5-7 camps split near/far" do
       given_(:a_world)
       given_(:registered_player)
 
@@ -73,14 +78,14 @@ defmodule BrokenOathsSpex.Story892.Criterion7543Spex do
         {:ok, context}
       end
 
-      then_ "four to six more camps sit 8-15 hexes out, unexplored, outside the region",
+      then_ "four to five more camps sit 8-15 hexes out, unexplored, outside the region",
             context do
         all_camps = Fixtures.list_camps(context.world)
         visible_ids = MapSet.new(context.pushed_camps, & &1.id)
         far_camps = Enum.reject(all_camps, &(&1.id in visible_ids))
 
-        assert length(far_camps) in 4..6
-        assert length(all_camps) in 5..8
+        assert length(far_camps) in 4..5
+        assert length(all_camps) in 5..7
 
         region_id = Fixtures.claimed_region(context.world, context.user)
         %{regions: regions} = Fixtures.region_partition(context.world)

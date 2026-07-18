@@ -11,12 +11,18 @@ defmodule BrokenOaths.Game.Unit do
   warriors per camp" at 2). An ordinary player-owned unit always sets
   `player_id` and leaves `camp_id` nil; the two are never both set.
 
-  One unit per hex is a hard rule everywhere EXCEPT a city's own tile
-  (story 895's garrison exception — see
-  `BrokenOaths.Game.CityDefense.garrison_room?/2`), so it's enforced at
-  the application layer (`BrokenOaths.Game.WorldServer.occupied_by_own?/4`
-  at queue time, `BrokenOaths.Game.Turn`'s movement collision check at
-  tick time) rather than a blanket DB unique index — see migration
+  One unit per hex is a hard rule, with two exceptions: a city's own
+  tile (story 895's garrison exception — see
+  `BrokenOaths.Game.CityDefense.garrison_room?/2`), and, out in the open
+  field, exactly one non-combat unit stacking with exactly one combat
+  unit of the SAME owner (v0.2.1 playtest issue 5df5de88 — a worker or
+  settler may walk with a warrior/lord/bronze-spearman escort — see
+  `BrokenOaths.Game.WorldServer.field_stack_room?/2` and
+  `BrokenOaths.Game.Turn.entering_field_stack_with_room?/2`). It's
+  enforced at the application layer
+  (`BrokenOaths.Game.WorldServer.occupied_by_own?/4` at queue time,
+  `BrokenOaths.Game.Turn`'s movement collision check at tick time)
+  rather than a blanket DB unique index — see migration
   `20260716190000` for why a DB-level constraint can no longer express
   this rule.
 

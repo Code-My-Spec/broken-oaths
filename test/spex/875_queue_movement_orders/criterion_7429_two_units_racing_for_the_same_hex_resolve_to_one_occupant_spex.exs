@@ -6,6 +6,17 @@ defmodule BrokenOathsSpex.Story875.Criterion7429Spex do
   The globe board has no tile DOM; orders travel as LiveView events
   (render_hook) and results come back as pushed payloads and unit
   positions — per the board doctrine.
+
+  Updated for the v0.2.1 playtest "stacking non-combat units" fix
+  (issue 5df5de88): a Lord and a Settler — the only two units a fresh
+  spawn provides, which this scenario originally raced against each
+  other — are now a DELIBERATELY allowed stack (one combat, one
+  non-combat unit; see `BrokenOaths.Game.WorldServer.
+  field_stack_room?/2`), so two of them converging on a shared tile
+  would now correctly end up sharing it rather than colliding. This
+  scenario's own subject — same-CLASS convergence still resolves to
+  exactly one occupant — is still real and enforced, so it now spawns
+  a second Settler (`Fixtures.spawn_unit/4`) to race the first.
   """
 
   use BrokenOathsSpex.Case
@@ -14,8 +25,8 @@ defmodule BrokenOathsSpex.Story875.Criterion7429Spex do
 
   alias BrokenOathsSpex.Fixtures
 
-  spex "two units racing for the same hex resolve to one occupant" do
-    scenario "converging moves never stack" do
+  spex "two same-class units racing for the same hex resolve to one occupant" do
+    scenario "converging moves of the same combat class never stack" do
       given_(:a_world)
       given_(:registered_player)
 
@@ -30,28 +41,47 @@ defmodule BrokenOathsSpex.Story875.Criterion7429Spex do
         {:ok, Map.put(context, :play_live, play_live)}
       end
 
-      given_ "both units target the same shared land tile", context do
-        land? = fn tile -> Fixtures.tile_class(context.world, tile) == :land end
+      given_ "a second settler stands nearby (same combat class as the first)", context do
+        {:ok, player} = Fixtures.join_world(context.world, context.user)
         units = Fixtures.player_units(context.world, context.user)
         [settler | _] = for u <- units, u.type == :settler, do: u
-        [lord | _] = for u <- units, u.type == :lord, do: u
 
-        shared =
+        land? = fn tile -> Fixtures.tile_class(context.world, tile) == :land end
+
+        [second_tile | _] =
           context.world
           |> Fixtures.adjacent_tiles(settler.tile_id)
           |> Enum.filter(land?)
-          |> Enum.filter(&(&1 in Fixtures.adjacent_tiles(context.world, lord.tile_id)))
+
+        second_settler = Fixtures.spawn_unit(context.world, player.id, :settler, second_tile)
+
+        {:ok,
+         context
+         |> Map.put(:settler, settler)
+         |> Map.put(:second_settler, second_settler)}
+      end
+
+      given_ "both settlers target the same shared land tile", context do
+        land? = fn tile -> Fixtures.tile_class(context.world, tile) == :land end
+
+        shared =
+          context.world
+          |> Fixtures.adjacent_tiles(context.settler.tile_id)
+          |> Enum.filter(land?)
+          |> Enum.filter(&(&1 in Fixtures.adjacent_tiles(context.world, context.second_settler.tile_id)))
           |> List.first()
 
         render_hook(context.play_live, "queue_move", %{
-          "unit_id" => settler.id,
+          "unit_id" => context.settler.id,
           "to_tile" => shared
         })
 
-        render_hook(context.play_live, "queue_move", %{"unit_id" => lord.id, "to_tile" => shared})
+        render_hook(context.play_live, "queue_move", %{
+          "unit_id" => context.second_settler.id,
+          "to_tile" => shared
+        })
 
-        {:ok,
-         context |> Map.put(:settler, settler) |> Map.put(:lord, lord) |> Map.put(:shared, shared)}
+        {:ok, Map.put(context, :shared, shared)}
       end
 
       when_ "the turn resolves", context do
@@ -62,18 +92,18 @@ defmodule BrokenOathsSpex.Story875.Criterion7429Spex do
       then_ "exactly one unit holds the hex and the other stayed put", context do
         units = Fixtures.player_units(context.world, context.user)
         [settler] = for u <- units, u.id == context.settler.id, do: u
-        [lord] = for u <- units, u.id == context.lord.id, do: u
+        [second_settler] = for u <- units, u.id == context.second_settler.id, do: u
 
-        occupants = for u <- [settler, lord], u.tile_id == context.shared, do: u
+        occupants = for u <- [settler, second_settler], u.tile_id == context.shared, do: u
         assert length(occupants) == 1
-        refute settler.tile_id == lord.tile_id
+        refute settler.tile_id == second_settler.tile_id
 
         original = %{
           context.settler.id => context.settler.tile_id,
-          context.lord.id => context.lord.tile_id
+          context.second_settler.id => context.second_settler.tile_id
         }
 
-        [held_back] = for u <- [settler, lord], u.tile_id != context.shared, do: u
+        [held_back] = for u <- [settler, second_settler], u.tile_id != context.shared, do: u
         assert held_back.tile_id == Map.fetch!(original, held_back.id)
         {:ok, context}
       end
