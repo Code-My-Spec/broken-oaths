@@ -14,7 +14,8 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
     * `:id` - the DOM id for this component instance
     * `:unit` - the selected unit, or `nil` when nothing is selected.
       Expected to carry `:id`, `:type` (`:lord` | `:settler` | `:worker`
-      | `:warrior`), `:hp`, `:max_hp`, `:movement`, `:max_movement`
+      | `:warrior` | `:barbarian_warrior` | `:bronze_spearman`), `:hp`,
+      `:max_hp`, `:movement`, `:max_movement`
     * `:order` - the unit's queued order, or `nil`. Expected to carry
       `:target_tile` and `:status` (`:pending` | `:interrupted`)
     * `:allowed_improvements` - improvement kinds (`:farm` | `:mine` |
@@ -150,7 +151,14 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
   defp unit_type_label(:settler), do: "Settler"
   defp unit_type_label(:worker), do: "Worker"
   defp unit_type_label(:warrior), do: "Warrior"
+  # Story 903's Bronze Age melee unit (issue b8f4ce10 — selecting one
+  # crashed this component with a FunctionClauseError; a garrisoned
+  # bronze_spearman also blocked left-clicking the city under it).
+  defp unit_type_label(:bronze_spearman), do: "Bronze Spearman"
   # Enemy units are selectable too — the panel doubles as the threat
   # readout (stats, HP), with every action already type/owner-gated.
   defp unit_type_label(:barbarian_warrior), do: "Barbarian Warrior"
+  # Any future unit type degrades to a readable label instead of
+  # crashing the LiveView the way :bronze_spearman did before this fix.
+  defp unit_type_label(type), do: type |> to_string() |> String.capitalize()
 end

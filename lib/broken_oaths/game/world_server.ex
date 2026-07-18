@@ -1778,7 +1778,7 @@ defmodule BrokenOaths.Game.WorldServer do
   defp do_assign_worked_tile(state, user, city_id, from_tile, to_tile) do
     with {:ok, city} <- owned_city(state, user, city_id),
          :ok <- validate_unassign(city, from_tile),
-         :ok <- validate_assign(state.world, city, to_tile) do
+         :ok <- validate_assign(state.world, city, from_tile, to_tile) do
       worked = city.worked_tiles |> maybe_remove(from_tile) |> maybe_add(to_tile)
       persist_worked_tiles!(city_id, worked)
       {:ok, %{state | cities: Map.put(state.cities, city_id, %{city | worked_tiles: worked})}}
@@ -1797,14 +1797,23 @@ defmodule BrokenOaths.Game.WorldServer do
     if tile in city.worked_tiles, do: :ok, else: {:error, :not_worked}
   end
 
-  defp validate_assign(_world, _city, nil), do: :ok
+  defp validate_assign(_world, _city, _from_tile, nil), do: :ok
 
-  defp validate_assign(world, city, tile) do
+  # A `to_tile` with no paired `from_tile` grows the worked-tile count
+  # by one — refused once the city is already at its population cap
+  # (`City.changeset/2`'s `validate_worked_tiles_within_size/1` encodes
+  # the same "cannot exceed size" invariant, but this write path
+  # persists via a raw `Repo.update_all` that never runs the
+  # changeset, so the cap has to be checked here too — issue
+  # 7509c453). A paired swap (`from_tile` supplied) never changes the
+  # count, so it stays allowed even at the cap.
+  defp validate_assign(world, city, from_tile, tile) do
     cond do
       tile == city.tile_id -> {:error, :invalid_tile}
       tile not in city.territory -> {:error, :not_territory}
       tile in city.worked_tiles -> {:error, :already_worked}
       not Yields.workable?(Regions.terrain(world, tile)) -> {:error, :invalid_terrain}
+      is_nil(from_tile) and length(city.worked_tiles) >= city.size -> {:error, :size_exceeded}
       true -> :ok
     end
   end

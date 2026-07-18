@@ -10,8 +10,10 @@ defmodule BrokenOaths.Game.WorldServerTest do
   alias BrokenOaths.Game.WorldServer
   alias BrokenOaths.Repo
   alias BrokenOaths.UsersFixtures
+  alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
   alias BrokenOaths.WorldsFixtures
+  alias BrokenOaths.Game.Yields
 
   # Regression for issue 07ee50d1: a second WorldServer instance for the
   # same world (a second BEAM node running a mix script) used to clobber
@@ -219,6 +221,69 @@ defmodule BrokenOaths.Game.WorldServerTest do
       :ok = Game.set_camp_hp_for_test(world, camp.id, 1)
 
       assert Enum.find(Game.list_camps(world), &(&1.id == camp.id)).hp == 1
+
+      WorldServer.restart(world)
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Worked tiles — population-cap exploit (QA issue 7509c453)
+  # -------------------------------------------------------------------
+  #
+  # `do_assign_worked_tile/5` persists via a raw `Repo.update_all`, which
+  # bypasses `City.changeset/2`'s own `validate_worked_tiles_within_size/1`
+  # guard entirely — so `validate_assign/4` has to enforce the "never
+  # exceed size" invariant itself for a `to_tile` with no paired
+  # `from_tile` (a pure reassignment, `from_tile` supplied, never grows
+  # the count and stays allowed even at the cap).
+
+  describe "assign_worked_tile/5 population cap (issue 7509c453)" do
+    test "rejects an unpaired assign once the city already works as many tiles as its size" do
+      world = WorldsFixtures.world_fixture(%{frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, _player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+
+      [city] = Game.player_cities(world, user)
+      # A freshly founded (size-1) city already auto-assigns its founding
+      # pop's one worked tile (story 880, criterion 7476) — already at cap.
+      assert length(city.worked_tiles) == city.size
+
+      spare = spare_workable_tile(world, city)
+      refute is_nil(spare), "expected a second workable, unworked territory tile to attempt the exploit on"
+
+      assert Game.assign_worked_tile(world, user, city.id, nil, spare) == {:error, :size_exceeded}
+
+      [unchanged] = Game.player_cities(world, user)
+      assert unchanged.worked_tiles == city.worked_tiles
+      assert length(unchanged.worked_tiles) == unchanged.size
+
+      WorldServer.restart(world)
+    end
+
+    test "a paired swap (from_tile + to_tile) still works at the population cap" do
+      world = WorldsFixtures.world_fixture(%{frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, _player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+
+      [city] = Game.player_cities(world, user)
+      assert length(city.worked_tiles) == city.size
+
+      [old_tile | _] = city.worked_tiles
+      spare = spare_workable_tile(world, city)
+      refute is_nil(spare)
+
+      assert Game.assign_worked_tile(world, user, city.id, old_tile, spare) == :ok
+
+      [updated] = Game.player_cities(world, user)
+      assert length(updated.worked_tiles) == city.size
+      assert spare in updated.worked_tiles
+      refute old_tile in updated.worked_tiles
 
       WorldServer.restart(world)
     end
@@ -478,6 +543,17 @@ defmodule BrokenOaths.Game.WorldServerTest do
 
     Enum.find(0..641, fn t ->
       land?.(t) and BrokenOaths.Worlds.Regions.terrain(world, t).relief == :hills
+    end)
+  end
+
+  # A territory tile that isn't the city center, isn't already worked,
+  # and is legal to work — the same "assignable" gate
+  # `BrokenOathsWeb.GameLive.Play`'s own `assign_worked_tile` handler
+  # relies on (it never checks remaining population itself; that's
+  # `validate_assign/4`'s job, per issue 7509c453).
+  defp spare_workable_tile(world, city) do
+    Enum.find(city.territory -- [city.tile_id | city.worked_tiles], fn tile_id ->
+      Yields.workable?(Regions.terrain(world, tile_id))
     end)
   end
 

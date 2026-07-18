@@ -176,7 +176,10 @@ defmodule BrokenOaths.Game do
   @doc """
   Reassign a citizen's worked tile: `from_tile`/`to_tile` are each
   optionally `nil` (unassign only, assign an idle citizen only, or
-  both for an ordinary reassignment).
+  both for an ordinary reassignment). Assigning a `to_tile` with no
+  paired `from_tile` is refused once the city is already working as
+  many tiles as its `size` allows (`:size_exceeded`) — a paired swap
+  never grows the count, so it stays allowed at the cap.
   """
   @spec assign_worked_tile(map(), map(), term(), term() | nil, term() | nil) ::
           :ok
@@ -186,7 +189,8 @@ defmodule BrokenOaths.Game do
              | :invalid_tile
              | :not_territory
              | :already_worked
-             | :invalid_terrain}
+             | :invalid_terrain
+             | :size_exceeded}
   def assign_worked_tile(world, user, city_id, from_tile, to_tile),
     do: WorldServer.call(world, {:assign_worked_tile, user, city_id, from_tile, to_tile})
 

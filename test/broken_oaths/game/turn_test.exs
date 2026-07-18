@@ -300,6 +300,43 @@ defmodule BrokenOaths.Game.TurnTest do
       assert [%{banked: banked}] = new_state.cities[1].queue
       assert banked >= 45
     end
+
+    # Regression for issue 63300098: a settler's population cost
+    # (`Production.apply_pop_cost/3`, resolved in phase 3) used to get
+    # silently refunded by growth (phase 5) resolving in the SAME tick
+    # once a well-fed city crossed its next threshold — `size` never
+    # visibly dropped from the outside. Growth for a city that just
+    # settled THIS tick is now suppressed for that one boundary.
+    test "a settler's pop cost survives the same tick's growth for a well-fed city" do
+      c =
+        city(1,
+          tile: 1,
+          size: 2,
+          # Comfortably past size 2's own growth threshold (30) even
+          # before this tick's own food accrual adds more.
+          food: 500,
+          territory: [1],
+          queue: [%{id: 10, type: :settler, banked: 100, cost: 100}]
+        )
+
+      state = %{base_state(%{}) | cities: %{1 => c}}
+
+      {new_state, events} = Turn.tick(state)
+
+      assert {:unit_spawned, %{player_id: 1, type: :settler, tile_id: 1}} in events
+      # Settled from size 2 -> 1; growth this same tick is suppressed,
+      # so it must NOT bounce back up to 2.
+      assert new_state.cities[1].size == 1
+    end
+
+    test "a well-fed city with no settler completing still grows normally" do
+      c = city(1, tile: 1, size: 2, food: 500, territory: [1])
+      state = %{base_state(%{}) | cities: %{1 => c}}
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.cities[1].size == 3
+    end
   end
 
   describe "tick/1 improvement progress" do

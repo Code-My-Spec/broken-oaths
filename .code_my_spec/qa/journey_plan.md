@@ -10,8 +10,8 @@ Steps:
 1. Visit `/users/register`, register a fresh email, follow the magic
    link from `/dev/mailbox` (Swoosh local adapter) to land logged in.
 2. Visit `/play`, see the world picker; click the Join button for
-   "QA World" (`[data-test='join-world-6']`).
-3. Land on `/play/6`: the cloud-wrapped globe renders with one clear
+   "QA World" (`[data-test='join-world-1']`).
+3. Land on `/play/1`: the cloud-wrapped globe renders with one clear
    bubble around the spawn — a lord and a settler visible, gold badge
    shows 50.
 4. Left-click the settler on its exact tile — the unit panel opens
@@ -37,7 +37,7 @@ Steps:
 1. Log in at `/users/log-in` with `qa@broken-oaths.test` /
    `qa-password-123!` (password form `#login_form_password`).
 2. Visit `/play`; the joined world shows Enter (not Join); click into
-   world 6 — the camera resumes on the civilization.
+   world 1 — the camera resumes on the civilization.
 3. Left-click own city (Oakhaven) — city panel opens with name, size,
    food progress, per-turn production, worked-tile list (center marked
    Free), and assignable tiles with Work buttons.
@@ -59,7 +59,7 @@ stories 873/874/879/880.
 Role: Gem-Weary Wes with a producing city.
 
 Steps:
-1. Log in as the QA account and enter world 6.
+1. Log in as the QA account and enter world 1.
 2. Select an idle worker (or queue one and wait for it to spawn).
 3. The unit panel shows Build actions gated by terrain (Farm only on
    flat grassland/plains; Mine only on hills).
@@ -79,7 +79,7 @@ duplicates, feed the city. Crosses stories 875/879/880/882.
 Role: Gem-Weary Wes expanding to a second city.
 
 Steps:
-1. Log in as the QA account, enter world 6, select a size-2+ city.
+1. Log in as the QA account, enter world 1, select a size-2+ city.
 2. Queue a Settler (note: at size 1 the option is disabled with the
    "Needs a second citizen to spare" reason — verify on any size-1
    city if present).
@@ -109,8 +109,8 @@ like the first. Crosses stories 875/876/879/883/878.
 - Credentials: `qa@broken-oaths.test` / `qa-password-123!` (password
   form). New-player journeys register fresh emails and confirm via
   `http://localhost:4050/dev/mailbox`.
-- Worlds: "QA World" id 6 (seed 424242, frequency 54, ~104 spawnable
-  regions — safe for new joins); "QA World (Fill Test)" id 10 has only
+- Worlds: "QA World" id 1 (seed 424242, frequency 54, ~104 spawnable
+  regions — safe for new joins); "QA World (Fill Test)" id 2 has only
   two spawnable regions and both are taken — do NOT use it for
   new-player joins.
 - Browser: vibium CLI (sandbox disabled); board interactions via
@@ -126,6 +126,6 @@ like the first. Crosses stories 875/876/879/883/878.
   visibility journeys are out of scope — those systems are future
   stories (the road Build button exists but is a no-op; see issue
   9bf18133).
-- World 6 accumulates state across QA sessions by design; journeys are
+- World 1 accumulates state across QA sessions by design; journeys are
   written to be additive (new cities/units) rather than assuming a
   pristine world.

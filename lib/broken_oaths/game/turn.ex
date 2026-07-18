@@ -126,7 +126,11 @@ defmodule BrokenOaths.Game.Turn do
     3. completions/spawn placement -- `Production.complete/3`; a
        completed item with nowhere to land simply waits. Successful
        spawns come back as `{:unit_spawned, spawn_event}` events --
-       this module never allocates a real unit id itself.
+       this module never allocates a real unit id itself. A settler
+       completion here already docks its city's population
+       (`Production.apply_pop_cost/3`) -- `resolve_completions/1`
+       tracks every city id that paid that cost THIS tick so phase 5
+       (growth, below) can skip it (issue 63300098).
     3b. camp spawn loop (story 892) -- `Camps.advance/2` per camp,
        threading the SAME "claimed this tick" occupied-tile set city
        completions just built (a camp spawn can't land on a tile a
@@ -169,7 +173,12 @@ defmodule BrokenOaths.Game.Turn do
        only an attack that's part of THIS tick's own AI phase does, so
        the very next boundary after an out-of-band hit still regens.
     4. food accrual -- `Yields.accrue_food/3`.
-    5. growth -- `Yields.grow/3`, at most once per city per tick.
+    5. growth -- `Yields.grow/3`, at most once per city per tick, and
+       never for a city that already paid a settler's population cost
+       in phase 3 THIS SAME tick (issue 63300098) -- otherwise a
+       well-fed city crossing its (now one-lower, post-pop-cost) next
+       growth threshold in the very same boundary silently refunds the
+       settler's cost, and `game_cities.size` never visibly drops.
     6. healing -- a unit that spent no movement this tick heals: 15 HP
        garrisoned on its own city's tile, 10 HP anywhere else in its
        owner's territory, 0 outside it.
@@ -287,7 +296,7 @@ defmodule BrokenOaths.Game.Turn do
       |> advance_improvements()
       |> accrue_production()
 
-    {state, spawn_events, occupied} = resolve_completions(state)
+    {state, spawn_events, occupied, settled_this_tick} = resolve_completions(state)
     {state, camp_events, occupied} = resolve_camp_spawns(state, occupied)
     {state, attacked_cities} = resolve_barbarian_ai(state, occupied, new_turn)
     {state, heir_events} = resolve_heirs(state, new_turn)
@@ -298,7 +307,7 @@ defmodule BrokenOaths.Game.Turn do
       |> clear_orphaned_builders()
       |> regen_cities(attacked_cities)
       |> accrue_food()
-      |> grow_cities()
+      |> grow_cities(settled_this_tick)
       |> heal_units()
       |> refresh_explored()
       |> Map.put(:turn, new_turn)
@@ -599,27 +608,46 @@ defmodule BrokenOaths.Game.Turn do
   # id order, so a spawn from one city in this same tick correctly
   # blocks a landing tile for the next city's completion — before
   # either lands in `state.units`, which only the caller can update
-  # (see `tick/1`'s doc on `{:unit_spawned, _}` events).
+  # (see `tick/1`'s doc on `{:unit_spawned, _}` events). Also threads a
+  # `MapSet` of city ids whose queue completed a `:settler` THIS tick
+  # (`Production.apply_pop_cost/3` already docked their population the
+  # instant the spawn event was built, above) — `grow_cities/2` reads
+  # this to skip those cities' own growth this same tick (issue
+  # 63300098: growth resolving in the same tick otherwise silently
+  # refunds the settler's population cost the instant a well-fed city
+  # crosses its next threshold).
   defp resolve_completions(state) do
     occupied = Map.new(state.units, fn {_id, unit} -> {unit.tile_id, true} end)
     ids = state.cities |> Map.keys() |> Enum.sort()
 
-    {cities, events, occupied} =
+    {cities, events, occupied, settled_this_tick} =
       Enum.reduce(
         ids,
-        {state.cities, [], occupied},
+        {state.cities, [], occupied, MapSet.new()},
         &resolve_city_completion(state.world, &1, &2)
       )
 
-    {%{state | cities: cities}, events, occupied}
+    {%{state | cities: cities}, events, occupied, settled_this_tick}
   end
 
-  defp resolve_city_completion(world, id, {cities, events, occupied}) do
+  defp resolve_city_completion(world, id, {cities, events, occupied, settled_this_tick}) do
     city = Map.fetch!(cities, id)
     {new_city, city_events} = Production.complete(city, occupied, world)
     newly_occupied = Map.new(city_events, fn event -> {event.tile_id, true} end)
 
-    {Map.put(cities, id, new_city), events ++ city_events, Map.merge(occupied, newly_occupied)}
+    settled_this_tick =
+      if Enum.any?(city_events, &(&1.type == :settler)) do
+        MapSet.put(settled_this_tick, id)
+      else
+        settled_this_tick
+      end
+
+    {
+      Map.put(cities, id, new_city),
+      events ++ city_events,
+      Map.merge(occupied, newly_occupied),
+      settled_this_tick
+    }
   end
 
   # -------------------------------------------------------------------
@@ -979,16 +1007,32 @@ defmodule BrokenOaths.Game.Turn do
   # `state.player_research` — already advanced by `accrue_science/1`
   # earlier in `tick/1`, so a Bronze Working completion lifts the cap
   # the instant it lands, same turn), never the city's own state.
-  defp grow_cities(state) do
+  #
+  # `settled_this_tick` (issue 63300098) is `resolve_completions/1`'s
+  # own set of city ids that completed a `:settler` THIS tick — a city
+  # in that set never grows this same tick, even if its banked food
+  # already clears the (now one-lower, post-pop-cost) next threshold.
+  # Without this, a well-fed city's settler pop cost and growth cancel
+  # out invisibly in the same boundary, defeating story 883's "a
+  # settler costs the city one population" intent. The city's CURRENT
+  # (already pop-cost-adjusted) state still threads through to its
+  # siblings' own territory checks below — only ITS OWN growth is
+  # skipped, nothing else about this tick's bookkeeping changes.
+  defp grow_cities(state, settled_this_tick) do
     ids = state.cities |> Map.keys() |> Enum.sort()
     player_research = Map.get(state, :player_research, %{})
 
     cities =
       Enum.reduce(ids, state.cities, fn id, cities ->
         city = Map.fetch!(cities, id)
-        pr = Map.get(player_research, city.player_id, Research.new())
-        grown = Yields.grow(city, Map.values(cities), state.world, Research.age(pr))
-        Map.put(cities, id, grown)
+
+        if MapSet.member?(settled_this_tick, id) do
+          cities
+        else
+          pr = Map.get(player_research, city.player_id, Research.new())
+          grown = Yields.grow(city, Map.values(cities), state.world, Research.age(pr))
+          Map.put(cities, id, grown)
+        end
       end)
 
     %{state | cities: cities}

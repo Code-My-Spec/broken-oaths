@@ -1116,6 +1116,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
   defp city_error_message(:invalid_tile), do: "The city center can't be reassigned."
   defp city_error_message(:not_territory), do: "That tile isn't part of the city."
   defp city_error_message(:already_worked), do: "That tile already has a citizen."
+
+  defp city_error_message(:size_exceeded),
+    do: "This city has no idle citizen — unassign a worked tile first."
+
   defp city_error_message(_other), do: "That action can't be completed."
 
   defp improvement_error_message(:not_owner), do: "You don't control that unit."

@@ -7,6 +7,7 @@ defmodule BrokenOathsWeb.GameLive.UnitPanelTest do
 
   @lord %{type: :lord, hp: 12, max_hp: 12, movement: 2, max_movement: 2}
   @settler %{type: :settler, hp: 8, max_hp: 8, movement: 1, max_movement: 1}
+  @bronze_spearman %{type: :bronze_spearman, hp: 120, max_hp: 120, movement: 1, max_movement: 1}
 
   describe "no unit selected" do
     test "renders without the unit panel" do
@@ -32,6 +33,16 @@ defmodule BrokenOathsWeb.GameLive.UnitPanelTest do
 
       assert html =~ ~s(data-test="unit-type")
       assert html =~ "Settler"
+    end
+
+    # Regression for issue b8f4ce10: selecting a bronze_spearman raised
+    # a FunctionClauseError in unit_type_label/1 and killed the LiveView.
+    test "labels a bronze_spearman correctly without raising" do
+      html = render_component(UnitPanel, id: "unit-panel", unit: @bronze_spearman, order: nil)
+
+      assert html =~ ~s(data-test="unit-panel")
+      assert html =~ ~s(data-test="unit-type")
+      assert html =~ "Bronze Spearman"
     end
 
     test "shows no orders queued when the unit has no order" do
