@@ -168,6 +168,24 @@ interesting decisions, and vassalage must not *always* be negative.
   reciprocity, the Pact-of-Broken-Oaths conspiracy, city-flip math, lord-death
   cascade, adjust-tribute-rate, voluntary vassalization, Honor as full reputation.
 
+## Round-4 final foundation mechanics (product owner, 2026-07-18)
+
+- **Capture moment:** zeroing city HP breaks it; the attacker must then **move a
+  unit onto the city tile** to occupy (Civ-style). No range-flip; you commit and
+  hold a body.
+- **Fallen garrison:** the **conqueror chooses** — execute the defenders or let them
+  flee — and the choice carries a **small Honor consequence** (mercy is the
+  honorable option; putting them to the sword costs Honor). A humane conqueror
+  builds the reputation that makes future vassals swear in willingly.
+- **Tribute rate is a LORD-SET, per-vassal, adjustable lever — not a fixed 25%.**
+  This is the core happiness/retention dial: a high cut = more income but rising
+  Oath Strain; a low cut = a contented, stable vassal. (This deliberately pulls the
+  "adjust tribute rate" mechanic, §7.3, *into* the foundation because the rate is a
+  day-one lever.) Default starting rate ~25%; applied to the vassal's **gross
+  per-turn gold income** unless tuned otherwise. The lord sets and changes it from
+  the Vassals panel; the vassal sees the rate and feels the pressure.
+- **Hidden Agenda v1 = all four:** Restore, Usurp, Kingmaker, Merchant Prince.
+
 ## Sources
 See `feudal_vassalage_prior_art.md` (CK3/EU4/Civ VI/Travian/EVE mechanics + numbers)
 and `feudal_vassalage_novel_design.md` (Neptune's Pride, Nemesis, EVE heists,
