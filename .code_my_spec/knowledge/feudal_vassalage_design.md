@@ -242,9 +242,12 @@ into an engagement + retention loop AND a concrete *benefit* of being in a house
   decision; bigger bank = more offline earnings retained.
 
 ### Feudal Stewardship (910) — the upside of vassalage
-- **Who stewards whom:** a player's **lord + fellow vassals of the same lord** can
-  steward them **while offline**. **Lords are never stewarded by vassals** (protection
-  flows down, not up).
+- **Who stewards whom:** while offline, a player can be stewarded by (a) their
+  **lord**, (b) their **fellow vassals of the same lord**, and (c) their **allies**
+  (the existing alliance relationship from stories 899/901). ALL stewardship mechanics
+  apply to **alliances as well as vassalage**. Feudal stewardship keeps the asymmetry
+  that **lords are never stewarded by their vassals** (protection flows down);
+  **alliance stewardship is symmetric/mutual** — allied peers each steward the other.
 - **Bank collection:** a steward sweeps the offline player's bank — **all to the
   owner** (pure stewardship; steward gets nothing; tribute still skims separately).
   Keeps an absent player's economy from capping out.
