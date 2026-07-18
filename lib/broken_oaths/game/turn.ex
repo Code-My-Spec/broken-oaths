@@ -22,7 +22,8 @@ defmodule BrokenOaths.Game.Turn do
           hp: non_neg_integer(),
           max_hp: pos_integer(),
           movement: non_neg_integer(),
-          max_movement: non_neg_integer()
+          max_movement: non_neg_integer(),
+          charges: non_neg_integer()
         }},
         orders: %{unit_id => %{
           kind: :move,
@@ -65,6 +66,14 @@ defmodule BrokenOaths.Game.Turn do
           destroyed_at: term() | nil
         }}
       }
+
+  `charges` (story 882 playtest update, issue 1caa87e9) is read
+  defensively via `Map.get(unit, :charges, 3)` everywhere this module
+  reads it — most of this module's own pre-existing unit tests build a
+  hand-written unit map with no `:charges` key at all, and a unit that
+  predates the charges migration would likewise have none in a raw
+  hand-built map, so the same "3, same as a freshly spawned worker"
+  default the DB migration itself uses applies here too.
 
   `pending_heirs` (story 896) is read defensively via
   `Map.get(state, :pending_heirs, %{})` — a scheduled-heir arrival turn
@@ -117,7 +126,11 @@ defmodule BrokenOaths.Game.Turn do
 
     1. improvement progress -- ticks `Improvement.duration/1` forward
        for any improvement whose declared builder is still standing on
-       its tile.
+       its tile. A completion of a Farm or Mine spends the builder's
+       build charge (story 882 playtest update, issue 1caa87e9); a
+       worker that spends its last charge is expended and removed from
+       `state.units` in this same phase. Roads (and, pending a PM call,
+       Pasture) are charge-exempt.
     2. production accrual -- `Production.accrue/3` (flat base plus
        worked-tile production) into each city's current queue item, EXCEPT
        a pillaged city still serving its `CityDefense.production_halted?/2`
@@ -229,6 +242,7 @@ defmodule BrokenOaths.Game.Turn do
   @type tile_id :: non_neg_integer()
 
   @type unit :: %{
+          optional(:charges) => non_neg_integer(),
           id: unit_id(),
           player_id: player_id(),
           type: :lord | :settler | :warrior | :worker,
@@ -575,25 +589,32 @@ defmodule BrokenOaths.Game.Turn do
   # to arbitrate. Anyone else (owner or not — improvements aren't
   # owned) who later starts the same kind on this tile reattaches and
   # resumes from whatever `progress` was frozen at.
+  #
+  # Threads `state.units` through alongside `state.improvements`
+  # (story 882 playtest update, issue 1caa87e9 — worker build charges):
+  # a completion can spend the builder's charge and, on its last one,
+  # remove the unit outright, so this phase now owns both maps instead
+  # of only the improvement side.
   defp advance_improvements(state) do
-    improvements =
-      Map.new(state.improvements, fn {tile_id, improvement} ->
-        {tile_id, advance_improvement(improvement, state.units)}
+    {improvements, units} =
+      Enum.map_reduce(state.improvements, state.units, fn {tile_id, improvement}, units ->
+        {new_improvement, new_units} = advance_improvement(improvement, units)
+        {{tile_id, new_improvement}, new_units}
       end)
 
-    %{state | improvements: improvements}
+    %{state | improvements: Map.new(improvements), units: units}
   end
 
-  defp advance_improvement(%{status: :complete} = improvement, _units), do: improvement
-  defp advance_improvement(%{builder_unit_id: nil} = improvement, _units), do: improvement
+  defp advance_improvement(%{status: :complete} = improvement, units), do: {improvement, units}
+  defp advance_improvement(%{builder_unit_id: nil} = improvement, units), do: {improvement, units}
 
   defp advance_improvement(improvement, units) do
     case Map.get(units, improvement.builder_unit_id) do
       %{tile_id: tile_id} when tile_id == improvement.tile_id ->
-        finish_or_progress(improvement)
+        finish_or_progress(improvement, units)
 
       _still_present ->
-        %{improvement | builder_unit_id: nil}
+        {%{improvement | builder_unit_id: nil}, units}
     end
   end
 
@@ -604,16 +625,47 @@ defmodule BrokenOaths.Game.Turn do
   # at all (most of this module's own unit tests, and any improvement
   # kind that never gets a research-gated override) falls back to
   # `Improvement.duration/1` exactly as before this story.
-  defp finish_or_progress(improvement) do
+  defp finish_or_progress(improvement, units) do
     progress = improvement.progress + 1
     duration = Map.get(improvement, :duration) || Improvement.duration(improvement.kind)
 
     if progress >= duration do
-      %{improvement | progress: duration, status: :complete, builder_unit_id: nil}
+      completed = %{improvement | progress: duration, status: :complete, builder_unit_id: nil}
+      {completed, spend_charge(units, improvement.builder_unit_id, improvement.kind)}
     else
-      %{improvement | progress: progress}
+      {%{improvement | progress: progress}, units}
     end
   end
+
+  # Story 882 playtest update (issue 1caa87e9 — worker build charges,
+  # Civ 6 Builder convention): a worker spends exactly one build charge
+  # per COMPLETED Farm or Mine (charges are only ever consumed on
+  # COMPLETION, never on starting or abandoning a build — an abandoned
+  # dig never reaches `finish_or_progress/2`'s completion branch at
+  # all, so it costs nothing by construction). Roads are charge-exempt
+  # (matching Civ 6, where Builders never spend a charge on a road) and
+  # so is Pasture here — story 905 postdates this charges shaping and
+  # names only Farm/Mine in its rule text, so Pasture is left
+  # charge-exempt pending an explicit PM call. A worker with no charges
+  # left after this decrement is expended: removed from `state.units`
+  # outright, in the SAME tick its last charge is spent — the same
+  # removal path `BrokenOaths.Game.WorldServer.persist_unit_changes/2`
+  # already sweeps a combat death through (diffs `state.units`, deletes
+  # whatever's missing).
+  defp spend_charge(units, unit_id, kind) when kind in [:farm, :mine] do
+    case Map.get(units, unit_id) do
+      nil ->
+        units
+
+      unit ->
+        case Map.get(unit, :charges, 3) - 1 do
+          remaining when remaining <= 0 -> Map.delete(units, unit_id)
+          remaining -> Map.put(units, unit_id, Map.put(unit, :charges, remaining))
+        end
+    end
+  end
+
+  defp spend_charge(units, _unit_id, _kind), do: units
 
   # `advance_improvements/1` (above) already clears a builder that's
   # gone or walked away — but only as of the START of this tick. Combat

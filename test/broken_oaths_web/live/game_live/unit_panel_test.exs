@@ -117,4 +117,32 @@ defmodule BrokenOathsWeb.GameLive.UnitPanelTest do
       refute html =~ ~s(data-test="cancel-build")
     end
   end
+
+  # Story 882 playtest update (issue 1caa87e9 — worker build charges):
+  # the selected worker shows how many build charges it has left.
+  describe "a worker's build charges" do
+    test "shows the worker's remaining charges" do
+      worker = %{type: :worker, hp: 6, max_hp: 6, movement: 2, max_movement: 2, charges: 2}
+
+      html = render_component(UnitPanel, id: "unit-panel", unit: worker, order: nil)
+
+      assert html =~ ~s(data-test="unit-charges")
+      assert html =~ "2 charges"
+    end
+
+    test "defaults to 3 charges when the unit map carries none" do
+      worker = %{type: :worker, hp: 6, max_hp: 6, movement: 2, max_movement: 2}
+
+      html = render_component(UnitPanel, id: "unit-panel", unit: worker, order: nil)
+
+      assert html =~ ~s(data-test="unit-charges")
+      assert html =~ "3 charges"
+    end
+
+    test "never shows charges for a non-worker unit" do
+      html = render_component(UnitPanel, id: "unit-panel", unit: @lord, order: nil)
+
+      refute html =~ ~s(data-test="unit-charges")
+    end
+  end
 end

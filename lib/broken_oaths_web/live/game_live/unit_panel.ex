@@ -15,7 +15,10 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
     * `:unit` - the selected unit, or `nil` when nothing is selected.
       Expected to carry `:id`, `:type` (`:lord` | `:settler` | `:worker`
       | `:warrior` | `:barbarian_warrior` | `:bronze_spearman`), `:hp`,
-      `:max_hp`, `:movement`, `:max_movement`
+      `:max_hp`, `:movement`, `:max_movement`, `:charges` (story 882
+      playtest update, issue 1caa87e9 — a worker's remaining build
+      charges; every other unit type carries the same field but this
+      panel only ever renders it for `:worker`)
     * `:order` - the unit's queued order, or `nil`. Expected to carry
       `:target_tile` and `:status` (`:pending` | `:interrupted`)
     * `:allowed_improvements` - improvement kinds (`:farm` | `:mine` |
@@ -66,6 +69,9 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
         </p>
         <p data-test="unit-movement" class="text-sm">
           Movement {@unit.movement}/{@unit.max_movement}
+        </p>
+        <p :if={@unit.type == :worker} data-test="unit-charges" class="text-sm">
+          {Map.get(@unit, :charges, 3)} charges
         </p>
         <.order_summary order={@order} />
 

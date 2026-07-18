@@ -736,12 +736,126 @@ defmodule BrokenOaths.Game.WorldServerTest do
     end
   end
 
+  # Story 882 playtest update (issue 1caa87e9 — worker build charges):
+  # a worker is created with 3 build charges, spends one per completed
+  # Farm/Mine, is expended on its last one, and Roads are charge-exempt.
+  # The end-to-end version of what `Turn`'s own unit tests already cover
+  # in isolation — driven through `start_improvement/4`/`advance_turn/1`
+  # for real, same style as the mine-duration describe block above.
+  describe "worker build charges (issue 1caa87e9)" do
+    test "a worker with 3 charges builds three Farms then is expended" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+      :ok = Game.isolate_camp_for_test(world, -1)
+
+      [tile_a, tile_b, tile_c] = farmable_tiles(world, 3)
+
+      worker = Game.spawn_unit_for_test(world, player.id, :worker, tile_a)
+      assert worker.charges == 3
+
+      :ok = Game.start_improvement(world, user, worker.id, "farm")
+      for _ <- 1..Improvement.duration(:farm), do: :ok = Game.advance_turn(world)
+      assert improvement_complete?(world, user, tile_a)
+      assert fetch_charges(world, user, worker.id) == 2
+
+      :ok = Game.relocate_unit_for_test(world, worker.id, tile_b)
+      :ok = Game.start_improvement(world, user, worker.id, "farm")
+      for _ <- 1..Improvement.duration(:farm), do: :ok = Game.advance_turn(world)
+      assert improvement_complete?(world, user, tile_b)
+      assert fetch_charges(world, user, worker.id) == 1
+
+      :ok = Game.relocate_unit_for_test(world, worker.id, tile_c)
+      :ok = Game.start_improvement(world, user, worker.id, "farm")
+      for _ <- 1..Improvement.duration(:farm), do: :ok = Game.advance_turn(world)
+      assert improvement_complete?(world, user, tile_c)
+
+      # Expended: gone from the live roster AND swept from the DB, the
+      # same removal path a combat death already takes.
+      refute Enum.any?(Game.player_units(world, user), &(&1.id == worker.id))
+      refute Repo.get(Unit, worker.id)
+
+      # All three Farms remain and still feed the city's yields — the
+      # worker's own expiry never un-does the improvements it built.
+      assert improvement_complete?(world, user, tile_a)
+      assert improvement_complete?(world, user, tile_b)
+      assert improvement_complete?(world, user, tile_c)
+
+      WorldServer.restart(world)
+    end
+
+    test "Roads never spend a build charge" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+      :ok = Game.isolate_camp_for_test(world, -1)
+
+      hills_tile = hills_tile(world)
+      worker = Game.spawn_unit_for_test(world, player.id, :worker, hills_tile)
+      :ok = Game.start_improvement(world, user, worker.id, "road")
+
+      for _ <- 1..Improvement.duration(:road), do: :ok = Game.advance_turn(world)
+
+      assert improvement_complete?(world, user, hills_tile)
+      assert fetch_charges(world, user, worker.id) == 3
+      assert Enum.any?(Game.player_units(world, user), &(&1.id == worker.id))
+
+      WorldServer.restart(world)
+    end
+
+    test "an abandoned dig costs no charge" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+      :ok = Game.isolate_camp_for_test(world, -1)
+
+      hills_tile = hills_tile(world)
+      worker = Game.spawn_unit_for_test(world, player.id, :worker, hills_tile)
+      :ok = Game.start_improvement(world, user, worker.id, "mine")
+      :ok = Game.advance_turn(world)
+
+      :ok = Game.cancel_improvement(world, user, worker.id)
+
+      assert fetch_charges(world, user, worker.id) == 3
+      assert Enum.any?(Game.player_units(world, user), &(&1.id == worker.id))
+
+      WorldServer.restart(world)
+    end
+  end
+
   defp hills_tile(world) do
     land? = fn t -> BrokenOaths.Worlds.Regions.tile_class(world, t) == :land end
 
     Enum.find(0..641, fn t ->
       land?.(t) and BrokenOaths.Worlds.Regions.terrain(world, t).relief == :hills
     end)
+  end
+
+  # `count` distinct flat, featureless grassland/plains tiles — legal
+  # Farm ground (`Improvement.allowed?/2`) — for scenarios that need to
+  # walk a worker between more than one build site.
+  defp farmable_tiles(world, count) do
+    land? = fn t -> BrokenOaths.Worlds.Regions.tile_class(world, t) == :land end
+
+    0..641
+    |> Enum.filter(fn t ->
+      land?.(t) and Improvement.allowed?(:farm, BrokenOaths.Worlds.Regions.terrain(world, t))
+    end)
+    |> Enum.take(count)
+  end
+
+  defp fetch_charges(world, user, unit_id) do
+    %{charges: charges} = Enum.find(Game.player_units(world, user), &(&1.id == unit_id))
+    charges
   end
 
   # A territory tile that isn't the city center, isn't already worked,

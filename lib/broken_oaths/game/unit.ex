@@ -30,6 +30,16 @@ defmodule BrokenOaths.Game.Unit do
   `BrokenOaths.Game.Production.unit_stats/1` alongside the rest of the
   buildable catalog, not here — this schema only shapes and validates
   whatever stats it's given.
+
+  `charges` (story 882 playtest update, issue 1caa87e9 — Civ 6 Builder
+  convention) defaults to 3 and is generic on the schema, but only a
+  `:worker` ever spends it: `BrokenOaths.Game.Turn` decrements it by
+  one for each COMPLETED Farm or Mine (never Road, which is
+  charge-exempt) and removes the unit outright once its last charge is
+  spent — the same removal path a combat death already uses
+  (`BrokenOaths.Game.WorldServer.persist_unit_changes/2` diffs
+  `state.units` and deletes whatever's missing). Every other unit type
+  simply carries the default and never reads it.
   """
 
   use Ecto.Schema
@@ -49,6 +59,7 @@ defmodule BrokenOaths.Game.Unit do
           max_hp: integer() | nil,
           movement: integer() | nil,
           max_movement: integer() | nil,
+          charges: integer() | nil,
           world_id: integer() | nil,
           player_id: integer() | nil,
           camp_id: integer() | nil,
@@ -62,11 +73,13 @@ defmodule BrokenOaths.Game.Unit do
   schema "game_units" do
     field :type, Ecto.Enum,
       values: [:lord, :settler, :warrior, :worker, :barbarian_warrior, :bronze_spearman]
+
     field :tile_id, :integer
     field :hp, :integer
     field :max_hp, :integer
     field :movement, :integer
     field :max_movement, :integer
+    field :charges, :integer, default: 3
 
     belongs_to :world, World
     belongs_to :player, Player
@@ -87,7 +100,8 @@ defmodule BrokenOaths.Game.Unit do
       :hp,
       :max_hp,
       :movement,
-      :max_movement
+      :max_movement,
+      :charges
     ])
     |> validate_required([
       :world_id,
@@ -96,12 +110,14 @@ defmodule BrokenOaths.Game.Unit do
       :hp,
       :max_hp,
       :movement,
-      :max_movement
+      :max_movement,
+      :charges
     ])
     |> validate_number(:hp, greater_than: 0)
     |> validate_number(:max_hp, greater_than: 0)
     |> validate_number(:movement, greater_than_or_equal_to: 0)
     |> validate_number(:max_movement, greater_than_or_equal_to: 0)
+    |> validate_number(:charges, greater_than_or_equal_to: 0)
     |> validate_hp_within_max()
     |> validate_movement_within_max()
     |> assoc_constraint(:world)

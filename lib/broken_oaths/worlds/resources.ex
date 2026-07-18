@@ -58,14 +58,36 @@ defmodule BrokenOaths.Worlds.Resources do
   # for its `{seed, frequency, density}` key forever, since nothing
   # about a placement bugfix itself changes those key inputs. Bumping
   # forces every world to recompute under the current, correct logic.
-  @cache_version 2
+  #
+  # Bumped 2 -> 3 for the playtest "resources everywhere" report (issue
+  # 3e1159d1, story 905 rules 7701-7703): `@rate` below dropped to a
+  # sparser Civ 6-like default, an in-place value change to the same
+  # `build_map/1` shape a stale `persistent_term` entry under version 2
+  # would otherwise keep serving forever for a world visited during a
+  # hot-reload window, exactly the same class of staleness the 1 -> 2
+  # bump above already documents.
+  @cache_version 3
 
-  # Per-eligible-tile placement chance. `:standard` echoes Civ VI's own
-  # `iStandardPercentage` (~28%, `civ6_resources.md` §3); `:sparse` and
-  # `:dense` bracket it widely enough that the ordering `dense > sparse`
-  # (story 905, criterion 7651) holds reliably at any realistic map
-  # size, not just in expectation.
-  @rate %{sparse: 0.15, standard: 0.28, dense: 0.55}
+  # Per-eligible-tile placement chance. Retuned for the "resources
+  # everywhere" playtest fix (issue 3e1159d1): the OLD values echoed
+  # Civ VI's own `iStandardPercentage` (~28%, `civ6_resources.md` §3)
+  # literally, but that rate is per ELIGIBLE tile (grassland/plains/
+  # hills only, per-terrain-gated `candidates/1` below), not per LAND
+  # tile — and it measurably put a resource on ~14-20% of every LAND
+  # tile once hills' own double-roll (Sheep then Stone, see `place/3`)
+  # is folded in, nowhere near Civ 6's actual early-game density. Story
+  # 905's shaped target (criteria 7701/7702) is ~7% of LAND tiles at
+  # STANDARD — roughly one resource per 12-15 land tiles. `:standard`
+  # 0.12 lands the mesh-wide average right at that target (measured
+  # ~7.1% across a ten-seed sample at the default frequency —
+  # `ResourcesTest`'s own "a standard-density world places roughly 7%"
+  # regression pins this down precisely); `:sparse`/`:dense` are exact
+  # halvings/doublings of the new standard (0.06 / 0.24, averaging
+  # ~3.9% / ~13.8% on the same sample) — the same relative spread the
+  # old sparse/standard/dense trio had (~0.5x / ~2x), just anchored to
+  # the new, lower midpoint, so the per-world density slider (criterion
+  # 7651/7703) still spans meaningfully sparser-to-richer worlds.
+  @rate %{sparse: 0.06, standard: 0.12, dense: 0.24}
 
   @doc """
   The bonus resource at `tile_id`, or `nil` for a bare tile. The

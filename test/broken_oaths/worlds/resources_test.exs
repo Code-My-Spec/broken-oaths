@@ -120,6 +120,64 @@ defmodule BrokenOaths.Worlds.ResourcesTest do
                "seed #{seed}: only rolled #{inspect(distinct_kinds)} across the whole map"
       end
     end
+
+    # Playtest fix regression (issue 3e1159d1 — "resources everywhere",
+    # story 905 criteria 7701/7702): STANDARD density should place a
+    # resource on roughly 7% of LAND tiles (one per 12-15), a Civ 6-like
+    # sparse scatter — not the ~14-20% the pre-fix `@rate.standard`
+    # (0.28, tuned per ELIGIBLE tile without accounting for hills'
+    # double Sheep/Stone roll or the eligible/land ratio) actually
+    # produced. Measured at real gameplay scale (`World.frequency`'s own
+    # schema default, 54 — same scale `criterion 335f265c`'s regression
+    # above already uses) across several seeds: 6.1%-7.3%, comfortably
+    # inside a generous 5%-9% band. A regression back toward the old,
+    # too-dense default would blow well past 9%; a broken/near-empty
+    # placement would fall under 5% — either fails this loudly.
+    test "a standard-density world places roughly 7% of land tiles with a resource" do
+      frequency = 54
+      total = Globe.tile_count(frequency)
+
+      for seed <- [7, 99, 20_260_718, 424_242, 33] do
+        w = %World{seed: seed, frequency: frequency, resource_density: :standard}
+
+        land = for tile_id <- 0..(total - 1), Regions.tile_class(w, tile_id) == :land, do: tile_id
+        resource_count = Enum.count(land, &(Resources.at(w, &1) != nil))
+        pct = resource_count / length(land) * 100
+
+        assert pct >= 5.0 and pct <= 9.0,
+               "seed #{seed}: standard density covered #{Float.round(pct, 2)}% of land tiles, expected ~7% (5-9% band)"
+      end
+    end
+
+    # Ordering regression alongside the coverage target above: sparse
+    # and dense stay meaningfully below/above the new, lower standard
+    # midpoint (not just "strictly more than sparse," which
+    # `"dense places strictly more resources than sparse"` above already
+    # covers) — the per-world density slider (criterion 7703) still
+    # reaches a noticeably sparser or richer world from the new default.
+    test "sparse and dense both land in their own bands around the new standard midpoint" do
+      frequency = 54
+      total = Globe.tile_count(frequency)
+
+      base = %World{seed: @hilly_seed, frequency: frequency, resource_density: :standard}
+
+      land =
+        for tile_id <- 0..(total - 1), Regions.tile_class(base, tile_id) == :land, do: tile_id
+
+      pct = fn density ->
+        w = %{base | resource_density: density}
+        Enum.count(land, &(Resources.at(w, &1) != nil)) / length(land) * 100
+      end
+
+      sparse_pct = pct.(:sparse)
+      standard_pct = pct.(:standard)
+      dense_pct = pct.(:dense)
+
+      assert sparse_pct < standard_pct
+      assert standard_pct < dense_pct
+      assert sparse_pct <= 5.0
+      assert dense_pct >= 10.0
+    end
   end
 
   defp eligible?(:cattle, %{base: :grassland, relief: :flat, feature: nil}), do: true

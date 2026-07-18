@@ -2413,6 +2413,7 @@ defmodule BrokenOaths.Game.WorldServer do
       max_hp: unit.max_hp,
       movement: unit.movement,
       max_movement: unit.max_movement,
+      charges: Map.get(unit, :charges, 3),
       order: order
     }
   end
@@ -2983,19 +2984,26 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   # A unit missing from `new_units` that was present in `old_units` was
-  # destroyed this delta (combat, currently the only path that removes
-  # a unit outside of `found_city`'s own dedicated delete) — swept from
-  # the DB here rather than left as a zombie row. `found_city` still
-  # deletes its consumed settler immediately, in its own transaction,
-  # same as before; this only ever catches removals this generic diff
-  # would otherwise silently miss.
+  # destroyed this delta (combat, or a worker expending its last build
+  # charge — story 882 playtest update, issue 1caa87e9, see
+  # `BrokenOaths.Game.Turn`'s "Improvement progress" section — outside
+  # of `found_city`'s own dedicated delete) — swept from the DB here
+  # rather than left as a zombie row. `found_city` still deletes its
+  # consumed settler immediately, in its own transaction, same as
+  # before; this only ever catches removals this generic diff would
+  # otherwise silently miss.
   defp persist_unit_changes(old_units, new_units) do
     removed_ids = Map.keys(old_units) -- Map.keys(new_units)
     if removed_ids != [], do: Repo.delete_all(from(u in Unit, where: u.id in ^removed_ids))
 
     for {id, unit} <- new_units, Map.get(old_units, id) != unit do
       Repo.update_all(from(u in Unit, where: u.id == ^id),
-        set: [tile_id: unit.tile_id, movement: unit.movement, hp: unit.hp]
+        set: [
+          tile_id: unit.tile_id,
+          movement: unit.movement,
+          hp: unit.hp,
+          charges: Map.get(unit, :charges, 3)
+        ]
       )
     end
   end
@@ -3392,7 +3400,8 @@ defmodule BrokenOaths.Game.WorldServer do
       hp: u.hp,
       max_hp: u.max_hp,
       movement: u.movement,
-      max_movement: u.max_movement
+      max_movement: u.max_movement,
+      charges: u.charges
     }
   end
 

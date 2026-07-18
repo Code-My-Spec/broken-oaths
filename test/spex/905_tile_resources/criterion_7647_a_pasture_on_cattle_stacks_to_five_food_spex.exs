@@ -135,14 +135,25 @@ defmodule BrokenOathsSpex.Story905.Criterion7647Spex do
       end
 
       when_ "the Cattle tile's own per-turn food contribution is isolated", context do
-        [initial_worked | _] =
-          for c <- Fixtures.player_cities(context.world, context.user),
-              c.id == context.city.id,
-              do: c.worked_tiles
+        # Targets `context.cattle_tile` directly rather than
+        # `List.first(worked_tiles)` — by this point in the scenario
+        # (research + worker production + movement + a Pasture build,
+        # dozens of turns) the city may well have grown past size 1, and
+        # `worked_tiles` is no longer guaranteed to list the Cattle tile
+        # first (unlike criterion 7646's own version of this isolation,
+        # which runs immediately post-founding while the city is still
+        # a guaranteed size-1/one-worked-tile city — see criterion
+        # 7650's own doc). Unassigning the WRONG tile here would leave
+        # Cattle still worked through the "baseline" turn too, making
+        # both deltas identical and silently zeroing out the measurement.
+        [current_city] =
+          for c <- Fixtures.player_cities(context.world, context.user), c.id == context.city.id, do: c
+
+        assert context.cattle_tile in current_city.worked_tiles
 
         render_hook(context.play_live, "assign_worked_tile", %{
           "city_id" => context.city.id,
-          "from_tile_id" => List.first(initial_worked) || context.cattle_tile,
+          "from_tile_id" => context.cattle_tile,
           "to_tile_id" => nil
         })
 

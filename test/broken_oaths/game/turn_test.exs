@@ -545,6 +545,126 @@ defmodule BrokenOaths.Game.TurnTest do
     end
   end
 
+  # Story 882 playtest update (issue 1caa87e9 — worker build charges).
+  describe "tick/1 worker build charges" do
+    defp worker_with_charges(id, tile, charges) do
+      Map.put(unit(id, tile: tile, type: :worker), :charges, charges)
+    end
+
+    test "a completed Farm spends one of the builder's charges" do
+      worker = worker_with_charges(1, 100, 3)
+
+      improvement = %{
+        tile_id: 100,
+        kind: :farm,
+        progress: 2,
+        status: :building,
+        builder_unit_id: 1
+      }
+
+      state = %{base_state(%{1 => worker}) | improvements: %{100 => improvement}}
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.improvements[100].status == :complete
+      assert new_state.units[1].charges == 2
+    end
+
+    test "a completed Mine spends one of the builder's charges" do
+      worker = worker_with_charges(1, 100, 3)
+
+      improvement = %{
+        tile_id: 100,
+        kind: :mine,
+        progress: 4,
+        status: :building,
+        builder_unit_id: 1
+      }
+
+      state = %{base_state(%{1 => worker}) | improvements: %{100 => improvement}}
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.improvements[100].status == :complete
+      assert new_state.units[1].charges == 2
+    end
+
+    test "a completed Road never spends a charge" do
+      worker = worker_with_charges(1, 100, 2)
+
+      improvement = %{
+        tile_id: 100,
+        kind: :road,
+        progress: 1,
+        status: :building,
+        builder_unit_id: 1
+      }
+
+      state = %{base_state(%{1 => worker}) | improvements: %{100 => improvement}}
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.improvements[100].status == :complete
+      assert new_state.units[1].charges == 2
+    end
+
+    test "a worker with no :charges key defaults to 3 and drops to 2 on a completed Farm" do
+      worker = unit(1, tile: 100, type: :worker)
+
+      improvement = %{
+        tile_id: 100,
+        kind: :farm,
+        progress: 2,
+        status: :building,
+        builder_unit_id: 1
+      }
+
+      state = %{base_state(%{1 => worker}) | improvements: %{100 => improvement}}
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.units[1].charges == 2
+    end
+
+    test "spending a worker's last charge expends it — removed from state.units" do
+      worker = worker_with_charges(1, 100, 1)
+
+      improvement = %{
+        tile_id: 100,
+        kind: :farm,
+        progress: 2,
+        status: :building,
+        builder_unit_id: 1
+      }
+
+      state = %{base_state(%{1 => worker}) | improvements: %{100 => improvement}}
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.improvements[100].status == :complete
+      refute Map.has_key?(new_state.units, 1)
+    end
+
+    test "an abandoned (not-yet-complete) dig spends no charge" do
+      worker = worker_with_charges(1, 100, 3)
+
+      improvement = %{
+        tile_id: 100,
+        kind: :mine,
+        progress: 1,
+        status: :building,
+        builder_unit_id: 1
+      }
+
+      state = %{base_state(%{1 => worker}) | improvements: %{100 => improvement}}
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.improvements[100].status == :building
+      assert new_state.units[1].charges == 3
+    end
+  end
+
   describe "tick/1 food accrual and growth" do
     test "food accrues and a city at threshold grows, claiming a new tile" do
       c = city(1, tile: 1, food: 18, territory: [1])

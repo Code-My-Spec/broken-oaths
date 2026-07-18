@@ -97,6 +97,28 @@ defmodule BrokenOaths.Game.UnitTest do
     assert changeset.valid?
   end
 
+  # Story 882 playtest update (issue 1caa87e9 — worker build charges):
+  # every unit type carries this field (only :worker ever spends it),
+  # defaulting to 3 (a fresh Civ 6-style Builder's charge count) when
+  # the caller doesn't set it explicitly.
+  test "charges defaults to 3 when omitted" do
+    changeset = Unit.changeset(%Unit{}, %{valid_attrs() | type: :worker})
+    assert changeset.valid?
+    assert Ecto.Changeset.get_field(changeset, :charges) == 3
+  end
+
+  test "charges can be set explicitly" do
+    changeset = Unit.changeset(%Unit{}, Map.put(valid_attrs(), :charges, 1))
+    assert changeset.valid?
+    assert Ecto.Changeset.get_field(changeset, :charges) == 1
+  end
+
+  test "charges cannot be negative" do
+    changeset = Unit.changeset(%Unit{}, Map.put(valid_attrs(), :charges, -1))
+    refute changeset.valid?
+    assert %{charges: ["must be greater than or equal to 0"]} = errors_on(changeset)
+  end
+
   # Story 895: the blanket `(world_id, tile_id)` DB uniqueness this test
   # used to assert was dropped outright by migration
   # `20260716190000_drop_unit_tile_uniqueness_for_city_garrisons` — a
