@@ -38,7 +38,11 @@ defmodule BrokenOathsSpex.Story909.Criterion7684Spex do
         cap_before_html = render(context.play_live)
 
         {:ok,
-         Map.put(context, :cap_before, Regex.run(~r/data-test="bank-cap"[^>]*>(\d+)/, cap_before_html))}
+         Map.put(
+           context,
+           :cap_before,
+           Regex.run(~r/data-test="bank-cap"[^>]*>(\d+)/, cap_before_html)
+         )}
       end
 
       when_ "I upgrade my bank", context do

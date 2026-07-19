@@ -24,37 +24,72 @@ defmodule BrokenOaths.Game.YieldsTest do
   describe "tile_yield/1" do
     test "grassland stacks: flat, hills, woods, hills+woods, rainforest, marsh" do
       assert Yields.tile_yield(%Terrain{base: :grassland}) == %{food: 2, production: 0}
-      assert Yields.tile_yield(%Terrain{base: :grassland, relief: :hills}) == %{food: 2, production: 1}
-      assert Yields.tile_yield(%Terrain{base: :grassland, feature: :woods}) == %{food: 2, production: 1}
+
+      assert Yields.tile_yield(%Terrain{base: :grassland, relief: :hills}) == %{
+               food: 2,
+               production: 1
+             }
+
+      assert Yields.tile_yield(%Terrain{base: :grassland, feature: :woods}) == %{
+               food: 2,
+               production: 1
+             }
 
       assert Yields.tile_yield(%Terrain{base: :grassland, relief: :hills, feature: :woods}) ==
                %{food: 2, production: 2}
 
-      assert Yields.tile_yield(%Terrain{base: :grassland, feature: :rainforest}) == %{food: 3, production: 0}
-      assert Yields.tile_yield(%Terrain{base: :grassland, feature: :marsh}) == %{food: 3, production: 0}
+      assert Yields.tile_yield(%Terrain{base: :grassland, feature: :rainforest}) == %{
+               food: 3,
+               production: 0
+             }
+
+      assert Yields.tile_yield(%Terrain{base: :grassland, feature: :marsh}) == %{
+               food: 3,
+               production: 0
+             }
     end
 
     test "plains stacks: flat, hills, woods, hills+woods, rainforest" do
       assert Yields.tile_yield(%Terrain{base: :plains}) == %{food: 1, production: 1}
-      assert Yields.tile_yield(%Terrain{base: :plains, relief: :hills}) == %{food: 1, production: 2}
-      assert Yields.tile_yield(%Terrain{base: :plains, feature: :woods}) == %{food: 1, production: 2}
+
+      assert Yields.tile_yield(%Terrain{base: :plains, relief: :hills}) == %{
+               food: 1,
+               production: 2
+             }
+
+      assert Yields.tile_yield(%Terrain{base: :plains, feature: :woods}) == %{
+               food: 1,
+               production: 2
+             }
 
       assert Yields.tile_yield(%Terrain{base: :plains, relief: :hills, feature: :woods}) ==
                %{food: 1, production: 3}
 
-      assert Yields.tile_yield(%Terrain{base: :plains, feature: :rainforest}) == %{food: 2, production: 1}
+      assert Yields.tile_yield(%Terrain{base: :plains, feature: :rainforest}) == %{
+               food: 2,
+               production: 1
+             }
     end
 
     test "desert and snow: nothing flat, +1 production on hills" do
       assert Yields.tile_yield(%Terrain{base: :desert}) == %{food: 0, production: 0}
-      assert Yields.tile_yield(%Terrain{base: :desert, relief: :hills}) == %{food: 0, production: 1}
+
+      assert Yields.tile_yield(%Terrain{base: :desert, relief: :hills}) == %{
+               food: 0,
+               production: 1
+             }
+
       assert Yields.tile_yield(%Terrain{base: :snow}) == %{food: 0, production: 0}
       assert Yields.tile_yield(%Terrain{base: :snow, relief: :hills}) == %{food: 0, production: 1}
     end
 
     test "tundra: flat, hills, hills+woods" do
       assert Yields.tile_yield(%Terrain{base: :tundra}) == %{food: 1, production: 0}
-      assert Yields.tile_yield(%Terrain{base: :tundra, relief: :hills}) == %{food: 1, production: 1}
+
+      assert Yields.tile_yield(%Terrain{base: :tundra, relief: :hills}) == %{
+               food: 1,
+               production: 1
+             }
 
       assert Yields.tile_yield(%Terrain{base: :tundra, relief: :hills, feature: :woods}) ==
                %{food: 1, production: 2}
@@ -66,8 +101,15 @@ defmodule BrokenOaths.Game.YieldsTest do
     end
 
     test "mountains never yield anything, regardless of base" do
-      assert Yields.tile_yield(%Terrain{base: :grassland, relief: :mountains}) == %{food: 0, production: 0}
-      assert Yields.tile_yield(%Terrain{base: :tundra, relief: :mountains}) == %{food: 0, production: 0}
+      assert Yields.tile_yield(%Terrain{base: :grassland, relief: :mountains}) == %{
+               food: 0,
+               production: 0
+             }
+
+      assert Yields.tile_yield(%Terrain{base: :tundra, relief: :mountains}) == %{
+               food: 0,
+               production: 0
+             }
     end
 
     test "ice never yields anything, regardless of base" do
@@ -191,7 +233,9 @@ defmodule BrokenOaths.Game.YieldsTest do
       expected = Yields.worked_tile_yield(terrain, nil)
 
       assert Yields.worked_yields(city, world(), %{}) == [expected]
-      assert Yields.center_yield(city, world()) == Yields.city_center_yield(Regions.terrain(world(), city_tile))
+
+      assert Yields.center_yield(city, world()) ==
+               Yields.city_center_yield(Regions.terrain(world(), city_tile))
     end
 
     test "a completed improvement's bonus is included, an in-progress one is not" do
@@ -203,8 +247,13 @@ defmodule BrokenOaths.Game.YieldsTest do
       complete = %{worked_tile => %{kind: :farm, status: :complete}}
       building = %{worked_tile => %{kind: :farm, status: :building}}
 
-      assert Yields.worked_yields(city, world(), complete) == [Yields.worked_tile_yield(terrain, :farm)]
-      assert Yields.worked_yields(city, world(), building) == [Yields.worked_tile_yield(terrain, nil)]
+      assert Yields.worked_yields(city, world(), complete) == [
+               Yields.worked_tile_yield(terrain, :farm)
+             ]
+
+      assert Yields.worked_yields(city, world(), building) == [
+               Yields.worked_tile_yield(terrain, nil)
+             ]
     end
   end
 
@@ -246,6 +295,88 @@ defmodule BrokenOaths.Game.YieldsTest do
   end
 
   # -------------------------------------------------------------------
+  # Gold (story 912)
+  # -------------------------------------------------------------------
+
+  describe "base_gold/1" do
+    test "1 + floor(size/2), the locked story 912 curve" do
+      assert Yields.base_gold(1) == 1
+      assert Yields.base_gold(2) == 2
+      assert Yields.base_gold(3) == 2
+      assert Yields.base_gold(4) == 3
+    end
+  end
+
+  describe "tile_gold/1" do
+    test "Coast yields +1 gold, regardless of feature" do
+      assert Yields.tile_gold(%Terrain{base: :coast}) == 1
+      assert Yields.tile_gold(%Terrain{base: :coast, feature: :ice}) == 1
+    end
+
+    test "every other terrain yields 0 gold" do
+      assert Yields.tile_gold(%Terrain{base: :ocean}) == 0
+      assert Yields.tile_gold(%Terrain{base: :grassland}) == 0
+      assert Yields.tile_gold(%Terrain{base: :plains, relief: :hills, feature: :woods}) == 0
+      assert Yields.tile_gold(%Terrain{base: :desert}) == 0
+      assert Yields.tile_gold(%Terrain{base: :tundra}) == 0
+      assert Yields.tile_gold(%Terrain{base: :snow}) == 0
+    end
+  end
+
+  describe "city_gold_income/2" do
+    test "a size-1 city with no worked tiles earns only the base" do
+      city = %{tile_id: 0, size: 1, worked_tiles: []}
+      assert Yields.city_gold_income(city, world()) == 1
+    end
+
+    test "a landlocked size-4 city earns exactly 3 — base only, no tile gold (criterion 7713)" do
+      # Every tile in this fixture's own founding ring (freq 8, seed
+      # 424242) around tile 0 happens to be non-Coast — verified by the
+      # same `Regions.terrain/2` read `city_gold_income/2` itself uses,
+      # so this is a real, deterministic 0-tile-gold city, not an
+      # assumption.
+      city_tile = 0
+      neighbors = Regions.adjacent_tiles(world(), city_tile)
+      assert Enum.all?(neighbors, &(Regions.terrain(world(), &1).base != :coast))
+
+      city = %{tile_id: city_tile, size: 4, worked_tiles: neighbors}
+      assert Yields.city_gold_income(city, world()) == 3
+    end
+
+    test "sums base_gold + tile_gold over every worked tile" do
+      city_tile = 0
+      [worked_tile | _] = Regions.adjacent_tiles(world(), city_tile)
+      city = %{tile_id: city_tile, size: 3, worked_tiles: [worked_tile]}
+
+      expected = Yields.base_gold(3) + Yields.tile_gold(Regions.terrain(world(), worked_tile))
+      assert Yields.city_gold_income(city, world()) == expected
+    end
+
+    test "a worked Coast tile adds its own +1 gold on top of the base (criterion 7715)" do
+      coast_tile =
+        Enum.find(0..(BrokenOaths.Worlds.Globe.tile_count(@frequency) - 1), fn t ->
+          Regions.terrain(world(), t).base == :coast
+        end)
+
+      refute is_nil(coast_tile), "expected at least one Coast tile on this fixture's own globe"
+
+      landlocked = %{tile_id: 0, size: 4, worked_tiles: []}
+      coastal = %{landlocked | worked_tiles: [coast_tile]}
+
+      assert Yields.city_gold_income(coastal, world()) ==
+               Yields.city_gold_income(landlocked, world()) + 1
+    end
+
+    test "recomputes fresh from current size/worked_tiles — growing raises income (criterion 7716)" do
+      city_tile = 0
+      size1 = %{tile_id: city_tile, size: 1, worked_tiles: []}
+      size4 = %{size1 | size: 4}
+
+      assert Yields.city_gold_income(size4, world()) > Yields.city_gold_income(size1, world())
+    end
+  end
+
+  # -------------------------------------------------------------------
   # Growth and deterministic tile-picking
   # -------------------------------------------------------------------
 
@@ -280,7 +411,12 @@ defmodule BrokenOaths.Game.YieldsTest do
       city_tile = 0
       neighbors = Regions.adjacent_tiles(world(), city_tile)
       [already_worked | _] = neighbors
-      city = %{tile_id: city_tile, territory: [city_tile | neighbors], worked_tiles: [already_worked]}
+
+      city = %{
+        tile_id: city_tile,
+        territory: [city_tile | neighbors],
+        worked_tiles: [already_worked]
+      }
 
       pick = Yields.pick_worked_tile(city, world())
 

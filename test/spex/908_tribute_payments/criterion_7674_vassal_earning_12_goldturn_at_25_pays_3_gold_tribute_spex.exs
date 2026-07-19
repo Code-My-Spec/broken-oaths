@@ -5,44 +5,55 @@ defmodule BrokenOathsSpex.Story908.Criterion7674Spex do
   turn, tribute automatically calculated and transferred. Calculation:
   vassal's gold income × tribute rate ÷ 100"
   (`.code_my_spec/stories/more_stories.md` §7.2), at the default 25%
-  rate: 12 × 0.25 = 3 gold, moving from the vassal's own treasury into
-  the lord's.
+  rate.
 
-  ## The gold-income gap this spec works around
+  ## Reconciled against story 912's REAL gold-income mechanic
+  (QA issue 589386f2)
 
-  No per-turn city gold YIELD mechanic exists ANYWHERE in this codebase
-  yet — `BrokenOaths.Game.Yields` only ever produces food/production; a
-  player's `gold` column only ever moves via one-off barbarian bounty/
-  camp-destroy rewards (`BarbarianAI.bounty_gold/0`,
-  `Camps.destroy_reward/0`), never a recurring income. This predates
-  and is independent of `BrokenOaths.Game.Tribute` itself. Rather than
-  leave this formula untestable, this spec uses the SAME kind of
-  narrow, documented test-only stand-in story 881 already established
-  for the equivalent "no real source exists yet" gap on healing
-  (`Fixtures.set_unit_hp/3`, before any combat existed to produce a
-  damaged unit): `Fixtures.set_player_gold_income/3` declares the
-  vassal's per-turn gold income directly — see `BrokenOaths.Game.
-  WorldServer`'s `:set_player_gold_income_for_test` handler for the
-  full rationale (a documented CONTRACT for `Game.Tribute` to read at
-  its own turn-boundary phase, not a wired-up mechanic today, exactly
-  like every other not-yet-implemented seam in this batch).
-  `Fixtures.set_player_gold/3` independently sets the ACTUAL treasury
-  balance the tribute payment moves gold out of/into — see
-  `criterion_7676`'s own moduledoc for why the two are kept separate.
+  This spec used to declare the vassal's per-turn gold income directly
+  (`Fixtures.set_player_gold_income/3`, story 908's own documented
+  stand-in for "no per-turn city gold YIELD mechanic exists ANYWHERE in
+  this codebase yet"). Story 912 closed that gap for real
+  (`BrokenOaths.Game.Yields.city_gold_income/2`), and `WorldServer.
+  apply_tribute/1` now computes its own `income_by_player` straight
+  from it every turn boundary — `set_player_gold_income_for_test` is no
+  longer read by that phase at all (see `BrokenOaths.Game.Tribute`'s
+  own moduledoc).
+
+  Growing the vassal's captured city to size 4 a real per-turn city
+  gold income of 12 exactly, the way the original worked example
+  named it, would need several real cities at the Stone Age's own
+  size-4 cap (`base_gold(4) = 3` is the ceiling for a single city, tile
+  gold included, is a further few gold on top depending on terrain) —
+  disproportionate setup for what this criterion is actually about: the
+  MULTIPLICATION itself. Instead, `SharedGivens.grow_city_to/5` grows
+  the vassal's captured city to size 4 (`base_gold(4) = 3`, deterministic
+  regardless of terrain — see `BrokenOathsSpex.Story912.
+  Criterion7713Spex`), then `SharedGivens.real_gold_income/2` reads the
+  vassal's OWN real per-turn income at the moment of the boundary and
+  this spec asserts the tribute actually moved is `round(income *
+  0.25)` — the exact same formula the original "12 × 0.25 = 3" worked
+  example exercised, now proven against a REAL, live economy instead of
+  a hand-set number.
 
   ## Story 909 postscript: the vassal goes offline too
 
-  Once `BrokenOaths.Game.Bank` shipped, this SAME `set_player_gold_income/3`
-  seam grew a second reader: a LOGGED-IN player's own declared income
-  now genuinely credits their treasury each boundary (story 909,
-  criterion 7682), not just this criterion's own tribute skim. Left
-  connected, `a_freshly_subjugated_vassal/1`'s own vassal would net
-  `income - tribute` instead of this criterion's own `-tribute` alone —
-  a real behavior change, not a bug. `go_offline(context.other_play_live)`
-  keeps this criterion's own worked example (12 × 25% = 3, moving from
-  the vassal's treasury to the lord's, nothing more) exactly what it
-  always was: income the OFFLINE vassal accrues into their own Gold
-  Bank instead (untouched by `Fixtures.gold/2`), not their treasury.
+  `go_offline(context.other_play_live)` keeps this criterion's own
+  premise intact (an income figure that feeds tribute but never itself
+  reaches the treasury): a LOGGED-IN vassal's own real income would
+  land in their own treasury too (story 909, criterion 7682), which
+  this criterion's own tribute-only math isn't about — the offline
+  vassal's income accrues into their own Gold Bank instead (untouched
+  by `Fixtures.gold/2`).
+
+  ## The lord's own income
+
+  The LORD (`context.user`) never goes offline in this scenario, so
+  their OWN captured-rival-adjacent capital city also earns its own
+  real per-turn gold income on this SAME boundary, landing straight in
+  their treasury alongside whatever tribute they collect — folded into
+  the lord's own expected gain here (`real_gold_income/2` read for both
+  players) rather than mistaken for a tribute-only measurement.
   """
 
   use BrokenOathsSpex.Case
@@ -52,41 +63,52 @@ defmodule BrokenOathsSpex.Story908.Criterion7674Spex do
   alias BrokenOathsSpex.Fixtures
 
   spex "a vassal earning 12 gold/turn at 25% pays 3 gold tribute" do
-    scenario "a turn boundary moves exactly 3 gold from the vassal's treasury to the lord's" do
+    scenario "a turn boundary moves round(real income x 25%) from the vassal's treasury to the lord's" do
       given_(:a_world)
       given_(:registered_player)
       given_(:second_registered_player)
 
-      given_ "my vassal earns 12 gold/turn, and I still tax them at the default 25%", context do
+      given_ "my vassal's captured city has grown to size 4, and I still tax them at the default 25%",
+             context do
         context = a_freshly_subjugated_vassal(context)
 
+        grow_city_to(context.world, context.other_user, context.other_city.id, 4)
         go_offline(context.other_play_live)
 
         :ok = Fixtures.set_player_gold(context.world, context.other_user, 100)
-        :ok = Fixtures.set_player_gold_income(context.world, context.other_user, 12)
 
-        vassal_gold0 = Fixtures.gold(context.world, context.other_user)
-        lord_gold0 = Fixtures.gold(context.world, context.user)
-
-        context
-        |> Map.put(:vassal_gold0, vassal_gold0)
-        |> Map.put(:lord_gold0, lord_gold0)
-        |> then(&{:ok, &1})
-      end
-
-      when_ "a turn boundary passes", context do
-        Fixtures.advance_turn(context.world)
         {:ok, context}
       end
 
-      then_ "exactly 3 gold moved from the vassal's own treasury to the lord's", context do
+      when_ "a turn boundary passes", context do
+        vassal_income = real_gold_income(context.world, context.other_user)
+        lord_income = real_gold_income(context.world, context.user)
+        vassal_gold0 = Fixtures.gold(context.world, context.other_user)
+        lord_gold0 = Fixtures.gold(context.world, context.user)
+
+        Fixtures.advance_turn(context.world)
+
+        {:ok,
+         context
+         |> Map.put(:vassal_income, vassal_income)
+         |> Map.put(:lord_income, lord_income)
+         |> Map.put(:vassal_gold0, vassal_gold0)
+         |> Map.put(:lord_gold0, lord_gold0)}
+      end
+
+      then_ "exactly round(income x 25%) gold moved from the vassal's own treasury to the lord's",
+            context do
         assert context.my_lord.tile_id == context.other_city.tile_id
+        assert context.vassal_income >= 3
+
+        expected_tribute = round(context.vassal_income * 0.25)
+        assert expected_tribute > 0
 
         vassal_gold_now = Fixtures.gold(context.world, context.other_user)
         lord_gold_now = Fixtures.gold(context.world, context.user)
 
-        assert vassal_gold_now == context.vassal_gold0 - 3
-        assert lord_gold_now == context.lord_gold0 + 3
+        assert vassal_gold_now == context.vassal_gold0 - expected_tribute
+        assert lord_gold_now == context.lord_gold0 + expected_tribute + context.lord_income
         {:ok, context}
       end
     end

@@ -39,8 +39,18 @@ defmodule BrokenOathsSpex.Story910.Criterion7690Spex do
       given_(:second_registered_player)
 
       given_ "my vassal is offline with an empty production queue in their own city", context do
-        %{lord_play_live: lord_play_live, vassal_city: vassal_city, vassal_play_live: vassal_play_live} =
-          subjugate(context.world, context.conn, context.user, context.other_conn, context.other_user)
+        %{
+          lord_play_live: lord_play_live,
+          vassal_city: vassal_city,
+          vassal_play_live: vassal_play_live
+        } =
+          subjugate(
+            context.world,
+            context.conn,
+            context.user,
+            context.other_conn,
+            context.other_user
+          )
 
         go_offline(vassal_play_live)
 

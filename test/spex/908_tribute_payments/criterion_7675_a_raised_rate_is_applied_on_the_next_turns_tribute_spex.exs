@@ -8,14 +8,19 @@ defmodule BrokenOathsSpex.Story908.Criterion7675Spex do
   NEW rate, not the old one.
 
   Reuses `criterion_7673`'s own `"set_tribute_rate"` judgment call and
-  `criterion_7674`'s own gold-income-gap workaround
-  (`Fixtures.set_player_gold_income/3`/`Fixtures.set_player_gold/3`) —
-  see both moduledocs for the full rationale, including `criterion_7674`'s
-  own "Story 909 postscript" for why the vassal goes offline
-  (`go_offline(context.other_play_live)`) before their income is
-  declared: a logged-in player's own declared income now genuinely
-  credits their treasury too (story 909), which this criterion's own
-  rate-math isn't about.
+  `criterion_7674`'s own reconciled-against-story-912 approach (see
+  that spec's own moduledoc for the full rationale: `SharedGivens.
+  grow_city_to/5` to a deterministic size-4 income, `SharedGivens.
+  real_gold_income/2` to read it, `go_offline/1` so the vassal's own
+  income never lands in their treasury directly, and the lord's own
+  income folded into their expected gain since they stay connected).
+
+  Growing to size 4 (`base_gold(4) = 3`, deterministic regardless of
+  terrain) guarantees `round(income * 0.25)` and `round(income * 0.50)`
+  are DIFFERENT numbers (`round(3 * 0.25) = 1`, `round(3 * 0.50) = 2` —
+  and only grows further apart at a higher real income), so this
+  criterion's own "the NEW rate applies, not the old one" claim stays
+  meaningful rather than vacuously true.
   """
 
   use BrokenOathsSpex.Case
@@ -30,41 +35,52 @@ defmodule BrokenOathsSpex.Story908.Criterion7675Spex do
       given_(:registered_player)
       given_(:second_registered_player)
 
-      given_ "my vassal earns 20 gold/turn, and I've just raised their rate to 50%", context do
+      given_ "my vassal's captured city has grown to size 4, and I've just raised their rate to 50%",
+             context do
         context = a_freshly_subjugated_vassal(context)
 
+        grow_city_to(context.world, context.other_user, context.other_city.id, 4)
         go_offline(context.other_play_live)
 
         :ok = Fixtures.set_player_gold(context.world, context.other_user, 100)
-        :ok = Fixtures.set_player_gold_income(context.world, context.other_user, 20)
 
         attempt_event(context.play_live, "set_tribute_rate", %{
           "vassal_user_id" => to_string(context.other_user.id),
           "rate" => "50"
         })
 
-        vassal_gold0 = Fixtures.gold(context.world, context.other_user)
-        lord_gold0 = Fixtures.gold(context.world, context.user)
-
-        context
-        |> Map.put(:vassal_gold0, vassal_gold0)
-        |> Map.put(:lord_gold0, lord_gold0)
-        |> then(&{:ok, &1})
-      end
-
-      when_ "the next turn boundary passes", context do
-        Fixtures.advance_turn(context.world)
         {:ok, context}
       end
 
-      then_ "the NEW 50% rate was skimmed — 10 gold, not the old rate's 5", context do
+      when_ "the next turn boundary passes", context do
+        vassal_income = real_gold_income(context.world, context.other_user)
+        lord_income = real_gold_income(context.world, context.user)
+        vassal_gold0 = Fixtures.gold(context.world, context.other_user)
+        lord_gold0 = Fixtures.gold(context.world, context.user)
+
+        Fixtures.advance_turn(context.world)
+
+        {:ok,
+         context
+         |> Map.put(:vassal_income, vassal_income)
+         |> Map.put(:lord_income, lord_income)
+         |> Map.put(:vassal_gold0, vassal_gold0)
+         |> Map.put(:lord_gold0, lord_gold0)}
+      end
+
+      then_ "the NEW 50% rate was skimmed — not the old rate's smaller cut", context do
         assert context.my_lord.tile_id == context.other_city.tile_id
+        assert context.vassal_income >= 3
+
+        expected_at_new_rate = round(context.vassal_income * 0.50)
+        expected_at_old_rate = round(context.vassal_income * 0.25)
+        assert expected_at_new_rate != expected_at_old_rate
 
         vassal_gold_now = Fixtures.gold(context.world, context.other_user)
         lord_gold_now = Fixtures.gold(context.world, context.user)
 
-        assert vassal_gold_now == context.vassal_gold0 - 10
-        assert lord_gold_now == context.lord_gold0 + 10
+        assert vassal_gold_now == context.vassal_gold0 - expected_at_new_rate
+        assert lord_gold_now == context.lord_gold0 + expected_at_new_rate + context.lord_income
         {:ok, context}
       end
     end

@@ -16,6 +16,14 @@ defmodule BrokenOathsSpex.Story910.Criterion7695Spex do
   stray extra mount never strands the vassal "online" against
   `BrokenOaths.Game.Presence`'s own `:duplicate` Registry keys.
 
+  Reconciled against story 912's REAL gold-income mechanic (QA issue
+  589386f2): this spec no longer declares a hand-set income via the
+  now-inert `Fixtures.set_player_gold_income/3` seam before the bank
+  sweep — the vassal's own real, freshly captured city already earns
+  SOME real gold every boundary (`base_gold(1) = 1` at minimum), which
+  is all `"steward_collect_bank"` needs to have something to log; this
+  criterion is only about the LOG entries themselves, not the amount.
+
   ## This criterion's own new judgment call: the log itself
 
   `data-test="steward-log"` on `GameLive.Play`, containing one
@@ -38,12 +46,21 @@ defmodule BrokenOathsSpex.Story910.Criterion7695Spex do
       given_(:second_registered_player)
 
       given_ "my lord stewarded my bank and my production while I was offline", context do
-        %{lord_play_live: lord_play_live, vassal_city: vassal_city, vassal_play_live: vassal_play_live} =
-          subjugate(context.world, context.conn, context.user, context.other_conn, context.other_user)
+        %{
+          lord_play_live: lord_play_live,
+          vassal_city: vassal_city,
+          vassal_play_live: vassal_play_live
+        } =
+          subjugate(
+            context.world,
+            context.conn,
+            context.user,
+            context.other_conn,
+            context.other_user
+          )
 
         go_offline(vassal_play_live)
 
-        :ok = Fixtures.set_player_gold_income(context.world, context.other_user, 5)
         Fixtures.advance_turn(context.world)
 
         attempt_event(lord_play_live, "steward_collect_bank", %{

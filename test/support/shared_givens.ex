@@ -627,4 +627,64 @@ defmodule BrokenOathsSpex.SharedGivens do
 
     %{play_live_a: play_live_a, play_live_b: play_live_b}
   end
+
+  @doc """
+  Story 912's own locked gold formula (`BrokenOaths.Game.Yields.
+  base_gold/1`/`tile_gold/1`), recomputed here from sanctioned reads
+  only (`Fixtures.player_cities/2`/`Fixtures.tile_terrain/2`) — never a
+  direct call into `BrokenOaths.Game.Yields` itself, which the spex
+  Boundary forbids (`BrokenOathsSpex.Fixtures` is the only module
+  allowed to dep on `BrokenOaths`). `1 + floor(size/2)` per city, plus
+  1 more per currently WORKED Coast tile, summed across every city
+  `user` owns in `world`.
+
+  Story 908/909's own tribute/bank criteria used to hand-set an
+  arbitrary per-turn income (`Fixtures.set_player_gold_income/3`)
+  before story 912 shipped a real per-turn city gold income mechanic —
+  now that `WorldServer`'s `apply_tribute/1`/`apply_bank/1` compute the
+  REAL figure every boundary, `Fixtures.set_player_gold_income/3` no
+  longer feeds either phase at all (see both modules' own moduledocs).
+  This is the reconciled specs' own sanctioned way to compute what
+  tribute/bank SHOULD move without re-deriving the formula from raw
+  game internals or hardcoding a magic number that would drift the
+  moment a city grows, a worked tile changes, or marching/siege turns
+  vary between runs.
+  """
+  def real_gold_income(world, user) do
+    for city <- Fixtures.player_cities(world, user) do
+      coast_tiles =
+        Enum.count(city.worked_tiles, &(Fixtures.tile_terrain(world, &1).base == :coast))
+
+      1 + div(city.size, 2) + coast_tiles
+    end
+    |> Enum.sum()
+  end
+
+  @doc """
+  Advances real turn boundaries, bounded at `max_turns`, until
+  `city_id` (owned by `user` in `world`) reaches `target_size` — the
+  same halt-on-condition loop already inlined in several growth specs
+  (`criterion_7475`/`criterion_7625`/`criterion_7646`), extracted here
+  so story 912's own reconciled tribute/bank specs can grow a captured
+  vassal's city to a MEANINGFUL, non-trivial gold income (a freshly
+  founded size-1 city earns only the 1-gold base — see
+  `BrokenOathsSpex.Story912CityGoldIncome.Criterion7714Spex`) without
+  depending on however many turns a march/siege happened to burn.
+  Growth (and food accrual) proceeds every real boundary regardless of
+  the OWNER's online/offline status, so this works identically whether
+  called before or after `go_offline/1`. A no-op once `target_size` is
+  already met.
+  """
+  def grow_city_to(world, user, city_id, target_size, max_turns \\ 250) do
+    Enum.reduce_while(1..max_turns, :ok, fn _, :ok ->
+      [city] = for c <- Fixtures.player_cities(world, user), c.id == city_id, do: c
+
+      if city.size >= target_size do
+        {:halt, :ok}
+      else
+        Fixtures.advance_turn(world)
+        {:cont, :ok}
+      end
+    end)
+  end
 end

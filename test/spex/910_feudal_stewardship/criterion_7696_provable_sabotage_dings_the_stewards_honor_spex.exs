@@ -50,7 +50,13 @@ defmodule BrokenOathsSpex.Story910.Criterion7696Spex do
       given_ "my vassal is offline and under attack, and I read my own Honor before acting",
              context do
         %{lord_play_live: lord_play_live, vassal_play_live: vassal_play_live} =
-          subjugate(context.world, context.conn, context.user, context.other_conn, context.other_user)
+          subjugate(
+            context.world,
+            context.conn,
+            context.user,
+            context.other_conn,
+            context.other_user
+          )
 
         honor_before_html = render(lord_play_live)
         honor_before = Regex.run(~r/data-test="player-honor"[^>]*>(-?\d+)/, honor_before_html)
@@ -117,7 +123,10 @@ defmodule BrokenOathsSpex.Story910.Criterion7696Spex do
                "no \"player-honor\" element rendered yet — GameLive.Play doesn't show Honor until this story lands"
 
         honor_after_html = render(fresh_lord_play_live)
-        [_, honor_after_text] = Regex.run(~r/data-test="player-honor"[^>]*>(-?\d+)/, honor_after_html)
+
+        [_, honor_after_text] =
+          Regex.run(~r/data-test="player-honor"[^>]*>(-?\d+)/, honor_after_html)
+
         honor_after = String.to_integer(honor_after_text)
 
         assert context.honor_before != nil,

@@ -10,35 +10,38 @@ defmodule BrokenOathsSpex.Story908.Criterion7676Spex do
   (`.code_my_spec/knowledge/feudal_vassalage_design.md`, "Round-5
   decisions").
 
-  See `criterion_7674`'s own moduledoc for the gold-income gap this
-  spec works around the same way. This criterion is WHY that spec kept
-  `Fixtures.set_player_gold/3` (the treasury BALANCE) and `Fixtures.
-  set_player_gold_income/3` (this turn's gold INCOME) as two SEPARATE
-  test-only facts rather than one: an "empty treasury" going into debt
-  only makes sense if tribute is computed from an income figure
-  independent of what the vassal's treasury already holds — otherwise
-  a rate capped at 100% could never skim more than the balance itself
-  contains, and debt would be structurally impossible to reach.
+  ## Reconciled against story 912's REAL gold-income mechanic
+  (QA issue 589386f2)
 
-  ## An existing obstacle this spec's own RED signal also catches
+  This spec used to declare the vassal's per-turn gold income directly
+  (`Fixtures.set_player_gold_income/3`), independent of the treasury
+  balance `Fixtures.set_player_gold/3` sets — see `criterion_7674`'s
+  own moduledoc for why that seam no longer feeds `apply_tribute/1` at
+  all now that story 912 shipped a real per-turn city gold income
+  mechanic. Rather than grow the vassal's captured city to a specific
+  income figure, this instead raises the tribute RATE to 100%
+  (`"set_tribute_rate"`, the same real, sanctioned lever
+  `criterion_7673`/`criterion_7675` already drive) — `base_gold(1) = 1`
+  alone guarantees ANY freshly captured city's real per-turn income is
+  at least 1 gold, so a 100% rate against an empty treasury drives the
+  vassal negative deterministically, with no dependency on whichever
+  tiles this run's own worked-tile assignment happened to pick.
+
+  ## An existing obstacle this spec's own RED signal also caught, before `Tribute` existed
 
   `Game.Player.changeset/2` already calls `validate_number(:gold,
-  greater_than_or_equal_to: 0)` — the schema itself currently FORBIDS a
-  negative balance outright. Whatever writes a tribute-driven negative
-  balance will need to loosen that constraint (or bypass the changeset
-  for tribute writes), a second, independent gap this criterion's own
-  failure surfaces alongside `BrokenOaths.Game.Tribute` not existing at
-  all yet.
+  greater_than_or_equal_to: 0)` — the schema itself would otherwise
+  forbid a negative balance outright; `Tribute`'s own write path bypasses
+  the changeset for exactly this reason (see its own moduledoc).
 
   ## Story 909 postscript: the vassal goes offline too
 
-  See `criterion_7674`'s own "Story 909 postscript" for why —
   `go_offline(context.other_play_live)` keeps this criterion's own
   premise intact (an income figure that feeds tribute but never itself
-  reaches the treasury): once `BrokenOaths.Game.Bank` shipped, a
-  LOGGED-IN vassal's declared 12/turn income would land in their own
-  treasury too, more than covering the 3 gold tribute and making "goes
-  into debt" impossible to reach at all.
+  reaches the treasury): a LOGGED-IN vassal's own real income would
+  land in their own treasury too (story 909), more than covering a
+  modest tribute and making "goes into debt" much harder to reach
+  reliably.
   """
 
   use BrokenOathsSpex.Case
@@ -48,18 +51,23 @@ defmodule BrokenOathsSpex.Story908.Criterion7676Spex do
   alias BrokenOathsSpex.Fixtures
 
   spex "a vassal with an empty treasury goes into debt paying tribute" do
-    scenario "tribute due against an empty treasury drives the vassal's balance negative" do
+    scenario "tribute due against an empty treasury, at a 100% rate, drives the vassal's balance negative" do
       given_(:a_world)
       given_(:registered_player)
       given_(:second_registered_player)
 
-      given_ "my vassal's treasury is empty, yet they still earn 12 gold/turn income", context do
+      given_ "my vassal's treasury is empty, and I've raised their tribute rate to 100%",
+             context do
         context = a_freshly_subjugated_vassal(context)
 
         go_offline(context.other_play_live)
 
         :ok = Fixtures.set_player_gold(context.world, context.other_user, 0)
-        :ok = Fixtures.set_player_gold_income(context.world, context.other_user, 12)
+
+        attempt_event(context.play_live, "set_tribute_rate", %{
+          "vassal_user_id" => to_string(context.other_user.id),
+          "rate" => "100"
+        })
 
         assert Fixtures.gold(context.world, context.other_user) == 0
         {:ok, context}

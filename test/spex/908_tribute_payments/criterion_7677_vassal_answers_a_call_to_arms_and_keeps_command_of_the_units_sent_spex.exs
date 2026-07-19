@@ -41,7 +41,7 @@ defmodule BrokenOathsSpex.Story908.Criterion7677Spex do
   alias BrokenOathsSpex.Fixtures
 
   spex "a vassal answers a call to arms and keeps command of the units sent",
-       fail_on_error_logs: false do
+    fail_on_error_logs: false do
     scenario "answering a levy shows it answered, and the vassal still commands their own units" do
       given_ "a world with room for three players", context do
         {:ok, Map.put(context, :world, Fixtures.world_fixture(%{seed: 1, frequency: 9}))}
@@ -105,7 +105,14 @@ defmodule BrokenOathsSpex.Story908.Criterion7677Spex do
         vassal_target =
           adjacent_land_tile(context.world, their_lord.tile_id, [context.other_city.tile_id])
 
-        their_lord = march_to(fresh_vassal_live, context.world, context.other_user, their_lord, vassal_target)
+        their_lord =
+          march_to(
+            fresh_vassal_live,
+            context.world,
+            context.other_user,
+            their_lord,
+            vassal_target
+          )
 
         assert their_lord.tile_id == vassal_target
         {:ok, context}

@@ -8,17 +8,28 @@ defmodule BrokenOathsSpex.Story908.Criterion7679Spex do
   tributes correctly resolved within the SAME single turn tick, not
   serialized across several boundaries or dropped for all but one.
 
-  Reuses `criterion_7674`'s own gold-income-gap workaround
-  (`Fixtures.set_player_gold/3`/`Fixtures.set_player_gold_income/3`)
-  — including its own "Story 909 postscript" `go_offline/1` step, so
-  each vassal's declared income here still ONLY ever feeds the tribute
-  skim, never their own treasury directly (a story 909 concern this
-  criterion's own "many relationships, one boundary" scope isn't about)
-  — and `criterion_7677`'s own "world with room for three players" note
-  — this criterion needs FOUR (one lord, three vassals), so it picks
-  its own bigger deterministic world the same documented way (issue
-  7509b3e6: the shared `:a_world` fixture, seed 424242/frequency 8, has
-  exactly two spawnable regions).
+  ## Reconciled against story 912's REAL gold-income mechanic
+  (QA issue 589386f2)
+
+  This spec used to declare a flat 12 gold/turn income for all three
+  vassals (`Fixtures.set_player_gold_income/3`) — see
+  `criterion_7674`'s own moduledoc for why that seam no longer feeds
+  `apply_tribute/1` at all. Each vassal's captured city is instead
+  grown to size 4 (`SharedGivens.grow_city_to/5`, `base_gold(4) = 3`
+  deterministic regardless of terrain), and each one's own REAL
+  per-turn income (`SharedGivens.real_gold_income/2`) is read
+  individually right before the shared boundary — three DIFFERENT
+  captured cities can easily have picked different worked-tile terrain
+  (a Coast tile here, none there), so nothing assumes they all earn the
+  same figure. The lord's own capital ALSO earns its own real income on
+  this same boundary (they never go offline) — folded into their own
+  expected total gain alongside all three tributes.
+
+  Reuses `criterion_7677`'s own "world with room for three players"
+  note — this criterion needs FOUR (one lord, three vassals), so it
+  picks its own bigger deterministic world the same documented way
+  (issue 7509b3e6: the shared `:a_world` fixture, seed 424242/frequency
+  8, has exactly two spawnable regions).
   """
 
   use BrokenOathsSpex.Case
@@ -35,7 +46,8 @@ defmodule BrokenOathsSpex.Story908.Criterion7679Spex do
 
       given_(:registered_player)
 
-      given_ "I hold three separate vassals, each earning their own gold income", context do
+      given_ "I hold three separate vassals, each with a real, grown per-turn gold income",
+             context do
         vassals =
           for _ <- 1..3 do
             other_user = Fixtures.user_fixture()
@@ -63,7 +75,14 @@ defmodule BrokenOathsSpex.Story908.Criterion7679Spex do
               )
 
             my_lord =
-              march_to(vassal_context.play_live, context.world, context.user, my_lord, target, 150)
+              march_to(
+                vassal_context.play_live,
+                context.world,
+                context.user,
+                my_lord,
+                target,
+                150
+              )
 
             {my_lord, _broken_city} =
               capture_city(
@@ -76,7 +95,7 @@ defmodule BrokenOathsSpex.Story908.Criterion7679Spex do
               )
 
             # Story 909 postscript — see `criterion_7674`'s own
-            # moduledoc: a LOGGED-IN vassal's declared income now
+            # moduledoc: a LOGGED-IN vassal's own real income now
             # genuinely credits their own treasury too, which this
             # criterion's own tribute-only math isn't about.
             go_offline(vassal_context.other_play_live)
@@ -84,38 +103,62 @@ defmodule BrokenOathsSpex.Story908.Criterion7679Spex do
             %{user: other_user, conn: conn, city: vassal_context.other_city, my_lord: my_lord}
           end
 
-        # Set each vassal's gold/income AFTER all captures. capture_city/march_to
-        # burn many real turn boundaries between vassals, and tribute correctly
-        # taxes every boundary — setting gold inside the loop would drain the
-        # earlier-captured vassals long before the single boundary under test.
-        for %{user: vassal_user} <- vassals do
-          :ok = Fixtures.set_player_gold(context.world, vassal_user, 100)
-          :ok = Fixtures.set_player_gold_income(context.world, vassal_user, 12)
+        # Grow every vassal's captured city to size 4 AFTER all captures
+        # complete — capture_city/march_to burn many real turn boundaries
+        # between vassals, and both tribute AND growth correctly proceed
+        # every one of them, so growing each one here simply continues
+        # from wherever that already left it.
+        for %{user: vassal_user, city: city} <- vassals do
+          grow_city_to(context.world, vassal_user, city.id, 4)
         end
 
-        lord_gold0 = Fixtures.gold(context.world, context.user)
-
-        context
-        |> Map.put(:vassals, vassals)
-        |> Map.put(:lord_gold0, lord_gold0)
-        |> then(&{:ok, &1})
+        {:ok, Map.put(context, :vassals, vassals)}
       end
 
       when_ "a single turn boundary passes", context do
+        incomes =
+          Map.new(context.vassals, fn %{user: u} -> {u.id, real_gold_income(context.world, u)} end)
+
+        lord_income = real_gold_income(context.world, context.user)
+
+        vassal_gold0 =
+          Map.new(context.vassals, fn %{user: u} -> {u.id, Fixtures.gold(context.world, u)} end)
+
+        lord_gold0 = Fixtures.gold(context.world, context.user)
+
         Fixtures.advance_turn(context.world)
-        {:ok, context}
+
+        {:ok,
+         context
+         |> Map.put(:incomes, incomes)
+         |> Map.put(:lord_income, lord_income)
+         |> Map.put(:vassal_gold0, vassal_gold0)
+         |> Map.put(:lord_gold0, lord_gold0)}
       end
 
-      then_ "the lord collected exactly 3 gold tribute from EACH of the three vassals", context do
+      then_ "the lord collected exactly round(income x 25%) tribute from EACH of the three vassals",
+            context do
         for %{my_lord: my_lord, city: city} <- context.vassals do
           assert my_lord.tile_id == city.tile_id
         end
 
-        for %{user: vassal_user} <- context.vassals do
-          assert Fixtures.gold(context.world, vassal_user) == 97
-        end
+        total_tribute =
+          Enum.reduce(context.vassals, 0, fn %{user: vassal_user}, acc ->
+            income = Map.fetch!(context.incomes, vassal_user.id)
+            assert income >= 3
 
-        assert Fixtures.gold(context.world, context.user) == context.lord_gold0 + 9
+            expected_tribute = round(income * 0.25)
+            assert expected_tribute > 0
+
+            assert Fixtures.gold(context.world, vassal_user) ==
+                     Map.fetch!(context.vassal_gold0, vassal_user.id) - expected_tribute
+
+            acc + expected_tribute
+          end)
+
+        assert Fixtures.gold(context.world, context.user) ==
+                 context.lord_gold0 + total_tribute + context.lord_income
+
         {:ok, context}
       end
     end

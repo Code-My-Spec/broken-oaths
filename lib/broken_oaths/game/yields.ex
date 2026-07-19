@@ -74,6 +74,23 @@ defmodule BrokenOaths.Game.Yields do
   (`BrokenOaths.Game.Production.can_queue?/3`'s `copper_access?`
   option), never a tile-yield bonus a citizen benefits from by working
   it.
+
+  ## Gold (story 912)
+
+  A city's per-turn GOLD income is a separate channel from food/
+  production, computed by `city_gold_income/2`: a per-size `base_gold/1`
+  (`1 + floor(size/2)`) plus `tile_gold/1` summed over every currently
+  worked tile — today, only worked Coast tiles (`Terrain.base ==
+  :coast`) contribute, +1 gold each (Civ's "commerce from the sea"
+  convention; copper/river gold is a deliberately deferred fork, see
+  `tile_gold/1`'s own doc). Recomputed fresh every turn boundary from
+  the city's current `size`/`worked_tiles` — nothing about gold is
+  cached on the city struct itself, the same "always live, never
+  stale" contract `worked_yields/3` already keeps for food/production.
+  `BrokenOaths.Game.WorldServer`'s `apply_tribute/1`/`apply_bank/1`
+  sum this over every city a player owns once per turn boundary — see
+  those modules' own moduledocs for the treasury-while-online/
+  bank-while-offline split this feeds.
   """
 
   alias BrokenOaths.Worlds.Globe
@@ -261,6 +278,59 @@ defmodule BrokenOaths.Game.Yields do
 
   defp granary_bonus(city) do
     if Map.get(city, :has_granary, false), do: @granary_food_bonus, else: 0
+  end
+
+  # -------------------------------------------------------------------
+  # Gold (story 912)
+  # -------------------------------------------------------------------
+
+  @doc """
+  A city's base per-turn gold, scaled by `size` alone (story 912, PO
+  decision 2026-07-18): `1 + floor(size/2)` — size 1 -> 1, 2 -> 2,
+  3 -> 2, 4 -> 3. Every city earns this regardless of terrain; tile
+  gold (`tile_gold/1`) stacks additively on top, the same "base +
+  bonus, never multiplicative" shape every other yield in this module
+  already follows.
+  """
+  @spec base_gold(pos_integer()) :: non_neg_integer()
+  def base_gold(size), do: 1 + div(size, 2)
+
+  @doc """
+  A tile's own gold yield when worked (story 912): Coast (`Terrain.
+  base == :coast` — the shallow, workable water ring the generator lays
+  down between deep ocean and land, `BrokenOaths.Worlds.Generator`'s
+  own `classify/4`, elevation band `[0.30, 0.37)`) yields +1 gold,
+  Civ's own "commerce from the sea" convention. Every other terrain
+  yields 0 gold — copper/river gold is a deliberately deferred fork
+  (story 912's own PO note), not implemented here. Deep ocean
+  (`:ocean`) carries no gold either, and is never a real concern in
+  practice: nothing in this codebase's territory rules ever lets a
+  city claim/work true open ocean.
+  """
+  @spec tile_gold(Terrain.t()) :: non_neg_integer()
+  def tile_gold(%Terrain{base: :coast}), do: 1
+  def tile_gold(%Terrain{}), do: 0
+
+  @doc """
+  A city's total per-turn gold income (story 912): `base_gold/1` on the
+  city's current `size`, plus `tile_gold/1` summed over every currently
+  worked (non-center) tile — recomputed fresh from `size`/`worked_tiles`
+  every call, exactly like `worked_yields/3`'s own food/production read,
+  never cached on the city itself. This is the REAL basis
+  `BrokenOaths.Game.Tribute`/`BrokenOaths.Game.Bank` tax/bank each turn
+  boundary, replacing the test-only `set_player_gold_income_for_test`
+  seam those two modules' own moduledocs used to document as the only
+  source.
+  """
+  @spec city_gold_income(city(), World.t()) :: non_neg_integer()
+  def city_gold_income(city, world) do
+    base_gold(city.size) + worked_gold(city, world)
+  end
+
+  defp worked_gold(city, world) do
+    city.worked_tiles
+    |> Enum.map(&(world |> Regions.terrain(&1) |> tile_gold()))
+    |> Enum.sum()
   end
 
   # -------------------------------------------------------------------

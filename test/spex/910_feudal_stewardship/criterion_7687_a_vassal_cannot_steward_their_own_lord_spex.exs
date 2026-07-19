@@ -10,8 +10,16 @@ defmodule BrokenOathsSpex.Story910.Criterion7687Spex do
   lord's own bank.
 
   See `criterion_7686`'s own moduledoc for the `subjugate/5`
-  household-setup helper and the `"steward_collect_bank"` judgment
-  call this reuses unchanged.
+  household-setup helper, the `"steward_collect_bank"` judgment call,
+  and the story 912 reconciliation (a real per-turn city gold income
+  banks the lord some real gold — the exact figure doesn't matter here,
+  since this criterion only asserts nothing moved). `subjugate/5`
+  itself never founds a city for the LORD (only the vassal's captured
+  one, which stays owned — `player_id` — by the vassal even while
+  occupied, per `BrokenOaths.Game.City`'s own doc), so this founds one
+  explicitly with the lord's own starting settler — otherwise the lord
+  would own zero cities and earn zero real income, leaving nothing for
+  this criterion's own "with real banked gold" premise to bank.
   """
 
   use BrokenOathsSpex.Case
@@ -26,14 +34,25 @@ defmodule BrokenOathsSpex.Story910.Criterion7687Spex do
       given_(:registered_player)
       given_(:second_registered_player)
 
-      given_ "my lord is offline with banked gold, and I am their vassal", context do
+      given_ "my lord is offline with real banked gold, and I am their vassal", context do
         %{lord_play_live: lord_play_live, vassal_play_live: vassal_play_live} =
-          subjugate(context.world, context.conn, context.user, context.other_conn, context.other_user)
+          subjugate(
+            context.world,
+            context.conn,
+            context.user,
+            context.other_conn,
+            context.other_user
+          )
+
+        [lord_settler | _] =
+          for u <- Fixtures.player_units(context.world, context.user), u.type == :settler, do: u
+
+        render_hook(lord_play_live, "found_city", %{"unit_id" => to_string(lord_settler.id)})
 
         go_offline(lord_play_live)
 
-        :ok = Fixtures.set_player_gold_income(context.world, context.user, 5)
         Fixtures.advance_turn(context.world)
+        assert Fixtures.bank_status(context.world, context.user).gold > 0
 
         treasury0 = Fixtures.gold(context.world, context.user)
 

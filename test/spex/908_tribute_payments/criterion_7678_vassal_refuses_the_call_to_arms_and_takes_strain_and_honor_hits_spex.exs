@@ -38,7 +38,7 @@ defmodule BrokenOathsSpex.Story908.Criterion7678Spex do
   alias BrokenOathsSpex.Fixtures
 
   spex "a vassal refuses the call to arms and takes strain and Honor hits",
-       fail_on_error_logs: false do
+    fail_on_error_logs: false do
     scenario "refusing a levy marks it refused and spikes the vassal's own Oath Strain" do
       given_ "a world with room for three players", context do
         {:ok, Map.put(context, :world, Fixtures.world_fixture(%{seed: 1, frequency: 9}))}
@@ -92,7 +92,9 @@ defmodule BrokenOathsSpex.Story908.Criterion7678Spex do
 
         strain_html = render(fresh_lord_live)
 
-        assert [_, strain_text] = Regex.run(~r/data-test="vassal-oath-strain"[^>]*>(\d+)/, strain_html)
+        assert [_, strain_text] =
+                 Regex.run(~r/data-test="vassal-oath-strain"[^>]*>(\d+)/, strain_html)
+
         assert String.to_integer(strain_text) > 0
         {:ok, context}
       end

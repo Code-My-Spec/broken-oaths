@@ -590,8 +590,13 @@ defmodule BrokenOaths.Game do
   Test-only: declares `user`'s per-turn gold INCOME, separate from
   their actual treasury balance (`set_player_gold_for_test/3`) — see
   `BrokenOaths.Game.WorldServer`'s `:set_player_gold_income_for_test`
-  handler for the full rationale (story 908's tribute specs, "debt on
-  an empty treasury" needs the two concepts kept apart).
+  handler for the full rationale and its CURRENT, narrower status now
+  that story 912 shipped a real per-turn city gold income mechanic:
+  `apply_tribute/1`/`apply_bank/1` compute their own figure straight
+  from `Yields.city_gold_income/2` every turn boundary and no longer
+  read this seam at all — it's kept only for narrower, not-yet-
+  reconciled test scenarios that still want a hand-declared income
+  independent of any real city.
   """
   @spec set_player_gold_income_for_test(map(), map(), integer()) :: :ok
   def set_player_gold_income_for_test(world, user, income),

@@ -25,6 +25,7 @@ defmodule BrokenOaths.Game.FeudalFlagTest do
   alias BrokenOaths.Game
   alias BrokenOaths.Game.Bank
   alias BrokenOaths.Game.WorldServer
+  alias BrokenOaths.Game.Yields
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.WorldsFixtures
@@ -141,14 +142,25 @@ defmodule BrokenOaths.Game.FeudalFlagTest do
       {:ok, _lord_player} = Game.join_world(world, lord)
       {:ok, _vassal_player} = Game.join_world(world, vassal)
 
+      # Story 912: give the vassal a REAL, positive per-turn city gold
+      # income (`Yields.city_gold_income/2`), not the test-only
+      # `:set_player_gold_income_for_test` seam — `apply_bank/1` no
+      # longer reads that seam at all (see its own moduledoc), so this
+      # is the real regression guard the flag-off path needs now that
+      # every founded city legitimately earns gold every turn: prod's
+      # own gold economy must stay untouched regardless.
+      [settler | _] = for u <- Game.player_units(world, vassal), u.type == :settler, do: u
+      :ok = Game.found_city(world, vassal, settler.id)
+      [vassal_city] = Game.player_cities(world, vassal)
+      assert Yields.city_gold_income(vassal_city, world) > 0
+
       gold_before = Game.gold(world, vassal)
 
-      # A real tick, with a real declared income, must move NOTHING —
-      # `apply_bank/1`'s own gate. Prod's own barbarian/normal gold
-      # economy (bounty kills, camp-destroy rewards — the only things
-      # that ever move `gold` today) is unaffected either way, since
-      # `test_gold_income` is itself only ever populated by a test.
-      :ok = Game.set_player_gold_income_for_test(world, vassal, 100)
+      # A real tick, with the vassal's own REAL positive gold income,
+      # must move NOTHING — `apply_bank/1`'s own gate. Prod's own
+      # barbarian/normal gold economy (bounty kills, camp-destroy
+      # rewards — the only things that ever move `gold` today) is
+      # unaffected either way.
       :ok = Game.advance_turn(world)
 
       assert Game.gold(world, vassal) == gold_before
@@ -177,18 +189,28 @@ defmodule BrokenOaths.Game.FeudalFlagTest do
       player = UsersFixtures.user_fixture()
       {:ok, _player} = Game.join_world(world, player)
 
+      # Story 912: a REAL founded city, taxed via its own REAL per-turn
+      # gold income (`Yields.city_gold_income/2`) — `apply_bank/1` sums
+      # this itself every boundary (`WorldServer.gold_income_by_player/1`)
+      # and no longer reads the test-only `:set_player_gold_income_for_test`
+      # seam this test used to declare an income through at all.
+      [settler | _] = for u <- Game.player_units(world, player), u.type == :settler, do: u
+      :ok = Game.found_city(world, player, settler.id)
+      [city] = Game.player_cities(world, player)
+      income = Yields.city_gold_income(city, world)
+      assert income > 0
+
       # Never connected via `GameLive.Play` at all in this bare-`Game`-call
       # test, so `Presence.online?/2` reads false for this user the whole
       # time — the same "offline" signal `SharedGivens.go_offline/1`
       # gives a real LiveView connection.
-      :ok = Game.set_player_gold_income_for_test(world, player, 10)
       :ok = Game.advance_turn(world)
 
-      assert Game.bank(world, player) == %{gold: 10, cap: Bank.starting_cap()}
+      assert Game.bank(world, player) == %{gold: income, cap: Bank.starting_cap()}
 
       gold_before = Game.gold(world, player)
       assert Game.collect_bank(world, player) == :ok
-      assert Game.gold(world, player) == gold_before + 10
+      assert Game.gold(world, player) == gold_before + income
       assert Game.bank(world, player) == %{gold: 0, cap: Bank.starting_cap()}
 
       WorldServer.restart(world)

@@ -34,7 +34,7 @@ defmodule BrokenOathsSpex.Story910.Criterion7691Spex do
   alias BrokenOathsSpex.Fixtures
 
   spex "the steward cannot disband a unit or cancel an in-progress build",
-       fail_on_error_logs: false do
+    fail_on_error_logs: false do
     scenario "cancel and disband attempts through the steward surface change nothing" do
       given_(:a_world)
       given_(:registered_player)
@@ -42,8 +42,18 @@ defmodule BrokenOathsSpex.Story910.Criterion7691Spex do
 
       given_ "my vassal is offline, already building a Warrior, with their Settler still standing",
              context do
-        %{lord_play_live: lord_play_live, vassal_city: vassal_city, vassal_play_live: vassal_play_live} =
-          subjugate(context.world, context.conn, context.user, context.other_conn, context.other_user)
+        %{
+          lord_play_live: lord_play_live,
+          vassal_city: vassal_city,
+          vassal_play_live: vassal_play_live
+        } =
+          subjugate(
+            context.world,
+            context.conn,
+            context.user,
+            context.other_conn,
+            context.other_user
+          )
 
         render_hook(vassal_play_live, "queue_production", %{
           "city_id" => to_string(vassal_city.id),

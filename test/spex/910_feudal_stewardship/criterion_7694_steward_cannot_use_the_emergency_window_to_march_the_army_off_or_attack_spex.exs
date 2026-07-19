@@ -36,7 +36,7 @@ defmodule BrokenOathsSpex.Story910.Criterion7694Spex do
   alias BrokenOathsSpex.Fixtures
 
   spex "the steward cannot use the emergency window to march the army off or attack",
-       fail_on_error_logs: false do
+    fail_on_error_logs: false do
     scenario "even mid-attack, a steward cannot march the owner's Lord far away or order an attack" do
       given_(:a_world)
       given_(:registered_player)
@@ -45,7 +45,13 @@ defmodule BrokenOathsSpex.Story910.Criterion7694Spex do
       given_ "my vassal is offline and under attack, with a distant tile and a barbarian camp both in reach",
              context do
         %{lord_play_live: lord_play_live, vassal_play_live: vassal_play_live} =
-          subjugate(context.world, context.conn, context.user, context.other_conn, context.other_user)
+          subjugate(
+            context.world,
+            context.conn,
+            context.user,
+            context.other_conn,
+            context.other_user
+          )
 
         go_offline(vassal_play_live)
 

@@ -824,22 +824,26 @@ defmodule BrokenOaths.Game.WorldServer do
     {:reply, :ok, new_state}
   end
 
-  # Test-only: declares `user`'s per-turn gold INCOME for story 908's
-  # tribute specs — deliberately SEPARATE from `:set_player_gold_for_test`
-  # above (the player's actual treasury BALANCE), since "insufficient
-  # gold -> debt" (`.code_my_spec/knowledge/feudal_vassalage_design.md`,
-  # "Round-5 decisions") only makes sense if tribute is computed from an
-  # INCOME figure distinct from whatever the treasury already holds.
-  # Held purely in ephemeral `WorldServer` state (`state.test_gold_
-  # income`, never persisted — there is no DB column for it, the same
-  # way a pending heir is tracked in `state.pending_heirs` only) since
-  # nothing reads it yet: `BrokenOaths.Game.Tribute` (this story's own
-  # component) doesn't exist, so this is a documented CONTRACT for that
-  # future implementation to read during its own turn-boundary phase,
-  # not a wired-up mechanic today — the same "narrow, false-until-
-  # implemented" status every other not-yet-existing seam in these
-  # feudal batch specs already has (a not-yet-existing event, a
-  # not-yet-rendered badge). Setting it never mutates `gold` itself.
+  # Test-only: declares `user`'s per-turn gold INCOME — originally
+  # story 908's own tribute-spec seam, deliberately SEPARATE from
+  # `:set_player_gold_for_test` above (the player's actual treasury
+  # BALANCE), since "insufficient gold -> debt"
+  # (`.code_my_spec/knowledge/feudal_vassalage_design.md`, "Round-5
+  # decisions") only makes sense if tribute is computed from an INCOME
+  # figure distinct from whatever the treasury already holds. Held
+  # purely in ephemeral `WorldServer` state (`state.test_gold_income`,
+  # never persisted — there is no DB column for it, the same way a
+  # pending heir is tracked in `state.pending_heirs` only).
+  #
+  # Story 912 shipped a REAL per-turn city gold income mechanic
+  # (`Yields.city_gold_income/2`), and `apply_tribute/1`/`apply_bank/1`
+  # (below) now compute their own `income_by_player` straight from it
+  # every turn boundary — `state.test_gold_income` is no longer read by
+  # either phase at all. This handler (and the state it writes) is kept
+  # only for narrower test scenarios that still want a hand-declared
+  # income independent of any real city; it never mutates `gold`
+  # itself, and setting it no longer has any effect on a real turn
+  # boundary's tribute/bank math.
   def handle_call({:set_player_gold_income_for_test, user_id, income}, _from, state) do
     player = find_player(state, user_id)
     existing = Map.get(state, :test_gold_income, %{})
@@ -2030,12 +2034,16 @@ defmodule BrokenOaths.Game.WorldServer do
   # itself is world-membership-scoped coordination state, not
   # tick-state, the same status `list_alliances/2` already documents
   # for `Alliance`) and each vassal's own gold INCOME this turn from
-  # `state.test_gold_income` (see `:set_player_gold_income_for_test`'s
-  # own doc for why that's kept separate from the treasury `state.
-  # players` already holds). `Tribute.collect_all/5` moves gold
-  # in-memory; the caller (`run_tick/1`) is responsible for persisting
-  # the resulting `state.players` diff (via `persist_tick/2`, same as
-  # every other in-tick gold change) and the returned `GoldLog` rows
+  # `gold_income_by_player/1` (story 912): every REAL city gold income
+  # (`Yields.city_gold_income/2`) summed per owning player, off THIS
+  # tick's own `state.cities` — the test-only `state.test_gold_income`
+  # seam (`:set_player_gold_income_for_test`) is no longer this phase's
+  # basis at all; it stays wired for narrower test scenarios that still
+  # call it directly, but the turn-boundary tribute/bank phases never
+  # read it again. `Tribute.collect_all/5` moves gold in-memory; the
+  # caller (`run_tick/1`) is responsible for persisting the resulting
+  # `state.players` diff (via `persist_tick/2`, same as every other
+  # in-tick gold change) and the returned `GoldLog` rows
   # (`persist_gold_logs/1`, immediately after). A no-op while `Game.
   # feudal_enabled?/0` reads `false` — belt-and-suspenders alongside
   # `apply_captures/1`'s own gate, which already keeps `active_vassalages/1`
@@ -2047,7 +2055,7 @@ defmodule BrokenOaths.Game.WorldServer do
           {state, []}
 
         vassalages ->
-          income_by_player = Map.get(state, :test_gold_income, %{})
+          income_by_player = gold_income_by_player(state)
 
           {new_players, logs} =
             Tribute.collect_all(
@@ -2071,6 +2079,26 @@ defmodule BrokenOaths.Game.WorldServer do
     |> Repo.all()
   end
 
+  # Story 912: every player's own REAL per-turn gold income —
+  # `Yields.city_gold_income/2` per city, grouped by `player_id` and
+  # summed, off THIS tick's own `state.cities`/`state.world` (never a
+  # stale/cached figure — a city's income is recomputed from its
+  # CURRENT size/worked_tiles every boundary, same "always live" rule
+  # `Yields.worked_yields/3` already keeps for food/production). A
+  # player who owns no city at all simply has no entry here — both
+  # `apply_tribute/1` (via `Map.get(income_by_player, id, 0)`) and
+  # `apply_bank/1` (which only ever iterates entries actually present)
+  # already treat a missing player the same as an explicit `0`.
+  defp gold_income_by_player(state) do
+    state.cities
+    |> Map.values()
+    |> Enum.group_by(& &1.player_id)
+    |> Map.new(fn {player_id, cities} ->
+      income = cities |> Enum.map(&Yields.city_gold_income(&1, state.world)) |> Enum.sum()
+      {player_id, income}
+    end)
+  end
+
   defp persist_gold_logs([]), do: :ok
 
   defp persist_gold_logs(logs) do
@@ -2088,19 +2116,19 @@ defmodule BrokenOaths.Game.WorldServer do
   # -------------------------------------------------------------------
 
   # Runs every turn boundary, alongside `apply_tribute/1` — settles
-  # EVERY player's own per-turn gold income (today, only the test-only
-  # `state.test_gold_income` seam `Tribute`'s own moduledoc already
-  # documents) via `Bank.settle_income/3`: straight to `:gold` while
-  # `Presence.online?/2` reads true, into the capped `:banked_gold`
-  # otherwise. A no-op while `Game.feudal_enabled?/0` reads `false` —
-  # same belt-and-suspenders status `apply_captures/1`/`apply_tribute/1`
-  # already carry, though in practice `test_gold_income` is ALSO never
-  # populated outside a test run either way, so prod's own barbarian/
-  # normal gold economy (bounty kills, camp rewards — the only things
-  # that ever move `gold` today) is unaffected regardless.
+  # EVERY player's own per-turn gold income (story 912: every REAL
+  # city gold income, `gold_income_by_player/1`, the SAME figure
+  # `apply_tribute/1` taxes) via `Bank.settle_income/3`: straight to
+  # `:gold` while `Presence.online?/2` reads true, into the capped
+  # `:banked_gold` otherwise. A no-op while `Game.feudal_enabled?/0`
+  # reads `false` — same belt-and-suspenders status
+  # `apply_captures/1`/`apply_tribute/1` already carry, so prod's own
+  # gold economy (bounty kills, camp rewards — the only things that
+  # ever moved `gold` before this story) stays exactly as it was until
+  # the flag flips on for real (v0.3.0).
   defp apply_bank(state) do
     if Game.feudal_enabled?() do
-      income_by_player = Map.get(state, :test_gold_income, %{})
+      income_by_player = gold_income_by_player(state)
 
       new_players =
         Enum.reduce(income_by_player, state.players, &settle_player_income(&1, &2, state.world))

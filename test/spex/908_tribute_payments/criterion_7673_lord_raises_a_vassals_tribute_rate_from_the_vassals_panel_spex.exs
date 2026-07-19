@@ -33,7 +33,8 @@ defmodule BrokenOathsSpex.Story908.Criterion7673Spex do
 
   import BrokenOathsSpex.SharedGivens
 
-  spex "the lord raises a vassal's tribute rate from the Vassals panel", fail_on_error_logs: false do
+  spex "the lord raises a vassal's tribute rate from the Vassals panel",
+    fail_on_error_logs: false do
     scenario "raising a vassal's rate updates it on both the lord's and the vassal's own view" do
       given_(:a_world)
       given_(:registered_player)

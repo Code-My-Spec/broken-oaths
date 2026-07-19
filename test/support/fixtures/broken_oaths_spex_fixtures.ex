@@ -74,6 +74,15 @@ defmodule BrokenOathsSpex.Fixtures do
   # read); also rendered as `data-test="player-gold"` on `GameLive.Play`,
   # so this is a shortcut for the SAME fact, not a new one.
   defdelegate gold(world, user), to: BrokenOaths.Game, as: :gold
+
+  # `user`'s own Gold Bank status (`%{gold:, cap:}` — story 909), same
+  # sanctioned, read-only status as `gold/2` above (`Game.bank/2` is a
+  # normal, non-test read). Works for an OFFLINE owner exactly like
+  # `gold/2` does — both are direct `WorldServer` state reads, not tied
+  # to any live connection — so a reconciled story 908/909/910 spec can
+  # read the REAL banked figure a steward/collect action is about to
+  # move without first re-mounting the (offline) owner's own LiveView.
+  defdelegate bank_status(world, user), to: BrokenOaths.Game, as: :bank
   defdelegate adjacent_tiles(world, tile_id), to: BrokenOaths.Worlds.Regions, as: :adjacent_tiles
 
   # The fog-filtered "everything user can currently see" read (own units
@@ -155,7 +164,9 @@ defmodule BrokenOathsSpex.Fixtures do
   # barbarian bounty/camp-destroy rewards, both one-off, never a
   # recurring income) — see `BrokenOaths.Game.WorldServer`'s
   # `:set_player_gold_for_test` handler for the full rationale.
-  defdelegate set_player_gold(world, user, gold), to: BrokenOaths.Game, as: :set_player_gold_for_test
+  defdelegate set_player_gold(world, user, gold),
+    to: BrokenOaths.Game,
+    as: :set_player_gold_for_test
 
   # Deliberate, narrow exception to "read-only" above, same status as
   # `set_player_gold/3`: a SEPARATE per-turn gold INCOME declaration,
@@ -196,7 +207,9 @@ defmodule BrokenOathsSpex.Fixtures do
   # attacks, pillages, roams) from the very next `advance_turn`, at
   # whatever exact tile the spec chose, with no long march through a
   # live hostile world needed to get either side into position.
-  defdelegate spawn_barbarian(world, tile_id, camp_id), to: BrokenOaths.Game, as: :spawn_barbarian_for_test
+  defdelegate spawn_barbarian(world, tile_id, camp_id),
+    to: BrokenOaths.Game,
+    as: :spawn_barbarian_for_test
 
   # Deliberate, narrow exception to "read-only" above, same status as
   # `spawn_barbarian/2`: instantly relocates ANY of the player's own
@@ -206,7 +219,9 @@ defmodule BrokenOathsSpex.Fixtures do
   # no longer marches it there over dozens of turns exposed to a live
   # hostile world just to get it into position; `:ok` or
   # `{:error, :occupied}`.
-  defdelegate relocate_unit(world, unit_id, tile_id), to: BrokenOaths.Game, as: :relocate_unit_for_test
+  defdelegate relocate_unit(world, unit_id, tile_id),
+    to: BrokenOaths.Game,
+    as: :relocate_unit_for_test
 
   # Deliberate, narrow exception to "read-only" above, same status as
   # `relocate_unit/3`: instantly places a COMPLETE improvement of

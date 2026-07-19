@@ -5,13 +5,16 @@ defmodule BrokenOaths.Game.Bank do
   Player` (migration `20260718130000`) — mirrors `BrokenOaths.Game.
   Tribute`'s own "pure math, no `Repo`" role. `BrokenOaths.Game.
   WorldServer` is the imperative shell: it reads each player's own
-  per-turn gold income (today, only the test-only `state.
-  test_gold_income` seam — see `BrokenOaths.Game.Tribute`'s moduledoc
-  for the same documented gap) and whether they currently hold a live
-  connection (`BrokenOaths.Game.Presence.online?/2`), calls
-  `settle_income/3` once per player per turn boundary, and persists the
-  result the same "diff `state.players`, `Repo.update_all` the changed
-  rows" way every other in-tick gold change already does.
+  REAL per-turn gold income (story 912 — `BrokenOaths.Game.Yields.
+  city_gold_income/2` summed over every city they own,
+  `WorldServer.gold_income_by_player/1`; the test-only `state.
+  test_gold_income` seam `BrokenOaths.Game.Tribute`'s own moduledoc
+  used to document is no longer this phase's source) and whether they
+  currently hold a live connection (`BrokenOaths.Game.
+  Presence.online?/2`), calls `settle_income/3` once per player per
+  turn boundary, and persists the result the same "diff `state.
+  players`, `Repo.update_all` the changed rows" way every other
+  in-tick gold change already does.
 
   ## Logged in vs. offline
 

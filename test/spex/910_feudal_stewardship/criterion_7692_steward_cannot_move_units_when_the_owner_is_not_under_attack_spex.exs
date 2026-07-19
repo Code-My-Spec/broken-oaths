@@ -25,7 +25,7 @@ defmodule BrokenOathsSpex.Story910.Criterion7692Spex do
   alias BrokenOathsSpex.Fixtures
 
   spex "the steward cannot move units when the owner is not under attack",
-       fail_on_error_logs: false do
+    fail_on_error_logs: false do
     scenario "a steward's move order for an offline, unthreatened vassal's unit is refused" do
       given_(:a_world)
       given_(:registered_player)
@@ -33,7 +33,13 @@ defmodule BrokenOathsSpex.Story910.Criterion7692Spex do
 
       given_ "my vassal is offline and not under attack", context do
         %{lord_play_live: lord_play_live, vassal_play_live: vassal_play_live} =
-          subjugate(context.world, context.conn, context.user, context.other_conn, context.other_user)
+          subjugate(
+            context.world,
+            context.conn,
+            context.user,
+            context.other_conn,
+            context.other_user
+          )
 
         [vassal_lord | _] =
           for u <- Fixtures.player_units(context.world, context.other_user),

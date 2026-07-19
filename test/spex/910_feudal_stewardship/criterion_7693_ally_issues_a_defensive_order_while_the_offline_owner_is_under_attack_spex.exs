@@ -44,7 +44,7 @@ defmodule BrokenOathsSpex.Story910.Criterion7693Spex do
   alias BrokenOathsSpex.Fixtures
 
   spex "an ally issues a defensive order while the offline owner is under attack",
-       fail_on_error_logs: false do
+    fail_on_error_logs: false do
     scenario "an ally's defensive move order for an offline, attacked owner's unit actually lands" do
       given_(:a_world)
       given_(:registered_player)
