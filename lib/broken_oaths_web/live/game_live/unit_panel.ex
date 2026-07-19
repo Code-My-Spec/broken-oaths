@@ -28,6 +28,15 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
       (story 882, criterion 7482: Farm is never offered on hills/
       forest; story 905, criterion 7648: Pasture only once Animal
       Husbandry is researched, and only on a Cattle/Sheep tile)
+    * `:attackable_cities` - `[%{id:, name:}]` (QA issue 56ee521a):
+      hostile cities adjacent to `:unit` right now, only ever non-empty
+      for a military unit while `Game.feudal_enabled?/0` — `Play`
+      computes this too (`attackable_cities/3`, same "needs world/
+      fog access this component doesn't have" reason). Each renders as
+      its own discoverable "Attack <name>" button, wired straight to
+      the existing `"attack"`/`target_city_id` handler — the button
+      sibling to the right-click gesture the board's own hook already
+      offers.
   """
 
   use BrokenOathsWeb, :live_component
@@ -43,6 +52,7 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
       assigns
       |> assign_new(:allowed_improvements, fn -> [] end)
       |> assign_new(:current_dig, fn -> nil end)
+      |> assign_new(:attackable_cities, fn -> [] end)
       |> assign_new(:unit_id, fn -> Map.get(assigns.unit, :id) end)
 
     ~H"""
@@ -116,6 +126,15 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
             unit_id={@unit_id}
           />
         </div>
+
+        <%!-- QA issue 56ee521a — the discoverable "Attack" affordance:
+             one button per hostile city `Play`'s own `attackable_cities/3`
+             found adjacent to this unit right now. --%>
+        <.attack_city_button
+          :for={city <- @attackable_cities}
+          city={city}
+          unit_id={@unit_id}
+        />
       </div>
     </div>
     """
@@ -135,6 +154,24 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
       class="btn btn-sm btn-outline"
     >
       Build {improvement_label(@kind)}
+    </button>
+    """
+  end
+
+  attr :city, :map, required: true
+  attr :unit_id, :any, required: true
+
+  defp attack_city_button(assigns) do
+    ~H"""
+    <button
+      type="button"
+      data-test={"attack-city-#{@city.id}"}
+      phx-click="attack"
+      phx-value-unit_id={@unit_id}
+      phx-value-target_city_id={@city.id}
+      class="btn btn-sm btn-error"
+    >
+      Attack {@city.name}
     </button>
     """
   end

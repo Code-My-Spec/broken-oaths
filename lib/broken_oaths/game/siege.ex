@@ -76,7 +76,18 @@ defmodule BrokenOaths.Game.Siege do
   the caller to remove from the board — "the conqueror chooses —
   execute the defenders or let them flee — and the choice carries a
   small Honor consequence" (design doc, "Round-4 final foundation
-  mechanics"; Honor itself has no ledger anywhere yet in this batch).
+  mechanics": executing ≈ −2 Honor, releasing ≈ 0/neutral —
+  `execute_garrison_honor_penalty/0`/`apply_execute_honor_penalty/1`,
+  below).
+
+  `fallen_garrison/2` is scoped to the DEFEATED city-owner's own units
+  ONLY (`unit.player_id == city.player_id`), never the conqueror's —
+  QA issue 94885d5e: filtering by tile alone (what
+  `CityDefense.military_garrison/2` does) also matches the conqueror's
+  own occupying unit, since it necessarily stands on the very same
+  tile the instant a capture happens. "Execute" must never delete the
+  conqueror's own army as a side effect of executing the people they
+  just conquered.
   """
 
   alias BrokenOaths.Game.CityDefense
@@ -230,10 +241,21 @@ defmodule BrokenOaths.Game.Siege do
   # Garrison fate
   # -------------------------------------------------------------------
 
-  @doc "Every living military defender still standing on `city`'s own tile — the fallen garrison."
+  @doc """
+  Every living military defender still standing on `city`'s own tile —
+  the fallen garrison. NEVER includes the conqueror's own unit(s), even
+  though they stand on the exact same tile the instant a capture
+  happens — only units belonging to `city`'s own (defeated) owner
+  (`city.player_id`, which never changes on capture — see
+  `enterable_despite_garrison?/2`'s own doc) ever count (QA issue
+  94885d5e).
+  """
   @spec fallen_garrison(city(), [unit()]) :: [unit()]
-  def fallen_garrison(city, units),
-    do: city |> CityDefense.military_garrison(units) |> Enum.filter(&(&1.hp > 0))
+  def fallen_garrison(city, units) do
+    city
+    |> CityDefense.military_garrison(units)
+    |> Enum.filter(&(&1.hp > 0 and &1.player_id == city.player_id))
+  end
 
   @doc """
   Resolve the conqueror's choice for `city`'s fallen garrison:
@@ -246,4 +268,23 @@ defmodule BrokenOaths.Game.Siege do
 
   def resolve_garrison_fate(:execute, city, units),
     do: city |> fallen_garrison(units) |> Enum.map(& &1.id)
+
+  # -------------------------------------------------------------------
+  # Garrison-fate Honor consequence (story 906, QA issue ed1ff4c0)
+  # -------------------------------------------------------------------
+
+  @execute_garrison_honor_penalty 2
+
+  @doc """
+  How much Honor executing a fallen garrison costs (design doc,
+  "Round-4 final foundation mechanics": "putting them to the sword
+  costs Honor") — releasing is neutral, `0`, so it has no matching
+  penalty function.
+  """
+  @spec execute_garrison_honor_penalty() :: pos_integer()
+  def execute_garrison_honor_penalty, do: @execute_garrison_honor_penalty
+
+  @doc "`honor - execute_garrison_honor_penalty/0` — the Honor consequence for choosing to execute a fallen garrison."
+  @spec apply_execute_honor_penalty(integer()) :: integer()
+  def apply_execute_honor_penalty(honor), do: honor - @execute_garrison_honor_penalty
 end

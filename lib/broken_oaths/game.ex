@@ -531,6 +531,32 @@ defmodule BrokenOaths.Game do
   def camps_visible_to(world, user), do: WorldServer.call(world, {:camps_visible_to, user})
 
   @doc """
+  Enemy (another player's own) cities `user` currently knows about
+  (QA issue 56ee521a): `[%{id:, name:, tile_id:, size:}]`, fog-filtered
+  the same "own region OR explored" way `camps_visible_to/2` already
+  is, minus any city `user` has personally captured (see
+  `captured_cities_visible_to/2` for those). Empty unless
+  `feudal_enabled?/0` — the surface `GameLive.Play` merges into its own
+  `"game:cities"` push as `hostile: true` markers, powering both the
+  right-click attack target and the adjacent-unit attack affordance.
+  """
+  @spec enemy_cities_visible_to(map(), map()) :: [map()]
+  def enemy_cities_visible_to(world, user),
+    do: WorldServer.call(world, {:enemy_cities_visible_to, user})
+
+  @doc """
+  Cities `user` has personally captured (QA issue ffa66192):
+  `[%{id:, name:, tile_id:, fallen_garrison?:}]` — `fallen_garrison?`
+  is whether a living defender of the ORIGINAL owner still awaits
+  `resolve_garrison_fate/4`'s execute/release choice. Empty unless
+  `feudal_enabled?/0`. Powers `GameLive.Play`'s own "Captured Cities"
+  panel.
+  """
+  @spec captured_cities_visible_to(map(), map()) :: [map()]
+  def captured_cities_visible_to(world, user),
+    do: WorldServer.call(world, {:captured_cities_visible_to, user})
+
+  @doc """
   Improvements on tiles the player knows (home region or explored) —
   same fog rule as `camps_visible_to/2`.
   """

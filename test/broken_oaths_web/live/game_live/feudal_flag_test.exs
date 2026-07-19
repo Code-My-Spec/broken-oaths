@@ -97,6 +97,13 @@ defmodule BrokenOathsWeb.GameLive.FeudalFlagTest do
 
       attacker = lord_warrior_adjacent_to(world, user, rival_city)
 
+      # QA batch (56ee521a/ffa66192/dae2e65d): a rival's city never
+      # rides "game:cities" as a hostile marker with the flag off — own
+      # cities only, `hostile: false` on every entry.
+      assert_push_event(play_live, "game:cities", %{cities: cities_off}, 500)
+      refute Enum.any?(cities_off, &(&1.id == rival_city.id))
+      assert Enum.all?(cities_off, &(&1.hostile == false))
+
       html = render(play_live)
       refute html =~ ~s(data-test="vassals-list")
       refute html =~ ~s(data-test="vassal-status")
@@ -106,6 +113,11 @@ defmodule BrokenOathsWeb.GameLive.FeudalFlagTest do
       refute html =~ ~s(data-test="bank-cap")
       refute html =~ ~s(data-test="player-honor")
       refute html =~ ~s(data-test="steward-log")
+      refute html =~ ~s(data-test="attack-city-)
+      refute html =~ ~s(data-test="captured-cities-panel")
+      refute html =~ ~s(data-test="issue-levy-form-)
+      refute html =~ ~s(data-test="answer-levy")
+      refute html =~ ~s(data-test="refuse-levy")
 
       html =
         render_hook(play_live, "attack", %{
@@ -127,6 +139,11 @@ defmodule BrokenOathsWeb.GameLive.FeudalFlagTest do
       refute html =~ ~s(data-test="bank-cap")
       refute html =~ ~s(data-test="player-honor")
       refute html =~ ~s(data-test="steward-log")
+      refute html =~ ~s(data-test="attack-city-)
+      refute html =~ ~s(data-test="captured-cities-panel")
+      refute html =~ ~s(data-test="issue-levy-form-)
+      refute html =~ ~s(data-test="answer-levy")
+      refute html =~ ~s(data-test="refuse-levy")
 
       # Story 909's own collect/upgrade events are refused outright
       # too, not merely hidden — belt-and-suspenders alongside the

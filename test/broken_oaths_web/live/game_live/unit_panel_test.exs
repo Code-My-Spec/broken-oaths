@@ -145,4 +145,30 @@ defmodule BrokenOathsWeb.GameLive.UnitPanelTest do
       refute html =~ ~s(data-test="unit-charges")
     end
   end
+
+  # QA issue 56ee521a: the discoverable Attack-city affordance — one
+  # button per hostile city `Play`'s own `attackable_cities/3` found
+  # adjacent to the selected unit.
+  describe "attackable_cities" do
+    test "renders no Attack button when nothing is attackable" do
+      html = render_component(UnitPanel, id: "unit-panel", unit: @lord, order: nil)
+
+      refute html =~ ~s(data-test="attack-city-)
+    end
+
+    test "renders an Attack button per attackable hostile city, wired to the attack handler" do
+      html =
+        render_component(UnitPanel,
+          id: "unit-panel",
+          unit: @lord,
+          order: nil,
+          attackable_cities: [%{id: 7, name: "Rivergate"}]
+        )
+
+      assert html =~ ~s(data-test="attack-city-7")
+      assert html =~ ~s(phx-click="attack")
+      assert html =~ ~s(phx-value-target_city_id="7")
+      assert html =~ "Attack Rivergate"
+    end
+  end
 end

@@ -765,6 +765,29 @@ defmodule BrokenOaths.Game.WorldServer do
     {:reply, visible_camps(state, user), state}
   end
 
+  # QA issue 56ee521a: fog-filtered ENEMY (another player's own) cities
+  # — the same "own region OR explored" rule `visible_camps/2` already
+  # uses, minus every city already occupied by the VIEWER themselves
+  # (their own captured holding isn't a fresh attack target — see
+  # `captured_cities_visible_to/2`'s own doc for where THAT surfaces
+  # instead). Empty unless `Game.feudal_enabled?/0` — belt-and-
+  # suspenders alongside `do_attack_city/4`'s own gate, matching
+  # `apply_captures/1`'s own posture.
+  def handle_call({:enemy_cities_visible_to, user}, _from, state) do
+    {:reply, visible_enemy_cities(state, user), state}
+  end
+
+  # QA issue ffa66192: cities the VIEWER has personally captured
+  # (`occupied_by_player_id == their own player id`), each carrying
+  # `fallen_garrison?` — whether `Siege.fallen_garrison/2` still finds a
+  # living defender awaiting the execute/release choice. Powers
+  # `GameLive.Play`'s own "Captured Cities" panel. Empty unless `Game.
+  # feudal_enabled?/0`, same belt-and-suspenders status as
+  # `visible_enemy_cities/2` above.
+  def handle_call({:captured_cities_visible_to, user}, _from, state) do
+    {:reply, captured_cities(state, user), state}
+  end
+
   def handle_call({:tile_improvement, tile_id}, _from, state) do
     {:reply, tile_improvement_at(state, tile_id), state}
   end
@@ -2934,9 +2957,27 @@ defmodule BrokenOaths.Game.WorldServer do
 
       true ->
         to_remove = Siege.resolve_garrison_fate(choice, city, Map.values(state.units))
-        {:ok, %{state | units: Map.drop(state.units, to_remove)}}
+
+        new_state =
+          state
+          |> Map.update!(:units, &Map.drop(&1, to_remove))
+          |> apply_garrison_fate_honor(player.id, choice)
+
+        {:ok, new_state}
     end
   end
+
+  # QA issue ed1ff4c0 — the conqueror's own Honor consequence for their
+  # garrison-fate choice (design doc: executing costs a small Honor
+  # penalty, releasing is neutral). Folded into the SAME `new_state`
+  # `do_resolve_garrison_fate/4` already returns, so the caller's own
+  # `persist_tick/2` picks up the `state.players` diff exactly like
+  # `resolve_steward_defend/5`'s own sabotage-penalty write above.
+  defp apply_garrison_fate_honor(state, player_id, :execute) do
+    update_in(state.players[player_id].honor, &Siege.apply_execute_honor_penalty/1)
+  end
+
+  defp apply_garrison_fate_honor(state, _player_id, :release), do: state
 
   defp do_issue_levy(state, user, vassal_user_id, target_user_id, share) do
     with {:ok, lord_player} <- fetch_player(state, user.id),
@@ -3494,6 +3535,62 @@ defmodule BrokenOaths.Game.WorldServer do
         )
         |> Enum.map(&format_camp(&1, state))
     end
+  end
+
+  # QA issue 56ee521a — see `handle_call({:enemy_cities_visible_to, ...`
+  # above for the full rationale. `city.player_id` is the ORIGINAL
+  # (possibly since-defeated) owner — it never changes on capture, only
+  # `occupied_by_player_id` does (see `Siege`'s own moduledoc) — so a
+  # city already captured by a THIRD player still reads as hostile here
+  # (attacking it again isn't specially blocked today), only the
+  # VIEWER's own captured holdings are excluded.
+  defp visible_enemy_cities(state, user) do
+    if Game.feudal_enabled?(), do: do_visible_enemy_cities(state, user), else: []
+  end
+
+  defp do_visible_enemy_cities(state, user) do
+    case find_player(state, user.id) do
+      nil ->
+        []
+
+      player ->
+        home = player_region_tiles(state.world, player.region_id)
+        explored = Map.get(state.explored, player.id, MapSet.new())
+
+        state.cities
+        |> Map.values()
+        |> Enum.filter(&enemy_city_visible?(&1, player, home, explored))
+        |> Enum.map(&Map.take(&1, [:id, :name, :tile_id, :size]))
+    end
+  end
+
+  defp enemy_city_visible?(city, player, home, explored) do
+    city.player_id != player.id and city.occupied_by_player_id != player.id and
+      (MapSet.member?(home, city.tile_id) or MapSet.member?(explored, city.tile_id))
+  end
+
+  # QA issue ffa66192 — see `handle_call({:captured_cities_visible_to,
+  # ...` above for the full rationale.
+  defp captured_cities(state, user) do
+    if Game.feudal_enabled?() do
+      case find_player(state, user.id) do
+        nil ->
+          []
+
+        player ->
+          state.cities
+          |> Map.values()
+          |> Enum.filter(&(&1.occupied_by_player_id == player.id))
+          |> Enum.map(&format_captured_city(state, &1))
+      end
+    else
+      []
+    end
+  end
+
+  defp format_captured_city(state, city) do
+    fallen_garrison? = city |> Siege.fallen_garrison(Map.values(state.units)) |> Enum.any?()
+    %{id: city.id, name: city.name, tile_id: city.tile_id, fallen_garrison?: fallen_garrison?}
   end
 
   defp player_region_tiles(world, region_id) do

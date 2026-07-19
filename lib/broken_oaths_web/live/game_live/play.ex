@@ -25,9 +25,17 @@ defmodule BrokenOathsWeb.GameLive.Play do
                            unit's remaining order path — pushed on queue, on
                            selection, and on every board refresh (empty when
                            the unit has no order)
-    * `game:cities`     — `%{cities: [%{id:, name:, tile_id:, size:}]}`, the
-                           player's own cities (never fog-filtered — a city
-                           is only ever seen by its owner here)
+    * `game:cities`     — `%{cities: [%{id:, name:, tile_id:, size:, hostile:}]}`,
+                           the player's own cities (never fog-filtered — a
+                           city is only ever seen by its owner here, `hostile:
+                           false`) PLUS, once `Game.feudal_enabled?/0` (QA
+                           issue 56ee521a), fog-filtered ENEMY cities the
+                           player currently knows (`hostile: true`, the same
+                           "own region OR explored" rule `game:camps` already
+                           uses — see `Game.enemy_cities_visible_to/2`) —
+                           powers the right-click ATTACK target on a hostile
+                           city (mirroring a barbarian/camp) and the
+                           adjacent-unit attack affordance in `UnitPanel`
     * `game:resources`  — `%{resources: [%{tile_id:, kind:}]}` (story 905),
                            bonus-resource billboards for every currently
                            known (visible ∪ explored) tile — resources are
@@ -80,6 +88,42 @@ defmodule BrokenOathsWeb.GameLive.Play do
   against the unit's own tile) so both panels dispatch every city-loop
   command; `GameLive.CityPanel` never reads `BrokenOaths.Game` itself.
 
+  ## Siege / Garrison-fate / Levy UI (QA batch, story 906/908 gaps)
+
+  Three real player affordances that used to exist only as bare
+  `handle_event/3` clauses reachable through `attempt_event/3` in specs
+  (never a real click), now surfaced for real:
+
+    * **Attack a rival city** — a hostile city rides `game:cities`
+      (see that event's own doc above), is a right-click ATTACK target
+      exactly like an adjacent barbarian/camp (the `.Board` hook's own
+      `orderMove/1`), and — when a friendly military unit adjacent to
+      one is selected — `GameLive.UnitPanel` also renders an explicit
+      "Attack" button per attackable city (`attackable_cities/2`,
+      below), the same discoverable-button convention `unit_panel.ex`'s
+      Found City/Build already establish (right-click alone is a
+      harder-to-discover gesture for a brand-new mechanic).
+    * **Execute/Release a fallen garrison** — once `Game.
+      captured_cities_visible_to/2` reports a captured city with a
+      still-living defender, the top bar's "Captured Cities" dropdown
+      (`captured_cities_panel/1`, below) renders the conqueror's own
+      Execute/Release choice, wired straight to the existing
+      `"resolve_garrison_fate"` handler.
+    * **Issue / answer / refuse a call to arms** — the lord's own
+      `vassals_panel`/`vassal_row` grows an "Issue Call to Arms" form
+      (target drawn from `@known_players`, wired to `"issue_levy"`);
+      the vassal's own status badge grows Answer/Refuse buttons while
+      `levy_status` reads `:pending`, wired to `"answer_levy"`/
+      `"refuse_levy"`.
+
+  All three stay implicitly scoped to `Game.feudal_enabled?/0` — the
+  underlying `Game` reads that power them
+  (`enemy_cities_visible_to/2`, `captured_cities_visible_to/2`,
+  `vassals/2`, `vassal_status/2`) all report empty/`nil` with the flag
+  off, the same "no separate UI-side check needed" posture
+  `Game.feudal_enabled?/0`'s own doc already establishes for the rest
+  of this batch.
+
   ## `BrokenOaths.Game` surface this view depends on
 
   Beyond the sanctioned reads already exposed to specs
@@ -109,7 +153,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   alias BrokenOaths.Chat
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.{Camp, Improvement, Presence, Research, Yields}
+  alias BrokenOaths.Game.{Camp, CityDefense, Improvement, Presence, Research, Yields}
   alias BrokenOaths.Worlds
   alias BrokenOaths.Worlds.{Generator, Globe, Regions, Resources, Terrain, Weather}
 
@@ -159,6 +203,15 @@ defmodule BrokenOathsWeb.GameLive.Play do
             cities: [],
             camps: [],
             improvements: [],
+            # QA issue 56ee521a/ffa66192: fog-filtered enemy cities
+            # (hostile attack targets), the viewer's own captured
+            # holdings (the garrison-fate choice), and whichever of
+            # those the currently selected unit could actually attack
+            # right now — all three real only once `feudal_enabled?`
+            # ever produces anything to fill them.
+            enemy_cities: [],
+            captured_cities: [],
+            attackable_cities: [],
             known_players: Game.known_players(world, user),
             selected_tile: nil,
             visible: [],
@@ -283,6 +336,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         allowed_improvements:
           worker_allowed_improvements(socket.assigns.world, unit, socket.assigns.player_research),
         current_dig: worker_current_dig(socket.assigns.improvements, unit),
+        attackable_cities: attackable_cities(socket.assigns.world, unit, socket.assigns.enemy_cities),
         order_error: nil,
         improvement_error: nil,
         selected_city_id: nil,
@@ -325,6 +379,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         selected_unit_id: nil,
         selected_unit: nil,
         selected_order: nil,
+        attackable_cities: [],
         selected_city_id: nil,
         selected_city: nil,
         selected_camp_id: nil,
@@ -353,6 +408,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         selected_unit_id: nil,
         selected_unit: nil,
         selected_tile: nil,
+        attackable_cities: [],
         selected_camp_id: nil,
         selected_camp: nil
       )
@@ -379,6 +435,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         selected_unit_id: nil,
         selected_unit: nil,
         selected_order: nil,
+        attackable_cities: [],
         selected_city_id: nil,
         selected_city: nil
       )
@@ -405,6 +462,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         selected_order: nil,
         allowed_improvements: [],
         current_dig: nil,
+        attackable_cities: [],
         selected_city_id: nil,
         selected_city: nil,
         assignable_tiles: [],
@@ -1248,6 +1306,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
     cities = Game.player_cities(world, user)
     camps = Game.camps_visible_to(world, user)
     improvements = Game.improvements_visible_to(world, user)
+    # QA issue 56ee521a/ffa66192 — see this module's own "Siege /
+    # Garrison-fate / Levy UI" doc section: both real only once `Game.
+    # feudal_enabled?/0` does, empty otherwise.
+    enemy_cities = Game.enemy_cities_visible_to(world, user)
+    captured_cities = Game.captured_cities_visible_to(world, user)
     %{visible: visible, explored: explored} = Game.visibility(world, user)
     selected_unit = selected_unit_id && Enum.find(units, &(&1.id == selected_unit_id))
     selected_city = selected_city_id && Enum.find(cities, &(&1.id == selected_city_id))
@@ -1279,6 +1342,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
       selected_order: selected_unit && selected_unit.order,
       allowed_improvements: worker_allowed_improvements(world, selected_unit, player_research),
       current_dig: worker_current_dig(improvements, selected_unit),
+      attackable_cities: attackable_cities(world, selected_unit, enemy_cities),
+      enemy_cities: enemy_cities,
+      captured_cities: captured_cities,
       selected_city: selected_city,
       assignable_tiles: assignable_tiles(world, selected_city),
       copper_access?: copper_access?(world, selected_city),
@@ -1396,16 +1462,19 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
     improvements = Map.get(socket.assigns, :improvements, [])
     player_research = socket.assigns.player_research
+    enemy_cities = Map.get(socket.assigns, :enemy_cities, [])
 
     known = Enum.uniq(visible ++ explored)
     tiles = Enum.map(known, &tile_row(&1, mesh, terrain_map))
     levels = Weather.map(world.seed, mesh)
 
+    city_markers = Enum.map(cities, &city_marker/1) ++ Enum.map(enemy_cities, &enemy_city_marker/1)
+
     socket
     |> push_event("game:window", %{tiles: tiles})
     |> push_event("game:visibility", %{visible: visible, explored: explored})
     |> push_event("game:units", %{units: units})
-    |> push_event("game:cities", %{cities: Enum.map(cities, &city_marker/1)})
+    |> push_event("game:cities", %{cities: city_markers})
     |> push_camps(camps)
     |> push_improvements(improvements)
     |> push_resources(known_resources(known, world, player_research))
@@ -1528,7 +1597,15 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   # The board only needs enough to place and label a billboard —
   # territory/queue/food stay in the CityPanel assign, not the client.
-  defp city_marker(city), do: Map.take(city, [:id, :name, :tile_id, :size])
+  # `hostile: false` — the client's `.Board` hook uses this to decide
+  # left-click select-vs-ignore and right-click move-vs-attack (QA
+  # issue 56ee521a).
+  defp city_marker(city), do: city |> Map.take([:id, :name, :tile_id, :size]) |> Map.put(:hostile, false)
+
+  # QA issue 56ee521a — the enemy-city sibling of `city_marker/1`,
+  # `hostile: true`.
+  defp enemy_city_marker(city),
+    do: city |> Map.take([:id, :name, :tile_id, :size]) |> Map.put(:hostile, true)
 
   # "Grassland Hills · Woods" — base, then relief when not flat, then
   # feature when present.
@@ -1757,6 +1834,29 @@ defmodule BrokenOathsWeb.GameLive.Play do
   defp copper_access?(world, city),
     do: Enum.any?(city.territory, &(Resources.at(world, &1) == :copper))
 
+  # QA issue 56ee521a — the "surface an attack affordance" half of the
+  # fix: enemy cities adjacent to the CURRENTLY SELECTED unit, but only
+  # once that unit is a military type (`CityDefense.military?/1` — a
+  # civilian can no more attack a city through this button than through
+  # `Siege.validate_siege/3` itself would allow). Powers `UnitPanel`'s
+  # own per-city "Attack" button, each wired straight to the existing
+  # `"attack"`/`target_city_id` handler — the discoverable-button
+  # sibling to the right-click gesture the `.Board` hook's own
+  # `orderMove/1` already offers.
+  defp attackable_cities(_world, nil, _enemy_cities), do: []
+
+  defp attackable_cities(world, unit, enemy_cities) do
+    if CityDefense.military?(unit) do
+      adjacent = MapSet.new(Regions.adjacent_tiles(world, unit.tile_id))
+
+      enemy_cities
+      |> Enum.filter(&MapSet.member?(adjacent, &1.tile_id))
+      |> Enum.map(&Map.take(&1, [:id, :name]))
+    else
+      []
+    end
+  end
+
   defp parse_id(nil), do: nil
   defp parse_id(""), do: nil
   defp parse_id(id) when is_integer(id), do: id
@@ -1904,10 +2004,22 @@ defmodule BrokenOathsWeb.GameLive.Play do
         <%!-- Story 907: the lord's own Vassals list — only mounted while
              non-empty (criterion 7667's own "no vassals-list at all"
              anchor). --%>
-        <.vassals_panel :if={@vassals != []} vassals={@vassals} />
+        <.vassals_panel :if={@vassals != []} vassals={@vassals} known_players={@known_players} />
+
+        <%!-- QA issue ffa66192: the conqueror's own captured-city
+             tracker — only mounted while non-empty, same "no element at
+             all while there's nothing to show" posture `vassals_panel`
+             above already has. Surfaces the Execute/Release choice for
+             any still-living fallen garrison. --%>
+        <.captured_cities_panel
+          :if={@captured_cities != []}
+          captured_cities={@captured_cities}
+        />
 
         <%!-- Story 907/908: a subjugated player's own oath — sworn-to
-             badge, the rate they feel, and their own latest levy status. --%>
+             badge, the rate they feel, and their own latest levy status
+             — plus, QA issue dae2e65d, real Answer/Refuse controls
+             while a call to arms is still pending. --%>
         <div :if={@vassal_status} class="flex items-center gap-1">
           <span class="badge badge-secondary gap-1" data-test="vassal-status">
             Sworn to {@vassal_status.lord_email}
@@ -1918,6 +2030,30 @@ defmodule BrokenOathsWeb.GameLive.Play do
           <span :if={@vassal_status.levy_status} class="badge badge-outline" data-test="levy-status">
             {@vassal_status.levy_status}
           </span>
+          <%!-- QA issue dae2e65d — the vassal's own Answer/Refuse
+               controls, only while a call to arms actually awaits a
+               response (`:pending`); `:answered`/`:refused` are past
+               tense, the badge above alone. --%>
+          <button
+            :if={@vassal_status.levy_status == :pending}
+            type="button"
+            phx-click="answer_levy"
+            phx-value-lord_user_id={@vassal_status.lord_user_id}
+            data-test="answer-levy"
+            class="btn btn-xs btn-primary"
+          >
+            Answer
+          </button>
+          <button
+            :if={@vassal_status.levy_status == :pending}
+            type="button"
+            phx-click="refuse_levy"
+            phx-value-lord_user_id={@vassal_status.lord_user_id}
+            data-test="refuse-levy"
+            class="btn btn-xs btn-outline btn-error"
+          >
+            Refuse
+          </button>
         </div>
 
         <.live_component
@@ -2216,6 +2352,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
             order={@selected_order}
             allowed_improvements={@allowed_improvements}
             current_dig={@current_dig}
+            attackable_cities={@attackable_cities}
           />
 
           <.live_component
@@ -2533,7 +2670,13 @@ defmodule BrokenOathsWeb.GameLive.Play do
             const unit = this.units.find((u) => u.tile_id === tile)
             if (unit) { this.pushEvent("select_unit", {unit_id: unit.id, tile_id: tile}); return }
 
-            const city = this.cities.find((c) => c.tile_id === tile)
+            // QA issue 56ee521a — a hostile (enemy) city never opens
+            // `CityPanel` (that component assumes an OWNED city's own
+            // shape: queue, worked tiles, etc., which `city_marker/1`'s
+            // trimmed board payload doesn't carry for someone else's
+            // city) — falls through to the plain tile-info panel below,
+            // same as clicking any other occupied-but-foreign ground.
+            const city = this.cities.find((c) => c.tile_id === tile && !c.hostile)
             if (city) { this.pushEvent("select_city", {city_id: city.id}); return }
 
             // QA issue 748348fe — a barbarian camp is selectable too,
@@ -2555,15 +2698,18 @@ defmodule BrokenOathsWeb.GameLive.Play do
           orderMove(e) {
             if (this.selectedId == null) return
 
-            // A right click on an adjacent barbarian or camp is an
-            // attack order, not a move — the RTS convention (story
-            // 891/894). Anything else falls through to movement.
+            // A right click on an adjacent barbarian, camp, or hostile
+            // player city is an attack order, not a move — the RTS
+            // convention (story 891/894, QA issue 56ee521a for the
+            // city case). Anything else falls through to movement.
             const tile = this.hitTile(e)
             if (tile != null) {
               const enemy = this.units.find((u) => u.tile_id === tile && u.type === "barbarian_warrior")
               if (enemy) { this.pushEvent("attack", {unit_id: this.selectedId, target_unit_id: enemy.id}); return }
               const camp = this.camps.find((c) => c.tile_id === tile)
               if (camp) { this.pushEvent("attack", {unit_id: this.selectedId, target_camp_id: camp.id}); return }
+              const hostileCity = this.cities.find((c) => c.tile_id === tile && c.hostile)
+              if (hostileCity) { this.pushEvent("attack", {unit_id: this.selectedId, target_city_id: hostileCity.id}); return }
             }
 
             const r = this.el.getBoundingClientRect()
@@ -2803,6 +2949,18 @@ defmodule BrokenOathsWeb.GameLive.Play do
                   ctx.strokeStyle = "#1a1a1a"
                   ctx.stroke()
                 }
+
+                // QA issue 56ee521a — a thin red ring marks a hostile
+                // (enemy, attackable) city, whether or not the real
+                // sprite loaded yet, so a player can tell "mine" from
+                // "attack target" at a glance.
+                if (c.hostile) {
+                  ctx.beginPath()
+                  ctx.arc(px, py, citySize * 0.32, 0, 2 * Math.PI)
+                  ctx.strokeStyle = "#dc2626"
+                  ctx.lineWidth = 2
+                  ctx.stroke()
+                }
               }
             }
 
@@ -2982,6 +3140,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # (`BrokenOathsSpex.Story907.Criterion7667Spex`'s own anchor: no
   # `vassals-list` element exists at all for a lord with zero vassals).
   attr :vassals, :list, required: true
+  attr :known_players, :list, required: true
 
   defp vassals_panel(assigns) do
     ~H"""
@@ -2993,15 +3152,18 @@ defmodule BrokenOathsWeb.GameLive.Play do
         tabindex="0"
         class="dropdown-content z-10 menu p-3 shadow bg-base-100 rounded-box w-80 gap-3"
       >
-        <.vassal_row :for={vassal <- @vassals} vassal={vassal} />
+        <.vassal_row :for={vassal <- @vassals} vassal={vassal} known_players={@known_players} />
       </div>
     </div>
     """
   end
 
   attr :vassal, :map, required: true
+  attr :known_players, :list, required: true
 
   defp vassal_row(assigns) do
+    assigns = assign(assigns, :levy_targets, levy_targets(assigns.known_players, assigns.vassal))
+
     ~H"""
     <div
       data-test={"vassal-row-#{@vassal.vassal_user_id}"}
@@ -3033,6 +3195,40 @@ defmodule BrokenOathsWeb.GameLive.Play do
         <button type="submit" class="btn btn-xs">Set Rate</button>
       </form>
 
+      <%!-- QA issue dae2e65d — the lord's own "issue a call to arms"
+           control: pick a third-party target (never the vassal
+           themselves — `@levy_targets` already excludes them, mirroring
+           `Levy`'s own `validate_target_not_vassal` guard) and a
+           pledged share, wired to the existing `"issue_levy"` handler.
+           Only rendered while there's an actual legal target known
+           (`@levy_targets != []`) — an empty `<select>` would only ever
+           be refused server-side anyway. --%>
+      <form
+        :if={@levy_targets != []}
+        phx-submit="issue_levy"
+        class="flex flex-col gap-1"
+        data-test={"issue-levy-form-#{@vassal.vassal_user_id}"}
+      >
+        <input type="hidden" name="vassal_user_id" value={@vassal.vassal_user_id} />
+        <div class="flex items-center gap-1">
+          <select name="target_user_id" class="select select-xs select-bordered flex-1">
+            <option :for={target <- @levy_targets} value={target.user_id}>{target.email}</option>
+          </select>
+          <input
+            type="number"
+            name="share"
+            min="0.1"
+            max="1"
+            step="0.1"
+            value="0.5"
+            class="input input-xs input-bordered w-16"
+          />
+        </div>
+        <button type="submit" data-test="issue-levy" class="btn btn-xs btn-outline self-start">
+          Call to Arms
+        </button>
+      </form>
+
       <%!-- Story 910: stewarding an OFFLINE vassal's bank — a lord may
            always steward their own vassal (`Stewardship.steward_role/4`
            always resolves `:lord` here), so this only ever hides on
@@ -3047,6 +3243,83 @@ defmodule BrokenOathsWeb.GameLive.Play do
       >
         Steward: Collect Bank
       </button>
+    </div>
+    """
+  end
+
+  # QA issue dae2e65d — legal call-to-arms targets for `vassal`: every
+  # known civilization EXCEPT the vassal themselves (`Levy`'s own
+  # `validate_target_not_vassal`/`validate_target_not_lord` schema
+  # guards already refuse both server-side; this just keeps the
+  # dropdown from ever offering an option that would only bounce).
+  defp levy_targets(known_players, vassal),
+    do: Enum.reject(known_players, &(&1.user_id == vassal.vassal_user_id))
+
+  # -------------------------------------------------------------------
+  # Captured Cities (QA issue ffa66192 — the execute/release UI)
+  # -------------------------------------------------------------------
+
+  # The conqueror's own tracker for cities they've personally captured
+  # — a dropdown, same "never crowd the top bar" reasoning
+  # `vassals_panel` above already uses; only mounted while non-empty
+  # (`Play`'s own render gates on `@captured_cities != []`).
+  attr :captured_cities, :list, required: true
+
+  defp captured_cities_panel(assigns) do
+    ~H"""
+    <div data-test="captured-cities-panel" class="dropdown dropdown-end">
+      <div tabindex="0" role="button" class="btn btn-sm btn-outline btn-warning gap-1">
+        <.icon name="hero-flag" class="w-3 h-3" /> Captured ({length(@captured_cities)})
+      </div>
+      <div
+        tabindex="0"
+        class="dropdown-content z-10 menu p-3 shadow bg-base-100 rounded-box w-72 gap-2"
+      >
+        <.captured_city_row :for={city <- @captured_cities} city={city} />
+      </div>
+    </div>
+    """
+  end
+
+  attr :city, :map, required: true
+
+  defp captured_city_row(assigns) do
+    ~H"""
+    <div
+      data-test={"captured-city-#{@city.id}"}
+      class="flex flex-col gap-1 border-b border-base-300 pb-2 last:border-b-0"
+    >
+      <span class="text-sm font-medium">{@city.name}</span>
+
+      <div :if={@city.fallen_garrison?} class="flex flex-col gap-1" data-test="fallen-garrison-choice">
+        <span class="text-xs opacity-70">A fallen garrison awaits your judgment.</span>
+        <div class="flex items-center gap-1">
+          <button
+            type="button"
+            phx-click="resolve_garrison_fate"
+            phx-value-city_id={@city.id}
+            phx-value-choice="release"
+            data-test={"release-garrison-#{@city.id}"}
+            class="btn btn-xs btn-outline"
+          >
+            Release
+          </button>
+          <button
+            type="button"
+            phx-click="resolve_garrison_fate"
+            phx-value-city_id={@city.id}
+            phx-value-choice="execute"
+            data-test={"execute-garrison-#{@city.id}"}
+            class="btn btn-xs btn-error"
+          >
+            Execute
+          </button>
+        </div>
+      </div>
+
+      <span :if={!@city.fallen_garrison?} class="text-xs opacity-60">
+        Secured — no living defenders remain.
+      </span>
     </div>
     """
   end

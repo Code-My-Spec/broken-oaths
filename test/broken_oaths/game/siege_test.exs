@@ -289,5 +289,47 @@ defmodule BrokenOaths.Game.SiegeTest do
 
       assert Siege.resolve_garrison_fate(:execute, c, [defender, civilian]) == [1]
     end
+
+    # QA issue 94885d5e: the conqueror's own occupying unit stands on
+    # the EXACT same tile as the fallen garrison the instant a capture
+    # happens (that's what capture IS — see `Siege`'s own moduledoc).
+    # `fallen_garrison/2` filtering by tile alone (what
+    # `CityDefense.military_garrison/2` does) would therefore ALSO
+    # match the conqueror's own unit — this is the regression this
+    # test locks down.
+    test "fallen_garrison/2 never includes the conqueror's own unit standing on the same tile" do
+      c = city(1, tile: 5, player_id: 2)
+      defender = unit(1, type: :warrior, tile: 5, player_id: 2)
+      conqueror_unit = unit(99, type: :lord, tile: 5, player_id: 7)
+
+      assert Siege.fallen_garrison(c, [defender, conqueror_unit]) == [defender]
+    end
+
+    test "resolve_garrison_fate/3 with :execute removes only the defender's units and leaves the conqueror's intact" do
+      c = city(1, tile: 5, player_id: 2)
+      defender_a = unit(1, type: :warrior, tile: 5, player_id: 2)
+      defender_b = unit(4, type: :lord, tile: 5, player_id: 2)
+      conqueror_unit = unit(99, type: :lord, tile: 5, player_id: 7)
+
+      to_remove = Siege.resolve_garrison_fate(:execute, c, [defender_a, defender_b, conqueror_unit])
+
+      assert Enum.sort(to_remove) == [1, 4]
+      refute 99 in to_remove
+    end
+
+    test "resolve_garrison_fate/3 with :release never reports the conqueror's own unit either" do
+      c = city(1, tile: 5, player_id: 2)
+      defender = unit(1, type: :warrior, tile: 5, player_id: 2)
+      conqueror_unit = unit(99, type: :lord, tile: 5, player_id: 7)
+
+      assert Siege.resolve_garrison_fate(:release, c, [defender, conqueror_unit]) == []
+    end
+  end
+
+  describe "execute_garrison_honor_penalty/0 and apply_execute_honor_penalty/1" do
+    test "executing costs a small, fixed Honor penalty" do
+      assert Siege.execute_garrison_honor_penalty() > 0
+      assert Siege.apply_execute_honor_penalty(100) == 100 - Siege.execute_garrison_honor_penalty()
+    end
   end
 end
