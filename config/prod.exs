@@ -30,7 +30,7 @@ config :logger, level: :info
 # default) so a prod deploy is never one dropped line away from
 # accidentally shipping it live. See `BrokenOaths.Game.
 # feudal_enabled?/0`.
-config :broken_oaths, :feudal_enabled, false
+config :broken_oaths, :feudal_enabled, true
 
 # Runtime production configuration, including reading
 # of environment variables, is done on config/runtime.exs.
