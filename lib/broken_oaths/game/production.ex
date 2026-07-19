@@ -60,6 +60,34 @@ defmodule BrokenOaths.Game.Production do
   `granary_available?`/`bronze_age?` already establish; the caller
   (`WorldServer`) computes `copper_access?` from the city's own
   `territory` and the world's resource placement.
+
+  ## The Archer (QA issue da39e50b "No archer")
+
+  The expanded tech tree's Archery tech (story 902) unlocked nothing —
+  `:archer` is the first-pass fix, gated on a single opt,
+  `opts[:archery?]` (the owner has completed Archery), the same single-
+  opt shape `:granary`'s `granary_available?` already uses. Missing
+  Archery reports `{:error, :locked}` and the option never appears in a
+  Build UI until then (`available_items/1` below), same as
+  `:bronze_spearman`'s own `bronze_age?` gate.
+
+  Civ 6's own Archer is a RANGED unit (attacks from 2 tiles away
+  without retaliation); this game's whole combat model
+  (`BrokenOaths.Game.Combat`) is melee/adjacent-only — no unit anywhere
+  in this codebase has a ranged attack. Implementing true ranged combat
+  is a genuine design/engineering project (attack range, no-retaliation
+  math, a new UI affordance for "attack from range"), well beyond a bug
+  fix's scope. This first pass ships the Archer as a buildable MELEE
+  unit instead — real, buildable, fights (adjacent, both sides land a
+  blow) — with stats scaled to sit between the Warrior and the Bronze
+  Spearman (`@unit_stats`/`BrokenOaths.Game.Combat`'s own
+  `@base_strength`): strength 14 (Warrior 10, Bronze Spearman 16), 100
+  HP (Warrior's own HP), cost 40 production (cheaper than the Bronze
+  Spearman's 60 — Archery is a tier-2 tech but doesn't need a strategic
+  resource the way Bronze Spearman needs Copper). **True ranged attack
+  (strike without retaliation, from 2 tiles away) is flagged here as a
+  follow-up design item for the product owner** — this comment is that
+  flag; see the QA issue's resolution for the full writeup.
   """
 
   alias BrokenOaths.Game.Yields
@@ -67,9 +95,10 @@ defmodule BrokenOaths.Game.Production do
   alias BrokenOaths.Worlds.World
 
   @type tile_id :: non_neg_integer()
-  @type unit_buildable :: :settler | :worker | :warrior | :bronze_spearman
+  @type unit_buildable :: :settler | :worker | :warrior | :bronze_spearman | :archer
   @type buildable :: unit_buildable() | :granary
-  @type unit_type :: :lord | :settler | :warrior | :worker | :barbarian_warrior | :bronze_spearman
+  @type unit_type ::
+          :lord | :settler | :warrior | :worker | :barbarian_warrior | :bronze_spearman | :archer
 
   @type queue_item :: %{
           optional(:id) => term(),
@@ -95,7 +124,7 @@ defmodule BrokenOaths.Game.Production do
   @flat_production 5
   @min_founding_spacing 4
 
-  @catalog %{settler: 100, worker: 60, warrior: 40, granary: 60, bronze_spearman: 60}
+  @catalog %{settler: 100, worker: 60, warrior: 40, granary: 60, bronze_spearman: 60, archer: 40}
 
   @unit_stats %{
     lord: %{hp: 150, movement: 2},
@@ -104,7 +133,10 @@ defmodule BrokenOaths.Game.Production do
     worker: %{hp: 10, movement: 2},
     barbarian_warrior: %{hp: 120, movement: 1},
     # Story 903 — `.code_my_spec/knowledge/civ6_tech_tree.md` §5.
-    bronze_spearman: %{hp: 120, movement: 1}
+    bronze_spearman: %{hp: 120, movement: 1},
+    # QA issue da39e50b — see this module's own moduledoc, "The Archer",
+    # for the melee-for-now stats rationale and the ranged-attack flag.
+    archer: %{hp: 100, movement: 1}
   }
 
   @doc "The buildable catalog: `%{settler: 100, worker: 60, warrior: 40}`."
@@ -167,6 +199,11 @@ defmodule BrokenOaths.Game.Production do
     end
   end
 
+  # QA issue da39e50b — see this module's own moduledoc, "The Archer".
+  def can_queue?(_city, :archer, opts) do
+    if Keyword.get(opts, :archery?, false), do: :ok, else: {:error, :locked}
+  end
+
   def can_queue?(_city, _type, _opts), do: :ok
 
   @always_available [:settler, :worker, :warrior]
@@ -193,6 +230,7 @@ defmodule BrokenOaths.Game.Production do
     @always_available
     |> maybe_offer(:granary, Keyword.get(opts, :granary_available?, false))
     |> maybe_offer(:bronze_spearman, Keyword.get(opts, :bronze_age?, false))
+    |> maybe_offer(:archer, Keyword.get(opts, :archery?, false))
   end
 
   defp maybe_offer(types, type, true), do: types ++ [type]
@@ -243,7 +281,12 @@ defmodule BrokenOaths.Game.Production do
   # `spawn_event` — it just flips `has_granary: true` on the completing
   # city itself and moves on, same overflow-carry treatment as every
   # other completion (story 902).
-  defp complete_loop(%{queue: [%{type: :granary} = current | rest]} = city, occupied, world, events)
+  defp complete_loop(
+         %{queue: [%{type: :granary} = current | rest]} = city,
+         occupied,
+         world,
+         events
+       )
        when current.banked >= current.cost do
     overflow = current.banked - current.cost
 
@@ -281,7 +324,9 @@ defmodule BrokenOaths.Game.Production do
   # not while merely banked (story 883). A size-1 city can never pay
   # that cost, so its settler item simply waits, exactly like a
   # blocked landing tile.
-  defp spawnable?(_city, type) when type in [:worker, :warrior, :bronze_spearman], do: true
+  defp spawnable?(_city, type) when type in [:worker, :warrior, :bronze_spearman, :archer],
+    do: true
+
   defp spawnable?(%{size: size}, :settler), do: size > 1
 
   defp landing_tile(city, occupied, world) do
@@ -296,7 +341,9 @@ defmodule BrokenOaths.Game.Production do
   defp land?(world, tile_id), do: Regions.tile_class(world, tile_id) == :land
 
   defp carry_overflow([], _overflow), do: []
-  defp carry_overflow([next | rest], overflow), do: [%{next | banked: next.banked + overflow} | rest]
+
+  defp carry_overflow([next | rest], overflow),
+    do: [%{next | banked: next.banked + overflow} | rest]
 
   defp apply_pop_cost(city, :settler, world) do
     city
@@ -370,9 +417,21 @@ defmodule BrokenOaths.Game.Production do
       |> Enum.reject(&MapSet.member?(seen, &1))
 
     cond do
-      to in next -> depth
-      next == [] -> max_depth + 1
-      true -> grow_land_ring(world, MapSet.union(seen, MapSet.new(next)), next, to, depth + 1, max_depth)
+      to in next ->
+        depth
+
+      next == [] ->
+        max_depth + 1
+
+      true ->
+        grow_land_ring(
+          world,
+          MapSet.union(seen, MapSet.new(next)),
+          next,
+          to,
+          depth + 1,
+          max_depth
+        )
     end
   end
 end

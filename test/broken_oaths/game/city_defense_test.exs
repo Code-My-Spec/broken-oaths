@@ -60,6 +60,12 @@ defmodule BrokenOaths.Game.CityDefenseTest do
       refute CityDefense.military?(unit(1, type: :settler, tile: 1))
       refute CityDefense.military?(unit(1, type: :worker, tile: 1))
     end
+
+    # QA issue da39e50b "No archer" — a genuine (melee-for-now) military
+    # unit: garrison-eligible and counts toward city defense.
+    test "the Archer is military" do
+      assert CityDefense.military?(unit(1, type: :archer, tile: 1))
+    end
   end
 
   describe "garrison/2 and military_garrison/2" do
@@ -69,7 +75,9 @@ defmodule BrokenOaths.Game.CityDefenseTest do
       worker = unit(2, type: :worker, tile: 10)
       elsewhere = unit(3, type: :warrior, tile: 11)
 
-      assert CityDefense.garrison(c, [warrior, worker, elsewhere]) |> Enum.map(& &1.id) |> Enum.sort() ==
+      assert CityDefense.garrison(c, [warrior, worker, elsewhere])
+             |> Enum.map(& &1.id)
+             |> Enum.sort() ==
                [1, 2]
     end
 
@@ -283,7 +291,8 @@ defmodule BrokenOaths.Game.CityDefenseTest do
     end
 
     test "HP resets to pillage_hp/0, not 0" do
-      assert CityDefense.pillage(city(1, tile: 10, size: 3, hp: 0), 5).hp == CityDefense.pillage_hp()
+      assert CityDefense.pillage(city(1, tile: 10, size: 3, hp: 0), 5).hp ==
+               CityDefense.pillage_hp()
     end
 
     test "worked tiles are trimmed to fit the smaller population" do
@@ -356,16 +365,20 @@ defmodule BrokenOaths.Game.CityDefenseTest do
       city_tile = 0
 
       far =
-        Enum.reduce(1..(CityDefense.approach_range() + 2), {[city_tile], MapSet.new([city_tile])}, fn
-          _, {frontier, seen} ->
-            next =
-              frontier
-              |> Enum.flat_map(&Regions.adjacent_tiles(world(), &1))
-              |> Enum.uniq()
-              |> Enum.reject(&MapSet.member?(seen, &1))
+        Enum.reduce(
+          1..(CityDefense.approach_range() + 2),
+          {[city_tile], MapSet.new([city_tile])},
+          fn
+            _, {frontier, seen} ->
+              next =
+                frontier
+                |> Enum.flat_map(&Regions.adjacent_tiles(world(), &1))
+                |> Enum.uniq()
+                |> Enum.reject(&MapSet.member?(seen, &1))
 
-            {next, MapSet.union(seen, MapSet.new(next))}
-        end)
+              {next, MapSet.union(seen, MapSet.new(next))}
+          end
+        )
         |> elem(0)
 
       [threat_tile | _] = far
@@ -379,7 +392,9 @@ defmodule BrokenOaths.Game.CityDefenseTest do
 
   describe "approach_alert/1 and under_attack_alert/1" do
     test "story copy, exact wording" do
-      assert CityDefense.approach_alert("Riverdale") == "Barbarians approaching Riverdale! 3 hexes away."
+      assert CityDefense.approach_alert("Riverdale") ==
+               "Barbarians approaching Riverdale! 3 hexes away."
+
       assert CityDefense.under_attack_alert("Riverdale") == "Your city Riverdale is under attack!"
     end
   end

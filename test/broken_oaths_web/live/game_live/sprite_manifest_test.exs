@@ -49,7 +49,7 @@ defmodule BrokenOathsWeb.GameLive.SpriteManifestTest do
     # (`play.ex`'s `spriteFor(barbarian ? "barbarian" : u.type)`), so it
     # is intentionally excluded here — its manifest key is "barbarian",
     # not its own unit type name.
-    for type <- [:lord, :settler, :worker, :warrior, :bronze_spearman] do
+    for type <- [:lord, :settler, :worker, :warrior, :bronze_spearman, :archer] do
       assert Map.has_key?(sprites, Atom.to_string(type)),
              "no SPRITES entry for unit type #{inspect(type)} — it would silently fall back to the generic blue dot"
     end

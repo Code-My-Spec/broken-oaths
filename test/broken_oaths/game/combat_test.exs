@@ -40,6 +40,13 @@ defmodule BrokenOaths.Game.CombatTest do
     test "the Bronze Spearman (story 903) matches civ6_tech_tree.md's recommendation" do
       assert Combat.base_strength(:bronze_spearman) == 16
     end
+
+    # QA issue da39e50b "No archer" — a first-pass MELEE unit (this
+    # engine has no ranged-attack model), strength 14: above the
+    # Warrior (10), below the Bronze Spearman (16).
+    test "the Archer (QA issue da39e50b) sits between the Warrior and the Bronze Spearman" do
+      assert Combat.base_strength(:archer) == 14
+    end
   end
 
   describe "effective_strength/2" do
@@ -186,6 +193,35 @@ defmodule BrokenOaths.Game.CombatTest do
         end)
 
       assert dealt_total > taken_total
+    end
+  end
+
+  describe "resolve/3 — Archer vs Barbarian Warrior (QA issue da39e50b, melee-for-now)" do
+    test "an Archer (14) always lands within its own asymmetric band against a Barbarian Warrior (15)" do
+      {lo, hi} = expected_band(14, 15)
+      {counter_lo, counter_hi} = expected_band(15, 14)
+
+      archer = unit(1, type: :archer, hp: 100, max_hp: 100)
+      barbarian = unit(2, type: :barbarian_warrior, hp: 120, max_hp: 120, player_id: nil)
+
+      for seed <- 1..100 do
+        %{damage_to_defender: dealt, damage_to_attacker: taken} =
+          Combat.resolve(archer, barbarian, seed: {:archer, seed})
+
+        assert dealt in lo..hi
+        assert taken in counter_lo..counter_hi
+      end
+    end
+
+    test "an Archer trades blows on an even adjacency exchange — genuinely melee, not ranged (both sides land a hit)" do
+      archer = unit(1, type: :archer, hp: 100, max_hp: 100)
+      warrior = unit(2, type: :warrior, hp: 100, max_hp: 100, player_id: 2)
+
+      %{damage_to_defender: dealt, damage_to_attacker: taken} =
+        Combat.resolve(archer, warrior, seed: {:archer_melee, 1})
+
+      assert dealt > 0
+      assert taken > 0
     end
   end
 

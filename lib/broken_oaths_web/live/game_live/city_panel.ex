@@ -135,7 +135,9 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
         </div>
 
         <div class="flex items-center gap-3 text-sm">
-          <span class="badge badge-error badge-outline" data-test="city-hp">{@city.hp}/{CityDefense.max_hp()}</span>
+          <span class="badge badge-error badge-outline" data-test="city-hp">
+            {@city.hp}/{CityDefense.max_hp()}
+          </span>
           <span class="badge badge-outline" data-test="city-defense">{@city.defense}</span>
           <%!-- Story 906 — `@city.status` (`Siege.status/1`, computed by
                `Game.player_cities/2`) is `:free` in the ordinary healthy
@@ -161,7 +163,8 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
           data-test="city-granary"
           class="badge badge-success badge-outline gap-1 text-xs"
         >
-          <.icon name="hero-check-circle" class="size-3" /> Granary (+{Yields.granary_food_bonus()} food/turn)
+          <.icon name="hero-check-circle" class="size-3" />
+          Granary (+{Yields.granary_food_bonus()} food/turn)
         </div>
 
         <.current_production queue={@city.queue} city_id={@city.id} />
@@ -419,7 +422,8 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
     [
       granary_available?: Research.granary_enabled?(player_research),
       bronze_age?: Research.age(player_research) == :bronze_age,
-      copper_access?: copper_access?
+      copper_access?: copper_access?,
+      archery?: Research.archery_enabled?(player_research)
     ]
   end
 
@@ -428,4 +432,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
   defp catalog_label(:warrior), do: "Warrior"
   defp catalog_label(:granary), do: "Granary"
   defp catalog_label(:bronze_spearman), do: "Bronze Spearman"
+  # QA issue da39e50b — see `BrokenOaths.Game.Production`'s own
+  # moduledoc, "The Archer".
+  defp catalog_label(:archer), do: "Archer"
 end

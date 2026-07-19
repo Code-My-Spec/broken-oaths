@@ -119,7 +119,10 @@ defmodule BrokenOaths.Game.CityDefense do
         }
   @type refusal :: :out_of_movement | :not_adjacent | :own_city
 
-  @military_types [:lord, :warrior, :bronze_spearman]
+  # QA issue da39e50b — the Archer is a genuine (melee-for-now) military
+  # unit; it garrisons/counts toward defense exactly like the Warrior
+  # and Bronze Spearman.
+  @military_types [:lord, :warrior, :bronze_spearman, :archer]
 
   @max_hp 100
   @base_defense 20
@@ -154,7 +157,7 @@ defmodule BrokenOaths.Game.CityDefense do
   @spec approach_range() :: pos_integer()
   def approach_range, do: @approach_range
 
-  @doc "Whether `unit` is a combat-capable (garrison-eligible) type — `:lord`, `:warrior`, or `:bronze_spearman` (story 903)."
+  @doc "Whether `unit` is a combat-capable (garrison-eligible) type — `:lord`, `:warrior`, `:bronze_spearman` (story 903), or `:archer` (QA issue da39e50b)."
   @spec military?(unit()) :: boolean()
   def military?(%{type: type}), do: type in @military_types
 
@@ -234,7 +237,9 @@ defmodule BrokenOaths.Game.CityDefense do
 
     resisting_strength = defensive_strength(city, units)
     striking_strength = Combat.effective_strength(attacker, attacker_aura?)
-    damage_to_city = min(Combat.damage(striking_strength, resisting_strength, {seed, :to_city}), city.hp)
+
+    damage_to_city =
+      min(Combat.damage(striking_strength, resisting_strength, {seed, :to_city}), city.hp)
 
     case strongest_defender(city, units) do
       nil ->
@@ -243,8 +248,15 @@ defmodule BrokenOaths.Game.CityDefense do
       defender ->
         counter_strength = Combat.garrisoned_strength(defender)
         attacker_strength = Combat.effective_strength(attacker, attacker_aura?)
-        damage_to_barbarian = Combat.damage(counter_strength, attacker_strength, {seed, :to_attacker})
-        %{damage_to_city: damage_to_city, damage_to_barbarian: damage_to_barbarian, defender_id: defender.id}
+
+        damage_to_barbarian =
+          Combat.damage(counter_strength, attacker_strength, {seed, :to_attacker})
+
+        %{
+          damage_to_city: damage_to_city,
+          damage_to_barbarian: damage_to_barbarian,
+          defender_id: defender.id
+        }
     end
   end
 
@@ -372,7 +384,8 @@ defmodule BrokenOaths.Game.CityDefense do
 
   @doc "Copy for the approach alert (`\"game:alert\"` push) — story copy, §3.3/§10.3."
   @spec approach_alert(String.t()) :: String.t()
-  def approach_alert(city_name), do: "Barbarians approaching #{city_name}! #{@approach_range} hexes away."
+  def approach_alert(city_name),
+    do: "Barbarians approaching #{city_name}! #{@approach_range} hexes away."
 
   @doc "Copy for the under-attack alert (`\"game:alert\"` push) — story copy, §3.3/§10.3."
   @spec under_attack_alert(String.t()) :: String.t()

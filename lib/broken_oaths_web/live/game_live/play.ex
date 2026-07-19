@@ -3019,9 +3019,15 @@ defmodule BrokenOathsWeb.GameLive.Play do
               }
             }
 
-            // Improvement billboards (farms, mines): built ON the
+            // Improvement billboards (farms, mines, roads): built ON the
             // terrain like decor, below cities/units. Pillaged ones
             // render half-faded — visibly wrecked, visibly repairable.
+            // QA issue 5656770d — a tile can now carry BOTH a yield
+            // improvement (farm/mine/pasture) AND a road at once; a
+            // `:road` billboard renders smaller and nudged toward one
+            // corner of the tile so it never fully hides whatever's
+            // centered there, the same "both queryable, both visible"
+            // fix as the server-side data model.
             const impSize = Math.min(Math.max(this.scale * this.arc * 1.6, 10), 68)
             if (impSize >= 10) {
               for (const imp of this.improvements) {
@@ -3033,7 +3039,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
                 const img = this.spriteFor(imp.kind)
                 if (!img) continue
                 ctx.globalAlpha = imp.status === "pillaged" ? 0.4 : (this.visibleSet.has(imp.tile_id) ? 1 : 0.55)
-                GR.drawBillboard(ctx, img, px, py, impSize)
+                if (imp.kind === "road") {
+                  const roadSize = impSize * 0.55
+                  GR.drawBillboard(ctx, img, px + roadSize * 0.5, py + roadSize * 0.4, roadSize)
+                } else {
+                  GR.drawBillboard(ctx, img, px, py, impSize)
+                }
                 ctx.globalAlpha = 1
               }
             }

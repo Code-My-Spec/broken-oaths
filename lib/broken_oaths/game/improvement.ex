@@ -11,13 +11,30 @@ defmodule BrokenOaths.Game.Improvement do
   — improvements aren't owned) that later starts the same kind on that
   tile resumes it.
 
-  One improvement per tile, enforced by the unique index on
-  `(world_id, tile_id)`: once `status` is `:complete`, no second
-  improvement can ever be started there (see
-  `BrokenOaths.Game.Production` for the terrain-eligibility and
-  duration rules — `allowed?/2` and `duration/1` below — and
+  One improvement PER KIND per tile, enforced by the unique index on
+  `(world_id, tile_id, kind)`: once a given kind's `status` is
+  `:complete`, no second improvement of THAT kind can ever be started
+  on the same tile. A Road, though, is a movement/connectivity
+  improvement, orthogonal to a tile's yield improvement — Farm, Mine,
+  or Pasture — the same "road sits UNDER an improvement" convention
+  Civ 6 itself uses (QA issue 5656770d "Roads conflict with
+  improvements"): `BrokenOaths.Game.WorldServer`'s
+  `validate_improvement_slot/3` checks a `:road` request only against
+  any EXISTING road on the tile, and a Farm/Mine/Pasture request only
+  against any existing YIELD improvement, so a worker can freely build
+  a Road across a tile that already carries (or is still building) a
+  Farm or a Mine, and vice versa — the two live as independent rows,
+  keyed by `(world_id, tile_id, kind)`, and `BrokenOaths.Game.WorldServer`
+  holds them in two separate in-memory maps (`state.improvements` for
+  the yield slot, `state.roads` for the road slot) for exactly this
+  reason. Farm, Mine, and Pasture remain mutually exclusive with EACH
+  OTHER on a given tile — that yield slot is still only one improvement
+  wide (see `BrokenOaths.Game.Production` for the terrain-eligibility
+  and duration rules — `allowed?/2` and `duration/1` below — and
   `BrokenOaths.Game.Yields` for the yield bonus a finished improvement
-  contributes).
+  contributes; a Road's own yield bonus is `%{food: 0, production: 0}`
+  — see `Yields.improvement_bonus/1` — its movement effect is still
+  deferred, as before this fix).
 
   A barbarian entering a `:complete` improvement's tile pillages it
   (`pillage/1`, story 893): `status` flips to `:pillaged` — the same
@@ -25,7 +42,9 @@ defmodule BrokenOaths.Game.Improvement do
   pillaged improvement's bonus silently stops counting with no separate
   check — and its `kind` is kept so a worker resuming the SAME kind
   repairs it in exactly one turn rather than paying a fresh build's
-  full `duration/1`.
+  full `duration/1`. A Road on the same tile pillages independently —
+  each kind is its own row, so a barbarian entering a tile that carries
+  both a complete Farm and a complete Road pillages BOTH.
 
   ## Pasture (story 905)
 
@@ -107,7 +126,9 @@ defmodule BrokenOaths.Game.Improvement do
     |> validate_number(:duration, greater_than: 0)
     |> assoc_constraint(:world)
     |> assoc_constraint(:builder)
-    |> unique_constraint([:world_id, :tile_id], name: :game_improvements_world_id_tile_id_index)
+    |> unique_constraint([:world_id, :tile_id, :kind],
+      name: :game_improvements_world_id_tile_id_kind_index
+    )
   end
 
   @doc "Turns to complete each improvement kind (story 882's yield table; story 905's Pasture)."

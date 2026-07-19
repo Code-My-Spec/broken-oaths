@@ -92,6 +92,10 @@ const GlobeRender = {
     settler: "/images/game/units/settler.png",
     warrior: "/images/game/units/warrior.png",
     bronze_spearman: "/images/game/units/bronze_spearman.png",
+    // QA issue da39e50b "No archer" — placeholder art (a recolored
+    // Warrior sprite, same "distinct tint" stopgap `bronze_spearman`
+    // itself used); flag real bespoke Archer art as a follow-up.
+    archer: "/images/game/units/archer.png",
     worker: "/images/game/units/worker.png",
     barbarian: "/images/game/units/barbarian.png",
     mountain: "/images/game/decor/mountain.png",

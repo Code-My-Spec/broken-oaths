@@ -72,7 +72,8 @@ defmodule BrokenOaths.Game.Combat do
   """
 
   @type tile_id :: non_neg_integer()
-  @type unit_type :: :lord | :settler | :warrior | :worker | :barbarian_warrior | :bronze_spearman
+  @type unit_type ::
+          :lord | :settler | :warrior | :worker | :barbarian_warrior | :bronze_spearman | :archer
 
   @type unit :: %{
           id: term(),
@@ -90,7 +91,12 @@ defmodule BrokenOaths.Game.Combat do
           damage_to_attacker: pos_integer()
         }
 
-  @type camp :: %{id: term(), tile_id: tile_id(), hp: non_neg_integer(), destroyed_at: term() | nil}
+  @type camp :: %{
+          id: term(),
+          tile_id: tile_id(),
+          hp: non_neg_integer(),
+          destroyed_at: term() | nil
+        }
 
   @type refusal :: :out_of_movement | :not_adjacent | :not_hostile
 
@@ -104,7 +110,14 @@ defmodule BrokenOaths.Game.Combat do
     # attack/defense split (`.code_my_spec/knowledge/civ6_tech_tree.md`
     # §5's recommendation), comfortably above a Barbarian Warrior's 15
     # so it reliably wins a 1v1 (criterion 7633).
-    bronze_spearman: 16
+    bronze_spearman: 16,
+    # QA issue da39e50b "No archer" — a first-pass MELEE Archer (this
+    # engine has no ranged-attack model at all; see
+    # `BrokenOaths.Game.Production`'s own moduledoc, "The Archer", for
+    # the full rationale and the ranged-attack follow-up flag), single
+    # strength like every other unit here, between the Warrior (10) and
+    # the Bronze Spearman (16).
+    archer: 14
   }
   @lord_aura_bonus 2
   @garrison_bonus 1.5
@@ -142,7 +155,8 @@ defmodule BrokenOaths.Game.Combat do
   a unit qualifies; this module only applies the multiplier.
   """
   @spec garrisoned_strength(unit(), boolean()) :: float()
-  def garrisoned_strength(unit, aura? \\ false), do: effective_strength(unit, aura?) * @garrison_bonus
+  def garrisoned_strength(unit, aura? \\ false),
+    do: effective_strength(unit, aura?) * @garrison_bonus
 
   @doc """
   Resolve a single simultaneous exchange: damage `attacker` deals to

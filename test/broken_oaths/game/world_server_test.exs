@@ -832,6 +832,141 @@ defmodule BrokenOaths.Game.WorldServerTest do
     end
   end
 
+  # QA issue 5656770d "Roads conflict with improvements" — a Road is a
+  # movement/connectivity improvement, orthogonal to a tile's yield
+  # improvement (Farm/Mine/Pasture): the two now live independently, so
+  # a tile can carry BOTH at once, and both are queryable via
+  # `improvements_visible_to/2`.
+  describe "roads coexist with improvements (QA issue 5656770d)" do
+    test "a tile can hold a completed Farm and a completed Road at once, both queryable" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+      :ok = Game.isolate_camp_for_test(world, -1)
+
+      [farm_tile] = farmable_tiles(world, 1)
+      worker = Game.spawn_unit_for_test(world, player.id, :worker, farm_tile)
+
+      :ok = Game.start_improvement(world, user, worker.id, "farm")
+      for _ <- 1..Improvement.duration(:farm), do: :ok = Game.advance_turn(world)
+      assert improvement_complete?(world, user, farm_tile)
+
+      # The SAME worker, still standing on the SAME tile, now builds a
+      # Road across it — refused before this fix (one improvement per
+      # tile, any kind, even a already-`:complete` one); now succeeds,
+      # since a Road is an independent slot from the tile's yield
+      # improvement.
+      :ok = Game.start_improvement(world, user, worker.id, "road")
+      for _ <- 1..Improvement.duration(:road), do: :ok = Game.advance_turn(world)
+
+      visible = Game.improvements_visible_to(world, user)
+
+      assert Enum.any?(
+               visible,
+               &(&1.tile_id == farm_tile and &1.kind == :farm and &1.status == :complete)
+             )
+
+      assert Enum.any?(
+               visible,
+               &(&1.tile_id == farm_tile and &1.kind == :road and &1.status == :complete)
+             )
+
+      WorldServer.restart(world)
+    end
+
+    test "starting a Road never contends with an in-progress Mine on the same tile — orthogonal slots" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+      :ok = Game.isolate_camp_for_test(world, -1)
+
+      hills_tile = hills_tile(world)
+      miner = Game.spawn_unit_for_test(world, player.id, :worker, hills_tile)
+      :ok = Game.start_improvement(world, user, miner.id, "mine")
+
+      roader = Game.spawn_unit_for_test(world, player.id, :worker, hills_tile)
+      assert :ok = Game.start_improvement(world, user, roader.id, "road")
+
+      visible = Game.improvements_visible_to(world, user)
+
+      assert Enum.any?(
+               visible,
+               &(&1.tile_id == hills_tile and &1.kind == :mine and &1.status == :building)
+             )
+
+      assert Enum.any?(
+               visible,
+               &(&1.tile_id == hills_tile and &1.kind == :road and &1.status == :building)
+             )
+
+      WorldServer.restart(world)
+    end
+  end
+
+  # QA issue da39e50b "No archer" — the Archery tech unlocked nothing;
+  # this is the end-to-end version of `ProductionTest`'s own
+  # `can_queue?/3` unit tests, driven through `queue_production/4` for
+  # real. See `BrokenOaths.Game.Production`'s own moduledoc, "The
+  # Archer", for the melee-for-now stats rationale and the ranged-attack
+  # follow-up flag — `CombatTest`'s own "resolve/3 — Archer vs
+  # Barbarian Warrior" describe block covers the Archer actually
+  # fighting (melee, both sides land a blow).
+  describe "queue_production/4 gates the Archer on Archery (QA issue da39e50b)" do
+    test "refused before Archery is researched" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, _player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+      [city] = Game.player_cities(world, user)
+
+      assert Game.queue_production(world, user, city.id, "archer") == {:error, :locked}
+
+      WorldServer.restart(world)
+    end
+
+    test "an Archery-complete player can build an Archer" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, _player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+      [city] = Game.player_cities(world, user)
+
+      # Archery's own prerequisite (`Research.prereqs(:archery)`) is
+      # Animal Husbandry — both must complete before Archery can even
+      # be selected (`set_research/3` refuses an unmet prereq).
+      :ok = Game.set_research(world, user, :animal_husbandry)
+      complete_current_research(world, user)
+      :ok = Game.set_research(world, user, :archery)
+      complete_current_research(world, user)
+      assert :archery in Game.player_research(world, user).completed_techs
+
+      :ok = Game.queue_production(world, user, city.id, "archer")
+
+      Enum.reduce_while(1..120, :ok, fn _, :ok ->
+        if Enum.any?(Game.player_units(world, user), &(&1.type == :archer)) do
+          {:halt, :ok}
+        else
+          :ok = Game.advance_turn(world)
+          {:cont, :ok}
+        end
+      end)
+
+      assert Enum.any?(Game.player_units(world, user), &(&1.type == :archer))
+
+      WorldServer.restart(world)
+    end
+  end
+
   defp hills_tile(world) do
     land? = fn t -> BrokenOaths.Worlds.Regions.tile_class(world, t) == :land end
 

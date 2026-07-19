@@ -23,13 +23,14 @@ defmodule BrokenOaths.Game.ProductionTest do
   end
 
   describe "catalog/0 and cost/1" do
-    test "Settler 100, Worker 60, Warrior 40, Granary 60, Bronze Spearman 60 (stories 902/903) — no Monument, no Swordsman" do
+    test "Settler 100, Worker 60, Warrior 40, Granary 60, Bronze Spearman 60, Archer 40 (stories 902/903, QA issue da39e50b) — no Monument, no Swordsman" do
       assert Production.catalog() == %{
                settler: 100,
                worker: 60,
                warrior: 40,
                granary: 60,
-               bronze_spearman: 60
+               bronze_spearman: 60,
+               archer: 40
              }
 
       assert Production.cost(:settler) == 100
@@ -37,6 +38,7 @@ defmodule BrokenOaths.Game.ProductionTest do
       assert Production.cost(:warrior) == 40
       assert Production.cost(:granary) == 60
       assert Production.cost(:bronze_spearman) == 60
+      assert Production.cost(:archer) == 40
     end
   end
 
@@ -50,6 +52,40 @@ defmodule BrokenOaths.Game.ProductionTest do
 
     test "the Bronze Spearman (story 903): 120 HP, 1 movement — mirrors the Warrior's mobility" do
       assert Production.unit_stats(:bronze_spearman) == %{hp: 120, movement: 1}
+    end
+
+    # QA issue da39e50b "No archer" — a first-pass MELEE unit (this
+    # engine has no ranged-attack model at all — see this module's own
+    # moduledoc, "The Archer"): 100 HP (the Warrior's own HP), 1
+    # movement, same mobility as every other Ancient-era melee unit.
+    test "the Archer (QA issue da39e50b): 100 HP, 1 movement — melee-for-now, ranged attack flagged as a follow-up" do
+      assert Production.unit_stats(:archer) == %{hp: 100, movement: 1}
+    end
+  end
+
+  describe "can_queue?/3 (QA issue da39e50b — the Archer)" do
+    test "an Archer defaults to locked — arity-2 has no research context" do
+      assert Production.can_queue?(city(size: 1), :archer) == {:error, :locked}
+    end
+
+    test "refused before Archery is researched" do
+      assert Production.can_queue?(city([]), :archer, archery?: false) == {:error, :locked}
+    end
+
+    test "allowed once Archery is researched" do
+      assert Production.can_queue?(city([]), :archer, archery?: true) == :ok
+    end
+
+    test "every other buildable ignores the archery? option entirely" do
+      assert Production.can_queue?(city(size: 2), :settler, archery?: false) == :ok
+    end
+  end
+
+  describe "available_items/1 (QA issue da39e50b — the Archer)" do
+    test "hidden until Archery is researched, offered once it is" do
+      refute :archer in Production.available_items([])
+      refute :archer in Production.available_items(archery?: false)
+      assert :archer in Production.available_items(archery?: true)
     end
   end
 
@@ -81,7 +117,8 @@ defmodule BrokenOaths.Game.ProductionTest do
 
   describe "can_queue?/3 (story 902 — the Granary)" do
     test "refused when Pottery isn't researched" do
-      assert Production.can_queue?(city([]), :granary, granary_available?: false) == {:error, :locked}
+      assert Production.can_queue?(city([]), :granary, granary_available?: false) ==
+               {:error, :locked}
     end
 
     test "allowed once Pottery is researched" do
@@ -192,7 +229,10 @@ defmodule BrokenOaths.Game.ProductionTest do
     end
 
     test "a completed item lands on a free adjacent tile when the city tile is occupied" do
-      [neighbor | _] = Regions.adjacent_tiles(world(), 1) |> Enum.filter(&(Regions.tile_class(world(), &1) == :land))
+      [neighbor | _] =
+        Regions.adjacent_tiles(world(), 1)
+        |> Enum.filter(&(Regions.tile_class(world(), &1) == :land))
+
       c = city(tile_id: 1, queue: [%{id: 1, type: :warrior, banked: 40, cost: 40}])
       occupied = %{1 => true}
 
@@ -203,7 +243,10 @@ defmodule BrokenOaths.Game.ProductionTest do
     end
 
     test "nothing lost when every landing tile is occupied — the item just waits" do
-      neighbors = Regions.adjacent_tiles(world(), 1) |> Enum.filter(&(Regions.tile_class(world(), &1) == :land))
+      neighbors =
+        Regions.adjacent_tiles(world(), 1)
+        |> Enum.filter(&(Regions.tile_class(world(), &1) == :land))
+
       occupied = Map.new([1 | neighbors], &{&1, true})
       item = %{id: 1, type: :warrior, banked: 47, cost: 40}
       c = city(tile_id: 1, queue: [item])
@@ -215,7 +258,10 @@ defmodule BrokenOaths.Game.ProductionTest do
       c =
         city(
           tile_id: 1,
-          queue: [%{id: 1, type: :warrior, banked: 47, cost: 40}, %{id: 2, type: :worker, banked: 0, cost: 60}]
+          queue: [
+            %{id: 1, type: :warrior, banked: 47, cost: 40},
+            %{id: 2, type: :worker, banked: 0, cost: 60}
+          ]
         )
 
       {new_city, _events} = Production.complete(c, %{}, world())

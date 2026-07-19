@@ -991,7 +991,7 @@ defmodule BrokenOaths.Game.WorldServer do
     duration = Improvement.duration(kind)
 
     improvement =
-      case Repo.get_by(Improvement, world_id: state.world.id, tile_id: tile_id) do
+      case Repo.get_by(Improvement, world_id: state.world.id, tile_id: tile_id, kind: kind) do
         nil ->
           {:ok, improvement} =
             %Improvement{}
@@ -1024,7 +1024,7 @@ defmodule BrokenOaths.Game.WorldServer do
       end
 
     improvement_data = improvement_map(improvement)
-    new_state = %{state | improvements: Map.put(state.improvements, tile_id, improvement_data)}
+    new_state = put_improvement(state, kind, tile_id, improvement_data)
     {:reply, improvement_data, new_state}
   end
 
@@ -1089,13 +1089,12 @@ defmodule BrokenOaths.Game.WorldServer do
       new_state = %{
         state
         | units: Map.put(state.units, barbarian_id, %{barbarian | tile_id: tile_id}),
-          improvements: maybe_pillage_for_test(state.improvements, tile_id)
+          improvements: maybe_pillage_for_test(state.improvements, tile_id),
+          roads: maybe_pillage_for_test(state.roads, tile_id)
       }
 
-      case Repo.get_by(Improvement, world_id: state.world.id, tile_id: tile_id) do
-        nil -> :ok
-        improvement -> persist_pillage_for_test(improvement, new_state.improvements[tile_id])
-      end
+      persist_pillage_for_test(state.world.id, tile_id, new_state.improvements[tile_id])
+      persist_pillage_for_test(state.world.id, tile_id, new_state.roads[tile_id])
 
       {:reply, :ok, new_state}
     end
@@ -2348,7 +2347,8 @@ defmodule BrokenOaths.Game.WorldServer do
            Production.can_queue?(city, type,
              granary_available?: granary_available?(state, city),
              bronze_age?: bronze_age?(state, city),
-             copper_access?: copper_access?(state, city)
+             copper_access?: copper_access?(state, city),
+             archery?: archery?(state, city)
            ) do
       next_position =
         city.queue |> Enum.map(&Map.get(&1, :position, 0)) |> Enum.max(fn -> 0 end) |> Kernel.+(1)
@@ -2429,7 +2429,7 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   defp parse_item_type(type)
-       when type in [:settler, :worker, :warrior, :granary, :bronze_spearman],
+       when type in [:settler, :worker, :warrior, :granary, :bronze_spearman, :archer],
        do: {:ok, type}
 
   defp parse_item_type("settler"), do: {:ok, :settler}
@@ -2437,6 +2437,10 @@ defmodule BrokenOaths.Game.WorldServer do
   defp parse_item_type("warrior"), do: {:ok, :warrior}
   defp parse_item_type("granary"), do: {:ok, :granary}
   defp parse_item_type("bronze_spearman"), do: {:ok, :bronze_spearman}
+  # QA issue da39e50b — the Archery tech unlocked nothing; a first-pass
+  # Archer (melee-for-now — see `Production`'s own moduledoc) buildable
+  # once the city's owner has completed Archery.
+  defp parse_item_type("archer"), do: {:ok, :archer}
   defp parse_item_type(_other), do: {:error, :invalid_item}
 
   # -------------------------------------------------------------------
@@ -2521,22 +2525,40 @@ defmodule BrokenOaths.Game.WorldServer do
     with {:ok, unit} <- owned_worker(state, user, unit_id),
          {:ok, kind} <- parse_kind(kind),
          :ok <- validate_improvement_terrain(state, unit.tile_id, kind, unit.player_id),
-         :ok <- validate_improvement_slot(state.improvements, unit.tile_id, kind) do
+         :ok <- validate_improvement_slot(state, unit.tile_id, kind) do
       improvement = persist_start_improvement!(state, unit, kind)
-      {:ok, %{state | improvements: Map.put(state.improvements, unit.tile_id, improvement)}}
+      {:ok, put_improvement(state, kind, unit.tile_id, improvement)}
     end
   end
+
+  # QA issue 5656770d — a Road (`state.roads`) and the tile's yield
+  # improvement (Farm/Mine/Pasture, `state.improvements`) are
+  # independent slots; see `Improvement`'s own moduledoc.
+  defp put_improvement(state, :road, tile_id, improvement),
+    do: %{state | roads: Map.put(state.roads, tile_id, improvement)}
+
+  defp put_improvement(state, _kind, tile_id, improvement),
+    do: %{state | improvements: Map.put(state.improvements, tile_id, improvement)}
 
   # QA issue 8aa2c571 — see `BrokenOaths.Game.cancel_improvement/3`'s doc.
   # Deletes the DB row outright (rather than merely clearing
   # `builder_unit_id`, the way a worker simply walking away already
   # does at a turn boundary — see `BrokenOaths.Game.Turn.advance_improvement/2`)
-  # so the tile comes back completely empty, free for any kind.
+  # so that SLOT comes back completely empty, free for any kind that
+  # shares it. QA issue 5656770d — a tile can now carry an active build
+  # in BOTH slots at once (a Road building alongside a Farm, say); this
+  # cancels whichever one `active_building/2` finds, preferring the
+  # yield slot (`state.improvements`) over the road slot (`state.roads`)
+  # when — the rare case — both are mid-build on the same tile, the same
+  # tie-break `visible_improvements/2`'s list order and the UI's own
+  # `worker_current_dig/2` (`Enum.find`, first match) already use.
   defp do_cancel_improvement(state, user, unit_id) do
     with {:ok, unit} <- owned_worker(state, user, unit_id),
-         :ok <- active_building(state.improvements, unit.tile_id) do
-      persist_cancel_improvement!(state, unit.tile_id)
-      {:ok, %{state | improvements: Map.delete(state.improvements, unit.tile_id)}}
+         {:ok, collection} <- active_building(state, unit.tile_id) do
+      kind = state |> Map.fetch!(collection) |> Map.fetch!(unit.tile_id) |> Map.fetch!(:kind)
+      persist_cancel_improvement!(state, unit.tile_id, kind)
+      new_collection = state |> Map.fetch!(collection) |> Map.delete(unit.tile_id)
+      {:ok, Map.put(state, collection, new_collection)}
     end
   end
 
@@ -2545,16 +2567,19 @@ defmodule BrokenOaths.Game.WorldServer do
   # dig-progress badge (and the Cancel button beside it) on, so the
   # button never offers to cancel something that isn't there to cancel
   # (a `:complete` improvement, or a `:pillaged` one nobody has resumed
-  # repairing yet).
-  defp active_building(improvements, tile_id) do
-    case Map.get(improvements, tile_id) do
-      %{status: :building} -> :ok
-      _other -> {:error, :no_active_build}
+  # repairing yet). Returns which COLLECTION (`:improvements` or
+  # `:roads`) the active build lives in, since a tile can now have one
+  # building in each independently (QA issue 5656770d).
+  defp active_building(state, tile_id) do
+    cond do
+      match?(%{status: :building}, Map.get(state.improvements, tile_id)) -> {:ok, :improvements}
+      match?(%{status: :building}, Map.get(state.roads, tile_id)) -> {:ok, :roads}
+      true -> {:error, :no_active_build}
     end
   end
 
-  defp persist_cancel_improvement!(state, tile_id) do
-    case Repo.get_by(Improvement, world_id: state.world.id, tile_id: tile_id) do
+  defp persist_cancel_improvement!(state, tile_id, kind) do
+    case Repo.get_by(Improvement, world_id: state.world.id, tile_id: tile_id, kind: kind) do
       nil -> :ok
       improvement -> do_delete_improvement(improvement)
     end
@@ -2617,22 +2642,34 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
-  # A completed improvement refuses any second dig. An in-progress one
-  # of the SAME kind just reattaches (any worker may resume a frozen
-  # dig — improvements aren't owned); a DIFFERENT kind already
-  # mid-build on this tile is refused rather than silently switched.
-  # A pillaged one (story 893) is the same "resume the same kind"
-  # story, just entered from `:pillaged` instead of `:building`.
-  defp validate_improvement_slot(improvements, tile_id, kind) do
-    case Map.get(improvements, tile_id) do
-      nil -> :ok
-      %{status: :complete} -> {:error, :occupied_improvement}
-      %{status: :building, kind: ^kind} -> :ok
-      %{status: :building} -> {:error, :invalid_improvement}
-      %{status: :pillaged, kind: ^kind} -> :ok
-      %{status: :pillaged} -> {:error, :invalid_improvement}
-    end
-  end
+  # QA issue 5656770d — Road and the tile's yield improvement
+  # (Farm/Mine/Pasture) occupy INDEPENDENT slots (see `Improvement`'s
+  # own moduledoc): a `:road` request only ever checks `state.roads`
+  # for this tile, and every other kind only ever checks
+  # `state.improvements` — neither slot's occupant blocks the other, so
+  # a worker can build a Road across a tile that already carries (or is
+  # still building) a Farm/Mine/Pasture, and vice versa.
+  #
+  # Within a single slot, a completed improvement refuses any second
+  # dig. An in-progress one of the SAME kind just reattaches (any
+  # worker may resume a frozen dig — improvements aren't owned); a
+  # DIFFERENT kind already mid-build in the SAME slot is refused rather
+  # than silently switched (this can only ever happen for the yield
+  # slot, since `state.roads` only ever holds `:road`). A pillaged one
+  # (story 893) is the same "resume the same kind" story, just entered
+  # from `:pillaged` instead of `:building`.
+  defp validate_improvement_slot(state, tile_id, :road),
+    do: slot_status(Map.get(state.roads, tile_id), :road)
+
+  defp validate_improvement_slot(state, tile_id, kind),
+    do: slot_status(Map.get(state.improvements, tile_id), kind)
+
+  defp slot_status(nil, _kind), do: :ok
+  defp slot_status(%{status: :complete}, _kind), do: {:error, :occupied_improvement}
+  defp slot_status(%{status: :building, kind: kind}, kind), do: :ok
+  defp slot_status(%{status: :building}, _kind), do: {:error, :invalid_improvement}
+  defp slot_status(%{status: :pillaged, kind: kind}, kind), do: :ok
+  defp slot_status(%{status: :pillaged}, _kind), do: {:error, :invalid_improvement}
 
   # A truly NEW improvement (no row yet on this tile) resolves its
   # `duration` once, here, from the BUILDING WORKER'S OWNER's research
@@ -2642,7 +2679,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # dig's target pace is fixed at build-start regardless of who later
   # finishes it.
   defp persist_start_improvement!(state, unit, kind) do
-    case Repo.get_by(Improvement, world_id: state.world.id, tile_id: unit.tile_id) do
+    case Repo.get_by(Improvement, world_id: state.world.id, tile_id: unit.tile_id, kind: kind) do
       nil ->
         {:ok, improvement} =
           %Improvement{}
@@ -3190,6 +3227,13 @@ defmodule BrokenOaths.Game.WorldServer do
   defp bronze_age?(state, city),
     do: Research.age(player_research_for(state, city.player_id)) == :bronze_age
 
+  # QA issue da39e50b — whether `city`'s OWNER has completed Archery,
+  # the option `Production.can_queue?/3` needs to gate `:archer` on,
+  # same "Production never touches Research" split `bronze_age?/2`
+  # already establishes.
+  defp archery?(state, city),
+    do: Research.archery_enabled?(player_research_for(state, city.player_id))
+
   # Story 911 — whether `city` itself has Copper access: a Copper tile
   # anywhere in its own `territory` (worked or not — a pure ACCESS
   # GATE), the option `Production.can_queue?/3` needs to gate
@@ -3607,8 +3651,21 @@ defmodule BrokenOaths.Game.WorldServer do
     :ok
   end
 
+  # QA issue 5656770d — a tile's yield improvement (`state.improvements`)
+  # is checked first, then its Road (`state.roads`), since the two now
+  # live independently; a tile with both a completed Farm and a
+  # completed Road reports the Farm here (this reader has always
+  # returned a single kind — same tie-break `visible_improvements/2`'s
+  # list order and cancel's `active_building/2` already use).
   defp tile_improvement_at(state, tile_id) do
     case Map.get(state.improvements, tile_id) do
+      %{status: :complete, kind: kind} -> kind
+      _other -> road_improvement_at(state, tile_id)
+    end
+  end
+
+  defp road_improvement_at(state, tile_id) do
+    case Map.get(state.roads, tile_id) do
       %{status: :complete, kind: kind} -> kind
       _other -> nil
     end
@@ -3617,6 +3674,12 @@ defmodule BrokenOaths.Game.WorldServer do
   # Improvements follow the same fog rule as camps below: a player sees
   # a tile's improvement only in their home region or once the tile is
   # explored — hidden tiles never leak their contents over the wire.
+  # QA issue 5656770d — a tile's yield improvement (`state.improvements`)
+  # and its Road (`state.roads`) are now independent, so both are
+  # emitted here when present; the board's own improvement billboard
+  # loop (`assets/js/globe_render.js`) draws every entry it's handed,
+  # offsetting a `:road` sprite so it never fully overlaps a
+  # Farm/Mine/Pasture sprite on the same tile.
   defp visible_improvements(state, user) do
     case find_player(state, user.id) do
       nil ->
@@ -3626,12 +3689,26 @@ defmodule BrokenOaths.Game.WorldServer do
         home = player_region_tiles(state.world, player.region_id)
         explored = Map.get(state.explored, player.id, MapSet.new())
 
-        for {tile_id, imp} <- state.improvements,
-            MapSet.member?(home, tile_id) or MapSet.member?(explored, tile_id) do
-          %{tile_id: tile_id, kind: imp.kind, status: imp.status, progress: imp.progress}
+        visible? = fn tile_id ->
+          MapSet.member?(home, tile_id) or MapSet.member?(explored, tile_id)
         end
+
+        yield_improvements =
+          for {tile_id, imp} <- state.improvements,
+              visible?.(tile_id),
+              do: format_improvement(tile_id, imp)
+
+        roads =
+          for {tile_id, imp} <- state.roads,
+              visible?.(tile_id),
+              do: format_improvement(tile_id, imp)
+
+        yield_improvements ++ roads
     end
   end
+
+  defp format_improvement(tile_id, imp),
+    do: %{tile_id: tile_id, kind: imp.kind, status: imp.status, progress: imp.progress}
 
   # Fog filter for camps (story 892, criterion 7546 — HARD constraint):
   # a camp is known the moment it's inside the player's own claimed
@@ -3776,6 +3853,12 @@ defmodule BrokenOaths.Game.WorldServer do
             new_state.world.id,
             old_state.improvements,
             new_state.improvements
+          )
+
+          persist_improvement_changes(
+            new_state.world.id,
+            old_state.roads,
+            new_state.roads
           )
 
           persist_known_player_changes(
@@ -3928,12 +4011,19 @@ defmodule BrokenOaths.Game.WorldServer do
 
   # Starting/attaching an improvement is persisted immediately (see
   # "Improvements" above) — this only reconciles what the tick itself
-  # advances: progress, completion, and a builder walking away.
+  # advances: progress, completion, and a builder walking away. Called
+  # once for `state.improvements` and once for `state.roads` (QA issue
+  # 5656770d) — the `kind` filter is required now that a single tile
+  # can carry a row in EACH collection: without it, this would rewrite
+  # every row at `tile_id` (both the yield improvement's AND the
+  # Road's) to whichever one changed.
   defp persist_improvement_changes(world_id, old_improvements, new_improvements) do
     for {tile_id, improvement} <- new_improvements,
         Map.get(old_improvements, tile_id) != improvement do
       Repo.update_all(
-        from(i in Improvement, where: i.world_id == ^world_id and i.tile_id == ^tile_id),
+        from(i in Improvement,
+          where: i.world_id == ^world_id and i.tile_id == ^tile_id and i.kind == ^improvement.kind
+        ),
         set: [
           progress: improvement.progress,
           status: improvement.status,
@@ -3960,17 +4050,27 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
-  defp persist_pillage_for_test(%{status: :complete} = existing, %{status: :pillaged} = pillaged) do
-    existing
-    |> Improvement.changeset(%{
-      status: pillaged.status,
-      progress: pillaged.progress,
-      builder_unit_id: nil
-    })
-    |> Repo.update()
+  defp persist_pillage_for_test(_world_id, _tile_id, nil), do: :ok
+
+  defp persist_pillage_for_test(world_id, tile_id, %{status: :pillaged, kind: kind} = pillaged) do
+    case Repo.get_by(Improvement, world_id: world_id, tile_id: tile_id, kind: kind) do
+      nil ->
+        :ok
+
+      existing ->
+        existing
+        |> Improvement.changeset(%{
+          status: pillaged.status,
+          progress: pillaged.progress,
+          builder_unit_id: nil
+        })
+        |> Repo.update()
+
+        :ok
+    end
   end
 
-  defp persist_pillage_for_test(_existing, _unchanged), do: :ok
+  defp persist_pillage_for_test(_world_id, _tile_id, _unchanged), do: :ok
 
   defp persist_order_changes(old_orders, new_orders) do
     case Map.keys(old_orders) -- Map.keys(new_orders) do
@@ -4082,6 +4182,7 @@ defmodule BrokenOaths.Game.WorldServer do
       explored: load_explored(world.id),
       cities: load_cities(world.id),
       improvements: load_improvements(world.id),
+      roads: load_roads(world.id),
       camps: load_camps(world.id),
       # Hydrated from game_players.heir_arrives_turn so a restart
       # mid-wait re-derives every pending heir (QA issue 0b7e82cd).
@@ -4172,8 +4273,22 @@ defmodule BrokenOaths.Game.WorldServer do
     |> Map.new(&{&1.id, city_map(&1)})
   end
 
+  # QA issue 5656770d — a Road lives in its own in-memory map
+  # (`state.roads`), independent of the tile's yield improvement
+  # (Farm/Mine/Pasture, `state.improvements`) — see `Improvement`'s own
+  # moduledoc. Excluding `:road` here (rather than a single
+  # `Map.new(&{&1.tile_id, ...})` keyed only by `tile_id`) is required
+  # for correctness, not just organization: once a tile can carry BOTH
+  # a yield improvement and a Road row, a single tile-keyed `Map.new/2`
+  # would silently drop one of the two same-tile rows.
   defp load_improvements(world_id) do
-    from(i in Improvement, where: i.world_id == ^world_id)
+    from(i in Improvement, where: i.world_id == ^world_id and i.kind != :road)
+    |> Repo.all()
+    |> Map.new(&{&1.tile_id, improvement_map(&1)})
+  end
+
+  defp load_roads(world_id) do
+    from(i in Improvement, where: i.world_id == ^world_id and i.kind == :road)
     |> Repo.all()
     |> Map.new(&{&1.tile_id, improvement_map(&1)})
   end

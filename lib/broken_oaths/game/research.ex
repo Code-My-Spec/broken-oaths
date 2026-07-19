@@ -389,6 +389,17 @@ defmodule BrokenOaths.Game.Research do
   def pasture_enabled?(player_research), do: completed?(player_research, :animal_husbandry)
 
   @doc """
+  Archery's unlock (QA issue da39e50b "No archer"): whether the Archer
+  unit is buildable. `Production.can_queue?/3`'s `:archer` clause reads
+  this the same "Production never touches Research" way
+  `granary_enabled?/1`/`pasture_enabled?/1` are already read — the
+  caller (`WorldServer`) resolves the flag and passes it in as
+  `opts[:archery?]`.
+  """
+  @spec archery_enabled?(player_research()) :: boolean()
+  def archery_enabled?(player_research), do: completed?(player_research, :archery)
+
+  @doc """
   Bronze Working's unlock: the player's age. Derived entirely from
   `completed_techs` — there is no separate `age` field to keep in sync.
   Reaching Bronze Working now requires Mining first (`prereqs/1`), so

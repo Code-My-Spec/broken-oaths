@@ -49,7 +49,8 @@ defmodule BrokenOaths.Game.Unit do
   alias BrokenOaths.Game.Player
   alias BrokenOaths.Worlds.World
 
-  @type unit_type :: :lord | :settler | :warrior | :worker | :barbarian_warrior | :bronze_spearman
+  @type unit_type ::
+          :lord | :settler | :warrior | :worker | :barbarian_warrior | :bronze_spearman | :archer
 
   @type t :: %__MODULE__{
           id: integer() | nil,
@@ -72,7 +73,7 @@ defmodule BrokenOaths.Game.Unit do
 
   schema "game_units" do
     field :type, Ecto.Enum,
-      values: [:lord, :settler, :warrior, :worker, :barbarian_warrior, :bronze_spearman]
+      values: [:lord, :settler, :warrior, :worker, :barbarian_warrior, :bronze_spearman, :archer]
 
     field :tile_id, :integer
     field :hp, :integer

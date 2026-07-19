@@ -19,7 +19,7 @@ defmodule BrokenOaths.Game.ProductionItem do
 
   alias BrokenOaths.Game.City
 
-  @type item_type :: :settler | :worker | :warrior | :granary | :bronze_spearman
+  @type item_type :: :settler | :worker | :warrior | :granary | :bronze_spearman | :archer
 
   @type t :: %__MODULE__{
           id: integer() | nil,
@@ -33,7 +33,9 @@ defmodule BrokenOaths.Game.ProductionItem do
         }
 
   schema "game_production_items" do
-    field :type, Ecto.Enum, values: [:settler, :worker, :warrior, :granary, :bronze_spearman]
+    field :type, Ecto.Enum,
+      values: [:settler, :worker, :warrior, :granary, :bronze_spearman, :archer]
+
     field :banked, :integer, default: 0
     field :position, :integer
     field :cost, :integer

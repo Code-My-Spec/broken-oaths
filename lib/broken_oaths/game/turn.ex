@@ -52,7 +52,14 @@ defmodule BrokenOaths.Game.Turn do
         }},
         improvements: %{tile_id => %{
           tile_id: tile_id,
-          kind: :farm | :mine | :road,
+          kind: :farm | :mine | :road | :pasture,
+          progress: non_neg_integer(),
+          status: :building | :complete,
+          builder_unit_id: unit_id | nil
+        }},
+        roads: %{tile_id => %{
+          tile_id: tile_id,
+          kind: :road,
           progress: non_neg_integer(),
           status: :building | :complete,
           builder_unit_id: unit_id | nil
@@ -100,6 +107,20 @@ defmodule BrokenOaths.Game.Turn do
   entry is treated as `BrokenOaths.Game.Research.new/0` for that tick
   only — most of this module's own tests build a state map without
   this key.
+
+  `roads` (QA issue 5656770d "Roads conflict with improvements") is
+  read the same defensive way, via `Map.get(state, :roads, %{})` — most
+  of this module's own unit tests predate the split and never set it. A
+  Road is a movement/connectivity improvement, orthogonal to whatever
+  yield improvement (Farm/Mine/Pasture) already occupies `improvements`
+  at the same `tile_id` — the two are independent slots, each advanced
+  by this module's own "improvement progress" phase exactly the same
+  way (this module's own advance/pillage/charge logic is agnostic to
+  which of the two maps an improvement happens to live in; only
+  `BrokenOaths.Game.WorldServer` — the imperative shell — cares, since
+  it's the one enforcing which slot a given `kind` belongs to and
+  persisting each slot to its own DB row). See `BrokenOaths.Game.Improvement`'s
+  own moduledoc for the full rationale.
 
   `unit_id`, `player_id`, and `city_id` are opaque keys (Ecto primary
   keys in production); `tile_id` is a `Worlds.Globe` mesh tile id.
@@ -596,13 +617,23 @@ defmodule BrokenOaths.Game.Turn do
   # remove the unit outright, so this phase now owns both maps instead
   # of only the improvement side.
   defp advance_improvements(state) do
-    {improvements, units} =
-      Enum.map_reduce(state.improvements, state.units, fn {tile_id, improvement}, units ->
+    {improvements, units} = advance_improvement_map(state.improvements, state.units)
+    {roads, units} = advance_improvement_map(Map.get(state, :roads, %{}), units)
+
+    %{state | improvements: improvements, units: units} |> Map.put(:roads, roads)
+  end
+
+  # QA issue 5656770d — the SAME advance logic, applied independently to
+  # `state.improvements` (the yield slot) and `state.roads` (the Road
+  # slot); this function is agnostic to which collection it's handed.
+  defp advance_improvement_map(improvements, units) do
+    {new_improvements, new_units} =
+      Enum.map_reduce(improvements, units, fn {tile_id, improvement}, units ->
         {new_improvement, new_units} = advance_improvement(improvement, units)
         {{tile_id, new_improvement}, new_units}
       end)
 
-    %{state | improvements: Map.new(improvements), units: units}
+    {Map.new(new_improvements), new_units}
   end
 
   defp advance_improvement(%{status: :complete} = improvement, units), do: {improvement, units}
@@ -680,20 +711,22 @@ defmodule BrokenOaths.Game.Turn do
   # happened — keeps this consistent regardless of which combat path
   # did the killing.
   defp clear_orphaned_builders(state) do
-    improvements =
-      Map.new(state.improvements, fn
-        {tile_id, %{builder_unit_id: id} = improvement} when not is_nil(id) ->
-          if Map.has_key?(state.units, id) do
-            {tile_id, improvement}
-          else
-            {tile_id, %{improvement | builder_unit_id: nil}}
-          end
+    %{state | improvements: clear_orphaned_builders_map(state.improvements, state.units)}
+    |> Map.put(:roads, clear_orphaned_builders_map(Map.get(state, :roads, %{}), state.units))
+  end
 
-        {tile_id, improvement} ->
+  defp clear_orphaned_builders_map(improvements, units) do
+    Map.new(improvements, fn
+      {tile_id, %{builder_unit_id: id} = improvement} when not is_nil(id) ->
+        if Map.has_key?(units, id) do
           {tile_id, improvement}
-      end)
+        else
+          {tile_id, %{improvement | builder_unit_id: nil}}
+        end
 
-    %{state | improvements: improvements}
+      {tile_id, improvement} ->
+        {tile_id, improvement}
+    end)
   end
 
   # -------------------------------------------------------------------
@@ -922,11 +955,13 @@ defmodule BrokenOaths.Game.Turn do
     else
       moved = %{barbarian | tile_id: tile, movement: 0}
 
-      new_state = %{
-        state
-        | units: Map.put(state.units, barbarian.id, moved),
-          improvements: maybe_pillage(state.improvements, tile)
-      }
+      new_state =
+        %{
+          state
+          | units: Map.put(state.units, barbarian.id, moved),
+            improvements: maybe_pillage(state.improvements, tile)
+        }
+        |> Map.put(:roads, maybe_pillage(Map.get(state, :roads, %{}), tile))
 
       new_occupied = occupied |> MapSet.delete(barbarian.tile_id) |> MapSet.put(tile)
       {new_state, new_occupied, attacked_cities}

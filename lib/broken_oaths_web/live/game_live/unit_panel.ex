@@ -243,6 +243,9 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
   # crashed this component with a FunctionClauseError; a garrisoned
   # bronze_spearman also blocked left-clicking the city under it).
   defp unit_type_label(:bronze_spearman), do: "Bronze Spearman"
+  # QA issue da39e50b — the Archery-gated melee unit; see
+  # `BrokenOaths.Game.Production`'s own moduledoc, "The Archer".
+  defp unit_type_label(:archer), do: "Archer"
   # Enemy units are selectable too — the panel doubles as the threat
   # readout (stats, HP), with every action already type/owner-gated.
   defp unit_type_label(:barbarian_warrior), do: "Barbarian Warrior"
