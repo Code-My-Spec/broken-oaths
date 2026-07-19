@@ -277,7 +277,124 @@ defmodule BrokenOathsWeb.GameLive.AlliancePanel do
       >
         Steward: Collect Bank
       </button>
+
+      <%!-- QA issue bd93cc0a: production stewardship — set this
+           OFFLINE ally's own production queue from the
+           CONSTRUCTIVE-only whitelist (`Stewardship.
+           constructive_item?/1`, already filtered server-side into
+           `@alliance.steward.cities`'s own `catalog`). Same "one form
+           per city" reasoning `GameLive.Play`'s own `vassal_row`
+           carries; same `Game.feudal_enabled?()` gate the Collect Bank
+           button above already needs (an accepted `Alliance` is
+           story 901's own already-shipped, always-on feature). Every
+           event here bubbles straight to `Play` — deliberately no
+           `phx-target`, same status the Collect Bank button above
+           already has. --%>
+      <div :for={city <- steward_production_cities(@alliance)} class="flex flex-col gap-1">
+        <span class="text-xs opacity-70">{city.name}</span>
+        <form
+          phx-submit="steward_queue_production"
+          data-test={"steward-production-#{city.id}"}
+          class="flex items-center gap-1"
+        >
+          <input type="hidden" name="owner_user_id" value={@alliance.other_user_id} />
+          <input type="hidden" name="city_id" value={city.id} />
+          <select name="item" class="select select-xs select-bordered flex-1">
+            <option :for={type <- city.catalog} value={type}>{steward_item_label(type)}</option>
+          </select>
+          <button
+            type="submit"
+            data-test={"steward-queue-production-#{city.id}"}
+            class="btn btn-xs btn-outline"
+          >
+            Steward: Set Production
+          </button>
+        </form>
+      </div>
+
+      <%!-- QA issue bd93cc0a: emergency defense — only ever offered
+           while this OFFLINE ally is genuinely `Stewardship.
+           under_attack?/1`; each button issues a strictly adjacent
+           `"steward_defend"` order for one of their own threatened
+           units. --%>
+      <div
+        :if={steward_under_attack?(@alliance)}
+        data-test={"steward-defend-#{@alliance.other_user_id}"}
+        class="flex flex-col gap-1"
+      >
+        <span class="text-xs text-error font-medium">Under attack!</span>
+        <.steward_defend_unit
+          :for={unit <- @alliance.steward.threatened_units}
+          unit={unit}
+          owner_user_id={@alliance.other_user_id}
+        />
+      </div>
     </div>
     """
   end
+
+  # QA issue bd93cc0a: an accepted `Alliance` is story 901's own
+  # already-shipped, always-on feature (unlike `vassals-list`/
+  # `vassal-status`), so both helpers re-check `Game.feudal_enabled?()`
+  # directly — same belt-and-suspenders gate the Collect Bank button
+  # above already needs, so neither steward affordance would otherwise
+  # render for an offline ally regardless of the feudal batch's own
+  # dormant-in-prod status.
+  defp steward_production_cities(%{steward: nil}), do: []
+
+  defp steward_production_cities(alliance) do
+    if Game.feudal_enabled?() do
+      Enum.filter(alliance.steward.cities, &(&1.catalog != []))
+    else
+      []
+    end
+  end
+
+  defp steward_under_attack?(%{steward: nil}), do: false
+
+  defp steward_under_attack?(alliance) do
+    Game.feudal_enabled?() and alliance.steward.under_attack? and
+      alliance.steward.threatened_units != []
+  end
+
+  attr :unit, :map, required: true
+  attr :owner_user_id, :any, required: true
+
+  defp steward_defend_unit(assigns) do
+    ~H"""
+    <div data-test={"steward-unit-#{@unit.id}"} class="flex flex-col gap-1">
+      <span class="text-xs">
+        {steward_unit_label(@unit.type)} ({@unit.hp}/{@unit.max_hp})
+      </span>
+      <div class="flex flex-wrap gap-1">
+        <button
+          :for={tile_id <- @unit.adjacent_tile_ids}
+          type="button"
+          phx-click="steward_defend"
+          phx-value-owner_user_id={@owner_user_id}
+          phx-value-unit_id={@unit.id}
+          phx-value-to_tile={tile_id}
+          data-test={"steward-defend-#{@unit.id}-#{tile_id}"}
+          class="btn btn-xs btn-error btn-outline"
+        >
+          Defend → Tile {tile_id}
+        </button>
+      </div>
+    </div>
+    """
+  end
+
+  defp steward_item_label(:settler), do: "Settler"
+  defp steward_item_label(:worker), do: "Worker"
+  defp steward_item_label(:warrior), do: "Warrior"
+  defp steward_item_label(:granary), do: "Granary"
+  defp steward_item_label(:bronze_spearman), do: "Bronze Spearman"
+  defp steward_item_label(type), do: type |> to_string() |> String.capitalize()
+
+  defp steward_unit_label(:lord), do: "Lord"
+  defp steward_unit_label(:settler), do: "Settler"
+  defp steward_unit_label(:worker), do: "Worker"
+  defp steward_unit_label(:warrior), do: "Warrior"
+  defp steward_unit_label(:bronze_spearman), do: "Bronze Spearman"
+  defp steward_unit_label(type), do: type |> to_string() |> String.capitalize()
 end

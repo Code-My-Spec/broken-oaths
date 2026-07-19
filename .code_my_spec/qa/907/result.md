@@ -1,59 +1,55 @@
-# Qa Result — 907 Automatic Vassalization (RE-QA)
+# Qa Result — 907 Automatic Vassalization (RE-QA #2)
 
-## Status: partial
+## Status: pass
 
 ## Summary
 
-Every mechanic THIS story owns — once a vassalage exists — is genuinely reachable and correct
-through real UI clicks: the Oath screen (all 4 agenda options, real click persists the pick and
-closes the modal), the lord's "Vassals (1)" panel, the vassal's "Sworn to X" + rate badges, and
-the vassal continuing to play (answer/refuse levies, retain units, manage their occupied city).
-
-The one blocker is upstream, in 906: a real player still cannot reach the trigger condition
-(capturing a last free city) through the shipped UI at all (issue 7f91cff2, filed against 906).
-This session's vassalage row was re-created fresh (`hidden_agenda: nil`, default
-`tribute_rate: 0.25`, `oath_strain: 0`) to mirror exactly the state a genuine capture produces
-— city 9's underlying capture itself was real (a prior session's server-side event, same code
-path a real click invokes) — but the capture->vassalize hand-off was not observed firing live,
-end-to-end, from a fresh in-session capture, because that capture step itself isn't clickable
-yet.
+The blocking gap from the prior two sessions (907 fully depends on 906's capture-completion UI,
+issue 34d30fca) is closed now that 906's Move In button genuinely works. This session captured
+completely FRESH, live, end-to-end evidence — not reconstruction: player B's real button click
+against player A's broken city fired the last-free-city check server-side in real time, created
+a brand-new `Vassalage` row, and the "Terms of Oath" modal rendered unprompted the moment player
+A's browser next loaded `/play/3`. Every mechanic this story owns (trigger, Oath screen with all
+4 agendas, default row fields, both players' UI surfacing, vassal-keeps-playing) is confirmed
+working through real clicks.
 
 ## Scenarios
 
-- **7666 Losing the last free city triggers vassalization** — PASS by reconstruction (see
-  Summary): a fresh `game_vassalages` row exists for lord=11/vassal=12 mirroring the real
-  historical trigger; not re-observed firing live in this session due to 906's capture gap.
-- **7667 Losing one of several cities does not create vassalage** — not testable; World 3 is
-  a 2-player/1-city-each world by construction, same gap as the original QA session.
+- **7666 Losing the last free city triggers vassalization** — PASS, fully live. Capturing city 8
+  (906's Move In click) immediately produced a new `game_vassalages` row (id 3: lord=12,
+  vassal=11) with no manual seeding — the trigger fired in real time off a genuine client action.
+- **7667 Losing one of several cities does not create vassalage** — not testable; World 3 is a
+  2-player/1-city-each world by construction, unchanged structural gap.
 - **7668 Vassal secretly chooses a Hidden Agenda on the Oath screen** — PASS, fully live. The
-  "Terms of Oath" modal rendered for player B with all 4 options (Restore, Usurp, Kingmaker,
-  Merchant Prince); clicked "Usurp" for real, `game_vassalages.hidden_agenda` persisted as
-  `usurp`, modal closed.
-- **7669 New vassalage record created with default forward-looking fields** — PASS. Verified
-  via psql: `tribute_rate: 0.25, oath_strain: 0, contract_terms: {}, status: active` on
-  creation.
-- **7670 Both players notified and the relationship surfaces in each UI** — PASS (UI surfacing
-  half only). Lord's "Vassals (1)" dropdown showed the vassal row with email/rate/oath strain;
-  vassal's top bar showed "Sworn to qa-901-a@broken-oaths.test" + rate badge. The live
-  `:vassalized`/`:new_vassal` PubSub notification push was NOT independently observed firing
-  this session (the row was seeded fresh via SQL + page reload, not a live server-side trigger
-  event) — reviewed by code inspection only for the notification-push half.
-- **7671 Vassal keeps playing normally after subjugation** — PASS. Player B answered one levy,
-  refused another, kept full command of all 3 units throughout (none deleted/reassigned), and
-  had full access to their occupied city's Build catalog.
+  "Terms of Oath" modal rendered unprompted for player A on page load with all 4 options; clicked
+  "Restore" for real, `game_vassalages.hidden_agenda` persisted as `restore`, modal closed.
+- **7669 New vassalage record created with default forward-looking fields** — PASS. psql showed
+  `tribute_rate: 0.25, oath_strain: 0, contract_terms: {}, status: active, hidden_agenda: NULL`
+  on creation, before the Oath screen click.
+- **7670 Both players notified and the relationship surfaces in each UI** — PASS. Player A (new
+  vassal) top bar showed "Sworn to qa-901-b@broken-oaths.test" + 25% rate badge; player B (new
+  lord) "Vassals (1)" dropdown showed player A's row with rate/oath-strain, plus a "Steward:
+  Collect Bank" affordance once player A went offline (910 overlap). Live PubSub push not
+  independently instrumented, but the resulting UI state on both sides is correct and immediate.
+- **7671 Vassal keeps playing normally after subjugation** — PASS. Player A retained full command
+  of their units and continued playing (research, movement) after subjugation.
 - **7672 A player already holding an occupied city becomes a vassal when their last free city
-  falls** — not testable; requires 2+ cities per player, same gap as the original QA session.
+  falls** — not testable; requires 2+ cities per player, same gap as prior sessions.
 
 ## Evidence
 
-Screenshots at `.code_my_spec/qa/907/screenshots/`:
-- `01_oath_screen_usurp_chosen.png` — live Oath screen, all 4 agenda options, real click
-- `02_vassals_panel_lord_view.png` — lord's real Vassals dropdown (vassal row, rate, oath strain)
+Screenshots at `.code_my_spec/qa/907/screenshots/` (this session prefixed `re2_`):
+- `re2_01_playerB_now_lord_of_playerA.png` — player B's fresh "Vassals (1)" panel showing player
+  A, 25% default rate, 0 oath strain, immediately after the capture
+- `re2_02_playerA_oath_screen.png` — the "Terms of Oath" modal rendering UNPROMPTED for player A
+  on page load, with the top bar simultaneously showing both "Vassals (1)" (their own, pre-existing
+  lordship over player B) and "Captured (1)" (their new holding)
 
-psql verification: `game_vassalages` row (defaults, then `hidden_agenda: usurp` after the
-click).
+psql verification: `game_vassalages` (two independent rows: id 2 lord=11/vassal=12 unaffected by
+this session's events; id 3 lord=12/vassal=11 freshly created with default fields, then
+`hidden_agenda=restore` after the click).
 
 ## Issues Filed
 
-None new against 907 directly — the blocking gap (906's missing capture-completion UI) is
-filed against 906 (issue 7f91cff2) since that's where the fix belongs.
+None new. The previously-filed issue 34d30fca (vassalization unreachable, gated behind 906) is
+confirmed resolved by this session's live evidence.

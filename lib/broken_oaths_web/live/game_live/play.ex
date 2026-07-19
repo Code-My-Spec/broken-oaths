@@ -266,6 +266,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
             # already have (never DB-persisted, only ever lives on this
             # one connection's own socket).
             bank_error: nil,
+            # QA issue bd93cc0a: same transient-error status as
+            # `bank_error` above, for `"steward_queue_production"`/
+            # `"steward_defend"`.
+            steward_error: nil,
             # Story 909/910: unlike `vassals-list`/`vassal-status`
             # (naturally empty with the flag off, since nothing ever
             # creates a `Vassalage` row to power them), the Bank/Honor/
@@ -352,7 +356,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
         allowed_improvements:
           worker_allowed_improvements(socket.assigns.world, unit, socket.assigns.player_research),
         current_dig: worker_current_dig(socket.assigns.improvements, unit),
-        attackable_cities: attackable_cities(socket.assigns.world, unit, socket.assigns.enemy_cities),
+        attackable_cities:
+          attackable_cities(socket.assigns.world, unit, socket.assigns.enemy_cities),
         order_error: nil,
         improvement_error: nil,
         selected_city_id: nil,
@@ -854,7 +859,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   # Sets an offline household member's own production queue —
   # constructive-only, mirrors `"queue_production"`'s own `"city_id"`/
-  # `"item"` param shape, scoped through stewardship eligibility.
+  # `"item"` param shape, scoped through stewardship eligibility. QA
+  # issue bd93cc0a: `@vassal.steward`/`@alliance.steward`'s own
+  # per-city catalog is the click-through source for `item` — always
+  # already whitelist-filtered client-side (`Stewardship.
+  # constructive_item?/1`), so `:not_constructive` never fires from a
+  # real click, only ever a direct `attempt_event`/spex dispatch.
   def handle_event(
         "steward_queue_production",
         %{"owner_user_id" => owner_user_id, "city_id" => city_id, "item" => item},
@@ -862,8 +872,16 @@ defmodule BrokenOathsWeb.GameLive.Play do
       ) do
     %{world: world, user: user} = socket.assigns
 
-    Game.steward_queue_production(world, user, parse_id(owner_user_id), parse_id(city_id), item)
-    {:noreply, refresh_board(socket)}
+    case Game.steward_queue_production(
+           world,
+           user,
+           parse_id(owner_user_id),
+           parse_id(city_id),
+           item
+         ) do
+      :ok -> {:noreply, socket |> assign(steward_error: nil) |> refresh_after_steward_action()}
+      {:error, reason} -> {:noreply, assign(socket, steward_error: steward_error_message(reason))}
+    end
   end
 
   # "No cancel-griefing" — always refused, whitelist enforced by
@@ -916,15 +934,35 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # strictly adjacent, defensive reposition. An eligible steward who
   # overreaches the destination mid-emergency is provable sabotage —
   # refused, logged, AND dings the STEWARD's own Honor (this refresh is
-  # what picks that up on THIS session).
+  # what picks that up on THIS session). `to_tile` goes through
+  # `parse_id/1` (QA issue bd93cc0a) exactly like every other DOM-button
+  # `phx-value` tile id — a real click's `phx-value-to_tile` arrives as
+  # a STRING, and without this, `Stewardship.defend_target_allowed?/3`'s
+  # own `to_tile in adjacent_tile_ids` could never match an integer
+  # list, so EVERY real click-through order would misfire as provable
+  # sabotage and wrongly ding the steward's own Honor.
   def handle_event(
         "steward_defend",
         %{"owner_user_id" => owner_user_id, "unit_id" => unit_id, "to_tile" => to_tile},
         socket
       ) do
     %{world: world, user: user} = socket.assigns
-    Game.steward_defend(world, user, parse_id(owner_user_id), parse_id(unit_id), to_tile)
-    {:noreply, refresh_board(socket)}
+
+    case Game.steward_defend(
+           world,
+           user,
+           parse_id(owner_user_id),
+           parse_id(unit_id),
+           parse_id(to_tile)
+         ) do
+      :ok ->
+        {:noreply, socket |> assign(steward_error: nil) |> refresh_after_steward_action()}
+
+      {:error, reason} ->
+        {:noreply,
+         assign(socket, steward_error: steward_error_message(reason))
+         |> refresh_after_steward_action()}
+    end
   end
 
   # "Never to launch aggression" — always refused, even mid-emergency.
@@ -1492,7 +1530,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
     tiles = Enum.map(known, &tile_row(&1, mesh, terrain_map))
     levels = Weather.map(world.seed, mesh)
 
-    city_markers = Enum.map(cities, &city_marker/1) ++ Enum.map(enemy_cities, &enemy_city_marker/1)
+    city_markers =
+      Enum.map(cities, &city_marker/1) ++ Enum.map(enemy_cities, &enemy_city_marker/1)
 
     socket
     |> push_event("game:window", %{tiles: tiles})
@@ -1624,7 +1663,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # `hostile: false` — the client's `.Board` hook uses this to decide
   # left-click select-vs-ignore and right-click move-vs-attack (QA
   # issue 56ee521a).
-  defp city_marker(city), do: city |> Map.take([:id, :name, :tile_id, :size]) |> Map.put(:hostile, false)
+  defp city_marker(city),
+    do: city |> Map.take([:id, :name, :tile_id, :size]) |> Map.put(:hostile, false)
 
   # QA issue 56ee521a — the enemy-city sibling of `city_marker/1`,
   # `hostile: true`. `:broken` (QA issue 7f91cff2) rides straight
@@ -1748,6 +1788,26 @@ defmodule BrokenOathsWeb.GameLive.Play do
       vassals: Game.vassals(world, user),
       vassal_status: Game.vassal_status(world, user)
     )
+  end
+
+  # QA issue bd93cc0a: shared post-action refresh for a production/
+  # defend steward command — `refresh_board/1` alone (the "steward_
+  # collect_bank" baseline) is no longer enough once `@vassal.steward`/
+  # `@alliance.steward` carries live per-city catalogs and per-unit
+  # `adjacent_tile_ids`: a stale row after a successful defend order
+  # would keep offering a tile that's no longer actually adjacent to
+  # the unit's NEW position, and clicking it would misfire as provable
+  # sabotage against an innocent steward's own Honor. `refresh_vassalage/1`
+  # keeps `@vassals` current for the lord/fellow-vassal path;
+  # `AlliancePanel` owns its own `@alliances` assign, so its refresh
+  # goes through the same `send_update/2` forward `handle_info(:alliances_changed, _)`
+  # already uses.
+  defp refresh_after_steward_action(socket) do
+    send_update(BrokenOathsWeb.GameLive.AlliancePanel, id: "alliance-panel", refresh: true)
+
+    socket
+    |> refresh_board()
+    |> refresh_vassalage()
   end
 
   defp parse_agenda("restore"), do: :restore
@@ -1970,6 +2030,27 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   defp bank_error_message(:insufficient_gold), do: "You can't afford that upgrade yet."
   defp bank_error_message(_other), do: "The bank refused that action."
+
+  # QA issue bd93cc0a — production-stewardship + emergency-defend error
+  # surface, same "transient, connection-only" status `city_error`/
+  # `bank_error` already have.
+  defp steward_error_message(:not_eligible), do: "You aren't eligible to steward them."
+  defp steward_error_message(:owner_online), do: "They're back online — stewardship has ended."
+  defp steward_error_message(:not_found), do: "That city isn't theirs to steward."
+  defp steward_error_message(:not_constructive), do: "That build isn't on the steward whitelist."
+  defp steward_error_message(:invalid_item), do: "That can't be queued."
+  defp steward_error_message(:size_one), do: "This city needs a second citizen first."
+  defp steward_error_message(:already_built), do: "They've already built one."
+  defp steward_error_message(:locked), do: "They haven't unlocked that yet."
+  defp steward_error_message(:copper_required), do: "That build requires Copper access."
+  defp steward_error_message(:not_owner), do: "That unit isn't theirs to command."
+
+  defp steward_error_message(:not_under_attack),
+    do: "They aren't under attack — there's nothing to defend against right now."
+
+  defp steward_error_message(:unreachable), do: "That tile isn't reachable."
+  defp steward_error_message(:feudal_disabled), do: "Stewardship isn't available right now."
+  defp steward_error_message(_other), do: "That steward action was refused."
 
   # -------------------------------------------------------------------
   # Render
@@ -2271,6 +2352,17 @@ defmodule BrokenOathsWeb.GameLive.Play do
             data-test="improvement-error"
           >
             <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@improvement_error}
+          </div>
+
+          <%!-- QA issue bd93cc0a: production-stewardship + emergency-
+               defend refusal surface, same toast pattern as every other
+               error above. --%>
+          <div
+            :if={@steward_error}
+            class="alert alert-error w-auto shadow-lg"
+            data-test="steward-error"
+          >
+            <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@steward_error}
           </div>
         </div>
 
@@ -3285,9 +3377,123 @@ defmodule BrokenOathsWeb.GameLive.Play do
       >
         Steward: Collect Bank
       </button>
+
+      <%!-- QA issue bd93cc0a: production stewardship — set this
+           OFFLINE vassal's own production queue from the
+           CONSTRUCTIVE-only whitelist (`Stewardship.
+           constructive_item?/1`, already filtered server-side into
+           `@vassal.steward.cities`'s own `catalog`). One compact form
+           PER city rather than a single cross-city dropdown pair — two
+           cities can offer different catalogs (research/Copper access
+           differ per city), and a shared `<select>` pair would need its
+           own JS to keep the item options in sync with whichever city
+           is picked. --%>
+      <div :for={city <- steward_cities_with_catalog(@vassal.steward)} class="flex flex-col gap-1">
+        <span class="text-xs opacity-70">{city.name}</span>
+        <form
+          phx-submit="steward_queue_production"
+          data-test={"steward-production-#{city.id}"}
+          class="flex items-center gap-1"
+        >
+          <input type="hidden" name="owner_user_id" value={@vassal.vassal_user_id} />
+          <input type="hidden" name="city_id" value={city.id} />
+          <select name="item" class="select select-xs select-bordered flex-1">
+            <option :for={type <- city.catalog} value={type}>{steward_item_label(type)}</option>
+          </select>
+          <button
+            type="submit"
+            data-test={"steward-queue-production-#{city.id}"}
+            class="btn btn-xs btn-outline"
+          >
+            Steward: Set Production
+          </button>
+        </form>
+      </div>
+
+      <%!-- QA issue bd93cc0a: emergency defense — only ever offered
+           while this OFFLINE vassal is genuinely `Stewardship.
+           under_attack?/1`; each button issues a strictly adjacent
+           `"steward_defend"` order (`Stewardship.
+           defend_target_allowed?/3`'s own gate) for one of their own
+           threatened units. --%>
+      <div
+        :if={
+          @vassal.steward && @vassal.steward.under_attack? &&
+            @vassal.steward.threatened_units != []
+        }
+        data-test={"steward-defend-#{@vassal.vassal_user_id}"}
+        class="flex flex-col gap-1"
+      >
+        <span class="text-xs text-error font-medium">Under attack!</span>
+        <.steward_defend_unit
+          :for={unit <- @vassal.steward.threatened_units}
+          unit={unit}
+          owner_user_id={@vassal.vassal_user_id}
+        />
+      </div>
     </div>
     """
   end
+
+  # -------------------------------------------------------------------
+  # Steward controls (QA issue bd93cc0a) — shared between `vassal_row`
+  # above and `GameLive.AlliancePanel`'s own `alliance_row` (a plain
+  # markup duplication, same status "Steward: Collect Bank" already
+  # has across the two modules — see that button's own moduledoc note
+  # for why alliance stewardship bubbles straight to `Play` with no
+  # `phx-target` instead of routing through the component).
+  # -------------------------------------------------------------------
+
+  # Only offer a city's own production form once it actually HAS a
+  # non-empty constructive catalog to offer — a size-1, freshly founded
+  # city with no research yet still has `[:settler, :worker, :warrior]`
+  # (the always-available baseline), so in practice this only ever
+  # excludes `nil` (the vassal is online, nothing to steward).
+  defp steward_cities_with_catalog(nil), do: []
+
+  defp steward_cities_with_catalog(steward),
+    do: Enum.filter(steward.cities, &(&1.catalog != []))
+
+  attr :unit, :map, required: true
+  attr :owner_user_id, :any, required: true
+
+  defp steward_defend_unit(assigns) do
+    ~H"""
+    <div data-test={"steward-unit-#{@unit.id}"} class="flex flex-col gap-1">
+      <span class="text-xs">
+        {steward_unit_label(@unit.type)} ({@unit.hp}/{@unit.max_hp})
+      </span>
+      <div class="flex flex-wrap gap-1">
+        <button
+          :for={tile_id <- @unit.adjacent_tile_ids}
+          type="button"
+          phx-click="steward_defend"
+          phx-value-owner_user_id={@owner_user_id}
+          phx-value-unit_id={@unit.id}
+          phx-value-to_tile={tile_id}
+          data-test={"steward-defend-#{@unit.id}-#{tile_id}"}
+          class="btn btn-xs btn-error btn-outline"
+        >
+          Defend → Tile {tile_id}
+        </button>
+      </div>
+    </div>
+    """
+  end
+
+  defp steward_item_label(:settler), do: "Settler"
+  defp steward_item_label(:worker), do: "Worker"
+  defp steward_item_label(:warrior), do: "Warrior"
+  defp steward_item_label(:granary), do: "Granary"
+  defp steward_item_label(:bronze_spearman), do: "Bronze Spearman"
+  defp steward_item_label(type), do: type |> to_string() |> String.capitalize()
+
+  defp steward_unit_label(:lord), do: "Lord"
+  defp steward_unit_label(:settler), do: "Settler"
+  defp steward_unit_label(:worker), do: "Worker"
+  defp steward_unit_label(:warrior), do: "Warrior"
+  defp steward_unit_label(:bronze_spearman), do: "Bronze Spearman"
+  defp steward_unit_label(type), do: type |> to_string() |> String.capitalize()
 
   # QA issue dae2e65d — legal call-to-arms targets for `vassal`: every
   # known civilization EXCEPT the vassal themselves (`Levy`'s own

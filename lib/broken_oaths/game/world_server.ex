@@ -2845,6 +2845,12 @@ defmodule BrokenOaths.Game.WorldServer do
 
     other_player = Map.fetch!(state.players, other_player_id)
     other_user = Users.get_user!(other_player.user_id)
+    online? = Presence.online?(state.world, %{id: other_user.id})
+    # QA issue bd93cc0a: only an ACCEPTED, offline ally is stewardable
+    # at all (`Stewardship.steward_role/4`'s own `:ally` clause reads
+    # straight off an accepted `Alliance`) — a merely `:proposed` row,
+    # or an online ally, carries no `steward_view/2` payload.
+    stewardable? = alliance.status == :accepted and not online?
 
     %{
       id: alliance.id,
@@ -2854,7 +2860,8 @@ defmodule BrokenOaths.Game.WorldServer do
       other_email: other_user.email,
       # Story 910: same "offer Steward only while offline" status
       # `format_vassal/2` already carries.
-      online?: Presence.online?(state.world, %{id: other_user.id})
+      online?: online?,
+      steward: if(stewardable?, do: steward_view(state, other_player), else: nil)
     }
   end
 
@@ -2907,6 +2914,7 @@ defmodule BrokenOaths.Game.WorldServer do
   defp format_vassal(state, vassalage) do
     vassal_player = Map.fetch!(state.players, vassalage.vassal_player_id)
     vassal_user = Users.get_user!(vassal_player.user_id)
+    online? = Presence.online?(state.world, %{id: vassal_user.id})
 
     %{
       vassal_user_id: vassal_user.id,
@@ -2918,7 +2926,11 @@ defmodule BrokenOaths.Game.WorldServer do
       # Story 910: whether this vassal is currently reachable to steward
       # — `GameLive.VassalsPanel`'s own Steward affordance only offers
       # itself against an OFFLINE household member.
-      online?: Presence.online?(state.world, %{id: vassal_user.id})
+      online?: online?,
+      # QA issue bd93cc0a: the production-stewardship + emergency-defend
+      # click-through's own data source — `nil` while online (nothing to
+      # steward yet), `steward_view/2`'s real payload once offline.
+      steward: if(online?, do: nil, else: steward_view(state, vassal_player))
     }
   end
 
@@ -3294,6 +3306,66 @@ defmodule BrokenOaths.Game.WorldServer do
       action: log.action,
       turn: log.turn,
       sabotage: log.sabotage
+    }
+  end
+
+  # QA issue bd93cc0a: the click-through steward view carried on every
+  # OFFLINE household member's own `format_vassal/2`/`format_alliance/3`
+  # row — everything `GameLive.Play`'s own production-stewardship +
+  # emergency-defend controls need to render REAL options, not a blank
+  # check. `nil` (never computed at all) whenever the owner is online or
+  # not currently stewardable, the same "absent means nothing to offer"
+  # posture `vassal_status/2` already gives a free player's own `nil`.
+  defp steward_view(state, owner_player) do
+    units = owner_units(state, owner_player.id)
+    cities = for {_id, c} <- state.cities, c.player_id == owner_player.id, do: c
+
+    %{
+      cities: Enum.map(cities, &steward_city_view(state, &1)),
+      under_attack?: Stewardship.under_attack?(units),
+      # Only units genuinely worth defending (`Stewardship.
+      # under_attack?/1`'s own literal "hp < max_hp" signal) — each
+      # carrying its own CURRENT `adjacent_tile_ids` so the rendered
+      # defend buttons can never go stale against a unit that's already
+      # moved (a stale button would make `Stewardship.
+      # defend_target_allowed?/3` refuse as provable sabotage, dinging
+      # an innocent steward's own Honor for nothing).
+      threatened_units:
+        units
+        |> Enum.filter(&(&1.hp < &1.max_hp))
+        |> Enum.map(&steward_unit_view(state, &1))
+    }
+  end
+
+  # `catalog` reuses `Production.available_items/1` — the SAME
+  # research/copper-gated Build list `GameLive.CityPanel` already reads
+  # for the owning player themselves — filtered through `Stewardship.
+  # constructive_item?/1` (today a no-op: every buildable type IS
+  # already constructive, see that module's own moduledoc, but still
+  # the one gate this view is contractually bound to).
+  defp steward_city_view(state, city) do
+    opts = [
+      granary_available?: granary_available?(state, city),
+      bronze_age?: bronze_age?(state, city),
+      copper_access?: copper_access?(state, city)
+    ]
+
+    catalog =
+      opts
+      |> Production.available_items()
+      |> Enum.filter(&Stewardship.constructive_item?/1)
+
+    %{id: city.id, name: city.name, catalog: catalog}
+  end
+
+  defp steward_unit_view(state, unit) do
+    %{
+      id: unit.id,
+      type: unit.type,
+      tile_id: unit.tile_id,
+      hp: unit.hp,
+      max_hp: unit.max_hp,
+      adjacent_tile_ids: Regions.adjacent_tiles(state.world, unit.tile_id)
     }
   end
 
