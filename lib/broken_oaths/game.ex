@@ -431,6 +431,107 @@ defmodule BrokenOaths.Game do
     do: WorldServer.call(world, {:mark_pact_unhonored, user, lord_user_id})
 
   # -------------------------------------------------------------------
+  # Rebellion (stories 915/919)
+  # -------------------------------------------------------------------
+
+  @doc """
+  Read-only preview of what declaring independence against
+  `lord_user_id` would do RIGHT NOW (story 915, criterion 7732): every
+  one of `user`'s own occupied cities marked `will_rise?` per
+  `BrokenOaths.Game.Rebellion.Resolution.city_rises?/4` (the SAME
+  deterministic formula `declare_independence/3` itself commits with),
+  plus the predicted temporary army size
+  (`BrokenOaths.Game.Rebellion.Resolution.army_size/1`). Never live RNG,
+  never a side effect — the same inputs (the lord's own Honor, this
+  vassalage's own tribute rate, the world's own seed) produce the same
+  verdicts calling this a hundred times in a row, and `declare_
+  independence/3` recomputes the identical split from the identical
+  inputs at commit time.
+  """
+  @spec independence_preview(map(), map(), term()) ::
+          {:ok, %{cities: [%{city_id: term(), will_rise?: boolean()}], army_size: pos_integer()}}
+          | {:error, :not_a_player | :not_a_vassal}
+  def independence_preview(world, user, lord_user_id),
+    do: WorldServer.call(world, {:independence_preview, user, lord_user_id})
+
+  @doc """
+  `user` (the vassal) declares independence from `lord_user_id` (story
+  915): immediately severs the Vassalage (tribute stops the same turn
+  boundary), resolves which of `user`'s own occupied cities rise back
+  to them (`BrokenOaths.Game.Rebellion.Resolution.resolve_risings/4`) —
+  each risen city de-occupies, restored to full health, and any of the
+  former lord's own units still standing on it defect to `user` — spawns
+  a temporary rebellion army (`BrokenOaths.Game.Rebellion.Resolution.
+  army_size/1`) flagged `temporary: true`, and opens a state of war
+  between the two (a narrow, rebellion-scoped PvP exception —
+  `BrokenOaths.Game.Combat.hostile?/2` itself never changes). Creates a
+  persisted, first-class `BrokenOaths.Game.Rebellion` row (`status:
+  :active`) naming both parties and recording the split, the army size,
+  and the start turn.
+  """
+  @spec declare_independence(map(), map(), term()) ::
+          {:ok, BrokenOaths.Game.Rebellion.t()}
+          | {:error, :not_a_player | :not_a_vassal | Ecto.Changeset.t()}
+  def declare_independence(world, user, lord_user_id),
+    do: WorldServer.call(world, {:declare_independence, user, lord_user_id})
+
+  @doc """
+  `user`'s own active-or-most-recent Rebellion as REBEL, or `nil` if
+  they've never declared one: `%{id:, status:, rebel_user_id:,
+  rebel_email:, former_lord_user_id:, former_lord_email:, started_turn:,
+  army_size:, risen_city_ids:, loyal_city_ids:}`. Once a rebellion ends
+  (`independence_won`/`crushed`/`peace`) this keeps reading that same
+  settled row — a rebel only ever carries one ACTIVE rebellion at a
+  time (`BrokenOaths.Game.Rebellion`'s own moduledoc).
+  """
+  @spec rebellion_status(map(), map()) :: map() | nil
+  def rebellion_status(world, user), do: WorldServer.call(world, {:rebellion_status, user})
+
+  @doc """
+  Every Rebellion (active or ended) raised against `user` as the FORMER
+  LORD — same shape as `rebellion_status/2`'s own single map, one per
+  row, freshest first.
+  """
+  @spec rebellions_as_lord(map(), map()) :: [map()]
+  def rebellions_as_lord(world, user), do: WorldServer.call(world, {:rebellions_as_lord, user})
+
+  @doc """
+  Either side of an active Rebellion between `user` and
+  `counterparty_user_id` offers a negotiated peace (story 919):
+  `outcome` is `"independence"` (the rebel is granted full freedom) or
+  `"restored_vassal"` (the rebel swears fealty again) — nobody loses
+  cities either way. `reparations_gold` (optional) moves from whoever
+  accepts to whoever offers once `accept_peace/3` closes the deal. A
+  fresh offer replaces any prior one still pending for this same
+  Rebellion.
+  """
+  @spec offer_peace(map(), map(), term(), String.t(), non_neg_integer() | nil) ::
+          :ok | {:error, :not_a_player | :no_active_rebellion}
+  def offer_peace(world, user, counterparty_user_id, outcome, reparations_gold),
+    do:
+      WorldServer.call(
+        world,
+        {:offer_peace, user, counterparty_user_id, outcome, reparations_gold}
+      )
+
+  @doc """
+  `user` accepts `counterparty_user_id`'s own pending peace offer —
+  refused unless one is actually pending FROM the counterparty. Ends
+  the Rebellion `:peace`, frees every one of the rebel's own cities
+  (risen or loyal — "nobody loses cities in a peace"), disbands the
+  temporary rebellion army, and moves any agreed reparations.
+  """
+  @spec accept_peace(map(), map(), term()) ::
+          :ok | {:error, :not_a_player | :no_active_rebellion | :no_pending_offer}
+  def accept_peace(world, user, counterparty_user_id),
+    do: WorldServer.call(world, {:accept_peace, user, counterparty_user_id})
+
+  @doc "`user` rejects `counterparty_user_id`'s own pending peace offer — the war simply continues, the Rebellion stays `:active`."
+  @spec reject_peace(map(), map(), term()) :: :ok | {:error, :not_a_player | :no_active_rebellion}
+  def reject_peace(world, user, counterparty_user_id),
+    do: WorldServer.call(world, {:reject_peace, user, counterparty_user_id})
+
+  # -------------------------------------------------------------------
   # Gold Bank (story 909)
   # -------------------------------------------------------------------
 

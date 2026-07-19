@@ -63,6 +63,8 @@ defmodule BrokenOaths.Game.WorldServer do
     ProtectionPact,
     Production,
     ProductionItem,
+    Rebellion,
+    Rebellion.Resolution,
     Research,
     Siege,
     Spawner,
@@ -224,6 +226,12 @@ defmodule BrokenOaths.Game.WorldServer do
         # left; the turn boundary only recharges and continues.
         moved = Turn.move_now(queued, unit_id)
         {moved, capture_events} = apply_captures(moved)
+        # Story 919: an adjacent march can knock a rebel out of the
+        # fight (or hand the former lord back every risen city) without
+        # ever needing a full turn boundary — see `process_rebellion_
+        # endings/1`'s own doc for why this immediate hook matters
+        # alongside its `run_tick/1` call site.
+        moved = process_rebellion_endings(moved, :move)
 
         case persist_tick(queued, moved) do
           :ok ->
@@ -633,6 +641,90 @@ defmodule BrokenOaths.Game.WorldServer do
       {:ok, _vassalage} ->
         broadcast(state.world.id, [:vassals_changed])
         {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Rebellion (stories 915/919)
+  # -------------------------------------------------------------------
+
+  # Story 915 (criterion 7732): read-only, no side effect — see
+  # `do_independence_preview/3`'s own doc.
+  def handle_call({:independence_preview, user, lord_user_id}, _from, state) do
+    {:reply, do_independence_preview(state, user, lord_user_id), state}
+  end
+
+  # Story 915: severs the oath, resolves risings, spawns the temporary
+  # army, and opens the war — see `do_declare_independence/3`'s own
+  # doc. Bypasses `persist_tick/2`'s own generic diff (which never
+  # tracks a unit's own `player_id` changing, the defecting-garrison
+  # case) in favor of its own immediate, targeted Repo writes — the
+  # SAME "immediate, not tick-state" status `apply_captures/1`'s own
+  # `persist_vassalization/2` already has for the sibling vassalization
+  # write.
+  def handle_call({:declare_independence, user, lord_user_id}, _from, state) do
+    case do_declare_independence(state, user, lord_user_id) do
+      {:ok, result, new_state, lord_events} ->
+        broadcast(
+          new_state.world.id,
+          [:vassals_changed, :units_changed, :cities_changed] ++ lord_events
+        )
+
+        {:reply, {:ok, result}, new_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # `user`'s own active-or-most-recent Rebellion as REBEL.
+  def handle_call({:rebellion_status, user}, _from, state) do
+    {:reply, rebellion_status(state, user), state}
+  end
+
+  # Every Rebellion raised against `user` as the FORMER LORD.
+  def handle_call({:rebellions_as_lord, user}, _from, state) do
+    {:reply, rebellions_as_lord(state, user), state}
+  end
+
+  # Story 919: either side offers a negotiated peace — persisted only
+  # as in-memory tick-state (`state.peace_offers`), the same "no
+  # restart survival needed" status `state.protection_calls` already
+  # has, until `accept_peace/3` actually closes it.
+  def handle_call(
+        {:offer_peace, user, counterparty_user_id, outcome, reparations_gold},
+        _from,
+        state
+      ) do
+    case do_offer_peace(state, user, counterparty_user_id, outcome, reparations_gold) do
+      {:ok, new_state} ->
+        broadcast(new_state.world.id, [:vassals_changed])
+        {:reply, :ok, new_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:accept_peace, user, counterparty_user_id}, _from, state) do
+    case do_accept_peace(state, user, counterparty_user_id) do
+      {:ok, new_state} ->
+        broadcast(new_state.world.id, [:vassals_changed, :units_changed, :cities_changed])
+        {:reply, :ok, new_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:reject_peace, user, counterparty_user_id}, _from, state) do
+    case do_reject_peace(state, user, counterparty_user_id) do
+      {:ok, new_state} ->
+        broadcast(new_state.world.id, [:vassals_changed])
+        {:reply, :ok, new_state}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -1339,6 +1431,7 @@ defmodule BrokenOaths.Game.WorldServer do
     ticked = apply_oath_strain_drift(ticked)
     ticked = apply_protection_pact_ticks(ticked)
     ticked = apply_bank(ticked)
+    ticked = process_rebellion_endings(ticked)
     {new_state, discovery_events} = apply_discoveries(state, ticked)
 
     case persist_tick(state, new_state) do
@@ -1579,6 +1672,31 @@ defmodule BrokenOaths.Game.WorldServer do
     |> Repo.insert()
   end
 
+  # Story 915: the temporary rebellion army raised at declare-independence
+  # time — same shape as `insert_unit/7` plus the two fields that mark
+  # it disbandable (`Unit`'s own moduledoc, `temporary`/`rebellion_id`).
+  defp insert_temporary_unit!(world_id, player_id, type, tile_id, rebellion_id) do
+    stats = Production.unit_stats(type)
+
+    {:ok, unit} =
+      %Unit{}
+      |> Unit.changeset(%{
+        world_id: world_id,
+        player_id: player_id,
+        type: type,
+        tile_id: tile_id,
+        hp: stats.hp,
+        max_hp: stats.hp,
+        movement: stats.movement,
+        max_movement: stats.movement,
+        temporary: true,
+        rebellion_id: rebellion_id
+      })
+      |> Repo.insert()
+
+    unit_map(unit)
+  end
+
   defp world_full?(state) do
     match?({:error, :world_full}, Spawner.spawn_player(state.world, taken_region_ids(state)))
   end
@@ -1798,6 +1916,7 @@ defmodule BrokenOaths.Game.WorldServer do
       defender.tile_id not in adjacent_tile_ids -> {:error, :not_adjacent}
       Combat.hostile?(attacker, defender) -> :ok
       protecting_lord_may_strike?(state, attacker, defender) -> :ok
+      rebellion_war?(state, attacker.player_id, defender.player_id) -> :ok
       true -> {:error, :not_hostile}
     end
   end
@@ -2102,13 +2221,44 @@ defmodule BrokenOaths.Game.WorldServer do
            status: :active
          ) do
       nil ->
-        {:ok, _vassalage} =
-          Vassalization.vassalize_changeset(state.world.id, lord_id, vassal_id) |> Repo.insert()
-
+        upsert_vassalage!(state.world.id, lord_id, vassal_id)
         :ok
 
       _existing ->
         :ok
+    end
+  end
+
+  # Story 915/919: `Vassalage`'s own unique index is on `(world_id,
+  # vassal_player_id)` ALONE, not scoped to `status` — "a vassal serves
+  # exactly one lord at a time... a broken/superseded row would need a
+  # DIFFERENT status, not a second active one for the same vassal"
+  # (`20260718090000_create_vassalages.exs`'s own comment). A rebel
+  # whose Vassalage was severed (`:broken`, story 915) and is later
+  # re-vassalized (crushed, story 919, or plain re-siege) reactivates
+  # that SAME row rather than inserting a fresh one that would violate
+  # the index — reset to a clean oath (default tribute/strain, no
+  # carried-over Hidden Agenda) under whichever lord captured them this
+  # time.
+  defp upsert_vassalage!(world_id, lord_player_id, vassal_player_id) do
+    case Repo.get_by(Vassalage, world_id: world_id, vassal_player_id: vassal_player_id) do
+      nil ->
+        {:ok, vassalage} =
+          Vassalization.vassalize_changeset(world_id, lord_player_id, vassal_player_id)
+          |> Repo.insert()
+
+        vassalage
+
+      existing ->
+        Vassalage.changeset(existing, %{
+          lord_player_id: lord_player_id,
+          status: :active,
+          tribute_rate: 0.25,
+          oath_strain: 0,
+          hidden_agenda: nil,
+          contract_terms: %{}
+        })
+        |> Repo.update!()
     end
   end
 
@@ -3065,6 +3215,12 @@ defmodule BrokenOaths.Game.WorldServer do
       movement: unit.movement,
       max_movement: unit.max_movement,
       charges: Map.get(unit, :charges, 3),
+      # Story 915 — see `BrokenOathsSpex.Story915.Criterion7734Spex`'s
+      # own "flagged temporary" read: the sanctioned board-state bridge
+      # (`Fixtures.player_units/2`) needs this on every unit map, not
+      # just the owner's own view, since a temporary rebellion unit's
+      # own flag is public knowledge (it's on the board).
+      temporary: Map.get(unit, :temporary, false),
       order: order
     }
   end
@@ -3501,6 +3657,591 @@ defmodule BrokenOaths.Game.WorldServer do
     |> case do
       nil -> {:error, :not_found}
       levy -> {:ok, levy}
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Rebellion (stories 915/919)
+  # -------------------------------------------------------------------
+
+  # `user`'s own occupied cities under `lord_player_id` right now — the
+  # exact `cities()` list `Resolution.resolve_risings/4`/`city_rises?/4`
+  # need, shared by the preview and the real commit so both ALWAYS
+  # agree (criterion 7732: "no hidden dice roll").
+  defp rebel_occupied_cities(state, vassal_player_id, lord_player_id) do
+    state.cities
+    |> Map.values()
+    |> Enum.filter(
+      &(&1.player_id == vassal_player_id and &1.occupied_by_player_id == lord_player_id)
+    )
+  end
+
+  # Story 915, criterion 7732 — read-only inspection: the SAME
+  # `Resolution.city_rises?/4`/`army_size/1` inputs (the lord's own
+  # Honor, this vassalage's own tribute rate, the world's own seed)
+  # `do_declare_independence/3` commits with below, never live RNG.
+  defp do_independence_preview(state, user, lord_user_id) do
+    with {:ok, vassal_player} <- fetch_player(state, user.id),
+         {:ok, lord_player} <- fetch_player(state, lord_user_id),
+         {:ok, vassalage} <- fetch_vassalage(state, lord_player.id, vassal_player.id) do
+      cities = rebel_occupied_cities(state, vassal_player.id, lord_player.id)
+
+      {risen_ids, _loyal_ids} =
+        Resolution.resolve_risings(
+          lord_player.honor,
+          vassalage.tribute_rate,
+          state.world.seed,
+          cities
+        )
+
+      verdicts = for city <- cities, do: %{city_id: city.id, will_rise?: city.id in risen_ids}
+      army_size = Resolution.army_size(vassalage.oath_strain)
+
+      {:ok, %{cities: verdicts, army_size: army_size}}
+    end
+  end
+
+  # Story 915 — the full commit: severs the Vassalage (`:broken`, so
+  # `apply_tribute/1`'s own `active_vassalages/1` read never finds it
+  # again — "no further tribute transfers"), resolves risings with the
+  # SAME formula the preview already showed, de-occupies + heals every
+  # risen city (its former garrison defecting to the rebel), spawns the
+  # temporary rebellion army flagged `temporary: true`, and creates the
+  # first-class `Rebellion` row. Returns `{:ok, %{rebellion:, message:},
+  # new_state, lord_events}` — `lord_events` is the former lord's own
+  # `{:rebellion_declared, ...}` notification, broadcast by the caller
+  # alongside the ordinary `:vassals_changed`/`:units_changed`/
+  # `:cities_changed` refresh triggers; the rebel's own "game:rebellion"
+  # push is built straight from this same reply by `GameLive.Play`
+  # (no broadcast round-trip needed for the caller's own session).
+  defp do_declare_independence(state, user, lord_user_id) do
+    with {:ok, vassal_player} <- fetch_player(state, user.id),
+         {:ok, lord_player} <- fetch_player(state, lord_user_id),
+         {:ok, vassalage} <- fetch_vassalage(state, lord_player.id, vassal_player.id) do
+      cities = rebel_occupied_cities(state, vassal_player.id, lord_player.id)
+
+      {risen_ids, loyal_ids} =
+        Resolution.resolve_risings(
+          lord_player.honor,
+          vassalage.tribute_rate,
+          state.world.seed,
+          cities
+        )
+
+      army_size = Resolution.army_size(vassalage.oath_strain)
+
+      {:ok, rebellion} =
+        %Rebellion{}
+        |> Rebellion.changeset(%{
+          world_id: state.world.id,
+          rebel_player_id: vassal_player.id,
+          former_lord_player_id: lord_player.id,
+          status: :active,
+          started_turn: state.turn,
+          risen_city_ids: risen_ids,
+          loyal_city_ids: loyal_ids,
+          army_size: army_size
+        })
+        |> Repo.insert()
+
+      {:ok, _severed} = Vassalage.changeset(vassalage, %{status: :broken}) |> Repo.update()
+
+      risen_cities = Enum.filter(cities, &(&1.id in risen_ids))
+
+      {new_cities, new_units} =
+        rise_cities(state.cities, state.units, risen_cities, vassal_player.id, lord_player.id)
+
+      new_units =
+        spawn_rebellion_army(
+          %{state | units: new_units},
+          rebellion,
+          vassal_player.id,
+          risen_cities,
+          army_size
+        )
+
+      new_state = %{state | cities: new_cities, units: new_units}
+
+      lord_user = Users.get_user!(lord_player.user_id)
+      rebel_user = Users.get_user!(vassal_player.user_id)
+
+      lord_events = [
+        {:rebellion_declared, lord_user.id, "#{rebel_user.email} has declared independence!",
+         risen_ids}
+      ]
+
+      {:ok, %{rebellion: rebellion, message: rebellion_message(risen_ids)}, new_state,
+       lord_events}
+    end
+  end
+
+  defp rebellion_message([]), do: "You have declared independence — the war begins."
+  defp rebellion_message(_risen), do: "Your cities rise — a rebellion rallies to your cause!"
+
+  # De-occupies + fully heals every one of `risen_cities` and defects
+  # whichever of `lord_player_id`'s own units still stand on each one's
+  # own tile to `vassal_player_id` — criterion 7733's own "the lord's
+  # garrison stationed there defects". Scoped to the FORMER LORD's own
+  # units only, mirroring `Siege.fallen_garrison/2`'s own "never the
+  # conqueror's" discipline (here: never some unrelated third party's
+  # unit that happens to be passing through). Persisted immediately —
+  # `occupied_by_player_id`/`hp` on the city row, `player_id` on each
+  # defecting unit — since `persist_tick/2`'s own generic unit diff
+  # never tracks a `player_id` change.
+  defp rise_cities(cities, units, risen_cities, vassal_player_id, lord_player_id) do
+    Enum.reduce(risen_cities, {cities, units}, fn city, {cities_acc, units_acc} ->
+      freed_hp = CityDefense.max_hp()
+
+      Repo.update_all(from(c in City, where: c.id == ^city.id),
+        set: [occupied_by_player_id: nil, hp: freed_hp]
+      )
+
+      freed_city = %{city | occupied_by_player_id: nil, hp: freed_hp}
+
+      defecting_ids =
+        units_acc
+        |> Map.values()
+        |> Enum.filter(&(&1.tile_id == city.tile_id and &1.player_id == lord_player_id))
+        |> Enum.map(& &1.id)
+
+      if defecting_ids != [] do
+        Repo.update_all(from(u in Unit, where: u.id in ^defecting_ids),
+          set: [player_id: vassal_player_id]
+        )
+      end
+
+      new_units_acc =
+        Enum.reduce(defecting_ids, units_acc, fn id, acc ->
+          Map.update!(acc, id, &%{&1 | player_id: vassal_player_id})
+        end)
+
+      {Map.put(cities_acc, city.id, freed_city), new_units_acc}
+    end)
+  end
+
+  # Spawns `army_size` real `:warrior` units, owned by the rebel and
+  # flagged `temporary: true`/`rebellion_id:` — on the FIRST risen
+  # city's own tile when one exists, else wherever the rebel's own Lord
+  # (or, failing that, any of their own units) currently stands — a
+  # fully-occupied vassal still has real units on the board even with
+  # zero free cities. Declaring is always available and always raises
+  # SOME token force (`OathStrain.rebellion_army_size/1`'s own
+  # moduledoc); this only ever spawns nothing if the rebel somehow has
+  # no anchor tile at all (never true for a real player, who always
+  # carries at least their own Lord unit).
+  defp spawn_rebellion_army(state, rebellion, vassal_player_id, risen_cities, army_size) do
+    case {army_size, rebellion_spawn_tile(state, vassal_player_id, risen_cities)} do
+      {0, _tile} ->
+        state.units
+
+      {_size, nil} ->
+        state.units
+
+      {size, tile_id} ->
+        Enum.reduce(1..size, state.units, fn _, units_acc ->
+          unit =
+            insert_temporary_unit!(
+              state.world.id,
+              vassal_player_id,
+              :warrior,
+              tile_id,
+              rebellion.id
+            )
+
+          Map.put(units_acc, unit.id, unit)
+        end)
+    end
+  end
+
+  defp rebellion_spawn_tile(_state, _vassal_player_id, [city | _risen_cities]), do: city.tile_id
+
+  defp rebellion_spawn_tile(state, vassal_player_id, []) do
+    units = state.units |> Map.values() |> Enum.filter(&(&1.player_id == vassal_player_id))
+
+    case Enum.find(units, &(&1.type == :lord)) do
+      %{tile_id: tile_id} ->
+        tile_id
+
+      nil ->
+        case units do
+          [%{tile_id: tile_id} | _] -> tile_id
+          [] -> nil
+        end
+    end
+  end
+
+  # `user`'s own active-or-most-recent Rebellion as REBEL — `nil` if
+  # they've never raised one. Reads the SAME settled row forever once a
+  # rebellion ends (`Rebellion.changeset/2`'s own once-only transition
+  # guard).
+  defp rebellion_status(state, user) do
+    case find_player(state, user.id) do
+      nil ->
+        nil
+
+      player ->
+        Rebellion
+        |> where([r], r.world_id == ^state.world.id and r.rebel_player_id == ^player.id)
+        |> order_by([r], desc: r.id)
+        |> limit(1)
+        |> Repo.one()
+        |> case do
+          nil -> nil
+          rebellion -> format_rebellion(state, rebellion)
+        end
+    end
+  end
+
+  # Every Rebellion (active or ended) raised against `user` as the
+  # FORMER LORD, freshest first.
+  defp rebellions_as_lord(state, user) do
+    case find_player(state, user.id) do
+      nil ->
+        []
+
+      player ->
+        Rebellion
+        |> where([r], r.world_id == ^state.world.id and r.former_lord_player_id == ^player.id)
+        |> order_by([r], desc: r.id)
+        |> Repo.all()
+        |> Enum.map(&format_rebellion(state, &1))
+    end
+  end
+
+  defp format_rebellion(state, rebellion) do
+    rebel_player = Map.get(state.players, rebellion.rebel_player_id)
+    lord_player = Map.get(state.players, rebellion.former_lord_player_id)
+    rebel_user = rebel_player && Users.get_user!(rebel_player.user_id)
+    lord_user = lord_player && Users.get_user!(lord_player.user_id)
+
+    %{
+      id: rebellion.id,
+      status: rebellion.status,
+      rebel_user_id: rebel_user && rebel_user.id,
+      rebel_email: rebel_user && rebel_user.email,
+      former_lord_user_id: lord_user && lord_user.id,
+      former_lord_email: lord_user && lord_user.email,
+      started_turn: rebellion.started_turn,
+      army_size: rebellion.army_size,
+      risen_city_ids: rebellion.risen_city_ids,
+      loyal_city_ids: rebellion.loyal_city_ids,
+      peace_outcome: rebellion.peace_outcome,
+      reparations_gold: rebellion.reparations_gold,
+      pending_peace_offer: format_pending_offer(state, rebellion)
+    }
+  end
+
+  # Story 919, criterion 7754 — surfaces a still-pending peace offer
+  # (`nil` while none is open) so either side's own view can render an
+  # Accept/Reject affordance naming who offered what.
+  defp format_pending_offer(state, rebellion) do
+    case Map.get(peace_offers(state), rebellion.id) do
+      nil ->
+        nil
+
+      offer ->
+        offering_player = Map.get(state.players, offer.offered_by_player_id)
+        offering_user = offering_player && Users.get_user!(offering_player.user_id)
+
+        %{
+          offered_by_user_id: offering_user && offering_user.id,
+          offered_by_email: offering_user && offering_user.email,
+          outcome: offer.outcome,
+          reparations_gold: offer.reparations_gold
+        }
+    end
+  end
+
+  # The ONE active Rebellion (if any) between two players, whichever
+  # direction — `validate_attack/4`'s own rebellion-war exception and
+  # the peace offer/accept/reject seam below both key off this same
+  # lookup.
+  defp find_active_rebellion_between(state, player_a_id, player_b_id) do
+    Rebellion
+    |> where([r], r.world_id == ^state.world.id and r.status == :active)
+    |> where(
+      [r],
+      (r.rebel_player_id == ^player_a_id and r.former_lord_player_id == ^player_b_id) or
+        (r.rebel_player_id == ^player_b_id and r.former_lord_player_id == ^player_a_id)
+    )
+    |> Repo.one()
+  end
+
+  # Story 915: the narrow, rebellion-scoped PvP exception `validate_attack/4`
+  # needs — mirrors `protecting_lord_may_strike?/3`'s own technique
+  # (widen the CALLER-side gate, never touch `Combat.hostile?/2` itself).
+  defp rebellion_war?(state, player_a_id, player_b_id)
+       when not is_nil(player_a_id) and not is_nil(player_b_id) do
+    not is_nil(find_active_rebellion_between(state, player_a_id, player_b_id))
+  end
+
+  defp rebellion_war?(_state, _player_a_id, _player_b_id), do: false
+
+  defp peace_offers(state), do: Map.get(state, :peace_offers, %{})
+
+  defp parse_peace_outcome("independence"), do: {:ok, :independence}
+  defp parse_peace_outcome("restored_vassal"), do: {:ok, :restored_vassal}
+
+  defp parse_peace_outcome(outcome) when outcome in [:independence, :restored_vassal],
+    do: {:ok, outcome}
+
+  defp parse_peace_outcome(_other), do: {:error, :invalid_outcome}
+
+  defp do_offer_peace(state, user, counterparty_user_id, outcome, reparations_gold) do
+    with {:ok, offering_player} <- fetch_player(state, user.id),
+         {:ok, counterparty_player} <- fetch_player(state, counterparty_user_id),
+         %Rebellion{} = rebellion <-
+           find_active_rebellion_between(state, offering_player.id, counterparty_player.id),
+         {:ok, outcome_atom} <- parse_peace_outcome(outcome) do
+      offer = %{
+        offered_by_player_id: offering_player.id,
+        outcome: outcome_atom,
+        reparations_gold: reparations_gold
+      }
+
+      new_state = Map.put(state, :peace_offers, Map.put(peace_offers(state), rebellion.id, offer))
+      {:ok, new_state}
+    else
+      nil -> {:error, :no_active_rebellion}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp do_accept_peace(state, user, counterparty_user_id) do
+    with {:ok, accepting_player} <- fetch_player(state, user.id),
+         {:ok, offering_player} <- fetch_player(state, counterparty_user_id),
+         %Rebellion{} = rebellion <-
+           find_active_rebellion_between(state, accepting_player.id, offering_player.id),
+         offering_player_id = offering_player.id,
+         %{offered_by_player_id: ^offering_player_id} = offer <-
+           Map.get(peace_offers(state), rebellion.id) do
+      new_state =
+        state
+        |> apply_peace_resolution(
+          rebellion,
+          offer.outcome,
+          offer.reparations_gold,
+          offering_player.id,
+          accepting_player.id
+        )
+        |> then(&Map.put(&1, :peace_offers, Map.delete(peace_offers(&1), rebellion.id)))
+
+      {:ok, new_state}
+    else
+      nil -> {:error, :no_pending_offer}
+      %{} -> {:error, :no_pending_offer}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp do_reject_peace(state, user, counterparty_user_id) do
+    with {:ok, rejecting_player} <- fetch_player(state, user.id),
+         {:ok, offering_player} <- fetch_player(state, counterparty_user_id),
+         %Rebellion{} = rebellion <-
+           find_active_rebellion_between(state, rejecting_player.id, offering_player.id) do
+      new_state = Map.put(state, :peace_offers, Map.delete(peace_offers(state), rebellion.id))
+      {:ok, new_state}
+    else
+      nil -> {:error, :no_active_rebellion}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Story 919, criterion 7754 — "nobody loses cities in a peace": frees
+  # AND fully heals every one of the rebel's own cities, risen or
+  # loyal, regardless of `outcome`. Reparations (optional) move from
+  # whoever ACCEPTED to whoever OFFERED — the offering side proposed
+  # (and, per the design, is compensated for) the terms.
+  defp apply_peace_resolution(
+         state,
+         rebellion,
+         outcome,
+         reparations_gold,
+         offering_player_id,
+         accepting_player_id
+       ) do
+    {:ok, ended} = Resolution.resolve_peace(rebellion, outcome, reparations_gold) |> Repo.update()
+
+    state =
+      state
+      |> free_rebel_cities(ended)
+      |> disband_temporary_army(ended.id)
+      |> transfer_reparations(accepting_player_id, offering_player_id, reparations_gold)
+
+    if outcome == :restored_vassal do
+      maybe_revassalize(state, ended.former_lord_player_id, ended.rebel_player_id)
+    end
+
+    state
+  end
+
+  # Story 919 — the turn-boundary lifecycle sweep: every ACTIVE
+  # rebellion in this world settles into EXACTLY ONE ended status the
+  # moment its own end condition reads true (`Rebellion.changeset/2`'s
+  # own once-only transition guard makes a repeat call to either
+  # `Resolution.win_independence/1`/`crush/1` a no-op error this
+  # function never triggers a second time — see `process_rebellion_
+  # ending/2`'s own `status: :active` scope). A no-op while `Game.
+  # feudal_enabled?/0` reads `false`, same belt-and-suspenders status
+  # every other feudal tick phase already carries. Also run immediately
+  # after an ordinary `queue_move` resolves (see that handler's own
+  # call site) — a rebel's last free city can fall to an adjacent march
+  # that itself never needed a fresh tick boundary to land.
+  defp process_rebellion_endings(state, trigger \\ :tick) do
+    if Game.feudal_enabled?() do
+      Rebellion
+      |> where([r], r.world_id == ^state.world.id and r.status == :active)
+      |> Repo.all()
+      |> Enum.reduce(state, &process_rebellion_ending(&2, &1, trigger))
+    else
+      state
+    end
+  end
+
+  # `trigger` distinguishes an ordinary quiet turn boundary (`:tick`,
+  # `run_tick/1`'s own call site) from an actual player move (`:move`,
+  # `do_queue_move`'s own call site): `crushed?/2` and `independence_won?/3`
+  # are both SAFE to check on either — neither can ever read true off a
+  # mere tick with nothing new having happened (both require an actual
+  # city-occupation change or elapsed-turn count, never a side effect of
+  # checking itself). `rebel_defeated?/2`, by contrast, would otherwise
+  # read true on the VERY FIRST quiet tick for a rebel whose cities
+  # never rose at all (see `Resolution.rebel_defeated?/2`'s own
+  # moduledoc) — indistinguishable from criterion 7731's own "one quiet
+  # turn boundary, still at war" expectation unless it's scoped to an
+  # actual move (a real siege attempt, however it resolves) instead.
+  defp process_rebellion_ending(state, rebellion, trigger) do
+    cities = Map.values(state.cities)
+
+    cond do
+      Resolution.independence_won?(rebellion, cities, state.turn) ->
+        end_rebellion_independence_won(state, rebellion)
+
+      Resolution.crushed?(rebellion, cities) ->
+        end_rebellion_crushed(state, rebellion)
+
+      trigger == :move and Resolution.rebel_defeated?(rebellion, cities) ->
+        end_rebellion_crushed(state, rebellion)
+
+      true ->
+        state
+    end
+  end
+
+  # Story 919, criterion 7752 — "the severed oath becomes permanent and
+  # the rebel is free": nothing further happens to the rebel's own
+  # cities here (a risen city is already free; a loyal one the former
+  # lord never lost stays theirs — "no separate reconquest mechanic",
+  # criterion 7736). Only the temporary army disbands and the war state
+  # clears.
+  defp end_rebellion_independence_won(state, rebellion) do
+    {:ok, ended} = Resolution.win_independence(rebellion) |> Repo.update()
+
+    state = disband_temporary_army(state, ended.id)
+
+    broadcast(state.world.id, [:vassals_changed, :units_changed])
+
+    state
+  end
+
+  # Story 919, criterion 7753 — "the normal siege and vassalization
+  # rules apply to the losing rebel, including being re-vassalized on
+  # the loss of their last city": reuses the SAME real vassalization
+  # write + `"game:vassalized"`/`"game:new_vassal"` notifications story
+  # 906/907 already ship (`maybe_revassalize/3`), rather than a second,
+  # parallel re-vassalization path — a rebel who's ALREADY back under
+  # an active Vassalage (the ordinary siege pipeline beat this sweep to
+  # it) is left untouched.
+  defp end_rebellion_crushed(state, rebellion) do
+    {:ok, ended} = Resolution.crush(rebellion) |> Repo.update()
+
+    state = disband_temporary_army(state, ended.id)
+
+    maybe_revassalize(state, ended.former_lord_player_id, ended.rebel_player_id)
+
+    broadcast(state.world.id, [:vassals_changed, :units_changed])
+
+    state
+  end
+
+  # Frees AND fully heals every one of `rebellion`'s own rebel-owned
+  # cities — both `risen_city_ids` (already free, this is a no-op for
+  # them) and `loyal_city_ids` (still occupied by the former lord) —
+  # `apply_peace_resolution/5`'s own "nobody loses cities" contract.
+  defp free_rebel_cities(state, rebellion) do
+    city_ids = rebellion.risen_city_ids ++ rebellion.loyal_city_ids
+    freed_hp = CityDefense.max_hp()
+
+    if city_ids != [] do
+      Repo.update_all(from(c in City, where: c.id in ^city_ids),
+        set: [occupied_by_player_id: nil, hp: freed_hp]
+      )
+    end
+
+    new_cities =
+      Enum.reduce(city_ids, state.cities, fn id, acc ->
+        case Map.get(acc, id) do
+          nil -> acc
+          city -> Map.put(acc, id, %{city | occupied_by_player_id: nil, hp: freed_hp})
+        end
+      end)
+
+    %{state | cities: new_cities}
+  end
+
+  # Removes every unit `rebellion_id`-tagged to `rebellion_id` — the
+  # temporary rebellion army, exactly once, the moment the war ends
+  # (any status). Idempotent: a rebellion with no remaining temporary
+  # units (already disbanded) simply deletes nothing.
+  defp disband_temporary_army(state, rebellion_id) do
+    Repo.delete_all(from(u in Unit, where: u.rebellion_id == ^rebellion_id))
+
+    new_units =
+      state.units
+      |> Enum.reject(fn {_id, unit} -> Map.get(unit, :rebellion_id) == rebellion_id end)
+      |> Map.new()
+
+    %{state | units: new_units}
+  end
+
+  defp transfer_reparations(state, _from_player_id, _to_player_id, nil), do: state
+  defp transfer_reparations(state, _from_player_id, _to_player_id, 0), do: state
+
+  defp transfer_reparations(state, from_player_id, to_player_id, amount) do
+    Repo.update_all(from(p in Player, where: p.id == ^from_player_id), inc: [gold: -amount])
+    Repo.update_all(from(p in Player, where: p.id == ^to_player_id), inc: [gold: amount])
+
+    state =
+      put_in(state.players[from_player_id].gold, state.players[from_player_id].gold - amount)
+
+    put_in(state.players[to_player_id].gold, state.players[to_player_id].gold + amount)
+  end
+
+  # Re-vassalizes `vassal_player_id` under `lord_player_id` via the
+  # SAME real `Vassalization.vassalize_changeset/3` write + `"game:
+  # vassalized"`/`"game:new_vassal"` notifications story 906/907 already
+  # ship — a no-op (no double row, no duplicate notification) if an
+  # active Vassalage between the two already exists (the ordinary siege
+  # pipeline may have already re-created it in the same pass).
+  defp maybe_revassalize(state, lord_player_id, vassal_player_id) do
+    case Repo.get_by(Vassalage,
+           world_id: state.world.id,
+           vassal_player_id: vassal_player_id,
+           status: :active
+         ) do
+      nil ->
+        upsert_vassalage!(state.world.id, lord_player_id, vassal_player_id)
+
+        broadcast(
+          state.world.id,
+          vassalization_broadcast(state, %{
+            captor_player_id: lord_player_id,
+            defeated_player_id: vassal_player_id
+          })
+        )
+
+      _existing ->
+        :ok
     end
   end
 
@@ -4687,7 +5428,9 @@ defmodule BrokenOaths.Game.WorldServer do
       max_hp: u.max_hp,
       movement: u.movement,
       max_movement: u.max_movement,
-      charges: u.charges
+      charges: u.charges,
+      temporary: u.temporary,
+      rebellion_id: u.rebellion_id
     }
   end
 

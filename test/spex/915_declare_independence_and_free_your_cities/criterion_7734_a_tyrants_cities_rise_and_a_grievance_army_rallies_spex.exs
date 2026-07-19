@@ -61,7 +61,24 @@ defmodule BrokenOathsSpex.Story915.Criterion7734Spex do
 
   spex "a tyrant's cities rise and a grievance army rallies", fail_on_error_logs: false do
     scenario "declaring independence against a dishonorable, heavy-taxing lord rises both cities, spawns a temporary army, and shows the results banner" do
-      given_(:a_world)
+      # QA precedent (see e.g. story 908/913/914's own third-player
+      # criteria): the plain `:a_world` given (freq 8) only has TWO
+      # spawnable regions — not enough room for the THIRD real player
+      # this criterion's own `lord_executes_a_throwaway_garrison/1`
+      # needs, so this substitutes the same `frequency: 9` (>= 3
+      # spawnable regions) those other criteria already use for
+      # exactly that reason. `seed: 17` is this criterion's own
+      # additional pick, verified against `Resolution.city_resistance/2`
+      # (a stable, deterministic function of seed + tile id, never live
+      # RNG — see that module's own moduledoc): the SAME dishonor/
+      # tribute this scenario's own given_ steps produce (Honor 98,
+      # 40% tribute -> tyranny score 21) clears BOTH of Wes's two real
+      # city tiles' own resistance under this seed, matching "both
+      # cities rise" — any seed with >= 3 spawnable regions works
+      # mechanically; this ONE additionally satisfies that outcome.
+      given_ "a world with room for three players", context do
+        {:ok, Map.put(context, :world, Fixtures.world_fixture(%{seed: 17, frequency: 9}))}
+      end
       given_(:registered_player)
       given_(:second_registered_player)
       given_(:third_registered_player)

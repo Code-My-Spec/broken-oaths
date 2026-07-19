@@ -348,7 +348,11 @@ defmodule BrokenOaths.Game.RebellionTest do
 
   describe "independence_hold_turns/0" do
     test "is a positive, named constant" do
-      assert Resolution.independence_hold_turns() == 5
+      # Reconciled to N = 10 against the story-919 spex's own
+      # hard-coded placeholder (`Criterion7752Spex`'s own `@hold_turns
+      # 10`) during the WorldServer/LiveView wiring pass — see
+      # `Resolution`'s own moduledoc.
+      assert Resolution.independence_hold_turns() == 10
     end
   end
 

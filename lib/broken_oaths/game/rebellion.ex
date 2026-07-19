@@ -309,13 +309,12 @@ defmodule BrokenOaths.Game.Rebellion.Resolution do
       nothing cannot win by merely waiting (see `crushed?/2`'s own
       note above for the same "empty risen list" carve-out).
 
-  `independence_hold_turns/0` (`N = 5`) is an explicit, still-OPEN
-  balancing placeholder — the design doc's own "Three Amigos" note lists
-  "the 'hold for N turns' threshold" as unresolved, and this component
-  picks its own concrete number purely so the predicate above is
-  computable today. A future integration (or the story-919 spex, which
-  independently picked their own placeholder `10`) is free to move this
-  constant; nothing else in this module depends on its exact value.
+  `independence_hold_turns/0` (`N = 10`) is reconciled against the
+  story-919 spex's own hard-coded placeholder (`Criterion7752Spex`'s
+  own `@hold_turns 10`) — the design doc's own "Three Amigos" note
+  lists "the 'hold for N turns' threshold" as unresolved, so this is a
+  balancing pass, not a locked design value; nothing else in this
+  module depends on its exact value.
 
   ## Status transitions
 
@@ -446,13 +445,21 @@ defmodule BrokenOaths.Game.Rebellion.Resolution do
   # End conditions (919)
   # -------------------------------------------------------------------
 
-  @independence_hold_turns 5
+  # Reconciled against the story-919 spex's own hard-coded placeholder
+  # (`BrokenOathsSpex.Story919.Criterion7752Spex`'s own `@hold_turns
+  # 10`, `Criterion7755Spex`'s own `@hold_turns 20` — both fixed turn
+  # counts, not a bounded convergence loop, so this constant is the one
+  # that moves per this module's own moduledoc: "a future integration
+  # ... is free to move this constant"). `N = 10`, not the original `5`
+  # placeholder.
+  @independence_hold_turns 10
 
   @doc """
   The number of consecutive turns (from the rebellion's own
   `started_turn`) a rebel must hold every one of their risen cities,
-  uncontested, to win independence outright. An explicitly OPEN
-  balancing placeholder (`N = 5`) — see this module's own moduledoc.
+  uncontested, to win independence outright. Reconciled to `N = 10`
+  against the story-919 spex's own hard-coded placeholder — see this
+  module's own moduledoc.
   """
   @spec independence_hold_turns() :: pos_integer()
   def independence_hold_turns, do: @independence_hold_turns

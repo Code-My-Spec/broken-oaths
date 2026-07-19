@@ -54,6 +54,8 @@ defmodule BrokenOathsSpex.Story915.Criterion7736Spex do
 
   import BrokenOathsSpex.SharedGivens
 
+  alias BrokenOathsSpex.Fixtures
+
   defp verdict(view, city_id) do
     cond do
       has_element?(view, "[data-test='rise-preview-city-#{city_id}']", "will rise") ->
@@ -70,7 +72,15 @@ defmodule BrokenOathsSpex.Story915.Criterion7736Spex do
   spex "cities that stay loyal must be taken by siege, and the lord is notified",
     fail_on_error_logs: false do
     scenario "loyal cities remain occupied and siege-only, and Mira is notified naming which cities rose" do
-      given_(:a_world)
+      # QA precedent (see e.g. story 908/913/914's own third-player
+      # criteria): the plain `:a_world` given (freq 8) only has TWO
+      # spawnable regions — not enough room for the THIRD real player
+      # this criterion's own `lord_executes_a_throwaway_garrison/1`
+      # needs. Same `seed: 1, frequency: 9` substitute those other
+      # criteria already use for exactly this reason.
+      given_ "a world with room for three players", context do
+        {:ok, Map.put(context, :world, Fixtures.world_fixture(%{seed: 1, frequency: 9}))}
+      end
       given_(:registered_player)
       given_(:second_registered_player)
       given_(:third_registered_player)

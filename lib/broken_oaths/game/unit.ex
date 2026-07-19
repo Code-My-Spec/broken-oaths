@@ -64,9 +64,12 @@ defmodule BrokenOaths.Game.Unit do
           world_id: integer() | nil,
           player_id: integer() | nil,
           camp_id: integer() | nil,
+          temporary: boolean(),
+          rebellion_id: integer() | nil,
           world: World.t() | Ecto.Association.NotLoaded.t(),
           player: Player.t() | Ecto.Association.NotLoaded.t() | nil,
           camp: Camp.t() | Ecto.Association.NotLoaded.t() | nil,
+          rebellion: BrokenOaths.Game.Rebellion.t() | Ecto.Association.NotLoaded.t() | nil,
           inserted_at: NaiveDateTime.t() | nil,
           updated_at: NaiveDateTime.t() | nil
         }
@@ -82,9 +85,15 @@ defmodule BrokenOaths.Game.Unit do
     field :max_movement, :integer
     field :charges, :integer, default: 3
 
+    # Story 915: flags a unit as part of a temporary rebellion army
+    # (spawned by `BrokenOaths.Game.Rebellion.Resolution.army_size/1`
+    # at declare-independence time) — see this schema's own moduledoc.
+    field :temporary, :boolean, default: false
+
     belongs_to :world, World
     belongs_to :player, Player
     belongs_to :camp, Camp
+    belongs_to :rebellion, BrokenOaths.Game.Rebellion
 
     timestamps()
   end
@@ -102,7 +111,9 @@ defmodule BrokenOaths.Game.Unit do
       :max_hp,
       :movement,
       :max_movement,
-      :charges
+      :charges,
+      :temporary,
+      :rebellion_id
     ])
     |> validate_required([
       :world_id,
@@ -124,6 +135,7 @@ defmodule BrokenOaths.Game.Unit do
     |> assoc_constraint(:world)
     |> assoc_constraint(:player)
     |> assoc_constraint(:camp)
+    |> assoc_constraint(:rebellion)
   end
 
   defp validate_hp_within_max(changeset) do

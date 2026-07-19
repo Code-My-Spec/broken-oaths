@@ -260,6 +260,18 @@ defmodule BrokenOathsWeb.GameLive.Play do
             # `:vassals_changed`/`:new_vassal`/`:vassalized` broadcasts.
             vassals: Game.vassals(world, user),
             vassal_status: Game.vassal_status(world, user),
+            # Stories 915/919: the rebel's own active-or-most-recent
+            # Rebellion, every Rebellion raised against this player as
+            # the FORMER LORD, and the read-only independence preview
+            # (`nil` until `"open_independence_preview"` fires — see
+            # that event's own doc). `declare_independence_lord_user_id`
+            # is the two-step confirm's own transient UI flag (story
+            # 915's own "confirming warning" step) — never persisted,
+            # cleared the moment the flow commits or is cancelled.
+            rebellion_status: Game.rebellion_status(world, user),
+            rebellions_as_lord: Game.rebellions_as_lord(world, user),
+            independence_preview: nil,
+            declare_independence_lord_user_id: nil,
             # Story 909: cleared the next time either `"collect_bank"`/
             # `"upgrade_bank"` succeeds — same transient-error status
             # `city_error`/`order_error`/`combat_error`/`improvement_error`
@@ -854,6 +866,92 @@ defmodule BrokenOathsWeb.GameLive.Play do
   end
 
   # -------------------------------------------------------------------
+  # Rebellion (stories 915/919)
+  # -------------------------------------------------------------------
+
+  # Story 915, criterion 7732 — read-only inspection: computes (never
+  # commits) which of `lord_user_id`'s occupied cities would rise and
+  # the predicted temporary army size, using the SAME formula
+  # `"confirm_declare_independence"` below commits with. Opening the
+  # preview alone changes nothing — no `Game` write happens here.
+  def handle_event("open_independence_preview", %{"lord_user_id" => lord_user_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    preview =
+      case Game.independence_preview(world, user, parse_id(lord_user_id)) do
+        {:ok, result} -> result
+        {:error, _reason} -> nil
+      end
+
+    {:noreply, assign(socket, independence_preview: preview)}
+  end
+
+  # Story 915 — step one of the two-step confirm: raises the confirming
+  # warning, commits nothing (mirrors story 902/903's own
+  # `"select_research"`/`"bronze_working_confirm"` pattern).
+  def handle_event("declare_independence", %{"lord_user_id" => lord_user_id}, socket) do
+    {:noreply, assign(socket, declare_independence_lord_user_id: parse_id(lord_user_id))}
+  end
+
+  # Story 919's own convenience entry point: fired with NO params — "a
+  # player has at most one lord, so no target disambiguation is
+  # needed" (mirrors `"answer_levy"`/`"refuse_levy"`). Commits
+  # IMMEDIATELY, skipping the two-step warning above — there is no
+  # separate preview open to bypass when this is invoked directly.
+  def handle_event("declare_independence", %{}, socket) do
+    case socket.assigns.vassal_status do
+      %{lord_user_id: lord_user_id} -> do_confirm_declare_independence(socket, lord_user_id)
+      _no_lord -> {:noreply, socket}
+    end
+  end
+
+  # Story 915 — step two: actually severs the oath, resolves risings,
+  # spawns the temporary army, and opens the war.
+  def handle_event("confirm_declare_independence", %{"lord_user_id" => lord_user_id}, socket) do
+    do_confirm_declare_independence(socket, parse_id(lord_user_id))
+  end
+
+  def handle_event("declare_independence_cancel", _params, socket) do
+    {:noreply, assign(socket, declare_independence_lord_user_id: nil)}
+  end
+
+  # Story 919, criterion 7754 — either side offers a negotiated peace.
+  # `"outcome"` is `"independence"` or `"restored_vassal"`;
+  # `"reparations_gold"` is optional (blank/missing reads as no
+  # reparations).
+  def handle_event(
+        "offer_peace",
+        %{"counterparty_user_id" => counterparty_user_id, "outcome" => outcome} = params,
+        socket
+      ) do
+    %{world: world, user: user} = socket.assigns
+    reparations_gold = parse_optional_int(Map.get(params, "reparations_gold"))
+
+    case Game.offer_peace(world, user, parse_id(counterparty_user_id), outcome, reparations_gold) do
+      :ok -> {:noreply, refresh_rebellions(socket)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("accept_peace", %{"counterparty_user_id" => counterparty_user_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.accept_peace(world, user, parse_id(counterparty_user_id)) do
+      :ok -> {:noreply, socket |> refresh_vassalage() |> refresh_rebellions() |> refresh_board()}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("reject_peace", %{"counterparty_user_id" => counterparty_user_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.reject_peace(world, user, parse_id(counterparty_user_id)) do
+      :ok -> {:noreply, refresh_rebellions(socket)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  # -------------------------------------------------------------------
   # Gold Bank (story 909)
   # -------------------------------------------------------------------
 
@@ -1309,14 +1407,36 @@ defmodule BrokenOathsWeb.GameLive.Play do
     end
   end
 
+  # Story 915, criterion 7736: the FORMER LORD's own notification the
+  # moment a vassal declares independence — names the rebel and lists
+  # exactly which cities the SAME deterministic formula the rebel's own
+  # preview already showed marked will-rise.
+  def handle_info({:rebellion_declared, user_id, message, risen_city_ids}, socket) do
+    if user_id == socket.assigns.user.id do
+      socket =
+        socket
+        |> refresh_rebellions()
+        |> push_event("game:rebellion_declared", %{
+          message: message,
+          risen_city_ids: risen_city_ids
+        })
+
+      {:noreply, socket}
+    else
+      {:noreply, socket}
+    end
+  end
+
   # Story 908: every OTHER Vassalage/Levy mutation (a raised tribute
   # rate, an issued/answered/refused call to arms) broadcasts this
   # world-wide — every connected view re-pulls both its own
   # `:vassals`/`:vassal_status` reads, the same "every connected view
   # re-pulls its own state" pattern `:cities_changed`/`:research_changed`
-  # already establish.
+  # already establish. Stories 915/919 ride this SAME broadcast for
+  # every Rebellion mutation too, so `:rebellion_status`/`:rebellions_
+  # as_lord` are refreshed right alongside.
   def handle_info(:vassals_changed, socket) do
-    {:noreply, refresh_vassalage(socket)}
+    {:noreply, socket |> refresh_vassalage() |> refresh_rebellions()}
   end
 
   # -------------------------------------------------------------------
@@ -1829,6 +1949,46 @@ defmodule BrokenOathsWeb.GameLive.Play do
     )
   end
 
+  # Stories 915/919: single source of truth for `:rebellion_status`/
+  # `:rebellions_as_lord` — re-pulled inline by every command that can
+  # change either and by the `:vassals_changed` broadcast every
+  # Rebellion mutation already rides alongside.
+  defp refresh_rebellions(socket) do
+    %{world: world, user: user} = socket.assigns
+
+    assign(socket,
+      rebellion_status: Game.rebellion_status(world, user),
+      rebellions_as_lord: Game.rebellions_as_lord(world, user)
+    )
+  end
+
+  # Story 915 — the shared commit path both `"declare_independence"`
+  # (no-params convenience) and `"confirm_declare_independence"` (the
+  # two-step flow's own second half) land on: the rebel's own
+  # `"game:rebellion"` results banner is pushed straight from the
+  # synchronous reply here — no PubSub round-trip needed for the
+  # caller's own session, unlike the former lord's own
+  # `"game:rebellion_declared"` notification (`handle_info/2` below).
+  defp do_confirm_declare_independence(socket, lord_user_id) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.declare_independence(world, user, lord_user_id) do
+      {:ok, %{message: message}} ->
+        socket =
+          socket
+          |> assign(declare_independence_lord_user_id: nil, independence_preview: nil)
+          |> refresh_vassalage()
+          |> refresh_rebellions()
+          |> refresh_board()
+          |> push_event("game:rebellion", %{message: message})
+
+        {:noreply, socket}
+
+      {:error, _reason} ->
+        {:noreply, socket}
+    end
+  end
+
   # QA issue bd93cc0a: shared post-action refresh for a production/
   # defend steward command — `refresh_board/1` alone (the "steward_
   # collect_bank" baseline) is no longer enough once `@vassal.steward`/
@@ -1876,6 +2036,19 @@ defmodule BrokenOathsWeb.GameLive.Play do
   end
 
   defp parse_fraction(fraction) when is_number(fraction), do: fraction
+
+  # Story 919 — `"reparations_gold"`'s own optional scale: blank/missing
+  # reads as no reparations at all, never a crash on an empty string.
+  defp parse_optional_int(nil), do: nil
+  defp parse_optional_int(""), do: nil
+  defp parse_optional_int(value) when is_integer(value), do: value
+
+  defp parse_optional_int(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {int, _rest} -> int
+      :error -> nil
+    end
+  end
 
   defp tribute_rate_label(rate), do: "#{round(rate * 100)}%"
 
@@ -2231,6 +2404,22 @@ defmodule BrokenOathsWeb.GameLive.Play do
              anchor). --%>
         <.vassals_panel :if={@vassals != []} vassals={@vassals} known_players={@known_players} />
 
+        <%!-- Stories 915/919 — every Rebellion (active or ended) raised
+             against this player as the FORMER LORD: the "at war" badge
+             (only while still active) plus the persisted Rebellion
+             panel itself (criterion 7747). --%>
+        <div :for={rebellion <- @rebellions_as_lord} class="flex items-center gap-1">
+          <span
+            :if={rebellion.status == :active}
+            class="badge badge-error gap-1"
+            data-test="at-war-with"
+          >
+            <.icon name="hero-fire" class="w-3 h-3" /> At war with {rebellion.rebel_email}
+          </span>
+
+          <.rebellion_panel rebellion={rebellion} viewer_user_id={@user.id} />
+        </div>
+
         <%!-- QA issue ffa66192: the conqueror's own captured-city
              tracker — only mounted while non-empty, same "no element at
              all while there's nothing to show" posture `vassals_panel`
@@ -2274,9 +2463,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
             class="badge badge-error badge-sm"
             data-test="my-protection-call"
           >
-            Under attack — protection requested from {@vassal_status.lord_email}
-            (<span data-test="my-protection-window">{@vassal_status.protection_call.window_remaining}</span>
-            turns left)
+            Under attack — protection requested from {@vassal_status.lord_email} (<span data-test="my-protection-window">{@vassal_status.protection_call.window_remaining}</span> turns left)
           </span>
           <button
             :if={@vassal_status.protection_call}
@@ -2312,6 +2499,86 @@ defmodule BrokenOathsWeb.GameLive.Play do
           >
             Refuse
           </button>
+
+          <%!-- Story 915 — the irreversible choice: step one raises the
+               confirming warning below, commits nothing. --%>
+          <button
+            type="button"
+            phx-click="declare_independence"
+            phx-value-lord_user_id={@vassal_status.lord_user_id}
+            data-test="declare-independence"
+            class="btn btn-xs btn-outline btn-error"
+          >
+            Declare Independence
+          </button>
+        </div>
+
+        <%!-- Story 915 — the confirming warning: a second, explicit
+             click actually severs the oath (`"confirm_declare_
+             independence"`). --%>
+        <div
+          :if={@declare_independence_lord_user_id}
+          class="modal modal-open"
+          data-test="declare-independence-warning"
+        >
+          <div class="modal-box">
+            <h3 class="font-bold text-lg">Declare Independence?</h3>
+            <p class="py-2 opacity-70">
+              This immediately severs your oath and opens a state of war. There is no going back.
+            </p>
+            <div class="modal-action">
+              <button phx-click="declare_independence_cancel" class="btn btn-ghost">Cancel</button>
+              <button
+                type="button"
+                phx-click="confirm_declare_independence"
+                phx-value-lord_user_id={@declare_independence_lord_user_id}
+                class="btn btn-error"
+                data-test="confirm-declare-independence"
+              >
+                Confirm — Declare Independence
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <%!-- Story 915, criterion 7732 — the read-only preview: each
+             occupied city marked will-rise/stays-loyal plus the
+             predicted temporary army size, entirely before the player
+             commits (no hidden dice roll). --%>
+        <div
+          :if={@independence_preview}
+          class="flex items-center gap-1"
+          data-test="independence-preview"
+        >
+          <span
+            :for={city <- @independence_preview.cities}
+            class="badge badge-outline badge-sm"
+            data-test={"rise-preview-city-#{city.city_id}"}
+          >
+            {if city.will_rise?, do: "will rise", else: "stays loyal"}
+          </span>
+          <span class="badge badge-outline gap-1" title="Predicted rebellion army">
+            <.icon name="hero-users" class="w-3 h-3" />
+            <span data-test="rebellion-army-preview">{@independence_preview.army_size}</span>
+          </span>
+        </div>
+
+        <%!-- Stories 915/919 — the rebel's own war state: the "at war"
+             badge (only while the Rebellion is still active) and the
+             persisted, first-class Rebellion panel, any status — the
+             story-919 lifecycle settles it exactly once and this keeps
+             reading that same row. --%>
+        <div :if={@rebellion_status} class="flex items-center gap-1">
+          <span
+            :if={@rebellion_status.status == :active}
+            class="badge badge-error gap-1"
+            data-test="at-war-with"
+          >
+            <.icon name="hero-fire" class="w-3 h-3" />
+            At war with {@rebellion_status.former_lord_email}
+          </span>
+
+          <.rebellion_panel rebellion={@rebellion_status} viewer_user_id={@user.id} />
         </div>
 
         <.live_component
@@ -3424,6 +3691,127 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # Vassalage / Tribute components (stories 906/907/908)
   # -------------------------------------------------------------------
 
+  # -------------------------------------------------------------------
+  # Rebellion components (stories 915/919)
+  # -------------------------------------------------------------------
+
+  # The persisted, first-class Rebellion panel — new judgment call,
+  # criterion 7747: `data-test="rebellion-panel"` wraps every field the
+  # design doc calls for (status, both parties, the start turn, the
+  # spawned army size, and the risen/contested city counts), rendered
+  # identically on BOTH the rebel's own view and the former lord's own.
+  # Story 919 (criterion 7754) grows the negotiated-peace affordance
+  # inline: a pending offer's own Accept/Reject (only for whichever
+  # side did NOT make the offer), or a fresh Offer Peace form while the
+  # war is still active and nothing is pending.
+  attr :rebellion, :map, required: true
+  attr :viewer_user_id, :integer, required: true
+
+  defp rebellion_panel(assigns) do
+    ~H"""
+    <div
+      data-test="rebellion-panel"
+      class="flex flex-col gap-1 text-xs border border-base-300 rounded-box p-2"
+    >
+      <div class="flex items-center justify-between gap-2">
+        <span class="font-semibold">
+          <span data-test="rebellion-rebel">{@rebellion.rebel_email}</span>
+          vs <span data-test="rebellion-former-lord">{@rebellion.former_lord_email}</span>
+        </span>
+        <span class="badge badge-outline badge-sm" data-test="rebellion-status">
+          {@rebellion.status}
+        </span>
+      </div>
+
+      <div class="flex items-center gap-2 opacity-70">
+        <span>Turn <span data-test="rebellion-started-turn">{@rebellion.started_turn}</span></span>
+        <span>Army <span data-test="rebellion-army-size">{@rebellion.army_size}</span></span>
+        <span>
+          Risen <span data-test="rebellion-risen-cities">{length(@rebellion.risen_city_ids)}</span>
+        </span>
+        <span>
+          Contested
+          <span data-test="rebellion-contested-cities">{length(@rebellion.loyal_city_ids)}</span>
+        </span>
+      </div>
+
+      <div
+        :if={@rebellion.pending_peace_offer}
+        class="flex flex-col gap-1"
+        data-test="pending-peace-offer"
+      >
+        <span>
+          {@rebellion.pending_peace_offer.offered_by_email} offers peace: {peace_outcome_label(
+            @rebellion.pending_peace_offer.outcome
+          )}
+          <span :if={@rebellion.pending_peace_offer.reparations_gold}>
+            ({@rebellion.pending_peace_offer.reparations_gold} gold reparations)
+          </span>
+        </span>
+        <div
+          :if={@rebellion.pending_peace_offer.offered_by_user_id != @viewer_user_id}
+          class="flex gap-1"
+        >
+          <button
+            type="button"
+            phx-click="accept_peace"
+            phx-value-counterparty_user_id={@rebellion.pending_peace_offer.offered_by_user_id}
+            data-test="accept-peace"
+            class="btn btn-xs btn-primary"
+          >
+            Accept
+          </button>
+          <button
+            type="button"
+            phx-click="reject_peace"
+            phx-value-counterparty_user_id={@rebellion.pending_peace_offer.offered_by_user_id}
+            data-test="reject-peace"
+            class="btn btn-xs btn-outline"
+          >
+            Reject
+          </button>
+        </div>
+      </div>
+
+      <form
+        :if={@rebellion.status == :active and is_nil(@rebellion.pending_peace_offer)}
+        phx-submit="offer_peace"
+        class="flex items-center gap-1"
+        data-test={"offer-peace-form-#{@rebellion.id}"}
+      >
+        <input
+          type="hidden"
+          name="counterparty_user_id"
+          value={rebellion_counterparty_user_id(@rebellion, @viewer_user_id)}
+        />
+        <select name="outcome" class="select select-xs">
+          <option value="independence">Grant independence</option>
+          <option value="restored_vassal">Restore as vassal</option>
+        </select>
+        <input
+          type="number"
+          name="reparations_gold"
+          min="0"
+          placeholder="gold"
+          class="input input-xs w-16"
+        />
+        <button type="submit" data-test="offer-peace" class="btn btn-xs btn-outline">
+          Offer Peace
+        </button>
+      </form>
+    </div>
+    """
+  end
+
+  defp rebellion_counterparty_user_id(rebellion, viewer_user_id) do
+    if viewer_user_id == rebellion.rebel_user_id,
+      do: rebellion.former_lord_user_id,
+      else: rebellion.rebel_user_id
+  end
+
+  defp peace_outcome_label(:independence), do: "full independence"
+  defp peace_outcome_label(:restored_vassal), do: "restored vassalage"
+
   # The lord's own "Vassals" list — a dropdown so it never crowds the
   # top bar; only mounted at all while `@vassals` is non-empty
   # (`BrokenOathsSpex.Story907.Criterion7667Spex`'s own anchor: no
@@ -3494,7 +3882,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
            a real, renderable "0", not an absent element), same posture
            `oath-strain-drivers` above already takes. --%>
       <div class="text-xs opacity-50">
-        Protection honored: <span data-test="protection-honored-count">{@vassal.protection_honored_count}</span>
+        Protection honored:
+        <span data-test="protection-honored-count">{@vassal.protection_honored_count}</span>
       </div>
 
       <div class="flex items-center gap-1">
