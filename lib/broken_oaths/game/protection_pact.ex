@@ -5,18 +5,29 @@ defmodule BrokenOaths.Game.ProtectionPact do
   (`.code_my_spec/knowledge/feudal_vassalage_design.md`, "Rebellion
   batch — LOCKED model": "the lord's binding duty to defend a vassal
   under attack. Failing = a public Honor hit + an Oath Strain spike;
-  honoring builds Honor + eases strain."). A PURE module, deliberately
-  — mirrors `BrokenOaths.Game.OathStrain`'s/`BrokenOaths.Game.Siege`'s
-  own "no `Repo`, no process state" role: every function here takes
-  plain values (a `call()`, a `BrokenOaths.Game.OathStrain.strain()`,
-  an integer Honor reading) and returns new ones. The imperative shell
-  — `BrokenOaths.Game.WorldServer` raising a real call the moment a
-  real attack lands on a vassal, ticking it every turn boundary
-  alongside `BrokenOaths.Game.Turn`'s own pipeline, and persisting the
-  `BrokenOaths.Game.Vassalage.oath_strain` / `BrokenOaths.Game.Player.honor`
-  results this module computes — is explicitly OUT OF SCOPE for this
-  task (a separate, coordinated wiring pass); this module only owns the
-  decision math the future integration will call.
+  honoring builds Honor + eases strain.").
+
+  ## Two layers in this one module
+
+  The scoring math itself (`raise_call/3`, `tick/1`, `expired?/1`,
+  `score_honored/3`, `score_broken/3`, `spike_contagion/1`) is PURE,
+  deliberately — mirrors `BrokenOaths.Game.OathStrain`'s/`BrokenOaths.
+  Game.Siege`'s own "no `Repo`, no process state" role: every function
+  takes plain values (a `call()`, an `OathStrain.strain()`, an integer
+  Honor reading) and returns new ones.
+
+  The board-application layer below it (`maybe_raise_protection_call/3`,
+  `resolve_protection_call_if_dead/2`, `apply_protection_pact_ticks/1`,
+  `honor_protection_call/3`) is the imperative shell this module's own
+  original moduledoc anticipated as a "separate, coordinated wiring
+  pass" — moved HOME here from `BrokenOaths.Game.WorldServer` per the
+  pragdave-pattern "logic lives with the domain model that owns it"
+  rule (see `.code_my_spec/knowledge/genserver_decomposition.md`).
+  Every function in this layer takes the WorldServer's own tick-`state`
+  (or the relevant substructure) plus plain args and returns either a
+  reply tuple/value or an updated `state` — no `GenServer`, no
+  `handle_*`, no process awareness; `WorldServer`'s own combat/tick
+  call sites are thin delegations into it.
 
   ## No Ecto schema — transient, in-memory tick state
 
@@ -28,22 +39,29 @@ defmodule BrokenOaths.Game.ProtectionPact do
   "typed map, not a struct, not a schema" convention
   `BrokenOaths.Game.CityDefense.city/0` and `BrokenOaths.Game.Siege`
   already use for combat-adjacent entities the `WorldServer` holds in
-  its own tick-state — a future `WorldServer` integration keeps a list
-  of these per world (or per lord), exactly like it already keeps
-  units and cities, with no migration required.
+  its own tick-state (`state.protection_calls`, `state.
+  protection_honored_counts` — both plain, un-initialized-at-boot maps
+  the WorldServer's own accessors default to `%{}`).
 
   ## Lifecycle
 
     * `raise_call/3` — opens a fresh call the moment a real attack
       lands on a vassal's city or units (criterion 7726): captures the
       relationship, the turn it was raised, and the turn it expires
-      (`raised_turn + response_window/0`).
+      (`raised_turn + response_window/0`). Applied by
+      `maybe_raise_protection_call/3` below, the moment a real attack
+      lands on a vassal's city or unit via one of the two real combat
+      surfaces (`WorldServer`'s own `resolve_attack/3`/
+      `resolve_city_attack/2`) — a no-op while a call is ALREADY
+      pending for this vassal, while the attacker IS their own lord, or
+      while `Game.feudal_enabled?/0` reads `false`.
     * `tick/1` — one turn boundary's worth of countdown (criterion
       7727: "counts down by exactly one turn as a boundary passes").
       Only a still-`:pending` call may tick; ticking an already-scored
       call is a caller bug and crashes
       (`.code_my_spec/rules/elixir.md`: "crash the process rather than
-      propagating invalid data").
+      propagating invalid data"). Applied every turn boundary by
+      `apply_protection_pact_ticks/1` below.
     * `expired?/1` — whether the window has fully lapsed with no
       relieving action — the signal the BROKEN branch below hangs off.
     * `score_honored/3` / `score_broken/3` — the two resolution
@@ -58,7 +76,10 @@ defmodule BrokenOaths.Game.ProtectionPact do
   a second, redundant easing constant, `score_honored/3` reuses that
   function directly: one fewer magic number, and a strain reading that
   reflects a real, already-designed relationship. The lord's Honor
-  rises by `honored_honor_gain/0`.
+  rises by `honored_honor_gain/0`. Applied by
+  `resolve_protection_call_if_dead/2` below the moment the tracked
+  besieger dies — whether from the lord's own follow-up strike or the
+  city's own counter-fire — no window-expiry wait needed.
 
   ## BROKEN (criterion 7729) — three separate consequences
 
@@ -78,12 +99,8 @@ defmodule BrokenOaths.Game.ProtectionPact do
       lord's realm takes an Oath Strain spike," but strictly smaller
       than the direct victim's own (`contagion_spike/0 <
       OathStrain.protection_pact_spike/0`, asserted as a relational
-      fact below, never a hardcoded ratio). `score_broken/3` itself
-      only resolves the direct victim + the lord; the caller (a future
-      `WorldServer` integration, iterating every fellow vassalage) maps
-      `spike_contagion/1` over each bystander's own reading — this
-      module never needs to see the whole household roster to decide
-      one relationship's own consequence.
+      fact below, never a hardcoded ratio). Applied once a call's own
+      `expired?/1` reads true (`apply_protection_pact_ticks/1` below).
 
   ## Numbers are a balancing pass, not a blocker
 
@@ -116,7 +133,12 @@ defmodule BrokenOaths.Game.ProtectionPact do
       derived ratio.
   """
 
+  import Ecto.Query
+
+  alias BrokenOaths.Game
   alias BrokenOaths.Game.OathStrain
+  alias BrokenOaths.Game.Vassalage
+  alias BrokenOaths.Repo
 
   @type player_id :: term()
   @type turn :: non_neg_integer()
@@ -254,4 +276,193 @@ defmodule BrokenOaths.Game.ProtectionPact do
   """
   @spec spike_contagion(OathStrain.strain()) :: OathStrain.strain()
   def spike_contagion(strain), do: OathStrain.clamp(strain + @contagion_spike)
+
+  # -------------------------------------------------------------------
+  # Board application — moved home from `WorldServer` (see moduledoc)
+  # -------------------------------------------------------------------
+
+  @doc """
+  Story 914 (criterion 7726): the moment a genuine THIRD PARTY (never
+  the vassal's own lord) lands a real attack on a vassal's city or
+  unit, raises a Protection Pact obligation against their lord — called
+  from the two real attack surfaces `WorldServer`'s own combat already
+  resolves through (`resolve_attack/3`, `resolve_city_attack/2`). A
+  no-op while a call is ALREADY pending for this vassal (one obligation
+  at a time), while the attacker IS their own lord (no self-protection),
+  or while `Game.feudal_enabled?/0` reads `false`.
+  """
+  @spec maybe_raise_protection_call(map(), map(), term() | nil) :: map()
+  def maybe_raise_protection_call(state, _attacker, nil), do: state
+
+  def maybe_raise_protection_call(state, attacker, victim_player_id) do
+    with true <- Game.feudal_enabled?(),
+         %Vassalage{} = vassalage <- active_vassalage_for_vassal(state, victim_player_id),
+         true <- attacker.player_id != vassalage.lord_player_id,
+         nil <- Map.get(protection_calls(state), victim_player_id) do
+      call =
+        vassalage.lord_player_id
+        |> raise_call(victim_player_id, state.turn)
+        |> Map.put(:attacker_unit_id, attacker.id)
+
+      Map.put(state, :protection_calls, Map.put(protection_calls(state), victim_player_id, call))
+    else
+      _ -> state
+    end
+  end
+
+  @doc """
+  The HONORED branch (criteria 7728/7730): the moment the tracked
+  besieger dies — whether from the lord's own follow-up strike or the
+  CITY's own counter-fire in the very same clash that raised the call —
+  the call resolves honored right here, no window-expiry wait needed.
+  Only ever matches a call still tracking THIS exact dead unit's own id.
+  """
+  @spec resolve_protection_call_if_dead(map(), map()) :: map()
+  def resolve_protection_call_if_dead(state, %{hp: 0} = dead_unit) do
+    protection_calls(state)
+    |> Enum.find(fn {_vassal_player_id, call} -> call.attacker_unit_id == dead_unit.id end)
+    |> case do
+      nil -> state
+      {vassal_player_id, call} -> resolve_honored(state, vassal_player_id, call)
+    end
+  end
+
+  def resolve_protection_call_if_dead(state, _unit), do: state
+
+  defp resolve_honored(state, vassal_player_id, call) do
+    {:ok, vassalage} = fetch_vassalage(state, call.lord_player_id, vassal_player_id)
+    lord_honor = state.players[call.lord_player_id].honor
+
+    {_resolved_call, new_strain, new_honor} =
+      score_honored(call, vassalage.oath_strain, lord_honor)
+
+    Vassalage.changeset(vassalage, %{oath_strain: new_strain}) |> Repo.update!()
+
+    state = put_in(state.players[call.lord_player_id].honor, new_honor)
+
+    state
+    |> Map.put(:protection_calls, Map.delete(protection_calls(state), vassal_player_id))
+    |> Map.put(
+      :protection_honored_counts,
+      Map.update(protection_honored_counts(state), vassal_player_id, 1, &(&1 + 1))
+    )
+  end
+
+  defp resolve_broken(state, vassal_player_id, call) do
+    {:ok, vassalage} = fetch_vassalage(state, call.lord_player_id, vassal_player_id)
+    lord_honor = state.players[call.lord_player_id].honor
+
+    {_resolved_call, new_strain, new_honor} =
+      score_broken(call, vassalage.oath_strain, lord_honor)
+
+    Vassalage.changeset(vassalage, %{oath_strain: new_strain}) |> Repo.update!()
+    apply_protection_pact_contagion(state, call.lord_player_id, vassal_player_id)
+
+    state = put_in(state.players[call.lord_player_id].honor, new_honor)
+    Map.put(state, :protection_calls, Map.delete(protection_calls(state), vassal_player_id))
+  end
+
+  # Every OTHER active vassal of `lord_player_id` (never the direct
+  # victim, `victim_vassal_player_id`) takes `spike_contagion/1` —
+  # persisted immediately, side-effect only (the caller's own `state`
+  # is untouched by this).
+  defp apply_protection_pact_contagion(state, lord_player_id, victim_vassal_player_id) do
+    Vassalage
+    |> where(
+      [v],
+      v.world_id == ^state.world.id and v.lord_player_id == ^lord_player_id and
+        v.status == :active and v.vassal_player_id != ^victim_vassal_player_id
+    )
+    |> Repo.all()
+    |> Enum.each(fn vassalage ->
+      new_strain = spike_contagion(vassalage.oath_strain)
+      Vassalage.changeset(vassalage, %{oath_strain: new_strain}) |> Repo.update!()
+    end)
+  end
+
+  @doc """
+  Runs every turn boundary, alongside `BrokenOaths.Game.OathStrain.
+  Ledger.apply_oath_strain_drift/1` — counts every still-pending call
+  down by exactly one (`tick/1`, criterion 7727); an expired, still-
+  unanswered one resolves BROKEN right here (criterion 7729). A no-op
+  while `Game.feudal_enabled?/0` reads `false`.
+  """
+  @spec apply_protection_pact_ticks(map()) :: map()
+  def apply_protection_pact_ticks(state) do
+    if Game.feudal_enabled?() do
+      Enum.reduce(protection_calls(state), state, fn {vassal_player_id, call}, acc ->
+        ticked_call = tick(call)
+
+        if expired?(ticked_call) do
+          resolve_broken(acc, vassal_player_id, ticked_call)
+        else
+          Map.put(
+            acc,
+            :protection_calls,
+            Map.put(protection_calls(acc), vassal_player_id, ticked_call)
+          )
+        end
+      end)
+    else
+      state
+    end
+  end
+
+  @doc """
+  Story 913 (criterion 7722, ProtectionPact's own narrow half): `user`
+  (the lord) honors `vassal_user_id`'s Protection Pact — eases the
+  vassal's Oath Strain by `OathStrain.ease_autonomy/1`. Distinct from
+  the real 914 call/expiry engine above; this handler only ever touches
+  Oath Strain.
+  """
+  @spec honor_protection_call(map(), map(), integer()) :: {:ok, Vassalage.t()} | {:error, atom()}
+  def honor_protection_call(state, user, vassal_user_id) do
+    with {:ok, lord_player} <- fetch_player(state, user.id),
+         {:ok, vassal_player} <- fetch_player(state, vassal_user_id),
+         {:ok, vassalage} <- fetch_vassalage(state, lord_player.id, vassal_player.id) do
+      new_strain = OathStrain.ease_autonomy(vassalage.oath_strain)
+      Vassalage.changeset(vassalage, %{oath_strain: new_strain}) |> Repo.update()
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Shared, trivial lookups — duplicated rather than reaching back into
+  # `WorldServer` (or reaching sideways into `Vassalage`, out of scope
+  # for this slice), matching this module's own "pure, process-unaware,
+  # unit-testable with no GenServer running" contract.
+  # -------------------------------------------------------------------
+
+  defp protection_calls(state), do: Map.get(state, :protection_calls, %{})
+  defp protection_honored_counts(state), do: Map.get(state, :protection_honored_counts, %{})
+
+  defp find_player(state, user_id) do
+    state.players |> Map.values() |> Enum.find(&(&1.user_id == user_id))
+  end
+
+  defp fetch_player(state, user_id) do
+    case find_player(state, user_id) do
+      nil -> {:error, :not_a_player}
+      player -> {:ok, player}
+    end
+  end
+
+  defp active_vassalage_for_vassal(state, vassal_player_id) do
+    Repo.get_by(Vassalage,
+      world_id: state.world.id,
+      vassal_player_id: vassal_player_id,
+      status: :active
+    )
+  end
+
+  defp fetch_vassalage(state, lord_player_id, vassal_player_id) do
+    case Repo.get_by(Vassalage,
+           world_id: state.world.id,
+           lord_player_id: lord_player_id,
+           vassal_player_id: vassal_player_id,
+           status: :active
+         ) do
+      nil -> {:error, :not_a_vassal}
+      vassalage -> {:ok, vassalage}
+    end
+  end
 end
