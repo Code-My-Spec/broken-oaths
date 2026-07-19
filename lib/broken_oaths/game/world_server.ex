@@ -488,6 +488,18 @@ defmodule BrokenOaths.Game.WorldServer do
     {:reply, vassal_status(state, user), state}
   end
 
+  # Story 917: whether `lord_user_id`'s own Lord unit is currently dead
+  # on the board — the "seize the moment" trigger. Read fresh off
+  # `state.units` every call (never cached on a socket assign) since
+  # `"declare_independence"` (`GameLive.Play`) needs this to be
+  # up-to-the-instant accurate even against an ALREADY-connected
+  # socket whose own `vassal_status` assign may not have refreshed yet
+  # (no `:vassals_changed` broadcast fires from the immediate,
+  # out-of-tick combat path that can kill a lord).
+  def handle_call({:lord_fallen?, lord_user_id}, _from, state) do
+    {:reply, lord_fallen?(state, lord_user_id), state}
+  end
+
   # Story 907: the vassal's own secret Hidden Agenda pick, closing the
   # Oath screen — never reaches the lord's own view (`vassals/2` never
   # reads `hidden_agenda` at all).
@@ -1437,7 +1449,9 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   defp run_tick(state) do
-    {ticked, events} = Turn.tick(state)
+    {gated_state, deferred_heirs} = defer_gated_heirs(state)
+    {ticked, events} = Turn.tick(gated_state)
+    ticked = restore_gated_heirs(ticked, deferred_heirs)
     {events, ticked} = materialize_spawns(events, ticked)
     ticked = %{ticked | turn_started_at: DateTime.utc_now()}
     {ticked, capture_events} = apply_captures(ticked)
@@ -1446,6 +1460,7 @@ defmodule BrokenOaths.Game.WorldServer do
     ticked = apply_protection_pact_ticks(ticked)
     ticked = apply_bank(ticked)
     ticked = process_rebellion_endings(ticked)
+    ticked = reconcile_heir_vassals(ticked, events)
     {new_state, discovery_events} = apply_discoveries(state, ticked)
 
     case persist_tick(state, new_state) do
@@ -1468,6 +1483,106 @@ defmodule BrokenOaths.Game.WorldServer do
         # state and resync from the row instead of clobbering it.
         resync(state)
     end
+  end
+
+  # -------------------------------------------------------------------
+  # Heir succession, reconciled with Rebellion (story 917)
+  # -------------------------------------------------------------------
+
+  # Story 917 (criterion 7748) — reconciles story 896's own already-
+  # shipped flat-10-turn heir schedule (`schedule_heir_if_lord_fell/2`,
+  # UNCHANGED — a single scheduling mechanism, never a second competing
+  # timer) with "the heir does not arrive until the LAST active
+  # rebellion against the realm has ended": withholds any `state.
+  # pending_heirs` entry for a player currently facing an ACTIVE
+  # `Rebellion` from `Turn.tick/1`'s own pure "heir succession" phase
+  # entirely (so it can never resolve THIS tick no matter how far past
+  # its own `arrival_turn` the clock has run), then splices it back in,
+  # completely untouched, once `Turn.tick/1` returns (`restore_gated_
+  # heirs/2` below) — the very next tick re-checks from scratch. A
+  # player with NO active rebellion against them (including a lord who
+  # dies with no vassals at all — criterion 7750's own "quiet death")
+  # is never gated at all, so the original flat-10-turn arrival fires
+  # exactly as story 896 shipped it, unmodified.
+  defp defer_gated_heirs(state) do
+    pending = Map.get(state, :pending_heirs, %{})
+
+    {gated, ready} =
+      Enum.split_with(pending, fn {player_id, _arrival_turn} ->
+        active_rebellion_against?(state, player_id)
+      end)
+
+    {%{state | pending_heirs: Map.new(ready)}, Map.new(gated)}
+  end
+
+  defp restore_gated_heirs(ticked, gated) when map_size(gated) == 0, do: ticked
+
+  defp restore_gated_heirs(ticked, gated) do
+    pending = Map.get(ticked, :pending_heirs, %{})
+    %{ticked | pending_heirs: Map.merge(pending, gated)}
+  end
+
+  defp active_rebellion_against?(state, former_lord_player_id) do
+    Rebellion
+    |> where(
+      [r],
+      r.world_id == ^state.world.id and r.former_lord_player_id == ^former_lord_player_id and
+        r.status == :active
+    )
+    |> Repo.exists?()
+  end
+
+  # Story 917 (criterion 7749) — once a gated heir actually resolves
+  # (this tick's own `events`, straight off `Turn.tick/1`, carries the
+  # `{:lineage_continued, user_id, _}` that phase fires the instant it
+  # does), the realm keeps lordship over exactly `Resolution.
+  # heir_retained_vassals/3` — every vassal who did NOT win
+  # independence during the leaderless window. Defensive, not
+  # load-bearing for the common "never rebelled" case: a `Vassalage`
+  # row is keyed on `player_id`, never on the specific Lord UNIT that
+  # died, so it already reads `:active` straight through the whole
+  # death/heir cycle untouched on its own — this only re-asserts that
+  # same intent (a no-op `maybe_revassalize/3` call) for a
+  # `:crushed`/`:peace` rebel whose own re-vassalization write might
+  # not have landed by this exact tick.
+  defp reconcile_heir_vassals(state, events) do
+    for {:lineage_continued, user_id, _message} <- events do
+      reconcile_heir_vassals_for_user(state, user_id)
+    end
+
+    state
+  end
+
+  defp reconcile_heir_vassals_for_user(state, user_id) do
+    case find_player(state, user_id) do
+      nil ->
+        :ok
+
+      lord_player ->
+        vassal_player_ids = historical_vassal_player_ids(state, lord_player.id)
+        rebellions = rebellions_against_player(state, lord_player.id)
+
+        lord_player.id
+        |> Resolution.heir_retained_vassals(vassal_player_ids, rebellions)
+        |> Enum.each(&maybe_revassalize(state, lord_player.id, &1))
+    end
+  end
+
+  defp historical_vassal_player_ids(state, lord_player_id) do
+    Vassalage
+    |> where([v], v.world_id == ^state.world.id and v.lord_player_id == ^lord_player_id)
+    |> select([v], v.vassal_player_id)
+    |> distinct(true)
+    |> Repo.all()
+  end
+
+  defp rebellions_against_player(state, former_lord_player_id) do
+    Rebellion
+    |> where(
+      [r],
+      r.world_id == ^state.world.id and r.former_lord_player_id == ^former_lord_player_id
+    )
+    |> Repo.all()
   end
 
   # Story 899: first-contact detection is evaluated once per turn
@@ -3474,10 +3589,32 @@ defmodule BrokenOaths.Game.WorldServer do
               # Story 914: this vassal's OWN read of their own active
               # Protection Pact call, same `nil | %{window_remaining:}`
               # shape `format_vassal/2` gives the lord.
-              protection_call: protection_call_view(state, player.id)
+              protection_call: protection_call_view(state, player.id),
+              # Story 917: whether THIS lord's own Lord unit is
+              # currently dead — the vassal's own "seize the moment"
+              # trigger (`GameLive.Play`'s own `seize-the-moment-prompt`).
+              lord_fallen?: not lord_unit_alive?(state, lord_player.id)
             }
         end
     end
+  end
+
+  # Story 917: whether `lord_user_id` currently has ANY living Lord
+  # unit on the board — a player with no `Player` row at all (never
+  # joined, or a stale/foreign id) reads as NOT fallen (`false`) rather
+  # than crashing, mirroring every other defensive `find_player/2`
+  # lookup in this module.
+  defp lord_fallen?(state, lord_user_id) do
+    case find_player(state, lord_user_id) do
+      nil -> false
+      lord_player -> not lord_unit_alive?(state, lord_player.id)
+    end
+  end
+
+  defp lord_unit_alive?(state, lord_player_id) do
+    Enum.any?(state.units, fn {_id, unit} ->
+      unit.type == :lord and unit.player_id == lord_player_id
+    end)
   end
 
   # The vassal has exactly one lord at a time, so at most one levy

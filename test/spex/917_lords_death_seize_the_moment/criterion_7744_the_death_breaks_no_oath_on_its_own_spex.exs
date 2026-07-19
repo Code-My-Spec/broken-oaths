@@ -108,7 +108,7 @@ defmodule BrokenOathsSpex.Story917.Criterion7744Spex do
             %{
               user: other_user,
               conn: conn,
-              play_live: vassal_context.play_live,
+              play_live: vassal_context.other_play_live,
               city: vassal_context.other_city,
               my_lord: my_lord
             }

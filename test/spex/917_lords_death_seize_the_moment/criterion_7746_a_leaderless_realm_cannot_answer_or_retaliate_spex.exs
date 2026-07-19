@@ -73,6 +73,24 @@ defmodule BrokenOathsSpex.Story917.Criterion7746Spex do
       given_ "a vassal whose lord's Lord unit has fallen and has not been replaced", context do
         context = a_freshly_subjugated_vassal(context)
 
+        # Guarantees the vassal's own occupied city actually RISES on
+        # declaration (`Resolution.city_rises?/4`'s own tyranny-vs-
+        # resistance formula, story 915) rather than leaving it to
+        # chance — a freshly subjugated vassal's lord otherwise sits at
+        # the untouched, high-Honor/low-tribute defaults
+        # (`criterion_7735`'s own documented "just lord" baseline),
+        # which is the WRONG fixture for a "the risen city" assertion.
+        # Same deterministic honor=0/tribute=100% combo `a_freshly_
+        # subjugated_vassal_of_a_tyrant/1` already establishes
+        # (`Resolution.tyranny_score/2` maxes at 100, clearing every
+        # possible `city_resistance/2` value).
+        :ok = Fixtures.set_player_honor(context.world, context.user, 0)
+
+        render_hook(context.play_live, "set_tribute_rate", %{
+          "vassal_user_id" => to_string(context.other_user.id),
+          "rate" => "100"
+        })
+
         land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
 
         [barbarian_target | _] =

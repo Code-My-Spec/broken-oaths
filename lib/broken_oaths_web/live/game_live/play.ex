@@ -889,8 +889,25 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # Story 915 — step one of the two-step confirm: raises the confirming
   # warning, commits nothing (mirrors story 902/903's own
   # `"select_research"`/`"bronze_working_confirm"` pattern).
+  #
+  # Story 917 — the SAME event, one narrow exception: once the target
+  # lord's own Lord unit is already dead ("seize the moment"), there is
+  # nothing further to warn about — the death itself was the dramatic
+  # beat — so this commits IMMEDIATELY instead, skipping the warning
+  # modal. `Game.lord_fallen?/2` is read fresh here (never off
+  # `socket.assigns.vassal_status`, which can go stale: the immediate,
+  # out-of-tick combat path that can kill a lord never broadcasts
+  # `:vassals_changed` on its own) so an already-connected socket still
+  # gets this right the instant it clicks.
   def handle_event("declare_independence", %{"lord_user_id" => lord_user_id}, socket) do
-    {:noreply, assign(socket, declare_independence_lord_user_id: parse_id(lord_user_id))}
+    %{world: world} = socket.assigns
+    lord_id = parse_id(lord_user_id)
+
+    if Game.lord_fallen?(world, lord_id) do
+      do_confirm_declare_independence(socket, lord_id)
+    else
+      {:noreply, assign(socket, declare_independence_lord_user_id: lord_id)}
+    end
   end
 
   # Story 919's own convenience entry point: fired with NO params — "a
@@ -2429,6 +2446,34 @@ defmodule BrokenOathsWeb.GameLive.Play do
           :if={@captured_cities != []}
           captured_cities={@captured_cities}
         />
+
+        <%!-- Story 917 — a durable, re-mountable "seize the moment"
+             prompt: rendered any time this vassal's own oath is still
+             active AND their lord's own Lord unit is currently dead
+             (`@vassal_status.lord_fallen?`), so it survives a fresh
+             mount/reconnect rather than a fire-once toast a player
+             could simply miss. Nests the SAME `"declare_independence"`
+             action (story 915) directly inside the prompt — clicking
+             it now commits immediately (see that event's own
+             `handle_event/3` doc for why a dead lord skips the
+             two-step confirm). --%>
+        <div
+          :if={@vassal_status && @vassal_status.lord_fallen?}
+          class="alert alert-warning flex items-center gap-2"
+          data-test="seize-the-moment-prompt"
+        >
+          <.icon name="hero-exclamation-triangle" class="w-4 h-4" />
+          <span>Your lord has fallen — seize the moment</span>
+          <button
+            type="button"
+            phx-click="declare_independence"
+            phx-value-lord_user_id={@vassal_status.lord_user_id}
+            data-test="declare-independence-action"
+            class="btn btn-xs btn-error"
+          >
+            Declare Independence
+          </button>
+        </div>
 
         <%!-- Story 907/908: a subjugated player's own oath — sworn-to
              badge, the rate they feel, and their own latest levy status

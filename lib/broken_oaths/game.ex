@@ -344,9 +344,11 @@ defmodule BrokenOaths.Game do
 
   @doc """
   `user`'s own oath, if any: `%{lord_user_id:, lord_email:,
-  tribute_rate:, oath_strain:, agenda_pending?:, levy_status:}`, or
-  `nil` for a free player. `agenda_pending?` is the Oath screen's own
-  trigger — `true` until `choose_hidden_agenda/3` closes it.
+  tribute_rate:, oath_strain:, agenda_pending?:, levy_status:,
+  lord_fallen?:}`, or `nil` for a free player. `agenda_pending?` is the
+  Oath screen's own trigger — `true` until `choose_hidden_agenda/3`
+  closes it. `lord_fallen?` (story 917) is `true` once the lord's own
+  Lord unit is dead — `GameLive.Play`'s own "seize the moment" trigger.
   """
   @spec vassal_status(map(), map()) :: map() | nil
   def vassal_status(world, user), do: WorldServer.call(world, {:vassal_status, user})
@@ -474,6 +476,19 @@ defmodule BrokenOaths.Game do
           | {:error, :not_a_player | :not_a_vassal | Ecto.Changeset.t()}
   def declare_independence(world, user, lord_user_id),
     do: WorldServer.call(world, {:declare_independence, user, lord_user_id})
+
+  @doc """
+  Story 917: whether `lord_user_id`'s own Lord unit is currently dead
+  on the board — "the lord has fallen, seize the moment." Read fresh
+  off live state every call (never cached), so a caller like `GameLive.
+  Play`'s own `"declare_independence"` handler can decide, at the
+  instant of the click, whether to skip story 915's two-step confirm
+  (the lord is already gone — there is nothing further to warn about)
+  or raise it as usual (the lord is still alive).
+  """
+  @spec lord_fallen?(map(), term()) :: boolean()
+  def lord_fallen?(world, lord_user_id),
+    do: WorldServer.call(world, {:lord_fallen?, lord_user_id})
 
   @doc """
   `user`'s own active-or-most-recent Rebellion as REBEL, or `nil` if

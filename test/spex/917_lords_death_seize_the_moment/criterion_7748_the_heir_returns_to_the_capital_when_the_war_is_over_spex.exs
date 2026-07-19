@@ -70,7 +70,36 @@ defmodule BrokenOathsSpex.Story917.Criterion7748Spex do
              context do
         context = a_freshly_subjugated_vassal(context)
 
+        # "Capital" has no modeled concept yet anywhere in the schema
+        # (same judgment call `BrokenOathsSpex.Story896.Criterion7573Spex`'s
+        # own moduledoc already makes) — Mira founds exactly one city of
+        # her OWN here, trivially her capital. `a_freshly_subjugated_
+        # vassal/1` only ever has the VASSAL (Wes) found a city (later
+        # captured); Mira needs one of her own for the heir to actually
+        # return to.
+        [mira_settler | _] =
+          for u <- Fixtures.player_units(context.world, context.user), u.type == :settler, do: u
+
+        render_hook(context.play_live, "found_city", %{"unit_id" => to_string(mira_settler.id)})
+
         [mira_city] = Fixtures.player_cities(context.world, context.user)
+
+        # Guarantees Wes's own occupied city actually RISES on
+        # declaration (`Resolution.city_rises?/4`, story 915) — without
+        # this, Mira sits at the untouched, high-Honor/low-tribute
+        # defaults (`criterion_7735`'s own "just lord" baseline), and a
+        # rebellion with an EMPTY `risen_city_ids` never reaches
+        # `independence_won?/3` by mere waiting (`Resolution`'s own
+        # moduledoc), so the heir this criterion is about would never
+        # arrive. Same deterministic honor=0/tribute=100% combo
+        # `a_freshly_subjugated_vassal_of_a_tyrant/1` already
+        # establishes.
+        :ok = Fixtures.set_player_honor(context.world, context.user, 0)
+
+        render_hook(context.play_live, "set_tribute_rate", %{
+          "vassal_user_id" => to_string(context.other_user.id),
+          "rate" => "100"
+        })
 
         land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
 

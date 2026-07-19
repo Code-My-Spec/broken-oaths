@@ -79,6 +79,20 @@ defmodule BrokenOathsSpex.Story917.Criterion7745Spex do
         context = join_and_found_rival_city(context)
         :ok = clear_all_camps(context.world)
 
+        # A single execute-garrison penalty (`Siege.
+        # apply_execute_honor_penalty/1`, `-2`) alone leaves Honor at
+        # 98 — nowhere near the "low Honor" this scenario's own name
+        # claims against `Resolution.tyranny_score/2`'s own 0..100
+        # scale (weighted 50/50 against tribute rate). Driving Honor
+        # all the way to 0 directly is the same real, already-shipped
+        # lever `criterion_7755`'s own `a_freshly_subjugated_vassal_of_
+        # a_tyrant/1` uses for an unambiguously "low Honor" fallen
+        # lord — the execute penalty below still applies on TOP of
+        # this (Honor is unclamped downward), so both real levers this
+        # scenario names ("low Honor" AND the execute mechanic) are
+        # genuinely exercised.
+        :ok = Fixtures.set_player_honor(context.world, context.user, 0)
+
         [my_lord] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
 
@@ -110,6 +124,17 @@ defmodule BrokenOathsSpex.Story917.Criterion7745Spex do
         attempt_event(context.play_live, "resolve_garrison_fate", %{
           "city_id" => to_string(context.other_city.id),
           "choice" => "execute"
+        })
+
+        # Tribute is the SECOND, equally-weighted half of `Resolution.
+        # tyranny_score/2` — pairing this with `set_player_honor/3`
+        # above guarantees this scenario's own city clears every
+        # possible `city_resistance/2` value (0..100) on declaration,
+        # the same deterministic combo `criterion_7755`'s own
+        # `a_freshly_subjugated_vassal_of_a_tyrant/1` establishes.
+        render_hook(context.play_live, "set_tribute_rate", %{
+          "vassal_user_id" => to_string(context.other_user.id),
+          "rate" => "100"
         })
 
         {:ok,

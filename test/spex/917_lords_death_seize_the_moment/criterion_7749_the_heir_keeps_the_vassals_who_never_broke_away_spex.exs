@@ -81,7 +81,7 @@ defmodule BrokenOathsSpex.Story917.Criterion7749Spex do
             %{
               user: other_user,
               conn: conn,
-              play_live: vassal_context.play_live,
+              play_live: vassal_context.other_play_live,
               city: vassal_context.other_city,
               my_lord: my_lord
             }
@@ -94,6 +94,27 @@ defmodule BrokenOathsSpex.Story917.Criterion7749Spex do
              context do
         [wes | _] = context.vassals
         [%{my_lord: last_lord}] = Enum.take(context.vassals, -1)
+
+        # Guarantees Wes's own occupied city actually RISES on
+        # declaration (`Resolution.city_rises?/4`, story 915) —
+        # without this Mira sits at the untouched, high-Honor/low-
+        # tribute defaults (`criterion_7735`'s own "just lord"
+        # baseline), and a rebellion with an EMPTY `risen_city_ids`
+        # never reaches `independence_won?/3` by mere waiting
+        # (`Resolution`'s own moduledoc), so the heir this criterion
+        # is about would never arrive. Same deterministic honor=0/
+        # tribute=100% combo `a_freshly_subjugated_vassal_of_a_tyrant/1`
+        # already establishes — scoped to Wes's OWN tribute rate only,
+        # since Ada and Bo must stay ordinary (never-rebelling)
+        # vassals throughout.
+        :ok = Fixtures.set_player_honor(context.world, context.user, 0)
+
+        {:ok, lord_live, _html} = live(context.conn, "/play/#{context.world.id}")
+
+        render_hook(lord_live, "set_tribute_rate", %{
+          "vassal_user_id" => to_string(wes.user.id),
+          "rate" => "100"
+        })
 
         land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
 
