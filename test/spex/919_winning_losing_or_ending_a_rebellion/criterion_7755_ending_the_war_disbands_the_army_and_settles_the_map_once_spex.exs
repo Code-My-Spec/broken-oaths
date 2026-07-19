@@ -88,7 +88,22 @@ defmodule BrokenOathsSpex.Story919.Criterion7755Spex do
 
       given_ "Wes's rebellion is active with a temporary army fielded, and Lord Mira's own realm is leaderless",
              context do
-        context = a_freshly_subjugated_vassal(context)
+        context = a_freshly_subjugated_vassal_of_a_tyrant(context)
+
+        # `Turn.resolve_heir/2`'s own real, already-shipped heir spawn
+        # only ever lands at the fallen lord's own CAPITAL
+        # (`capital_city/2` — their oldest owned city, by id); a lord
+        # with NO city at all has nowhere for an heir to land, so
+        # `resolve_heir/2` silently no-ops (deletes the pending entry,
+        # pushes nothing). `a_freshly_subjugated_vassal_of_a_tyrant/1`
+        # never gives Mira a city of her own (only Wes, the vassal,
+        # founds one) — she needs one here so "Lord Mira's own realm is
+        # leaderless" has a real capital for the heir below to actually
+        # take.
+        [my_settler | _] =
+          for u <- Fixtures.player_units(context.world, context.user), u.type == :settler, do: u
+
+        render_hook(context.play_live, "found_city", %{"unit_id" => to_string(my_settler.id)})
 
         wes_units_before = Fixtures.player_units(context.world, context.other_user)
 

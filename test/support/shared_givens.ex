@@ -458,6 +458,136 @@ defmodule BrokenOathsSpex.SharedGivens do
     Map.put(context, :my_lord, my_lord)
   end
 
+  # Minimum RAW (unrestricted-adjacency, exactly `Visibility.vision_ball/3`'s
+  # own BFS) hex-distance `a_freshly_subjugated_vassal_of_a_tyrant/1`
+  # marches `my_lord` away from `other_city`'s own tile — see that
+  # function's own doc. Wes's own only remaining unit once the war ends
+  # is his Lord, standing ON `other_city`'s own tile
+  # (`Visibility.vision_radius(:lord) == 3`); a unit adjacent (1 hop) to
+  # wherever `my_lord` ends up could be as close as `radius - 1` hops
+  # from `other_city` in the worst case, so `radius - 1` must clear `3`
+  # — `6` leaves a full hop of headroom over the `5` that bound alone
+  # would require.
+  @rebellion_lord_exile_radius 6
+
+  # A LAND tile at EXACTLY `radius` raw hex-hops from `from_tile` (per
+  # `Fixtures.adjacent_tiles/2`'s own unrestricted mesh adjacency — the
+  # SAME graph `Visibility.vision_ball/3` walks, never land-restricted,
+  # since a land-restricted search could under-count the real distance a
+  # water shortcut gives vision), growing `radius` outward one extra hop
+  # at a time (bounded) if the exact-`radius` frontier happens to be all
+  # water. `march_to/5`'s own generous default `max_turns` (`40`) absorbs
+  # however much longer the REAL, land-only walking route ends up being
+  # to actually reach it.
+  defp far_land_tile(world, from_tile, radius) do
+    Enum.reduce_while(radius..(radius + 15), nil, fn hops, _ ->
+      frontier =
+        Enum.reduce(1..hops, {[from_tile], MapSet.new([from_tile])}, fn _, {frontier, seen} ->
+          next =
+            frontier
+            |> Enum.flat_map(&Fixtures.adjacent_tiles(world, &1))
+            |> Enum.uniq()
+            |> Enum.reject(&MapSet.member?(seen, &1))
+
+          {next, MapSet.union(seen, MapSet.new(next))}
+        end)
+        |> elem(0)
+
+      case Enum.filter(frontier, &(Fixtures.tile_class(world, &1) == :land)) do
+        [tile | _] -> {:halt, tile}
+        [] -> {:cont, nil}
+      end
+    end)
+  end
+
+  @doc """
+  Generalizes `a_freshly_subjugated_vassal/1` into story 919's own
+  "holding the FREED cities wins independence" happy path
+  (`Criterion7752Spex`/`Criterion7755Spex`): subjugates `context.
+  other_user` exactly as that function does, then drives `context.user`
+  (the lord) to the MAXIMAL tyrant reading `Rebellion.Resolution.
+  tyranny_score/2` can produce — Honor 0 (via the test-only `Fixtures.
+  set_player_honor/3`, the same documented, narrow-exception status
+  `Fixtures.set_player_gold/3` already has for a figure this codebase
+  has no fast real path to) and a 100% tribute rate (via the REAL
+  `"set_tribute_rate"` event `GameLive.Play` already ships, story 908 —
+  no seam needed, the lord can always raise their own vassal's rate to
+  its own real `1.0` ceiling).
+
+  `tyranny_score(0, 1.0) == round((100 - 0) * 0.5 + 1.0 * 100 * 0.5) ==
+  100`, which is `>= city_resistance/2`'s own full `0..100` range — so
+  `context.other_city` rises to the rebel on ANY seed once independence
+  is declared, deterministically, without depending on this scenario's
+  own fixture world's own seed happening to produce a low-resistance
+  city. The city RISING is still `Rebellion.Resolution` computing that
+  for real off these two real, played-to inputs — this given only forces
+  the INPUTS (a precondition), never the rise/independence verdict
+  itself.
+
+  Also marches `my_lord` off `other_city`'s own tile once captured, all
+  the way out to `far_land_tile/3`'s own `@rebellion_lord_exile_radius`
+  — for TWO real, independent reasons a caller relying on this given
+  needs both of:
+
+    * No leftover defecting garrison. `do_declare_independence/3`'s own
+      `rise_cities/5` defects WHICHEVER of the lord's own units is still
+      literally standing on a risen city's tile the moment independence
+      is declared (criterion 7733's own real, already-shipped behavior).
+      Left in place, `a_freshly_subjugated_vassal/1`'s own capturing
+      Lord unit would defect to the rebel the instant this city rises —
+      correct behavior, but it would (a) silently inflate a caller's own
+      before/after unit-roster delta (criterion 7755's own "the
+      temporary army disbands" check) with a PERMANENT defector that was
+      never part of the temporary army, and (b) far worse, SWAP OWNERSHIP
+      of the very unit criterion 7755's own given steps go on to kill via
+      a scripted barbarian strike (intended as the FORMER LORD's own
+      death, for the heir mechanic) — a defected unit would make that
+      kill land on the REBEL's own unit instead, silently breaking "Lord
+      Mira's own realm is leaderless" entirely.
+    * No stray visible barbarian. Criterion 7755's own given steps spawn
+      a throwaway barbarian ADJACENT to `context.my_lord`'s own position
+      (required for `Combat.validate_attack/3`'s own adjacency check) to
+      deliver that same scripted kill, and never remove it afterward —
+      it has no camp/AI (`Fixtures.spawn_barbarian/2`'s own "ownerless,
+      no AI" default), so it sits there, alive, for the rest of the
+      scenario. Left near `other_city` (my_lord's own old position),
+      that barbarian would fall within Wes's own Lord's `vision_radius
+      (:lord) == 3` for the ENTIRE rest of the war, and `"game:units"`
+      pushes fog-visible enemies alongside a player's own units
+      (`Visibility.filter/2`) — silently inflating criterion 7755's own
+      post-war unit count with a unit that was never Wes's, was never
+      part of the temporary army, and was never meant to be "seen" at
+      all. Exiling the lord (and therefore the barbarian, spawned
+      adjacent to wherever it ends up) well outside that radius keeps
+      the kill real while keeping it invisible to the one player whose
+      own roster this given's callers go on to inspect.
+
+  Returns the exact same `context` shape `a_freshly_subjugated_vassal/1`
+  does (`:my_lord` — now far off `other_city`'s own tile — `:play_live`,
+  `:other_play_live`, `:other_city`, plus whatever `join_and_found_
+  rival_city/1` already carries).
+
+  Requires `:a_world`, `:registered_player`, `:second_registered_player`
+  already run.
+  """
+  def a_freshly_subjugated_vassal_of_a_tyrant(context) do
+    context = a_freshly_subjugated_vassal(context)
+
+    :ok = Fixtures.set_player_honor(context.world, context.user, 0)
+
+    render_hook(context.play_live, "set_tribute_rate", %{
+      "vassal_user_id" => to_string(context.other_user.id),
+      "rate" => "100"
+    })
+
+    exile_tile =
+      far_land_tile(context.world, context.other_city.tile_id, @rebellion_lord_exile_radius)
+
+    my_lord = march_to(context.play_live, context.world, context.user, context.my_lord, exile_tile, 80)
+
+    Map.put(context, :my_lord, my_lord)
+  end
+
   @doc """
   Cleanly terminates `play_live`'s own LiveView process and waits for
   its DOWN — story 909's own "offline" signal. No Presence/online

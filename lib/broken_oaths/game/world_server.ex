@@ -985,6 +985,20 @@ defmodule BrokenOaths.Game.WorldServer do
     {:reply, :ok, new_state}
   end
 
+  # Test-only: instantly sets `user`'s own world-visible Honor
+  # (`Player.honor`) to `honor`, same narrow, documented-bridge status as
+  # `:set_player_gold_for_test` above — a direct precondition setter, not
+  # a stand-in for any computed RESULT (`Rebellion.Resolution.
+  # city_rises?/4` still computes whether a city actually rises from
+  # whatever Honor this sets, same as it would from Honor moved by the
+  # real `apply_execute_honor_penalty/1` path).
+  def handle_call({:set_player_honor_for_test, user_id, honor}, _from, state) do
+    player = find_player(state, user_id)
+    Repo.update_all(from(p in Player, where: p.id == ^player.id), set: [honor: honor])
+    new_state = put_in(state.players[player.id].honor, honor)
+    {:reply, :ok, new_state}
+  end
+
   # Test-only: declares `user`'s per-turn gold INCOME — originally
   # story 908's own tribute-spec seam, deliberately SEPARATE from
   # `:set_player_gold_for_test` above (the player's actual treasury

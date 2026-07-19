@@ -741,6 +741,22 @@ defmodule BrokenOaths.Game do
     do: WorldServer.call(world, {:set_player_gold_income_for_test, user.id, income})
 
   @doc """
+  Test-only: set `user`'s own world-visible Honor reputation
+  (`BrokenOaths.Game.Player.honor`) directly, same narrow, documented-
+  bridge status as `set_player_gold_for_test/3` — a direct precondition
+  setter for Honor, standing in for however many dishonorable acts it
+  would otherwise take to depress it to a specific figure (`Siege.
+  apply_execute_honor_penalty/1` only ever moves it by small, fixed
+  steps). Never used to fabricate a RESULT this codebase computes itself
+  (e.g. a rebellion's own `risen_city_ids` — `Rebellion.Resolution.
+  city_rises?/4` still does that math for real, off whatever Honor this
+  sets) — only the lord's own starting reputation.
+  """
+  @spec set_player_honor_for_test(map(), map(), integer()) :: :ok
+  def set_player_honor_for_test(world, user, honor),
+    do: WorldServer.call(world, {:set_player_honor_for_test, user.id, honor})
+
+  @doc """
   Test-only: instantly restore `unit_id`'s movement to its own max,
   bypassing the turn boundary that would normally do it — see
   `BrokenOaths.Game.WorldServer`'s `:recharge_unit_for_test` handler for

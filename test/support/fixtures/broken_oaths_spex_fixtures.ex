@@ -181,6 +181,22 @@ defmodule BrokenOathsSpex.Fixtures do
     as: :set_player_gold_income_for_test
 
   # Deliberate, narrow exception to "read-only" above, same status as
+  # `set_player_gold/3`: story 919's own "holding the FREED cities wins
+  # independence" happy-path criteria need a lord whose Honor is a
+  # specific, deterministic figure (a maximal tyrant, Honor 0) so the
+  # rebel's own city rises for SURE regardless of seed
+  # (`Rebellion.Resolution.city_rises?/4`'s own `tyranny_score(0, 1.0)
+  # == 100` clears every possible `city_resistance/2` in `0..100`) —
+  # the same "no real source exists yet to reach this figure quickly"
+  # gap `set_player_gold/3` already papers over, not a stand-in for the
+  # RISING itself (`Rebellion.Resolution` still computes that for real
+  # off whatever Honor this sets). See `BrokenOaths.Game.WorldServer`'s
+  # `:set_player_honor_for_test` handler for the full rationale.
+  defdelegate set_player_honor(world, user, honor),
+    to: BrokenOaths.Game,
+    as: :set_player_honor_for_test
+
+  # Deliberate, narrow exception to "read-only" above, same status as
   # `set_unit_hp/3`: instantly restores a unit's movement to its own
   # max, bypassing the turn boundary that would normally do it. A
   # scenario needing the SAME unit to attack repeatedly (story 894

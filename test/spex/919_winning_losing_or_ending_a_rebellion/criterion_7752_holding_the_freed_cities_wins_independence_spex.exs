@@ -48,7 +48,7 @@ defmodule BrokenOathsSpex.Story919.Criterion7752Spex do
 
       given_ "Wes's rebellion is active and all of his risen cities are held by Wes",
              context do
-        context = a_freshly_subjugated_vassal(context)
+        context = a_freshly_subjugated_vassal_of_a_tyrant(context)
 
         attempt_event(context.other_play_live, "declare_independence", %{})
 
