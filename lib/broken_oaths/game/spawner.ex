@@ -21,10 +21,10 @@ defmodule BrokenOaths.Game.Spawner do
 
   The spawn tile (`lord_tile`) is the region's most central `:land` tile —
   the one with the greatest distance to the region boundary, ties broken
-  by lowest tile id. `settler_tile` is the lowest-id adjacent `:land`
-  tile, distinct from `lord_tile` (one unit per hex is a hard rule). If a
-  candidate spawn tile has no adjacent land, the next-most-central
-  candidate is tried.
+  by lowest tile id (`Regions.central_land_tiles/2`). `settler_tile` is
+  the lowest-id adjacent `:land` tile, distinct from `lord_tile` (one unit
+  per hex is a hard rule). If a candidate spawn tile has no adjacent land,
+  the next-most-central candidate is tried.
 
   Returns `{:error, :world_full}` when every spawnable region is taken.
   """
@@ -43,9 +43,8 @@ defmodule BrokenOaths.Game.Spawner do
   defp place([], _world), do: {:error, :world_full}
 
   defp place([region_id | rest], world) do
-    region_id
-    |> region_tiles(world)
-    |> central_land_tiles(world)
+    world
+    |> Regions.central_land_tiles(region_id)
     |> find_pair(world)
     |> case do
       nil ->
@@ -54,13 +53,6 @@ defmodule BrokenOaths.Game.Spawner do
       {lord_tile, settler_tile} ->
         {:ok, %{region_id: region_id, lord_tile: lord_tile, settler_tile: settler_tile}}
     end
-  end
-
-  defp region_tiles(region_id, world) do
-    world
-    |> Regions.partition()
-    |> Map.fetch!(:regions)
-    |> Map.fetch!(region_id)
   end
 
   defp find_pair(candidates, world) do
@@ -77,49 +69,5 @@ defmodule BrokenOaths.Game.Spawner do
     |> Regions.adjacent_tiles(tile_id)
     |> Enum.filter(&(Regions.tile_class(world, &1) == :land))
     |> Enum.sort()
-  end
-
-  # -------------------------------------------------------------------
-  # Centrality: land tiles ordered by distance to the region boundary,
-  # deepest interior first, ties broken by lowest tile id.
-  # -------------------------------------------------------------------
-
-  defp central_land_tiles(tiles, world) do
-    land = for tile <- tiles, Regions.tile_class(world, tile) == :land, do: tile
-    depth = boundary_depths(land, MapSet.new(tiles), world)
-
-    # Land pockets fully enclosed by same-region mountains never reach
-    # the boundary BFS (no depth entry) — and they'd be spawn traps a
-    # settler could never walk out of. Exclude them rather than crash;
-    # a region with NO reachable land simply yields no candidates and
-    # placement falls through to the next region.
-    land
-    |> Enum.filter(&Map.has_key?(depth, &1))
-    |> Enum.sort_by(fn tile -> {-Map.fetch!(depth, tile), tile} end)
-  end
-
-  # Multi-source BFS from every region tile that touches something outside
-  # the region: depth 0 at the boundary, growing inward.
-  defp boundary_depths(land, region_set, world) do
-    boundary =
-      for tile <- land,
-          Enum.any?(Regions.adjacent_tiles(world, tile), &(not MapSet.member?(region_set, &1))),
-          do: tile
-
-    land_set = MapSet.new(land)
-    grow_depths(boundary, Map.new(boundary, &{&1, 0}), land_set, world, 0)
-  end
-
-  defp grow_depths([], depths, _land_set, _world, _depth), do: depths
-
-  defp grow_depths(frontier, depths, land_set, world, depth) do
-    next =
-      frontier
-      |> Enum.flat_map(&Regions.adjacent_tiles(world, &1))
-      |> Enum.uniq()
-      |> Enum.filter(&(MapSet.member?(land_set, &1) and not Map.has_key?(depths, &1)))
-
-    depths = Enum.reduce(next, depths, &Map.put(&2, &1, depth + 1))
-    grow_depths(next, depths, land_set, world, depth + 1)
   end
 end

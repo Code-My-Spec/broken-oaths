@@ -57,6 +57,39 @@ defmodule BrokenOaths.Worlds.Regions do
     |> Enum.sort()
   end
 
+  @doc """
+  `region_id`'s own `:land` tiles, ordered by centrality — the tile
+  deepest inside the region's own boundary first (ties broken by lowest
+  tile id). Land tiles fully enclosed by same-region mountains (never
+  reaching the boundary BFS below) are excluded, not crashed on — a
+  region with no reachable land simply yields `[]`.
+
+  Extracted from `Game.Spawner` (story 873), which walks this exact
+  ordering to pick a `lord_tile` (the deepest candidate with at least one
+  adjacent `:land` tile wins — see that module for the settler-pairing
+  step this function deliberately leaves out). `Worlds.Resources`'s own
+  Copper-reachability guarantee (story 911 follow-up, QA issue
+  `78e938bb`) anchors its "near spawn" radius on this SAME centrality, so
+  the two modules always agree on what counts as "near" a given region's
+  spawn point without either depending on the other's context (`Game`
+  depends on `Worlds`, never the reverse).
+  """
+  @spec central_land_tiles(World.t(), region_id) :: [tile_id]
+  def central_land_tiles(world, region_id) do
+    tiles =
+      world
+      |> partition()
+      |> Map.fetch!(:regions)
+      |> Map.fetch!(region_id)
+
+    land = for tile <- tiles, tile_class(world, tile) == :land, do: tile
+    depth = boundary_depths(land, MapSet.new(tiles), world)
+
+    land
+    |> Enum.filter(&Map.has_key?(depth, &1))
+    |> Enum.sort_by(fn tile -> {-Map.fetch!(depth, tile), tile} end)
+  end
+
   @doc "Classify a single tile: :land | :mountain | :coastal_water | :deep_ocean."
   @spec tile_class(World.t(), tile_id) :: tile_class
   def tile_class(world, tile_id) do
@@ -329,5 +362,36 @@ defmodule BrokenOaths.Worlds.Regions do
     else
       next_claimed
     end
+  end
+
+  # -------------------------------------------------------------------
+  # Centrality: land tiles ordered by distance to the region boundary,
+  # deepest interior first, ties broken by lowest tile id. Backs
+  # `central_land_tiles/2` above.
+  # -------------------------------------------------------------------
+
+  # Multi-source BFS from every region tile that touches something outside
+  # the region: depth 0 at the boundary, growing inward.
+  defp boundary_depths(land, region_set, world) do
+    boundary =
+      for tile <- land,
+          Enum.any?(adjacent_tiles(world, tile), &(not MapSet.member?(region_set, &1))),
+          do: tile
+
+    land_set = MapSet.new(land)
+    grow_boundary_depths(boundary, Map.new(boundary, &{&1, 0}), land_set, world, 0)
+  end
+
+  defp grow_boundary_depths([], depths, _land_set, _world, _depth), do: depths
+
+  defp grow_boundary_depths(frontier, depths, land_set, world, depth) do
+    next =
+      frontier
+      |> Enum.flat_map(&adjacent_tiles(world, &1))
+      |> Enum.uniq()
+      |> Enum.filter(&(MapSet.member?(land_set, &1) and not Map.has_key?(depths, &1)))
+
+    depths = Enum.reduce(next, depths, &Map.put(&2, &1, depth + 1))
+    grow_boundary_depths(next, depths, land_set, world, depth + 1)
   end
 end
