@@ -26,7 +26,81 @@ defmodule BrokenOathsSpex.Case do
 
   setup tags do
     BrokenOathsTest.DataCase.setup_sandbox(tags)
+
+    # QA issue (test-isolation flake): a spex scenario's `given_`/
+    # `when_`/`then_` steps lazily start a real, Registry-addressed
+    # `BrokenOaths.Game.WorldServer` (via `Fixtures.world_fixture/1` and
+    # every `Game.*` call that follows) but this case template used to
+    # register no teardown for it at all. A `WorldServer` left running
+    # after the test returns can still be asked something — most often
+    # a mounted `GameLive.Play` reacting, slightly late, to its OWN
+    # broadcast (e.g. `refresh_vassalage/1`'s `Game.vassals/2`/
+    # `Game.conspiracy_heat/2` calls off a `:vassals_changed`/
+    # `:pact_changed` broadcast the scenario's own last action fired) —
+    # and it answers that call with a real DB read. If that read lands
+    # after THIS test's own sandbox connection owner has already been
+    # checked back in, it crashes with `DBConnection.ConnectionError:
+    # owner <pid> exited`, which `SexySpex.Reporter` then reports as an
+    # unrelated `KeyError` on `:steps`.
+    #
+    # `on_exit` callbacks run in LIFO order, so registering this HERE —
+    # after `setup_sandbox/1` above has already registered ITS OWN
+    # `on_exit` to stop the sandbox owner — guarantees every world this
+    # test touched is torn down first, closing that window before the
+    # connection goes away.
+    on_exit(&stop_world_servers/0)
+
     {:ok, conn: Phoenix.ConnTest.build_conn()}
+  end
+
+  # Stops every `BrokenOaths.Game.WorldServer` currently running under
+  # `BrokenOaths.GameSupervisor` — not just the world(s) THIS test
+  # happens to know about. Every spex test registers this same `on_exit`
+  # (this module is the ONLY spex case template), so by the time any
+  # given test's teardown runs, every child still present belongs either
+  # to this test or to an already-finished EARLIER test that leaked one
+  # before this fix existed — safe to sweep unconditionally either way,
+  # since world-server-starting spex/test suites all run non-async (see
+  # `BrokenOathsTest.DataCase.setup_sandbox/1`'s `shared: not tags[:async]`)
+  # and so never run concurrently with this test.
+  #
+  # `GenServer.stop/2` — deliberately NOT `DynamicSupervisor.
+  # terminate_child/2` — matches the graceful stop `WorldServer.restart/1`
+  # itself already uses everywhere in `world_server_test.exs`.
+  # `terminate_child/2` sends a raw `Process.exit(pid, :shutdown)` LINK
+  # signal; since `WorldServer` never traps exits, that kills it
+  # PREEMPTIVELY, mid-instruction — including mid-Postgrex-query, for a
+  # mounted `GameLive.Play` (never explicitly closed by `Phoenix.
+  # LiveViewTest`, so it can still be reacting to this test's own last
+  # broadcast right as teardown starts) still calling back in for e.g.
+  # `Game.vassals/2`/`Game.conspiracy_heat/2`. That abrupt mid-query kill
+  # itself produces a `DBConnection.ConnectionError` (a "client exited"
+  # disconnect) that can bleed into the connection pool for whichever
+  # test runs next. `GenServer.stop/2` instead queues a normal stop
+  # request behind whatever the server is CURRENTLY doing — gen_server
+  # always finishes its in-flight callback before looking at its next
+  # message — so any such straggling read completes cleanly first, and
+  # only THEN does the process (and its checked-out sandbox connection)
+  # actually go away, before `setup_sandbox/1`'s own `on_exit` (registered
+  # first, so it runs second/last per `on_exit`'s LIFO order) checks the
+  # sandbox connection back in.
+  defp stop_world_servers do
+    BrokenOaths.GameSupervisor
+    |> DynamicSupervisor.which_children()
+    |> Enum.each(fn
+      {_, pid, _, _} when is_pid(pid) -> stop_world_server(pid)
+      _ -> :ok
+    end)
+  end
+
+  # A child already gone by the time we get to it (its own natural
+  # `:transient` exit, or a previous iteration racing it down) is not a
+  # failure here — `GenServer.stop/2` exits the calling process for a
+  # `:noproc` target, which this narrowly swallows.
+  defp stop_world_server(pid) do
+    GenServer.stop(pid, :normal)
+  catch
+    :exit, _ -> :ok
   end
 
   @doc """
