@@ -556,14 +556,33 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
-  # Story 908: the refusal branch — marks the levy refused AND spikes
-  # the vassal's own Oath Strain (`Tribute.spike_oath_strain/1`), "a
-  # publicly-legible broken obligation."
+  # Story 908: the refusal branch — marks the levy refused, spikes the
+  # vassal's own Oath Strain (`Tribute.spike_oath_strain/1`), AND dings
+  # their own Honor (`Tribute.apply_refusal_honor_penalty/1`, QA issue
+  # c0ec53ed — criterion 7678's "strain and Honor hits" was only
+  # half-wired before this fix), "a publicly-legible broken obligation."
+  # The Honor half lives on `state.players` (in-memory tick-state, NOT
+  # a Repo-backed changeset the way Levy/Vassalage are) — persisted via
+  # `persist_tick/2`, the same shape `resolve_steward_defend/5`'s own
+  # sabotage-penalty write and `apply_garrison_fate_honor/2` already
+  # establish for an in-place Honor-only state change.
   def handle_call({:refuse_levy, user, lord_user_id}, _from, state) do
     case do_refuse_levy(state, user, lord_user_id) do
-      {:ok, _levy} ->
-        broadcast(state.world.id, [:vassals_changed])
-        {:reply, :ok, state}
+      {:ok, _levy, new_state} ->
+        case persist_tick(state, new_state) do
+          :ok ->
+            # `:vassals_changed` refreshes the levy status badge,
+            # `:units_changed` refreshes the Honor figure (`refresh_board/1`
+            # re-pulls `Game.honor/2`; `refresh_vassalage/1` alone does
+            # not) — the same two-broadcast pairing a Honor-bearing
+            # change needs whenever it rides alongside a Vassalage-only
+            # mutation.
+            broadcast(new_state.world.id, [:vassals_changed, :units_changed])
+            {:reply, :ok, new_state}
+
+          :stale ->
+            {:reply, {:error, :stale}, resync(state)}
+        end
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -3038,7 +3057,10 @@ defmodule BrokenOaths.Game.WorldServer do
          {:ok, refused} <- Tribute.refuse_changeset(levy) |> Repo.update(),
          {:ok, vassalage} <- fetch_vassalage(state, lord_player.id, vassal_player.id),
          {:ok, _vassalage} <- Tribute.spike_oath_strain(vassalage) |> Repo.update() do
-      {:ok, refused}
+      new_state =
+        update_in(state.players[vassal_player.id].honor, &Tribute.apply_refusal_honor_penalty/1)
+
+      {:ok, refused, new_state}
     end
   end
 
@@ -3588,8 +3610,20 @@ defmodule BrokenOaths.Game.WorldServer do
         state.cities
         |> Map.values()
         |> Enum.filter(&enemy_city_visible?(&1, player, home, explored))
-        |> Enum.map(&Map.take(&1, [:id, :name, :tile_id, :size]))
+        |> Enum.map(&enemy_city_summary/1)
     end
+  end
+
+  # QA issue 7f91cff2 — `broken` (computed off the FULL city, which
+  # still carries `occupied_by_player_id`, before `Map.take/2` drops it)
+  # is what `GameLive.Play`'s `.Board` hook needs to route a right-click
+  # (or the UnitPanel button) to `queue_move`/occupy instead of another
+  # `attack` once the city is at 0 HP — `Siege.broken?/1` is the single
+  # source of truth every other broken-city check already reads.
+  defp enemy_city_summary(city) do
+    city
+    |> Map.take([:id, :name, :tile_id, :size, :hp])
+    |> Map.put(:broken, Siege.broken?(city))
   end
 
   defp enemy_city_visible?(city, player, home, explored) do

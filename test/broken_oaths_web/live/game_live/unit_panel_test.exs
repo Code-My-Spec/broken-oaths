@@ -170,5 +170,27 @@ defmodule BrokenOathsWeb.GameLive.UnitPanelTest do
       assert html =~ ~s(phx-value-target_city_id="7")
       assert html =~ "Attack Rivergate"
     end
+
+    # QA issue 7f91cff2 — a BROKEN (0 HP, not yet captured) hostile city
+    # must swap the discoverable button from "Attack" to "Move In": the
+    # capture is a MOVEMENT event, so it dispatches `queue_move`/
+    # `to_tile` instead of `attack`/`target_city_id`, and never renders
+    # the plain Attack affordance for that city.
+    test "renders a Move In button (not Attack) once the attackable city is broken" do
+      html =
+        render_component(UnitPanel,
+          id: "unit-panel",
+          unit: @lord,
+          order: nil,
+          attackable_cities: [%{id: 7, name: "Rivergate", tile_id: 42, broken: true}]
+        )
+
+      assert html =~ ~s(data-test="move-in-city-7")
+      assert html =~ ~s(phx-click="queue_move")
+      assert html =~ ~s(phx-value-to_tile="42")
+      assert html =~ "Move In Rivergate"
+
+      refute html =~ ~s(data-test="attack-city-7")
+    end
   end
 end

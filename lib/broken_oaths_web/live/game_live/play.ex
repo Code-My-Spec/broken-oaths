@@ -35,7 +35,15 @@ defmodule BrokenOathsWeb.GameLive.Play do
                            uses — see `Game.enemy_cities_visible_to/2`) —
                            powers the right-click ATTACK target on a hostile
                            city (mirroring a barbarian/camp) and the
-                           adjacent-unit attack affordance in `UnitPanel`
+                           adjacent-unit attack affordance in `UnitPanel`.
+                           Every hostile entry also carries `hp:`/`broken:`
+                           (QA issue 7f91cff2, `Siege.broken?/1`) — once a
+                           hostile city hits 0 HP, the `.Board` hook's
+                           `orderMove/1` routes a right-click at its tile to
+                           `queue_move` (walk in and occupy — Civ-style, no
+                           range-flip) instead of another `attack`, and
+                           `UnitPanel`'s own button swaps from "Attack" to
+                           "Move In" the same way
     * `game:resources`  — `%{resources: [%{tile_id:, kind:}]}` (story 905),
                            bonus-resource billboards for every currently
                            known (visible ∪ explored) tile — resources are
@@ -94,15 +102,23 @@ defmodule BrokenOathsWeb.GameLive.Play do
   `handle_event/3` clauses reachable through `attempt_event/3` in specs
   (never a real click), now surfaced for real:
 
-    * **Attack a rival city** — a hostile city rides `game:cities`
-      (see that event's own doc above), is a right-click ATTACK target
-      exactly like an adjacent barbarian/camp (the `.Board` hook's own
-      `orderMove/1`), and — when a friendly military unit adjacent to
-      one is selected — `GameLive.UnitPanel` also renders an explicit
-      "Attack" button per attackable city (`attackable_cities/2`,
-      below), the same discoverable-button convention `unit_panel.ex`'s
-      Found City/Build already establish (right-click alone is a
-      harder-to-discover gesture for a brand-new mechanic).
+    * **Attack a rival city, then MOVE IN to capture it** — an intact
+      hostile city rides `game:cities` (see that event's own doc above)
+      as a right-click ATTACK target exactly like an adjacent barbarian/
+      camp (the `.Board` hook's own `orderMove/1`), and — when a
+      friendly military unit adjacent to one is selected —
+      `GameLive.UnitPanel` also renders an explicit "Attack" button per
+      attackable city (`attackable_cities/2`, below), the same
+      discoverable-button convention `unit_panel.ex`'s Found City/Build
+      already establish (right-click alone is a harder-to-discover
+      gesture for a brand-new mechanic). QA issue 7f91cff2: once that
+      same city is `broken` (0 HP, `Siege.broken?/1`), both affordances
+      swap from attack to MOVE — the right-click now `queue_move`s the
+      selected unit onto the city's own tile (Civ-style occupation, "no
+      range-flip — you commit and hold a body") instead of re-issuing a
+      harmless attack, and the UnitPanel button relabels "Move In" and
+      dispatches `"queue_move"`/`to_tile` instead of `"attack"`/
+      `target_city_id`.
     * **Execute/Release a fallen garrison** — once `Game.
       captured_cities_visible_to/2` reports a captured city with a
       still-living defender, the top bar's "Captured Cities" dropdown
@@ -603,10 +619,18 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # issue class documented on found_city/2 above; queue_move had the
   # identical gap — a string unit_id silently failed as :not_owner,
   # since `Map.get(state.units, unit_id)` never matches an integer key
-  # against a string).
+  # against a string). `to_tile` gets the same treatment (QA issue
+  # 7f91cff2) — until `UnitPanel`'s own "Move In" button, `to_tile`
+  # only ever arrived pre-parsed as a real integer (the `to_point`
+  # clause above resolves one via `nearest_tile/2`; every existing spec
+  # call goes through `render_hook`, which never stringifies). A real
+  # DOM button's `phx-value-to_tile` is a STRING, and `do_queue_move/4`
+  # hard-requires `is_integer(to_tile)` — without this, the Move In
+  # button would silently no-op as `{:error, :invalid_tile}`.
   def handle_event("queue_move", %{"unit_id" => unit_id, "to_tile" => to_tile}, socket) do
     %{world: world, user: user} = socket.assigns
     unit_id = parse_id(unit_id)
+    to_tile = parse_id(to_tile)
 
     case Game.queue_move(world, user, unit_id, to_tile) do
       {:ok, %{path: path}} ->
@@ -1603,9 +1627,16 @@ defmodule BrokenOathsWeb.GameLive.Play do
   defp city_marker(city), do: city |> Map.take([:id, :name, :tile_id, :size]) |> Map.put(:hostile, false)
 
   # QA issue 56ee521a — the enemy-city sibling of `city_marker/1`,
-  # `hostile: true`.
+  # `hostile: true`. `:broken` (QA issue 7f91cff2) rides straight
+  # through from `Game.enemy_cities_visible_to/2`'s own `Siege.broken?/1`
+  # read — the `.Board` hook's `orderMove/1` needs it to route a
+  # right-click at a 0-HP hostile city to `queue_move` (occupy) instead
+  # of another `attack`.
   defp enemy_city_marker(city),
-    do: city |> Map.take([:id, :name, :tile_id, :size]) |> Map.put(:hostile, true)
+    do:
+      city
+      |> Map.take([:id, :name, :tile_id, :size, :hp, :broken])
+      |> Map.put(:hostile, true)
 
   # "Grassland Hills · Woods" — base, then relief when not flat, then
   # feature when present.
@@ -1839,10 +1870,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # once that unit is a military type (`CityDefense.military?/1` — a
   # civilian can no more attack a city through this button than through
   # `Siege.validate_siege/3` itself would allow). Powers `UnitPanel`'s
-  # own per-city "Attack" button, each wired straight to the existing
-  # `"attack"`/`target_city_id` handler — the discoverable-button
-  # sibling to the right-click gesture the `.Board` hook's own
-  # `orderMove/1` already offers.
+  # own per-city button — "Attack" for an intact city, wired to the
+  # existing `"attack"`/`target_city_id` handler, or "Move In" once the
+  # city is `broken` (QA issue 7f91cff2), wired to `"queue_move"`/
+  # `to_tile` instead — the discoverable-button sibling to the
+  # right-click gesture the `.Board` hook's own `orderMove/1` already
+  # offers (and, since 7f91cff2, already routes the same way).
   defp attackable_cities(_world, nil, _enemy_cities), do: []
 
   defp attackable_cities(world, unit, enemy_cities) do
@@ -1851,7 +1884,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
       enemy_cities
       |> Enum.filter(&MapSet.member?(adjacent, &1.tile_id))
-      |> Enum.map(&Map.take(&1, [:id, :name]))
+      |> Enum.map(&Map.take(&1, [:id, :name, :tile_id, :broken]))
     else
       []
     end
@@ -2698,10 +2731,16 @@ defmodule BrokenOathsWeb.GameLive.Play do
           orderMove(e) {
             if (this.selectedId == null) return
 
-            // A right click on an adjacent barbarian, camp, or hostile
-            // player city is an attack order, not a move — the RTS
-            // convention (story 891/894, QA issue 56ee521a for the
-            // city case). Anything else falls through to movement.
+            // A right click on an adjacent barbarian, camp, or an INTACT
+            // hostile player city is an attack order, not a move — the
+            // RTS convention (story 891/894, QA issue 56ee521a for the
+            // city case). A BROKEN hostile city (0 HP, not yet captured —
+            // `city.broken`, QA issue 7f91cff2) is the one exception: the
+            // capture itself is a MOVEMENT event ("Civ-style — you commit
+            // and hold a body," `Siege.materialize_captures/2`), so this
+            // deliberately falls through to the plain move order below
+            // instead of re-issuing a harmless, floor-clamped attack.
+            // Anything else falls through to movement too.
             const tile = this.hitTile(e)
             if (tile != null) {
               const enemy = this.units.find((u) => u.tile_id === tile && u.type === "barbarian_warrior")
@@ -2709,7 +2748,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
               const camp = this.camps.find((c) => c.tile_id === tile)
               if (camp) { this.pushEvent("attack", {unit_id: this.selectedId, target_camp_id: camp.id}); return }
               const hostileCity = this.cities.find((c) => c.tile_id === tile && c.hostile)
-              if (hostileCity) { this.pushEvent("attack", {unit_id: this.selectedId, target_city_id: hostileCity.id}); return }
+              if (hostileCity && !hostileCity.broken) {
+                this.pushEvent("attack", {unit_id: this.selectedId, target_city_id: hostileCity.id})
+                return
+              }
             }
 
             const r = this.el.getBoundingClientRect()

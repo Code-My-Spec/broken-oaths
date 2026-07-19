@@ -11,7 +11,7 @@ defmodule BrokenOathsSpex.Story908.Criterion7678Spex do
   a third, independently-joined player. This criterion refuses instead
   of answering: `"refuse_levy"`, `%{"lord_user_id" => ...}`.
 
-  ## Oath Strain: a new observable this criterion needs, Honor: none
+  ## Oath Strain AND Honor — both halves of the pair now asserted
 
   Story 907's own `criterion_7669` deliberately did NOT invent a
   surface for Oath Strain or Honor — nothing in this batch surfaced
@@ -24,11 +24,16 @@ defmodule BrokenOathsSpex.Story908.Criterion7678Spex do
   number (the design doc's own "Round-5 decisions": "Exact numbers are
   a balancing pass, not a blocker").
 
-  Honor still gets no surface here, matching
-  `BrokenOathsSpex.Story906.Criterion7662Spex`'s own precedent (Honor
-  has no UI anywhere in this batch, not even a schema field yet) — this
-  spec's own RED signal is the Oath Strain spike and the levy's own
-  `"refused"` status, not a Honor number nothing could observe.
+  QA issue c0ec53ed: this criterion's own text ALSO says "Honor hits,"
+  but the shipped `refuse_levy` handler only ever spiked Oath Strain —
+  Honor never moved, a gap this criterion's own moduledoc used to
+  document rather than catch. `Tribute.apply_refusal_honor_penalty/1`
+  closes it, and this spec now asserts the drop for real — reading the
+  vassal's OWN `data-test="player-honor"` badge (story 910's
+  `criterion_7696` precedent, `BrokenOaths.Game.honor/2`'s own board
+  surface) before and after the refusal, the same before/after
+  comparison that criterion already established for the steward
+  sabotage penalty, never asserting an exact starting number or delta.
   """
 
   use BrokenOathsSpex.Case
@@ -63,7 +68,15 @@ defmodule BrokenOathsSpex.Story908.Criterion7678Spex do
           "share" => "0.5"
         })
 
-        {:ok, context}
+        # QA issue c0ec53ed — the vassal's own Honor reading BEFORE the
+        # refusal, off their OWN board (`data-test="player-honor"`,
+        # `criterion_7696`'s own precedent), to compare against after.
+        honor_before_html = render(context.other_play_live)
+
+        honor_before =
+          Regex.run(~r/data-test="player-honor"[^>]*>(-?\d+)/, honor_before_html)
+
+        {:ok, Map.put(context, :honor_before, honor_before)}
       end
 
       when_ "the vassal refuses the call", context do
@@ -74,7 +87,8 @@ defmodule BrokenOathsSpex.Story908.Criterion7678Spex do
         {:ok, context}
       end
 
-      then_ "the levy reads refused, and the vassal's own Oath Strain is now positive", context do
+      then_ "the levy reads refused, and the vassal's own Oath Strain is now positive, and their Honor dropped",
+            context do
         assert context.my_lord.tile_id == context.other_city.tile_id
 
         {:ok, fresh_lord_live, _html} = live(context.conn, "/play/#{context.world.id}")
@@ -96,6 +110,30 @@ defmodule BrokenOathsSpex.Story908.Criterion7678Spex do
                  Regex.run(~r/data-test="vassal-oath-strain"[^>]*>(\d+)/, strain_html)
 
         assert String.to_integer(strain_text) > 0
+
+        # QA issue c0ec53ed — the paired Honor consequence: a fresh
+        # mount of the VASSAL's own board (same "don't trust a stale
+        # live socket's own timing" posture `criterion_7696` already
+        # establishes) must now read a LOWER Honor than before refusing.
+        {:ok, fresh_vassal_live, _html} = live(context.other_conn, "/play/#{context.world.id}")
+
+        assert has_element?(fresh_vassal_live, "[data-test='player-honor']")
+
+        honor_after_html = render(fresh_vassal_live)
+
+        assert [_, honor_after_text] =
+                 Regex.run(~r/data-test="player-honor"[^>]*>(-?\d+)/, honor_after_html)
+
+        honor_after = String.to_integer(honor_after_text)
+
+        assert context.honor_before != nil,
+               "no \"player-honor\" element rendered BEFORE the refusal either — nothing to compare against"
+
+        [_, honor_before_text] = context.honor_before
+        honor_before = String.to_integer(honor_before_text)
+
+        assert honor_after < honor_before
+
         {:ok, context}
       end
     end

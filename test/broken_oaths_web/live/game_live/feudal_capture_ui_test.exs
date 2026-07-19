@@ -40,6 +40,7 @@ defmodule BrokenOathsWeb.GameLive.FeudalCaptureUITest do
   import BrokenOaths.WorldsFixtures
 
   alias BrokenOaths.Game
+  alias BrokenOaths.Game.Tribute
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.Worlds.Regions
 
@@ -239,6 +240,67 @@ defmodule BrokenOathsWeb.GameLive.FeudalCaptureUITest do
     end
   end
 
+  describe "broken city -> Move In captures it, through real UI controls (QA issue 7f91cff2)" do
+    test "once a hostile city is broken, the panel swaps Attack for Move In, and clicking it occupies the tile",
+         %{
+           conn: conn,
+           user: user,
+           other_conn: other_conn,
+           other_user: other_user,
+           world: world
+         } do
+      other_play_live = join_and_mount(other_conn, world)
+      play_live = join_and_mount(conn, world)
+
+      rival_city = found_city(other_play_live, world, other_user)
+      _my_city = found_city(play_live, world, user)
+
+      # Same barbarian-interference guard the sibling capture test above
+      # uses (`Shared Givens.clear_all_camps/1`'s own rationale).
+      :ok = Game.isolate_camp_for_test(world, -1)
+
+      attacker = warrior_adjacent_to(world, user, rival_city)
+      Game.advance_turn(world)
+
+      broken_city = grind_via_attack_button(conn, world, attacker, other_user, rival_city)
+      assert broken_city.hp == 0
+
+      # QA issue 7f91cff2 — `game:cities` now carries the broken state,
+      # and a fresh mount's own board push reflects it immediately.
+      {:ok, board_check, _html} = live(conn, ~p"/play/#{world.id}")
+      assert_push_event(board_check, "game:cities", %{cities: cities}, 500)
+      hostile = Enum.find(cities, &(&1.id == rival_city.id))
+      assert hostile.hostile == true
+      assert hostile.broken == true
+      assert hostile.hp == 0
+
+      # The discoverable button itself: once broken, "Attack" is gone
+      # and "Move In" takes its place — the real client-facing
+      # affordance this issue was filed over never existing.
+      {:ok, fresh_play_live, _html} = live(conn, ~p"/play/#{world.id}")
+      render_hook(fresh_play_live, "select_unit", %{"unit_id" => to_string(attacker.id)})
+
+      html = render(fresh_play_live)
+      refute html =~ ~s(data-test="attack-city-#{rival_city.id}")
+      assert html =~ ~s(data-test="move-in-city-#{rival_city.id}")
+      assert html =~ "Move In #{rival_city.name}"
+
+      # Click it for real — no raw `queue_move`/`to_tile` render_hook
+      # workaround, exactly the button a genuine player would reach.
+      fresh_play_live
+      |> element("[data-test='move-in-city-#{rival_city.id}']")
+      |> render_click()
+
+      Game.advance_turn(world)
+
+      [moved_attacker] = for u <- Game.player_units(world, user), u.id == attacker.id, do: u
+      assert moved_attacker.tile_id == rival_city.tile_id
+
+      captured = Game.captured_cities_visible_to(world, user)
+      assert Enum.any?(captured, &(&1.id == rival_city.id))
+    end
+  end
+
   describe "Captured Cities panel — Execute/Release (QA issues ffa66192, ed1ff4c0)" do
     test "presents Execute/Release for a fallen garrison, and Execute costs Honor via the real button",
          %{
@@ -405,14 +467,15 @@ defmodule BrokenOathsWeb.GameLive.FeudalCaptureUITest do
       assert status.levy_status == :answered
     end
 
-    test "refusing a call to arms through the real Refuse button spikes Oath Strain", %{
-      conn: conn,
-      other_conn: other_conn,
-      user: user,
-      other_user: other_user,
-      world: world,
-      third_user: third_user
-    } do
+    test "refusing a call to arms through the real Refuse button spikes Oath Strain and dings Honor",
+         %{
+           conn: conn,
+           other_conn: other_conn,
+           user: user,
+           other_user: other_user,
+           world: world,
+           third_user: third_user
+         } do
       {:ok, lord_live, _html} = live(conn, ~p"/play/#{world.id}")
 
       lord_live
@@ -422,6 +485,10 @@ defmodule BrokenOathsWeb.GameLive.FeudalCaptureUITest do
       {:ok, vassal_live, _html} = live(other_conn, ~p"/play/#{world.id}")
 
       strain_before = Game.vassals(world, user) |> hd() |> Map.get(:oath_strain)
+      # QA issue c0ec53ed — criterion 7678's "strain and Honor hits" was
+      # only half-wired: only Oath Strain moved. This is the vassal's
+      # OWN Honor, read straight off `Game.honor/2` before the refusal.
+      honor_before = Game.honor(world, other_user)
 
       vassal_live
       |> element("[data-test='refuse-levy']")
@@ -432,6 +499,10 @@ defmodule BrokenOathsWeb.GameLive.FeudalCaptureUITest do
 
       strain_after = Game.vassals(world, user) |> hd() |> Map.get(:oath_strain)
       assert strain_after > strain_before
+
+      honor_after = Game.honor(world, other_user)
+      assert honor_after < honor_before
+      assert honor_after == honor_before - Tribute.refusal_honor_penalty()
     end
   end
 end

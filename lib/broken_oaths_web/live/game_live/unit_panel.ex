@@ -28,15 +28,18 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
       (story 882, criterion 7482: Farm is never offered on hills/
       forest; story 905, criterion 7648: Pasture only once Animal
       Husbandry is researched, and only on a Cattle/Sheep tile)
-    * `:attackable_cities` - `[%{id:, name:}]` (QA issue 56ee521a):
-      hostile cities adjacent to `:unit` right now, only ever non-empty
-      for a military unit while `Game.feudal_enabled?/0` — `Play`
-      computes this too (`attackable_cities/3`, same "needs world/
-      fog access this component doesn't have" reason). Each renders as
-      its own discoverable "Attack <name>" button, wired straight to
-      the existing `"attack"`/`target_city_id` handler — the button
-      sibling to the right-click gesture the board's own hook already
-      offers.
+    * `:attackable_cities` - `[%{id:, name:, tile_id:, broken:}]` (QA
+      issue 56ee521a): hostile cities adjacent to `:unit` right now,
+      only ever non-empty for a military unit while
+      `Game.feudal_enabled?/0` — `Play` computes this too
+      (`attackable_cities/2`, same "needs world/fog access this
+      component doesn't have" reason). Each renders as its own
+      discoverable button, wired straight to the same command the
+      board's own right-click gesture already dispatches: "Attack
+      <name>" (`"attack"`/`target_city_id`) for an intact city, or
+      "Move In <name>" (`"queue_move"`/`to_tile`) once `broken` is true
+      (QA issue 7f91cff2) — a 0-HP city is captured by walking a unit
+      onto its tile, not by attacking it again.
   """
 
   use BrokenOathsWeb, :live_component
@@ -128,8 +131,10 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
         </div>
 
         <%!-- QA issue 56ee521a — the discoverable "Attack" affordance:
-             one button per hostile city `Play`'s own `attackable_cities/3`
-             found adjacent to this unit right now. --%>
+             one button per hostile city `Play`'s own `attackable_cities/2`
+             found adjacent to this unit right now. QA issue 7f91cff2 —
+             once a given city is `broken` (0 HP), its own button swaps
+             to "Move In" and dispatches `queue_move` instead. --%>
         <.attack_city_button
           :for={city <- @attackable_cities}
           city={city}
@@ -160,6 +165,26 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
 
   attr :city, :map, required: true
   attr :unit_id, :any, required: true
+
+  # QA issue 7f91cff2 — once the target city is broken (0 HP, not yet
+  # captured), the discoverable button must MOVE the unit onto its
+  # tile to occupy it, not re-issue another (now harmless, floor-
+  # clamped) attack. Mirrors the `.Board` hook's own `orderMove/1`
+  # branch: broken -> `queue_move`, intact -> `attack`.
+  defp attack_city_button(%{city: %{broken: true}} = assigns) do
+    ~H"""
+    <button
+      type="button"
+      data-test={"move-in-city-#{@city.id}"}
+      phx-click="queue_move"
+      phx-value-unit_id={@unit_id}
+      phx-value-to_tile={@city.tile_id}
+      class="btn btn-sm btn-warning"
+    >
+      Move In {@city.name}
+    </button>
+    """
+  end
 
   defp attack_city_button(assigns) do
     ~H"""

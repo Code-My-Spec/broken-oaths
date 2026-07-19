@@ -44,10 +44,15 @@ defmodule BrokenOaths.Game.Tribute do
   vassal's own pledge (`:answered`) — they keep command of the pledged
   units; nothing about answering moves any unit itself, only the
   record. `refuse_changeset/1` marks it `:refused`; `spike_oath_strain/1`
-  is the paired Honor-adjacent consequence a refusal (or, per the
-  design doc, a mid-war withdrawal reclassified to refusal) always
-  carries — Oath Strain rises by `oath_strain_refusal_spike/0`, clamped
-  at 100.
+  and `apply_refusal_honor_penalty/1` are the PAIRED consequences a
+  refusal (or, per the design doc, a mid-war withdrawal reclassified to
+  refusal) always carries — Oath Strain rises by
+  `oath_strain_refusal_spike/0`, clamped at 100, AND Honor drops by
+  `refusal_honor_penalty/0` (QA issue c0ec53ed — criterion 7678's
+  "takes strain and Honor hits" was only half-wired: Oath Strain rose,
+  Honor never moved. `refusal_honor_penalty/0` mirrors the sibling
+  execute-garrison penalty's own unclamped `honor - N` shape,
+  `Siege.apply_execute_honor_penalty/1`).
 
   ## The tribute rate lever
 
@@ -75,6 +80,7 @@ defmodule BrokenOaths.Game.Tribute do
 
   @oath_strain_refusal_spike 15
   @max_oath_strain 100
+  @refusal_honor_penalty 3
 
   # -------------------------------------------------------------------
   # Gold tribute
@@ -181,7 +187,7 @@ defmodule BrokenOaths.Game.Tribute do
   @spec answer_changeset(Levy.t()) :: Ecto.Changeset.t()
   def answer_changeset(levy), do: Levy.changeset(levy, %{status: :answered})
 
-  @doc "Build the changeset refusing (or withdrawing from) a call to arms — pair with `spike_oath_strain/1`."
+  @doc "Build the changeset refusing (or withdrawing from) a call to arms — pair with `spike_oath_strain/1` AND `apply_refusal_honor_penalty/1`."
   @spec refuse_changeset(Levy.t()) :: Ecto.Changeset.t()
   def refuse_changeset(levy), do: Levy.changeset(levy, %{status: :refused})
 
@@ -189,11 +195,32 @@ defmodule BrokenOaths.Game.Tribute do
   Build the changeset spiking `vassalage`'s own Oath Strain by
   `oath_strain_refusal_spike/0`, clamped at `#{@max_oath_strain}` — the
   refused-call consequence: "Refusal spikes Oath Strain and dings the
-  Honor ledger" (Honor itself has no ledger anywhere yet in this batch).
+  Honor ledger" — see `refusal_honor_penalty/0`/`apply_refusal_honor_penalty/1`
+  below for the Honor half of that pair (QA issue c0ec53ed).
   """
   @spec spike_oath_strain(Vassalage.t()) :: Ecto.Changeset.t()
   def spike_oath_strain(vassalage) do
     new_strain = min(vassalage.oath_strain + @oath_strain_refusal_spike, @max_oath_strain)
     Vassalage.changeset(vassalage, %{oath_strain: new_strain})
   end
+
+  # -------------------------------------------------------------------
+  # Refusal Honor consequence (QA issue c0ec53ed)
+  # -------------------------------------------------------------------
+
+  @doc """
+  How much Honor a refused (or withdrawn) call to arms costs — criterion
+  7678's "takes strain and Honor hits," the Honor half of the pair
+  alongside `oath_strain_refusal_spike/0`. Deliberately calibrated
+  against the sibling garrison-execute penalty
+  (`Siege.execute_garrison_honor_penalty/0`, `2`) — refusing an oath is
+  a step worse than executing a beaten garrison, so this reads
+  slightly higher.
+  """
+  @spec refusal_honor_penalty() :: pos_integer()
+  def refusal_honor_penalty, do: @refusal_honor_penalty
+
+  @doc "`honor - refusal_honor_penalty/0` — the Honor consequence for refusing (or withdrawing from) a call to arms, unclamped (mirrors `Siege.apply_execute_honor_penalty/1`)."
+  @spec apply_refusal_honor_penalty(integer()) :: integer()
+  def apply_refusal_honor_penalty(honor), do: honor - @refusal_honor_penalty
 end
