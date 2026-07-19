@@ -65,6 +65,7 @@ defmodule BrokenOaths.Game.Tribute do
   """
 
   alias BrokenOaths.Game.Levy
+  alias BrokenOaths.Game.OathStrain
   alias BrokenOaths.Game.Vassalage
 
   @type player_id :: term()
@@ -196,11 +197,17 @@ defmodule BrokenOaths.Game.Tribute do
   `oath_strain_refusal_spike/0`, clamped at `#{@max_oath_strain}` — the
   refused-call consequence: "Refusal spikes Oath Strain and dings the
   Honor ledger" — see `refusal_honor_penalty/0`/`apply_refusal_honor_penalty/1`
-  below for the Honor half of that pair (QA issue c0ec53ed).
+  below for the Honor half of that pair (QA issue c0ec53ed). Story 913:
+  delegates its magnitude to `OathStrain.spike_refused_levy/1` — the
+  now-canonical home for this number (`OathStrain`'s own moduledoc) —
+  rather than carrying a second copy that could drift out of sync;
+  `oath_strain_refusal_spike/0` stays as this module's own public
+  accessor (unchanged value, `refusal_honor_penalty/0`'s sibling), only
+  the WRITE path underneath it changed.
   """
   @spec spike_oath_strain(Vassalage.t()) :: Ecto.Changeset.t()
   def spike_oath_strain(vassalage) do
-    new_strain = min(vassalage.oath_strain + @oath_strain_refusal_spike, @max_oath_strain)
+    new_strain = OathStrain.spike_refused_levy(vassalage.oath_strain)
     Vassalage.changeset(vassalage, %{oath_strain: new_strain})
   end
 

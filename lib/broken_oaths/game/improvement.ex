@@ -155,6 +155,18 @@ defmodule BrokenOaths.Game.Improvement do
   def allowed?(:road, %Terrain{}), do: true
 
   @doc """
+  Whether a Mine can be built on a tile, widened for strategic resources
+  (QA issue 5a30ad3f): the normal Hills-relief gate (`allowed?/2`), OR
+  any tile carrying a mineable strategic resource — Copper, which
+  `BrokenOaths.Worlds.Resources.ensure_reachable_copper/3` can guarantee
+  onto a non-Hills tile near spawn, leaving the player staring at a
+  Copper deposit with no way to mine it. Callers still owe the `:land`
+  `tile_class` check (mountains/water) exactly as `allowed?/2` documents.
+  """
+  @spec mine_allowed?(Terrain.t(), atom() | nil) :: boolean()
+  def mine_allowed?(terrain, resource), do: allowed?(:mine, terrain) or resource == :copper
+
+  @doc """
   Whether a Pasture can be built on a tile carrying `resource` (story
   905): only the two animal resources, Cattle and Sheep — the terrain
   those two are eligible on (`BrokenOaths.Worlds.Resources`) already

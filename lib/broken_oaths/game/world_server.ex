@@ -55,10 +55,12 @@ defmodule BrokenOaths.Game.WorldServer do
     Improvement,
     KnownPlayer,
     Levy,
+    OathStrain,
     Order,
     Player,
     PlayerResearch,
     Presence,
+    ProtectionPact,
     Production,
     ProductionItem,
     Research,
@@ -583,6 +585,54 @@ defmodule BrokenOaths.Game.WorldServer do
           :stale ->
             {:reply, {:error, :stale}, resync(state)}
         end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Story 913: a lord's one-off gift to `vassal_user_id` — eases their
+  # Oath Strain (`OathStrain.ease_gift/1`), persisted immediately, same
+  # non-tick-state status `:set_tribute_rate` above already has.
+  def handle_call({:gift_vassal, user, vassal_user_id}, _from, state) do
+    case do_gift_vassal(state, user, vassal_user_id) do
+      {:ok, _vassalage} ->
+        broadcast(state.world.id, [:vassals_changed])
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Story 913: a lord and `vassal_user_id` declaring a shared enemy
+  # (`enemy_user_id`) — eases the vassal's Oath Strain (`OathStrain.
+  # ease_shared_enemy/1`), same immediate-persist status as
+  # `:gift_vassal` above.
+  def handle_call({:declare_shared_enemy, user, vassal_user_id, enemy_user_id}, _from, state) do
+    case do_declare_shared_enemy(state, user, vassal_user_id, enemy_user_id) do
+      {:ok, _vassalage} ->
+        broadcast(state.world.id, [:vassals_changed])
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Story 913 (criterion 7722): the vassal's own narrow seam for
+  # marking their lord's Protection Pact unhonored — spikes their own
+  # Oath Strain (`OathStrain.spike_broken_protection_pact/1`). Distinct
+  # from the REAL Protection Pact engine (story 914, `resolve_broken/3`,
+  # a window genuinely expiring unanswered) — this handler only ever
+  # touches Oath Strain, never the lord's Honor or fellow-vassal
+  # contagion, exactly the narrower scope criterion 7722's own moduledoc
+  # describes for this invented hook.
+  def handle_call({:mark_pact_unhonored, user, lord_user_id}, _from, state) do
+    case do_mark_pact_unhonored(state, user, lord_user_id) do
+      {:ok, _vassalage} ->
+        broadcast(state.world.id, [:vassals_changed])
+        {:reply, :ok, state}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -1286,6 +1336,8 @@ defmodule BrokenOaths.Game.WorldServer do
     ticked = %{ticked | turn_started_at: DateTime.utc_now()}
     {ticked, capture_events} = apply_captures(ticked)
     {ticked, tribute_logs} = apply_tribute(ticked)
+    ticked = apply_oath_strain_drift(ticked)
+    ticked = apply_protection_pact_ticks(ticked)
     ticked = apply_bank(ticked)
     {new_state, discovery_events} = apply_discoveries(state, ticked)
 
@@ -1295,7 +1347,8 @@ defmodule BrokenOaths.Game.WorldServer do
 
         broadcast(
           new_state.world.id,
-          events ++
+          [:vassals_changed] ++
+            events ++
             discovery_events ++ approach_alert_events(state, new_state) ++ capture_events
         )
 
@@ -1717,7 +1770,7 @@ defmodule BrokenOaths.Game.WorldServer do
       true ->
         adjacent_tile_ids = Regions.adjacent_tiles(state.world, attacker.tile_id)
 
-        case Combat.validate_attack(attacker, defender, adjacent_tile_ids) do
+        case validate_attack(state, attacker, defender, adjacent_tile_ids) do
           :ok ->
             {result, new_state} = resolve_attack(state, attacker, defender)
             {:ok, result, new_state}
@@ -1726,6 +1779,33 @@ defmodule BrokenOaths.Game.WorldServer do
             {:error, reason}
         end
     end
+  end
+
+  # Story 914: `Combat.validate_attack/3`'s own general "no PvP in the
+  # Stone Age" rule (`Combat.hostile?/2` — false for any two real
+  # players, LOCKED, see `BrokenOathsSpex.Story899.Criterion7603Spex`)
+  # stays untouched for everyone ELSE — this only widens the CALLER-side
+  # gate `do_attack/4` itself applies, with one narrow, story-914-scoped
+  # exception: a lord may always strike the SPECIFIC unit currently
+  # tracked as the besieger of one of their OWN vassal's active
+  # Protection Pact calls ("the lord is notified and is expected to
+  # defend" — the design doc's own words require the lord be ABLE to
+  # fight back). Every other pairing of two real players falls through
+  # to `Combat.validate_attack/3`'s own unchanged verdict.
+  defp validate_attack(state, attacker, defender, adjacent_tile_ids) do
+    cond do
+      attacker.movement <= 0 -> {:error, :out_of_movement}
+      defender.tile_id not in adjacent_tile_ids -> {:error, :not_adjacent}
+      Combat.hostile?(attacker, defender) -> :ok
+      protecting_lord_may_strike?(state, attacker, defender) -> :ok
+      true -> {:error, :not_hostile}
+    end
+  end
+
+  defp protecting_lord_may_strike?(state, attacker, defender) do
+    Enum.any?(protection_calls(state), fn {_vassal_player_id, call} ->
+      call.attacker_unit_id == defender.id and call.lord_player_id == attacker.player_id
+    end)
   end
 
   defp resolve_attack(state, attacker, defender) do
@@ -1754,6 +1834,9 @@ defmodule BrokenOaths.Game.WorldServer do
       |> schedule_heir_if_lord_fell(defender, new_defender)
       |> pay_bounty_if_barbarian_fell(new_attacker, defender)
       |> pay_bounty_if_barbarian_fell(new_defender, attacker)
+      |> maybe_raise_protection_call(attacker, defender.player_id)
+      |> resolve_protection_call_if_dead(new_attacker)
+      |> resolve_protection_call_if_dead(new_defender)
 
     {%{damage_dealt: dealt, damage_taken: taken}, state}
   end
@@ -1957,6 +2040,8 @@ defmodule BrokenOaths.Game.WorldServer do
       }
       |> schedule_heir_if_lord_fell(attacker, new_attacker)
       |> pay_bounty_if_barbarian_fell(new_attacker, %{player_id: city.player_id})
+      |> maybe_raise_protection_call(attacker, city.player_id)
+      |> resolve_protection_call_if_dead(new_attacker)
 
     {%{damage_dealt: dealt, damage_taken: taken}, state}
   end
@@ -2095,6 +2180,197 @@ defmodule BrokenOaths.Game.WorldServer do
     Vassalage
     |> where([v], v.world_id == ^world_id and v.status == :active)
     |> Repo.all()
+  end
+
+  # -------------------------------------------------------------------
+  # Oath Strain drift (story 913)
+  # -------------------------------------------------------------------
+
+  # Runs every turn boundary, alongside `apply_tribute/1` — reads the
+  # SAME `active_vassalages/1` fresh from Repo and nudges each one's own
+  # Oath Strain by `OathStrain.tribute_drift/2`, off its OWN
+  # `tribute_rate` ("slow and sticky": at most `OathStrain.
+  # max_drift_step/0` points per boundary, zero at the 25% baseline —
+  # see that module's own moduledoc). Persisted immediately, same
+  # "direct Repo write, not tick-state" status `Tribute.
+  # spike_oath_strain/1`'s own call site (`do_refuse_levy/3`) already
+  # has for this exact column — never writes when the drift is
+  # genuinely zero, so a quiet vassalage held exactly at the baseline
+  # generates no churn. A no-op while `Game.feudal_enabled?/0` reads
+  # `false`, same belt-and-suspenders status `apply_tribute/1` already
+  # carries.
+  defp apply_oath_strain_drift(state) do
+    if Game.feudal_enabled?() do
+      for vassalage <- active_vassalages(state.world.id) do
+        new_strain = OathStrain.tribute_drift(vassalage.oath_strain, vassalage.tribute_rate)
+
+        if new_strain != vassalage.oath_strain do
+          Vassalage.changeset(vassalage, %{oath_strain: new_strain}) |> Repo.update!()
+        end
+      end
+
+      state
+    else
+      state
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Protection Pact (story 914)
+  # -------------------------------------------------------------------
+
+  # `state.protection_calls` (`%{vassal_player_id => ProtectionPact.call()}`)
+  # and `state.protection_honored_counts` (`%{vassal_player_id =>
+  # non_neg_integer()}`) are purely in-memory tick-state — same "no
+  # restart survival needed" status `state.camp_contributions` already
+  # has (`ProtectionPact`'s own moduledoc: "nothing about it needs to
+  # survive a WorldServer restart any more than an in-flight combat
+  # resolution does") — never initialized in `load_state/1`, always
+  # read through these two accessors' own `Map.get(state, key, %{})`
+  # default.
+  defp protection_calls(state), do: Map.get(state, :protection_calls, %{})
+  defp protection_honored_counts(state), do: Map.get(state, :protection_honored_counts, %{})
+
+  # The lord/vassal-facing read both `format_vassal/2` and
+  # `vassal_status/2` share: `nil` while no call is active, or a plain
+  # `%{window_remaining:}` otherwise — deliberately narrower than the
+  # full `ProtectionPact.call()` map (the UI only ever needs the
+  # countdown; `attacker_unit_id` is this module's own bookkeeping).
+  defp protection_call_view(state, vassal_player_id) do
+    case Map.get(protection_calls(state), vassal_player_id) do
+      nil -> nil
+      call -> %{window_remaining: call.window_remaining}
+    end
+  end
+
+  # Story 914 (criterion 7726): the moment a genuine THIRD PARTY (never
+  # the vassal's own lord) lands a real attack on a vassal's city or
+  # unit, raises a Protection Pact obligation against their lord —
+  # reuses the SAME two real attack surfaces every combat in this
+  # codebase already resolves through: `resolve_attack/3` (unit-vs-unit,
+  # also the barbarian bridge `:resolve_barbarian_attack_for_test`
+  # calls) and `resolve_city_attack/2` (a besieging "attack"/
+  # `target_city_id`). A no-op while a call is ALREADY pending for this
+  # vassal (one obligation at a time), while the attacker IS their own
+  # lord (no self-protection), or while `Game.feudal_enabled?/0` reads
+  # `false`.
+  defp maybe_raise_protection_call(state, _attacker, nil), do: state
+
+  defp maybe_raise_protection_call(state, attacker, victim_player_id) do
+    with true <- Game.feudal_enabled?(),
+         %Vassalage{} = vassalage <- active_vassalage_for_vassal(state, victim_player_id),
+         true <- attacker.player_id != vassalage.lord_player_id,
+         nil <- Map.get(protection_calls(state), victim_player_id) do
+      call =
+        vassalage.lord_player_id
+        |> ProtectionPact.raise_call(victim_player_id, state.turn)
+        |> Map.put(:attacker_unit_id, attacker.id)
+
+      Map.put(state, :protection_calls, Map.put(protection_calls(state), victim_player_id, call))
+    else
+      _ -> state
+    end
+  end
+
+  # The HONORED branch (criteria 7728/7730): the moment the tracked
+  # besieger dies — whether from the lord's own follow-up strike
+  # (`resolve_attack/3`) or the CITY's own counter-fire in the very same
+  # clash that raised the call (`resolve_city_attack/2`) — the call
+  # resolves honored right here, no window-expiry wait needed. Only
+  # ever matches a call still tracking THIS exact dead unit's own id.
+  defp resolve_protection_call_if_dead(state, %{hp: 0} = dead_unit) do
+    protection_calls(state)
+    |> Enum.find(fn {_vassal_player_id, call} -> call.attacker_unit_id == dead_unit.id end)
+    |> case do
+      nil -> state
+      {vassal_player_id, call} -> resolve_honored(state, vassal_player_id, call)
+    end
+  end
+
+  defp resolve_protection_call_if_dead(state, _unit), do: state
+
+  defp resolve_honored(state, vassal_player_id, call) do
+    {:ok, vassalage} = fetch_vassalage(state, call.lord_player_id, vassal_player_id)
+    lord_honor = state.players[call.lord_player_id].honor
+
+    {_resolved_call, new_strain, new_honor} =
+      ProtectionPact.score_honored(call, vassalage.oath_strain, lord_honor)
+
+    Vassalage.changeset(vassalage, %{oath_strain: new_strain}) |> Repo.update!()
+
+    state = put_in(state.players[call.lord_player_id].honor, new_honor)
+
+    state
+    |> Map.put(:protection_calls, Map.delete(protection_calls(state), vassal_player_id))
+    |> Map.put(
+      :protection_honored_counts,
+      Map.update(protection_honored_counts(state), vassal_player_id, 1, &(&1 + 1))
+    )
+  end
+
+  # The BROKEN branch (criterion 7729): only ever called once a call's
+  # own `ProtectionPact.expired?/1` reads true (see
+  # `apply_protection_pact_ticks/1`) — docks the lord's Honor, spikes
+  # the direct victim's own strain, and fans the smaller realm-wide
+  # contagion spike out to every OTHER active vassal of the same lord
+  # (`apply_protection_pact_contagion/3`).
+  defp resolve_broken(state, vassal_player_id, call) do
+    {:ok, vassalage} = fetch_vassalage(state, call.lord_player_id, vassal_player_id)
+    lord_honor = state.players[call.lord_player_id].honor
+
+    {_resolved_call, new_strain, new_honor} =
+      ProtectionPact.score_broken(call, vassalage.oath_strain, lord_honor)
+
+    Vassalage.changeset(vassalage, %{oath_strain: new_strain}) |> Repo.update!()
+    apply_protection_pact_contagion(state, call.lord_player_id, vassal_player_id)
+
+    state = put_in(state.players[call.lord_player_id].honor, new_honor)
+    Map.put(state, :protection_calls, Map.delete(protection_calls(state), vassal_player_id))
+  end
+
+  # Every OTHER active vassal of `lord_player_id` (never the direct
+  # victim, `victim_vassal_player_id`) takes `ProtectionPact.
+  # spike_contagion/1` — read fresh from Repo, same "world-membership-
+  # scoped coordination state, not tick-state" status `active_vassalages/1`
+  # already documents. Persisted immediately, side-effect only (the
+  # caller's own `state` is untouched by this).
+  defp apply_protection_pact_contagion(state, lord_player_id, victim_vassal_player_id) do
+    Vassalage
+    |> where(
+      [v],
+      v.world_id == ^state.world.id and v.lord_player_id == ^lord_player_id and
+        v.status == :active and v.vassal_player_id != ^victim_vassal_player_id
+    )
+    |> Repo.all()
+    |> Enum.each(fn vassalage ->
+      new_strain = ProtectionPact.spike_contagion(vassalage.oath_strain)
+      Vassalage.changeset(vassalage, %{oath_strain: new_strain}) |> Repo.update!()
+    end)
+  end
+
+  # Runs every turn boundary, alongside `apply_oath_strain_drift/1` —
+  # counts every still-pending call down by exactly one
+  # (`ProtectionPact.tick/1`, criterion 7727); an expired, still-
+  # unanswered one resolves BROKEN right here (criterion 7729). A no-op
+  # while `Game.feudal_enabled?/0` reads `false`.
+  defp apply_protection_pact_ticks(state) do
+    if Game.feudal_enabled?() do
+      Enum.reduce(protection_calls(state), state, fn {vassal_player_id, call}, acc ->
+        ticked_call = ProtectionPact.tick(call)
+
+        if ProtectionPact.expired?(ticked_call) do
+          resolve_broken(acc, vassal_player_id, ticked_call)
+        else
+          Map.put(
+            acc,
+            :protection_calls,
+            Map.put(protection_calls(acc), vassal_player_id, ticked_call)
+          )
+        end
+      end)
+    else
+      state
+    end
   end
 
   # Story 912: every player's own REAL per-turn gold income —
@@ -2629,6 +2905,26 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
+  # Mine (QA issue 5a30ad3f) gates on the resource-aware
+  # `Improvement.mine_allowed?/2` — Hills relief OR a Copper deposit that
+  # `Resources.ensure_reachable_copper/3` may have guaranteed onto a
+  # non-Hills tile — rather than the terrain-only `allowed?/2` below.
+  defp validate_improvement_terrain(state, tile_id, :mine, _player_id) do
+    cond do
+      Regions.tile_class(state.world, tile_id) != :land ->
+        {:error, :invalid_terrain}
+
+      not Improvement.mine_allowed?(
+        Regions.terrain(state.world, tile_id),
+        Resources.at(state.world, tile_id)
+      ) ->
+        {:error, :invalid_terrain}
+
+      true ->
+        :ok
+    end
+  end
+
   defp validate_improvement_terrain(state, tile_id, kind, _player_id) do
     cond do
       Regions.tile_class(state.world, tile_id) != :land ->
@@ -2967,7 +3263,15 @@ defmodule BrokenOaths.Game.WorldServer do
       # QA issue bd93cc0a: the production-stewardship + emergency-defend
       # click-through's own data source — `nil` while online (nothing to
       # steward yet), `steward_view/2`'s real payload once offline.
-      steward: if(online?, do: nil, else: steward_view(state, vassal_player))
+      steward: if(online?, do: nil, else: steward_view(state, vassal_player)),
+      # Story 914: `nil` while no Protection Pact call is active for
+      # this vassal, `%{window_remaining:}` otherwise.
+      protection_call: protection_call_view(state, vassalage.vassal_player_id),
+      # Story 914 (criterion 7730): a running count of calls honored FOR
+      # this vassal — never resets, survives the underlying call itself
+      # being resolved and removed from `state.protection_calls`.
+      protection_honored_count:
+        Map.get(protection_honored_counts(state), vassalage.vassal_player_id, 0)
     }
   end
 
@@ -2996,7 +3300,11 @@ defmodule BrokenOaths.Game.WorldServer do
               tribute_rate: vassalage.tribute_rate,
               oath_strain: vassalage.oath_strain,
               agenda_pending?: Vassalization.agenda_pending?(vassalage),
-              levy_status: levy_status_for(state.world.id, vassalage.lord_player_id, player.id)
+              levy_status: levy_status_for(state.world.id, vassalage.lord_player_id, player.id),
+              # Story 914: this vassal's OWN read of their own active
+              # Protection Pact call, same `nil | %{window_remaining:}`
+              # shape `format_vassal/2` gives the lord.
+              protection_call: protection_call_view(state, player.id)
             }
         end
     end
@@ -3110,6 +3418,46 @@ defmodule BrokenOaths.Game.WorldServer do
         update_in(state.players[vassal_player.id].honor, &Tribute.apply_refusal_honor_penalty/1)
 
       {:ok, refused, new_state}
+    end
+  end
+
+  # Story 913: `user` (the lord) gifts `vassal_user_id` — eases their
+  # Oath Strain by `OathStrain.gift_ease/0`.
+  defp do_gift_vassal(state, user, vassal_user_id) do
+    with {:ok, lord_player} <- fetch_player(state, user.id),
+         {:ok, vassal_player} <- fetch_player(state, vassal_user_id),
+         {:ok, vassalage} <- fetch_vassalage(state, lord_player.id, vassal_player.id) do
+      new_strain = OathStrain.ease_gift(vassalage.oath_strain)
+      Vassalage.changeset(vassalage, %{oath_strain: new_strain}) |> Repo.update()
+    end
+  end
+
+  # Story 913: `user` (the lord) and `vassal_user_id` declare
+  # `enemy_user_id` a shared enemy — eases the vassal's Oath Strain by
+  # `OathStrain.shared_enemy_ease/0`. `enemy_user_id` only needs to be a
+  # real, known player (validated via `fetch_player/2`) — nothing about
+  # the declaration itself is persisted beyond the strain ease.
+  defp do_declare_shared_enemy(state, user, vassal_user_id, enemy_user_id) do
+    with {:ok, lord_player} <- fetch_player(state, user.id),
+         {:ok, vassal_player} <- fetch_player(state, vassal_user_id),
+         {:ok, _enemy_player} <- fetch_player(state, enemy_user_id),
+         {:ok, vassalage} <- fetch_vassalage(state, lord_player.id, vassal_player.id) do
+      new_strain = OathStrain.ease_shared_enemy(vassalage.oath_strain)
+      Vassalage.changeset(vassalage, %{oath_strain: new_strain}) |> Repo.update()
+    end
+  end
+
+  # Story 913 (criterion 7722): `user` (the vassal) marks their own
+  # bond with `lord_user_id` unhonored — spikes their own Oath Strain by
+  # `OathStrain.protection_pact_spike/0`. See this handler's own
+  # `handle_call/3` doc for how this differs from the real story 914
+  # broken-pact resolution.
+  defp do_mark_pact_unhonored(state, user, lord_user_id) do
+    with {:ok, vassal_player} <- fetch_player(state, user.id),
+         {:ok, lord_player} <- fetch_player(state, lord_user_id),
+         {:ok, vassalage} <- fetch_vassalage(state, lord_player.id, vassal_player.id) do
+      new_strain = OathStrain.spike_broken_protection_pact(vassalage.oath_strain)
+      Vassalage.changeset(vassalage, %{oath_strain: new_strain}) |> Repo.update()
     end
   end
 

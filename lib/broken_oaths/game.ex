@@ -394,6 +394,43 @@ defmodule BrokenOaths.Game do
     do: WorldServer.call(world, {:refuse_levy, user, lord_user_id})
 
   # -------------------------------------------------------------------
+  # Oath Strain concessions / Protection Pact (stories 913/914)
+  # -------------------------------------------------------------------
+
+  @doc """
+  `user` (the lord) gifts `vassal_user_id` — a one-off concession that
+  eases their Oath Strain (`BrokenOaths.Game.OathStrain.ease_gift/1`).
+  """
+  @spec gift_vassal(map(), map(), term()) ::
+          :ok | {:error, :not_a_player | :not_a_vassal | Ecto.Changeset.t()}
+  def gift_vassal(world, user, vassal_user_id),
+    do: WorldServer.call(world, {:gift_vassal, user, vassal_user_id})
+
+  @doc """
+  `user` (the lord) and `vassal_user_id` declare `enemy_user_id` a
+  shared enemy — eases the vassal's Oath Strain
+  (`BrokenOaths.Game.OathStrain.ease_shared_enemy/1`).
+  """
+  @spec declare_shared_enemy(map(), map(), term(), term()) ::
+          :ok | {:error, :not_a_player | :not_a_vassal | Ecto.Changeset.t()}
+  def declare_shared_enemy(world, user, vassal_user_id, enemy_user_id),
+    do: WorldServer.call(world, {:declare_shared_enemy, user, vassal_user_id, enemy_user_id})
+
+  @doc """
+  The vassal (`user`) marks their own bond with `lord_user_id`
+  unhonored — spikes their own Oath Strain
+  (`BrokenOaths.Game.OathStrain.spike_broken_protection_pact/1`). See
+  `BrokenOaths.Game.WorldServer`'s own `handle_call/3` doc for how this
+  narrow, vassal-driven seam differs from the real Protection Pact
+  engine's own broken-pact resolution (a window genuinely expiring
+  unanswered — story 914).
+  """
+  @spec mark_pact_unhonored(map(), map(), term()) ::
+          :ok | {:error, :not_a_player | :not_a_vassal | Ecto.Changeset.t()}
+  def mark_pact_unhonored(world, user, lord_user_id),
+    do: WorldServer.call(world, {:mark_pact_unhonored, user, lord_user_id})
+
+  # -------------------------------------------------------------------
   # Gold Bank (story 909)
   # -------------------------------------------------------------------
 

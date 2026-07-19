@@ -336,39 +336,30 @@ defmodule BrokenOathsWeb.GameLive.Play do
     unit_id = parse_id(unit_id)
     tile_id = params |> Map.get("tile_id") |> parse_id()
 
-    %{units: units, world: world, user: user, selected_unit_id: current_selected_id} =
-      socket.assigns
+    %{
+      units: units,
+      cities: cities,
+      world: world,
+      user: user,
+      selected_unit_id: current_unit_id,
+      selected_city_id: current_city_id
+    } = socket.assigns
 
-    unit =
-      case tile_id && owned_stack_on_tile(world, user, tile_id) do
-        [_ | _] = stack -> next_unit_in_stack(stack, current_selected_id)
-        _no_owned_stack -> Enum.find(units, &(&1.id == unit_id))
-      end
-
-    selected_unit_id = if unit, do: unit.id, else: unit_id
+    stack = if tile_id, do: owned_stack_on_tile(world, user, tile_id), else: []
+    city_on_tile = tile_id && Enum.find(cities, &(&1.tile_id == tile_id))
 
     socket =
-      socket
-      |> assign(
-        selected_unit_id: selected_unit_id,
-        selected_unit: unit,
-        selected_order: unit && unit.order,
-        allowed_improvements:
-          worker_allowed_improvements(socket.assigns.world, unit, socket.assigns.player_research),
-        current_dig: worker_current_dig(socket.assigns.improvements, unit),
-        attackable_cities:
-          attackable_cities(socket.assigns.world, unit, socket.assigns.enemy_cities),
-        order_error: nil,
-        improvement_error: nil,
-        selected_city_id: nil,
-        selected_city: nil,
-        selected_tile: nil,
-        selected_camp_id: nil,
-        selected_camp: nil
-      )
-      |> push_event("game:selected", %{unit_id: selected_unit_id})
-      |> push_selected_path()
-      |> push_city_selection()
+      case next_tile_selection(stack, city_on_tile, current_unit_id, current_city_id) do
+        {:city, city} ->
+          apply_city_panel(socket, city)
+
+        {:unit, unit} ->
+          apply_unit_panel(socket, unit, unit.id)
+
+        :none ->
+          unit = Enum.find(units, &(&1.id == unit_id))
+          apply_unit_panel(socket, unit, (unit && unit.id) || unit_id)
+      end
 
     {:noreply, socket}
   end
@@ -809,6 +800,54 @@ defmodule BrokenOathsWeb.GameLive.Play do
     %{world: world, user: user} = socket.assigns
 
     case Game.refuse_levy(world, user, parse_id(lord_user_id)) do
+      :ok -> {:noreply, refresh_vassalage(socket)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  # Story 913: the lord's one-off gift to a vassal — `"gift"` names
+  # what was gifted (flavor only; every gift applies the same
+  # `OathStrain.ease_gift/1` regardless of what it names).
+  def handle_event(
+        "gift_vassal",
+        %{"vassal_user_id" => vassal_user_id, "gift" => _gift},
+        socket
+      ) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.gift_vassal(world, user, parse_id(vassal_user_id)) do
+      :ok -> {:noreply, refresh_vassalage(socket)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  # Story 913: the lord and a vassal declaring a shared enemy.
+  def handle_event(
+        "declare_shared_enemy",
+        %{"vassal_user_id" => vassal_user_id, "enemy_user_id" => enemy_user_id},
+        socket
+      ) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.declare_shared_enemy(
+           world,
+           user,
+           parse_id(vassal_user_id),
+           parse_id(enemy_user_id)
+         ) do
+      :ok -> {:noreply, refresh_vassalage(socket)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  # Story 913 (criterion 7722): the vassal's own narrow seam for
+  # marking their lord's Protection Pact unhonored — see
+  # `BrokenOaths.Game.mark_pact_unhonored/3`'s own doc for how this
+  # differs from the real story 914 broken-pact resolution.
+  def handle_event("mark_pact_unhonored", %{"lord_user_id" => lord_user_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.mark_pact_unhonored(world, user, parse_id(lord_user_id)) do
       :ok -> {:noreply, refresh_vassalage(socket)}
       {:error, _reason} -> {:noreply, socket}
     end
@@ -1874,7 +1913,16 @@ defmodule BrokenOathsWeb.GameLive.Play do
   defp worker_allowed_improvements(world, %{tile_id: tile_id}, player_research) do
     if Regions.tile_class(world, tile_id) == :land do
       terrain = Regions.terrain(world, tile_id)
-      terrain_kinds = Enum.filter([:farm, :mine, :road], &Improvement.allowed?(&1, terrain))
+      resource = Resources.at(world, tile_id)
+
+      # `:mine` uses the resource-aware gate (QA issue 5a30ad3f — Copper
+      # guaranteed near spawn can land off-Hills); Farm/Road stay
+      # terrain-only.
+      terrain_kinds =
+        Enum.filter([:farm, :mine, :road], fn
+          :mine -> Improvement.mine_allowed?(terrain, resource)
+          kind -> Improvement.allowed?(kind, terrain)
+        end)
 
       if pasture_offered?(world, tile_id, player_research) do
         terrain_kinds ++ [:pasture]
@@ -1971,18 +2019,81 @@ defmodule BrokenOathsWeb.GameLive.Play do
   end
 
   # Pure cycling rule, kept separate from the `Game.player_units/2` read
-  # above so it's trivially unit-testable: given a NON-EMPTY, already
-  # `owned_stack_on_tile/3`-sorted stack and whichever unit id is
-  # presently selected (`nil` when nothing is, or when the selection
-  # belongs to a different tile entirely), returns the unit a click
-  # should select next — the first of the stack when none of it is
-  # already selected (the unchanged "first click" behavior a
-  # single-unit tile always hits), otherwise the NEXT one, wrapping
-  # back to the first past the last.
-  defp next_unit_in_stack(stack, current_selected_id) do
-    case Enum.find_index(stack, &(&1.id == current_selected_id)) do
-      nil -> List.first(stack)
-      idx -> Enum.at(stack, rem(idx + 1, length(stack)))
+  # above so it's trivially unit-testable. Repeated clicks on one tile
+  # cycle through everything selectable there: each of the player's own
+  # units in `owned_stack_on_tile/3` order, THEN (QA issue adc8c79e) the
+  # player's own city on that tile — so a unit parked on a city no longer
+  # hides it. Given the current selection (`current_unit_id` when a unit
+  # is selected, `current_city_id` when a city is, both possibly on a
+  # different tile), returns the selection AFTER it, wrapping past the
+  # last back to the first. `:none` when the tile has neither an owned
+  # stack nor an owned city — the caller then falls back to the plain
+  # by-id unit lookup (foreign unit, or a tile_id-less test click),
+  # unchanged from before.
+  # Shared unit-panel selection (the `select_unit` cycle and its by-id
+  # fallthrough both land here): open the unit side panel and clear every
+  # other panel, exactly as the handler did inline before the cycle was
+  # widened to include cities.
+  defp apply_unit_panel(socket, unit, selected_unit_id) do
+    socket
+    |> assign(
+      selected_unit_id: selected_unit_id,
+      selected_unit: unit,
+      selected_order: unit && unit.order,
+      allowed_improvements:
+        worker_allowed_improvements(socket.assigns.world, unit, socket.assigns.player_research),
+      current_dig: worker_current_dig(socket.assigns.improvements, unit),
+      attackable_cities:
+        attackable_cities(socket.assigns.world, unit, socket.assigns.enemy_cities),
+      order_error: nil,
+      improvement_error: nil,
+      selected_city_id: nil,
+      selected_city: nil,
+      selected_tile: nil,
+      selected_camp_id: nil,
+      selected_camp: nil
+    )
+    |> push_event("game:selected", %{unit_id: selected_unit_id})
+    |> push_selected_path()
+    |> push_city_selection()
+  end
+
+  # City-panel selection reached by CYCLING off a unit stacked on the city
+  # (QA issue adc8c79e); mirrors the `select_city` handler's own assigns,
+  # plus a `selected_order` clear since we're arriving from a unit.
+  defp apply_city_panel(socket, city) do
+    socket
+    |> assign(
+      selected_city_id: city.id,
+      selected_city: city,
+      assignable_tiles: assignable_tiles(socket.assigns.world, city),
+      copper_access?: copper_access?(socket.assigns.world, city),
+      city_error: nil,
+      selected_unit_id: nil,
+      selected_unit: nil,
+      selected_order: nil,
+      selected_tile: nil,
+      attackable_cities: [],
+      selected_camp_id: nil,
+      selected_camp: nil
+    )
+    |> push_city_selection()
+  end
+
+  defp next_tile_selection([], nil, _current_unit_id, _current_city_id), do: :none
+
+  defp next_tile_selection(stack, city, current_unit_id, current_city_id) do
+    cycle = Enum.map(stack, &{:unit, &1}) ++ if(city, do: [{:city, city}], else: [])
+
+    idx =
+      Enum.find_index(cycle, fn
+        {:unit, u} -> u.id == current_unit_id
+        {:city, c} -> c.id == current_city_id
+      end)
+
+    case idx do
+      nil -> List.first(cycle)
+      i -> Enum.at(cycle, rem(i + 1, length(cycle)))
     end
   end
 
@@ -2141,9 +2252,42 @@ defmodule BrokenOathsWeb.GameLive.Play do
           <span class="badge badge-outline" data-test="my-tribute-rate">
             {tribute_rate_label(@vassal_status.tribute_rate)}
           </span>
+          <%!-- Story 913: the vassal's OWN read of their Oath Strain —
+               sibling to `my-tribute-rate` above, same "icon outside,
+               digit in its own innermost span" structure `player-honor`
+               already sets, since a spec's own
+               `data-test="my-oath-strain"[^>]*>(\d+)` regex needs the
+               digit immediately after this span's own opening tag. --%>
+          <span class="badge badge-outline gap-1" title="Oath Strain">
+            <.icon name="hero-fire" class="w-3 h-3" />
+            <span data-test="my-oath-strain">{@vassal_status.oath_strain}</span>
+          </span>
           <span :if={@vassal_status.levy_status} class="badge badge-outline" data-test="levy-status">
             {@vassal_status.levy_status}
           </span>
+          <%!-- Story 914: a Protection Pact call actively raised for
+               THIS vassal — only rendered while one is active, same
+               "no element at all with nothing to show" posture
+               `levy-status` above already has. --%>
+          <span
+            :if={@vassal_status.protection_call}
+            class="badge badge-error badge-sm"
+            data-test="my-protection-call"
+          >
+            Under attack — protection requested from {@vassal_status.lord_email}
+            (<span data-test="my-protection-window">{@vassal_status.protection_call.window_remaining}</span>
+            turns left)
+          </span>
+          <button
+            :if={@vassal_status.protection_call}
+            type="button"
+            phx-click="mark_pact_unhonored"
+            phx-value-lord_user_id={@vassal_status.lord_user_id}
+            data-test="mark-pact-unhonored"
+            class="btn btn-xs btn-outline btn-error"
+          >
+            Mark Unhonored
+          </button>
           <%!-- QA issue dae2e65d — the vassal's own Answer/Refuse
                controls, only while a call to arms actually awaits a
                response (`:pending`); `:answered`/`:refused` are past
@@ -3324,6 +3468,57 @@ defmodule BrokenOathsWeb.GameLive.Play do
       <div class="flex items-center justify-between text-xs opacity-70">
         <span>Oath Strain <span data-test="vassal-oath-strain">{@vassal.oath_strain}</span></span>
         <span :if={@vassal.levy_status} data-test="levy-status">{@vassal.levy_status}</span>
+      </div>
+
+      <%!-- Story 913 (criterion 7721): the strain gauge's own drivers
+           breakdown — a narrow tooltip-style surface naming the
+           tribute rate as a contributor, the Three Amigos notes' own
+           open "how is the gauge surfaced" question resolved to the
+           narrowest literal reading of the scenario's own words. --%>
+      <div class="text-xs opacity-50" data-test="oath-strain-drivers">
+        Driven by tribute rate: {tribute_rate_label(@vassal.tribute_rate)}
+      </div>
+
+      <%!-- Story 914: an active Protection Pact call raised against
+           THIS vassal — only rendered while one is active, mirroring
+           `levy-status`'s own "no element at all with nothing to show"
+           posture above. --%>
+      <div :if={@vassal.protection_call} class="text-xs text-error" data-test="protection-call">
+        {@vassal.email} is under attack — respond within
+        <span data-test="protection-window">{@vassal.protection_call.window_remaining}</span>
+        turn(s)
+      </div>
+
+      <%!-- Story 914 (criterion 7730): a running ledger of calls
+           honored for this vassal — always rendered (an empty tally is
+           a real, renderable "0", not an absent element), same posture
+           `oath-strain-drivers` above already takes. --%>
+      <div class="text-xs opacity-50">
+        Protection honored: <span data-test="protection-honored-count">{@vassal.protection_honored_count}</span>
+      </div>
+
+      <div class="flex items-center gap-1">
+        <button
+          type="button"
+          phx-click="gift_vassal"
+          phx-value-vassal_user_id={@vassal.vassal_user_id}
+          phx-value-gift="warrior"
+          data-test="gift-vassal"
+          class="btn btn-xs btn-outline"
+        >
+          Gift
+        </button>
+        <button
+          :if={@levy_targets != []}
+          type="button"
+          phx-click="declare_shared_enemy"
+          phx-value-vassal_user_id={@vassal.vassal_user_id}
+          phx-value-enemy_user_id={hd(@levy_targets).user_id}
+          data-test="declare-shared-enemy"
+          class="btn btn-xs btn-outline"
+        >
+          Shared Enemy
+        </button>
       </div>
 
       <form phx-submit="set_tribute_rate" class="flex items-center gap-1">

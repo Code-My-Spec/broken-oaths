@@ -269,6 +269,92 @@ into an engagement + retention loop AND a concrete *benefit* of being in a house
 the production-queue (879) / unit-combat (891) systems. Both extend the feudal
 foundation batch.
 
+## Rebellion batch — LOCKED model (design session 2026-07-19, main-agent Three Amigos)
+
+Supersedes the earlier flip-odds/coordination-bonus sketch in sections D/E. Direction:
+**light mechanics, more social, fewer numeric bonuses — encourage real-rebellion
+behaviour and player agency.** Two distinct arcs: the **independence arc** (rebel to
+FREE your cities and win your freedom — liberation, not destruction) and the
+**defeat-the-lord arc** (separately, hunt/kill the enemy Lord unit via normal combat,
+with its own consequence, story 917).
+
+- **913 Oath Strain** (KEPT): a per-relationship grievance gauge (0-100, on the
+  Vassalage schema). Rises with tribute burden / neglect / a broken Protection Pact /
+  refused levy; falls with investment/autonomy/shared enemies. Slow + sticky. It does
+  NOT gate rebellion (always available) — its job is to **SIZE the temporary rebellion
+  army**. Both sides see it as a tension signal.
+- **914 Protection Pact** (KEPT): the lord's binding duty to defend a vassal under
+  attack. Failing = a public **Honor** hit + an Oath Strain spike; honoring builds
+  Honor + eases strain. This is how a lord's Honor erodes from bad lordship.
+- **915 Declare Independence & Free Your Cities**: sever the oath, tribute stops, war
+  with the former lord. Occupied cities RISE BACK based on the LORD'S REPUTATION — the
+  lord's world-visible **Honor** + the **tribute rate**: a dishonorable/greedy lord's
+  cities flock back; a just, light-handed lord's cities may STAY LOYAL (retaken only by
+  normal siege). No dice-roll feel, no per-city grind — reputation decides. PLUS a
+  **temporary rebellion army** spawns to fight the war, size SCALED BY GRIEVANCE (Oath
+  Strain / the lord's dishonor — a hated lord faces a bigger uprising); these units
+  **DISBAND after the war** (independence secured, or after N turns). A surge that
+  swells then settles.
+- **916 Coordinated Rebellion (Pact of Broken Oaths)**: PURELY SOCIAL. Fellow vassals
+  of one lord coordinate via chat and declare independence together; power is numbers +
+  the shared war, NO mechanical coordination bonus. The drama is human: the hidden
+  plot + the **informer** (first-class) — an invited vassal can secretly betray the
+  plot to the lord for a reward; the lord may sense conspiracy 'heat' and pre-empt.
+- **917 Lord's Death**: killing a lord unit NOTIFIES all their vassals ("your lord has
+  fallen — seize the moment"); each vassal CHOOSES whether to revolt. NO forced
+  cascade, NO mechanical buff — pure opportunity + agency (a prominent prompt surfaces
+  the moment).
+- **918 Reconquer — CUT**: redundant. Cities that don't rise are retaken by normal
+  siege (906); the lord's retaliation is normal siege too.
+- **Two levers, two effects**: per-relationship **Oath Strain → temporary rebellion
+  army size**; the lord's global **Honor + tribute rate → which occupied cities rise**.
+
+Story set: 913, 914, 915, 916, 917 (918 cut). All behind :feudal_enabled.
+
+### Round 2 — first-class Rebellion, Pact-in-chat, Heir (design session 2026-07-19)
+
+Three things become first-class abstractions. Note the deliberate scoping call:
+**a Rebellion is NOT a generic "War".** We do not wrap ordinary siege between
+unrelated players in a War object — that stays as it is (free combat after
+discovery, story 906). The Rebellion itself is the dedicated first-class
+conflict abstraction; keeping the line un-blurred is the point.
+
+- **Rebellion is a first-class entity with a lifecycle: declared → active →
+  ended.** Declaring independence (915) CREATES a Rebellion record (rebel,
+  former lord, contested/risen cities, the temporary army, status, started
+  turn), persisted via the WorldServer delta. It **ENDS** one of three ways:
+  (a) **independence won** — the rebel holds all their freed cities for N turns;
+  (b) **crushed** — the former lord retakes/holds; (c) **negotiated peace** —
+  a mutually-agreed end (BOTH sides must accept) that resolves to one of the two
+  clean outcomes only: the rebel is RESTORED as a vassal, or GRANTED full
+  independence. Nobody loses cities in a peace — optional gold reparations (paid
+  by the winner to the loser) may sweeten it; no agreement means the war
+  continues to a military decision. The rebellion's END is the
+  single event that DISBANDS the temporary army and SETTLES the cities — "after
+  the war" is now a real, detectable moment. NEW story 919 covers the end.
+- **The Pact of Broken Oaths (916) is bound to a CHAT.** You invite your
+  conspirators into a chat channel; chat membership IS the conspiracy roster.
+  Any member can BETRAY by informing the lord (identity hidden from the others).
+  At the strike, committed members each open/join their Rebellion together —
+  still purely social, no coordination bonus.
+- **Lord's Death → Heir (917).** Killing a Lord unit applies the same
+  seize-the-moment mechanics (vassals notified, each chooses to rebel). The
+  realm is leaderless only for the duration of the resulting war. When the war
+  ENDS (no active rebellion against the realm), an **HEIR respawns at the
+  realm's capital**, resuming lordship over every vassal who did NOT win
+  independence; vassals who secured freedom during the leaderless window stay
+  free. The dynasty survives, minus whoever slipped away. If a lord dies with no
+  rebellion raised, the heir respawns after a short delay.
+
+- **Partial subjugation — DEFERRED (not this batch).** Peace stays deliberately
+  BINARY — vassal or independent — because a middle outcome (holding SOME of a
+  player's cities without full vassalization, e.g. only the conceded cities pay
+  tribute) is a whole separate relationship type (per-city tribute, split
+  loyalty). Parked as a future feature; revisit after the core rebellion ships.
+
+Updated story set: 913, 914, 915, 916, 917, **919 (Winning, Losing, or Ending a
+Rebellion)**. 918 still cut. All behind :feudal_enabled.
+
 ## Sources
 See `feudal_vassalage_prior_art.md` (CK3/EU4/Civ VI/Travian/EVE mechanics + numbers)
 and `feudal_vassalage_novel_design.md` (Neptune's Pride, Nemesis, EVE heists,

@@ -687,4 +687,326 @@ defmodule BrokenOathsSpex.SharedGivens do
       end
     end)
   end
+
+  # -------------------------------------------------------------------
+  # Rebellion batch helpers (story 915 and friends): a lord who already
+  # holds one vassal occupying MULTIPLE cities, and a way to depress
+  # that same lord's world-visible Honor via a REAL, already-shipped
+  # dishonorable act (story 906's garrison-execution choice) against a
+  # THROWAWAY third party — see each calling criterion's own moduledoc
+  # for why these are kept generic here rather than duplicated inline a
+  # third time.
+  # -------------------------------------------------------------------
+
+  @doc """
+  Generalizes `a_freshly_subjugated_vassal/1` to TWO cities — the
+  tractable substitute story 915's own multi-city rebellion criteria
+  (7732/7734/7736) use in place of the gherkin's own illustrative "5
+  occupied cities": a real settler-founded second city costs dozens of
+  real turn boundaries by itself (growth to size 2, settler production,
+  a multi-ring march to a legal founding spot — see
+  `BrokenOathsSpex.Story907.Criterion7667Spex`'s own inline version of
+  this exact setup), so 5 real cities would be disproportionate setup
+  cost for what these criteria are actually about (the per-city
+  rise/stay formula and its downstream UI, not "found N cities"). TWO
+  is the minimum that still lets a scenario distinguish "some cities
+  rise, some stay loyal" from "the whole relationship flips as one
+  unit" — see each calling criterion's own moduledoc for how it reads
+  the actual split rather than assuming one.
+
+  Both captured cities are left WITHOUT any of the lord's own units
+  still standing on them afterward (the final step below marches the
+  lord's own Lord unit off the last-captured city, back toward a
+  neutral tile) — story 915's own temporary-rebellion-army criteria
+  (7734) need to count NEWLY SPAWNED units on the rebel's own side
+  without a leftover defecting garrison confounding that count. A
+  criterion that specifically needs a lord's unit LEFT stationed on an
+  occupied city as a garrison (7733) does not use this helper — see its
+  own moduledoc.
+
+  Returns context extended with `:my_lord`, `:other_city` (the FIRST
+  city founded — captured LAST, since it's the rival's own last free
+  city, so this is the capture that fires vassalization), `:second_city`
+  (founded second, captured FIRST while the rival still had a free city
+  elsewhere, so this capture alone does NOT trigger vassalization —
+  mirrors `criterion_7667`'s own "occupying a non-last city leaves the
+  owner free" fact).
+
+  Requires `:a_world`, `:registered_player`, `:second_registered_player`
+  already run.
+  """
+  def a_freshly_subjugated_vassal_with_two_cities(context) do
+    context = join_and_found_rival_city(context)
+    :ok = clear_all_camps(context.world)
+
+    first_city = context.other_city
+
+    grow_city_to(context.world, context.other_user, first_city.id, 2)
+
+    render_hook(context.other_play_live, "queue_production", %{
+      "city_id" => to_string(first_city.id),
+      "item" => "settler"
+    })
+
+    for _ <- 1..20, do: Fixtures.advance_turn(context.world)
+
+    [new_settler] =
+      for u <- Fixtures.player_units(context.world, context.other_user),
+          u.type == :settler,
+          do: u
+
+    land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
+
+    ring4 =
+      Enum.reduce(1..4, {[first_city.tile_id], MapSet.new([first_city.tile_id])}, fn _,
+                                                                                       {frontier,
+                                                                                        seen} ->
+        next =
+          frontier
+          |> Enum.flat_map(&Fixtures.adjacent_tiles(context.world, &1))
+          |> Enum.uniq()
+          |> Enum.reject(&MapSet.member?(seen, &1))
+          |> Enum.filter(land?)
+
+        {next, MapSet.union(seen, MapSet.new(next))}
+      end)
+      |> elem(0)
+
+    [second_target | _] = ring4
+
+    settler =
+      march_to(
+        context.other_play_live,
+        context.world,
+        context.other_user,
+        new_settler,
+        second_target
+      )
+
+    render_hook(context.other_play_live, "found_city", %{"unit_id" => to_string(settler.id)})
+
+    [second_city] =
+      for c <- Fixtures.player_cities(context.world, context.other_user),
+          c.id != first_city.id,
+          do: c
+
+    [my_lord] =
+      for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
+
+    # Capture the SECOND city first — the rival still has a free city
+    # (`first_city`), so this does not trigger vassalization yet
+    # (`criterion_7667`'s own guarantee).
+    target2 = adjacent_land_tile(context.world, second_city.tile_id, [my_lord.tile_id])
+    my_lord = march_to(context.play_live, context.world, context.user, my_lord, target2)
+
+    {my_lord, _} =
+      capture_city(
+        context.play_live,
+        context.world,
+        context.user,
+        my_lord,
+        context.other_user,
+        second_city
+      )
+
+    # Capture the FIRST city last — the rival's own last free city, so
+    # THIS capture fires vassalization.
+    target1 = adjacent_land_tile(context.world, first_city.tile_id, [my_lord.tile_id])
+    my_lord = march_to(context.play_live, context.world, context.user, my_lord, target1)
+
+    {my_lord, _} =
+      capture_city(
+        context.play_live,
+        context.world,
+        context.user,
+        my_lord,
+        context.other_user,
+        first_city
+      )
+
+    # Leave neither captured city garrisoned by the lord's own Lord
+    # unit — march it off to a neutral spot so a later "count the
+    # rebel's own newly spawned units" check isn't confounded by a
+    # defecting garrison (see this function's own doc).
+    neutral = adjacent_land_tile(context.world, first_city.tile_id, [second_city.tile_id])
+    my_lord = march_to(context.play_live, context.world, context.user, my_lord, neutral)
+
+    context
+    |> Map.put(:my_lord, my_lord)
+    |> Map.put(:other_city, first_city)
+    |> Map.put(:second_city, second_city)
+  end
+
+  @doc """
+  Depresses `context.user`'s (the lord's) global Honor via a REAL,
+  already-shipped dishonorable act: executing a captured garrison
+  "costs Honor" (`.code_my_spec/knowledge/feudal_vassalage_design.md`,
+  "Round-4 final foundation mechanics"), already wired end-to-end since
+  story 906 (`BrokenOaths.Game.Siege.apply_execute_honor_penalty/1`,
+  the real `"resolve_garrison_fate"` event — see
+  `BrokenOathsSpex.Story906.Criterion7662Spex`). Honor is described as
+  the lord's own WORLD-VISIBLE reputation
+  (`.code_my_spec/knowledge/feudal_vassalage_design.md`, "Rebellion
+  batch"), not a per-relationship figure, so this depresses it against
+  a THROWAWAY third victim (`context.third_user`, never `context.
+  other_user` — the vassal a calling story 915 criterion's own scenario
+  is actually about) — the same lord-global reputation story 915's own
+  rise/stay-loyal formula is meant to read, established without
+  entangling a garrisoned-siege setup with whatever OTHER city/vassal
+  the calling scenario's own `given_` builds separately.
+
+  Leaves `context.user`'s own Lord unit standing on the throwaway
+  victim's city tile once done — callers whose own scenario needs that
+  unit back at a DIFFERENT tile (e.g. still garrisoning the actual
+  vassal under test) march it there as an explicit follow-up step; this
+  helper does not know or care where it's needed next.
+
+  Requires `context.world`, `context.user`/`context.conn`/`context.
+  play_live` (already joined and mounted — e.g. by a prior
+  `a_freshly_subjugated_vassal/1` or `a_freshly_subjugated_vassal_
+  with_two_cities/1` call), and `context.third_user`/`context.
+  third_conn` — run `:a_world`, `:registered_player`, and
+  `:third_registered_player` first.
+  """
+  def lord_executes_a_throwaway_garrison(context) do
+    {:ok, third_join_live, _html} = live(context.third_conn, "/play")
+
+    third_join_live
+    |> element("[data-test='join-world-#{context.world.id}']")
+    |> render_click()
+
+    {:ok, third_play_live, _html} = live(context.third_conn, "/play/#{context.world.id}")
+
+    [third_settler | _] =
+      for u <- Fixtures.player_units(context.world, context.third_user),
+          u.type == :settler,
+          do: u
+
+    render_hook(third_play_live, "found_city", %{"unit_id" => to_string(third_settler.id)})
+    [third_city] = Fixtures.player_cities(context.world, context.third_user)
+
+    :ok = clear_all_camps(context.world)
+
+    [my_lord] =
+      for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
+
+    target = adjacent_land_tile(context.world, third_city.tile_id, [my_lord.tile_id])
+    my_lord = march_to(context.play_live, context.world, context.user, my_lord, target)
+
+    grind_city(context.play_live, context.world, my_lord, context.third_user, third_city)
+
+    render_hook(third_play_live, "queue_production", %{
+      "city_id" => to_string(third_city.id),
+      "item" => "warrior"
+    })
+
+    for _ <- 1..12, do: Fixtures.advance_turn(context.world)
+
+    [garrison] =
+      for u <- Fixtures.player_units(context.world, context.third_user),
+          u.type == :warrior,
+          do: u
+
+    _garrison =
+      if garrison.tile_id == third_city.tile_id do
+        garrison
+      else
+        march_to(third_play_live, context.world, context.third_user, garrison, third_city.tile_id)
+      end
+
+    _ =
+      march_to(context.play_live, context.world, context.user, my_lord, third_city.tile_id)
+
+    render_hook(context.play_live, "resolve_garrison_fate", %{
+      "city_id" => to_string(third_city.id),
+      "choice" => "execute"
+    })
+
+    context
+  end
+
+  # -------------------------------------------------------------------
+  # Story 916 (Coordinated Rebellion — Pact of Broken Oaths) helpers.
+  # See `BrokenOathsSpex.Story916.Criterion7737Spex`'s own moduledoc for
+  # the full assumed `RebellionPact` surface contract these two givens
+  # (and every story 916 spec) drive.
+  # -------------------------------------------------------------------
+
+  @doc false
+  # Three fellow vassals of the SAME lord (`context.user`) — story
+  # 916's own "Wes, Ada, and Bo are all vassals of Lord Mira"
+  # precondition, needed by every criterion in that story (five
+  # separate spec files), crossing this module's own "only after a
+  # third duplicate" shared-given threshold (`shared_givens.md`).
+  # Captures each vassal one after another via `subjugate/5` — exactly
+  # the "multi-vassal-under-one-lord" general form that function's own
+  # doc names as the seam for "story 910's own 'fellow vassal'
+  # criteria" and, now, story 916's own conspiracy roster — taking
+  # each one offline right after capture (`go_offline/1`) the same way
+  # `BrokenOathsSpex.Story908.Criterion7679Spex`'s own three-vassal
+  # loop does: an idle, disconnected `GameLive.Play` mount left open
+  # per vassal would otherwise stay registered forever against this
+  # scenario's later turn boundaries for no reason story 916 cares
+  # about.
+  #
+  # Requires `context.world` (sized for FOUR players — one lord, three
+  # vassals) and `context.user`/`context.conn` (the lord) from a prior
+  # `:a_world`-shaped given + `:registered_player`. Produces
+  # `context.pact_vassals`, a 3-element list of `%{user:, conn:}` in
+  # Wes/Ada/Bo order (list order IS the story's own naming order —
+  # every calling spec destructures `[wes, ada, bo] = context.
+  # pact_vassals`) — deliberately bare, no live `play_live` handle
+  # carried forward: every story 916 spec re-mounts each vassal's own
+  # `GameLive.Play` fresh at the point it actually needs to drive or
+  # observe something, the same "mount fresh, don't trust a stale
+  # handle" discipline `BrokenOathsSpex.Story913.Criterion7720Spex`'s
+  # own `when_` step already uses.
+  register_given :three_vassals_of_one_lord, context do
+    vassals =
+      for _ <- 1..3 do
+        vassal_user = Fixtures.user_fixture()
+
+        vassal_conn =
+          Phoenix.ConnTest.build_conn()
+          |> BrokenOathsTest.ConnCase.log_in_user(vassal_user)
+
+        %{vassal_play_live: vassal_play_live} =
+          subjugate(context.world, context.conn, context.user, vassal_conn, vassal_user)
+
+        go_offline(vassal_play_live)
+
+        %{user: vassal_user, conn: vassal_conn}
+      end
+
+    {:ok, Map.put(context, :pact_vassals, vassals)}
+  end
+
+  @doc false
+  # Wes (the first of `context.pact_vassals`) opens a Pact of Broken
+  # Oaths naming strike turn 50 and invites Ada and Bo (the other two)
+  # into it — the exact precondition four of story 916's five own
+  # criteria need as SETUP rather than as their own subject under test
+  # (only `Criterion7737Spex` drives this action itself as its own
+  # `when_`, so that file intentionally does NOT use this given).
+  # Driven via `attempt_event/3` against the INVENTED `"open_pact_chat"`
+  # hook — see `Criterion7737Spex`'s own moduledoc for the full assumed
+  # event/param/selector contract.
+  #
+  # Requires `context.world` and `context.pact_vassals` — run
+  # `:three_vassals_of_one_lord` first. Produces `context.wes`/
+  # `context.ada`/`context.bo`, the same three `%{user:, conn:}` maps
+  # `context.pact_vassals` already carries, just destructured under
+  # their own story names for every downstream step's convenience.
+  register_given :wes_opened_pact_inviting_ada_and_bo, context do
+    [wes, ada, bo] = context.pact_vassals
+
+    {:ok, wes_live, _html} = live(wes.conn, "/play/#{context.world.id}")
+
+    attempt_event(wes_live, "open_pact_chat", %{
+      "strike_turn" => "50",
+      "invitee_user_ids" => [to_string(ada.user.id), to_string(bo.user.id)]
+    })
+
+    {:ok, context |> Map.put(:wes, wes) |> Map.put(:ada, ada) |> Map.put(:bo, bo)}
+  end
 end
