@@ -547,6 +547,120 @@ defmodule BrokenOaths.Game do
     do: WorldServer.call(world, {:reject_peace, user, counterparty_user_id})
 
   # -------------------------------------------------------------------
+  # Coordinated Rebellion — Pact of Broken Oaths (story 916)
+  # -------------------------------------------------------------------
+
+  @doc """
+  `user`'s own membership in an active (`:forming`) Pact of Broken
+  Oaths, or `nil` if they aren't currently a member of one: `%{id:,
+  strike_turn:, own_status:, informer?:, members: [%{user_id:, email:,
+  status:}]}`. Every OTHER member's own `status` is always `:invited`
+  ("Outstanding") regardless of their real, secret commit answer —
+  only the reader's own row (`own_status`) ever tells the truth,
+  criterion 7738's own secrecy rule.
+  """
+  @spec pact_view(map(), map()) :: map() | nil
+  def pact_view(world, user), do: WorldServer.call(world, {:pact_view, user})
+
+  @doc """
+  Every FELLOW vassal of `user`'s own lord — the eligible-to-invite
+  roster a pact composer offers (criterion 7737's own "only fellow
+  vassals of the same lord are eligible"). `[]` for a free player, or
+  for a vassal with no fellow vassals under the same lord.
+  """
+  @spec pact_candidates(map(), map()) :: [%{user_id: term(), email: String.t()}]
+  def pact_candidates(world, user), do: WorldServer.call(world, {:pact_candidates, user})
+
+  @doc """
+  `user` (a vassal) opens a Pact of Broken Oaths against their own
+  lord, naming `strike_turn` (a positive integer of turn BOUNDARIES
+  from right now, not an absolute world-turn number) and inviting
+  `invitee_user_ids` into it — chat membership IS the conspiracy
+  roster. An invitee who isn't a fellow vassal of the SAME lord is
+  silently dropped, never rejecting the call outright. `user` becomes
+  a member of their own pact too (`:invited`, same as any other
+  invitee — they still `pact_commit/2` explicitly).
+  """
+  @spec open_pact_chat(map(), map(), pos_integer() | String.t(), [term()]) ::
+          {:ok, BrokenOaths.Game.RebellionPact.t()}
+          | {:error, :not_a_player | :not_a_vassal | :invalid_strike_turn | Ecto.Changeset.t()}
+  def open_pact_chat(world, user, strike_turn, invitee_user_ids),
+    do: WorldServer.call(world, {:open_pact_chat, user, strike_turn, invitee_user_ids})
+
+  @doc "`user` secretly commits to strike with their own pact — reversible any time before the strike turn."
+  @spec pact_commit(map(), map()) ::
+          {:ok, BrokenOaths.Game.RebellionPactMember.t()}
+          | {:error, :not_a_player | :not_a_pact_member}
+  def pact_commit(world, user), do: WorldServer.call(world, {:pact_commit, user})
+
+  @doc "`user` secretly declines to strike with their own pact — reversible any time before the strike turn."
+  @spec pact_decline(map(), map()) ::
+          {:ok, BrokenOaths.Game.RebellionPactMember.t()}
+          | {:error, :not_a_player | :not_a_pact_member}
+  def pact_decline(world, user), do: WorldServer.call(world, {:pact_decline, user})
+
+  @doc """
+  `user` secretly informs their own pact's targeted lord of the plot,
+  for a personal reward — their identity stays hidden from every
+  OTHER member (criterion 7741). Informing changes no odds; it only
+  warns the lord, who can then pre-empt.
+  """
+  @spec pact_inform(map(), map()) ::
+          {:ok, BrokenOaths.Game.RebellionPactMember.t()}
+          | {:error, :not_a_player | :not_a_pact_member}
+  def pact_inform(world, user), do: WorldServer.call(world, {:pact_inform, user})
+
+  @doc """
+  `user`'s own warning that a plot against them has been informed on,
+  or `nil` while no member of any of their own pacts has informed:
+  `%{strike_turn:}`. Never carries the informer's own identity, nor
+  the rest of the roster.
+  """
+  @spec pact_informed_notice(map(), map()) :: %{strike_turn: pos_integer()} | nil
+  def pact_informed_notice(world, user),
+    do: WorldServer.call(world, {:pact_informed_notice, user})
+
+  @doc """
+  `user`'s own coarse conspiracy "heat" gauge (story 916, criterion
+  7742): the mean `BrokenOaths.Game.Vassalage.oath_strain` across
+  every one of their own ACTIVE vassals — a needle, never the pact
+  chat's own content. `0` for a lord with no vassals.
+  """
+  @spec conspiracy_heat(map(), map()) :: BrokenOaths.Game.OathStrain.strain()
+  def conspiracy_heat(world, user), do: WorldServer.call(world, {:conspiracy_heat, user})
+
+  @doc "`user` (a lord) fully heals every one of their own cities — a pre-emptive defensive brace once warned of a plot."
+  @spec brace_defenses(map(), map()) :: :ok | {:error, :not_a_player}
+  def brace_defenses(world, user), do: WorldServer.call(world, {:brace_defenses, user})
+
+  @doc "`user` (a lord) fully heals their own Lord unit — a pre-emptive reposition once warned of a plot."
+  @spec reposition_lord(map(), map()) :: :ok | {:error, :not_a_player | :no_lord_unit}
+  def reposition_lord(world, user), do: WorldServer.call(world, {:reposition_lord, user})
+
+  @doc """
+  `user` (a lord) eases EVERY one of their own vassals' Oath Strain by
+  `BrokenOaths.Game.OathStrain.gift_ease/0` at once — a broad
+  concession a warned lord can make without knowing which of their
+  vassals is actually plotting (the roster stays secret even once
+  informed).
+  """
+  @spec buy_off_conspirators(map(), map()) :: :ok | {:error, :not_a_player}
+  def buy_off_conspirators(world, user),
+    do: WorldServer.call(world, {:buy_off_conspirators, user})
+
+  @doc """
+  `user` (a lord) honors an overdue Protection Pact call for
+  `vassal_user_id`, easing their Oath Strain by
+  `BrokenOaths.Game.OathStrain.autonomy_ease/0` — a targeted
+  concession, alongside the real `set_tribute_rate/4`, story 916's own
+  "lowers tribute rates and honors an overdue protection call" lever.
+  """
+  @spec honor_protection_call(map(), map(), term()) ::
+          :ok | {:error, :not_a_player | :not_a_vassal | Ecto.Changeset.t()}
+  def honor_protection_call(world, user, vassal_user_id),
+    do: WorldServer.call(world, {:honor_protection_call, user, vassal_user_id})
+
+  # -------------------------------------------------------------------
   # Gold Bank (story 909)
   # -------------------------------------------------------------------
 

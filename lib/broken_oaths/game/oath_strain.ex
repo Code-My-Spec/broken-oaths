@@ -222,6 +222,26 @@ defmodule BrokenOaths.Game.OathStrain do
   end
 
   # -------------------------------------------------------------------
+  # Conspiracy heat (story 916)
+  # -------------------------------------------------------------------
+
+  @doc """
+  A lord's own coarse "conspiracy heat" gauge (criterion 7742): the
+  mean `strain()` across every one of their own vassals' individual
+  readings, rounded down — a single needle for the whole realm, never
+  a duplicate of any one relationship's own exact figure. `0` for a
+  lord with no vassals at all (nothing to aggregate).
+  """
+  @spec heat([strain()]) :: strain()
+  def heat([]), do: 0
+
+  def heat(strains) when is_list(strains) do
+    strains
+    |> Enum.sum()
+    |> div(length(strains))
+  end
+
+  # -------------------------------------------------------------------
   # Private helpers
   # -------------------------------------------------------------------
 

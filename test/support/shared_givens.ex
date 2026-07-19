@@ -416,10 +416,24 @@ defmodule BrokenOathsSpex.SharedGivens do
   city — see `BrokenOathsSpex.Story906.Criterion7661Spex`'s own
   moduledoc for why (real counter-fire would kill the besieger over
   many rounds); garrison AFTER calling this instead.
+
+  `max_turns` (default 40, same as `march_to/6`'s own default) is the
+  budget for the final walk-onto-the-tile step only — a caller whose
+  own world is large enough that even the PRE-adjacency march can run
+  long (story 916's own larger, multi-vassal worlds) passes a bigger
+  figure through `subjugate/6`.
   """
-  def capture_city(attacker_play_live, world, user, attacker, defender_user, city) do
+  def capture_city(
+        attacker_play_live,
+        world,
+        user,
+        attacker,
+        defender_user,
+        city,
+        max_turns \\ 40
+      ) do
     broken_city = grind_city(attacker_play_live, world, attacker, defender_user, city)
-    attacker = march_to(attacker_play_live, world, user, attacker, city.tile_id)
+    attacker = march_to(attacker_play_live, world, user, attacker, city.tile_id, max_turns)
     {attacker, broken_city}
   end
 
@@ -583,7 +597,8 @@ defmodule BrokenOathsSpex.SharedGivens do
     exile_tile =
       far_land_tile(context.world, context.other_city.tile_id, @rebellion_lord_exile_radius)
 
-    my_lord = march_to(context.play_live, context.world, context.user, context.my_lord, exile_tile, 80)
+    my_lord =
+      march_to(context.play_live, context.world, context.user, context.my_lord, exile_tile, 80)
 
     Map.put(context, :my_lord, my_lord)
   end
@@ -632,8 +647,19 @@ defmodule BrokenOathsSpex.SharedGivens do
   the last. Returns `%{lord_play_live:, vassal_play_live:, vassal_city:,
   lord_unit:}` (`lord_unit` wherever it actually ended up — see
   `capture_city/6`'s own doc).
+
+  `max_turns` (default 40) is the PRE-adjacency march's own budget,
+  passed straight through to `capture_city/7`'s own final walk-in
+  step too — a caller subjugating several vassals in a row on a LARGE
+  world (story 916's own multi-vassal, room-for-five worlds) can land
+  arbitrarily far from the lord's own current position each time and
+  needs real headroom over the default (QA issue 916-fixture-march:
+  `three_vassals_of_one_lord`'s own second and third vassal silently
+  never actually became vassals at the default budget — `grind_city/6`
+  attacked a target the lord's own unit was never actually adjacent
+  to, landing zero damage every round, with no crash to signal it).
   """
-  def subjugate(world, lord_conn, lord_user, vassal_conn, vassal_user) do
+  def subjugate(world, lord_conn, lord_user, vassal_conn, vassal_user, max_turns \\ 40) do
     {:ok, lord_join_live, _html} = live(lord_conn, "/play")
 
     lord_join_live
@@ -659,11 +685,34 @@ defmodule BrokenOathsSpex.SharedGivens do
     :ok = clear_all_camps(world)
 
     [lord_unit] = for u <- Fixtures.player_units(world, lord_user), u.type == :lord, do: u
-    target = adjacent_land_tile(world, vassal_city.tile_id, [lord_unit.tile_id])
-    lord_unit = march_to(lord_play_live, world, lord_user, lord_unit, target)
+
+    # QA issue 916-fixture-adjacency: `adjacent_land_tile/3` picks the
+    # FIRST land neighbor with no occupancy check of its own — the
+    # vassal's own un-moved Lord unit (their starting pair spawns a
+    # Lord alongside the Settler that founds the city, and nothing
+    # here ever moves it) can sit RIGHT ON that neighbor, silently
+    # walling off the only route in: `march_to/6`'s queued order stalls
+    # `:interrupted` one hop short forever, no crash, no timeout ever
+    # resolves it. Excluding every tile the vassal's own units
+    # currently occupy — not just the lord's own starting tile — picks
+    # a neighbor that's actually enterable.
+    vassal_unit_tiles = for u <- Fixtures.player_units(world, vassal_user), do: u.tile_id
+
+    target =
+      adjacent_land_tile(world, vassal_city.tile_id, [lord_unit.tile_id | vassal_unit_tiles])
+
+    lord_unit = march_to(lord_play_live, world, lord_user, lord_unit, target, max_turns)
 
     {lord_unit, _broken_city} =
-      capture_city(lord_play_live, world, lord_user, lord_unit, vassal_user, vassal_city)
+      capture_city(
+        lord_play_live,
+        world,
+        lord_user,
+        lord_unit,
+        vassal_user,
+        vassal_city,
+        max_turns
+      )
 
     %{
       lord_play_live: lord_play_live,
@@ -889,8 +938,8 @@ defmodule BrokenOathsSpex.SharedGivens do
 
     ring4 =
       Enum.reduce(1..4, {[first_city.tile_id], MapSet.new([first_city.tile_id])}, fn _,
-                                                                                       {frontier,
-                                                                                        seen} ->
+                                                                                     {frontier,
+                                                                                      seen} ->
         next =
           frontier
           |> Enum.flat_map(&Fixtures.adjacent_tiles(context.world, &1))
@@ -1091,6 +1140,20 @@ defmodule BrokenOathsSpex.SharedGivens do
   # observe something, the same "mount fresh, don't trust a stale
   # handle" discipline `BrokenOathsSpex.Story913.Criterion7720Spex`'s
   # own `when_` step already uses.
+  #
+  # Passes a generous `250`-turn march budget through `subjugate/6`
+  # (default `40`, tuned for `world_fixture/1`'s own small default
+  # 642-tile globe) — story 916's own worlds are deliberately LARGER
+  # ("room for four/five players", frequency 10-12), so a fresh
+  # vassal's own claimed region can land far enough from the lord's
+  # own CURRENT position (already displaced by the prior vassal's own
+  # capture march) that the default budget silently never gets the
+  # lord adjacent at all: `grind_city/6` still "succeeds" (no crash,
+  # `attempt_event`-shaped `"attack"` calls just never land — see
+  # `Game.attack_city/4`'s own `:not_adjacent` refusal) while doing
+  # zero damage every round, so the SECOND and THIRD vassal in the
+  # loop never actually became vassals under the old default — this
+  # was a bug in this given's own fixture, not in any spec's `then_`.
   register_given :three_vassals_of_one_lord, context do
     vassals =
       for _ <- 1..3 do
@@ -1101,7 +1164,7 @@ defmodule BrokenOathsSpex.SharedGivens do
           |> BrokenOathsTest.ConnCase.log_in_user(vassal_user)
 
         %{vassal_play_live: vassal_play_live} =
-          subjugate(context.world, context.conn, context.user, vassal_conn, vassal_user)
+          subjugate(context.world, context.conn, context.user, vassal_conn, vassal_user, 250)
 
         go_offline(vassal_play_live)
 

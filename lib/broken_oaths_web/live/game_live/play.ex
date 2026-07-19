@@ -272,6 +272,21 @@ defmodule BrokenOathsWeb.GameLive.Play do
             rebellions_as_lord: Game.rebellions_as_lord(world, user),
             independence_preview: nil,
             declare_independence_lord_user_id: nil,
+            # Story 916 (Pact of Broken Oaths): `pact` is `user`'s own
+            # membership in a `:forming` conspiracy chat (`nil` while
+            # they're not a member of one — see `Game.pact_view/2`'s
+            # own doc for the secrecy masking every OTHER member's row
+            # gets, criterion 7738), `pact_candidates` the fellow-vassal
+            # invite roster the composer offers, `pact_panel_open?` its
+            # own local toggle (mirrors `AlliancePanel`'s `open?`), and
+            # `pact_informed`/`conspiracy_heat` the LORD's own side —
+            # the warning banner once informed on, and the coarse
+            # aggregate Oath Strain gauge (criterion 7742).
+            pact: Game.pact_view(world, user),
+            pact_candidates: Game.pact_candidates(world, user),
+            pact_panel_open?: false,
+            pact_informed: Game.pact_informed_notice(world, user),
+            conspiracy_heat: Game.conspiracy_heat(world, user),
             # Story 909: cleared the next time either `"collect_bank"`/
             # `"upgrade_bank"` succeeds — same transient-error status
             # `city_error`/`order_error`/`combat_error`/`improvement_error`
@@ -969,6 +984,113 @@ defmodule BrokenOathsWeb.GameLive.Play do
   end
 
   # -------------------------------------------------------------------
+  # Coordinated Rebellion — Pact of Broken Oaths (story 916)
+  # -------------------------------------------------------------------
+
+  # Mirrors `AlliancePanel`'s own `"toggle_alliance_panel"` — this
+  # composer lives directly on `Play` (not a `LiveComponent`) since
+  # every OTHER pact event does too (the invented contract fires
+  # `render_hook` straight at this LiveView, never a `phx-target`).
+  def handle_event("toggle_pact_panel", _params, socket) do
+    {:noreply, assign(socket, pact_panel_open?: !socket.assigns.pact_panel_open?)}
+  end
+
+  # Criterion 7737 — a vassal opens a Pact of Broken Oaths against
+  # their own lord, naming a strike turn (turn BOUNDARIES from right
+  # now — see `Game.open_pact_chat/4`'s own doc) and inviting fellow
+  # vassals into it.
+  def handle_event(
+        "open_pact_chat",
+        %{"strike_turn" => strike_turn, "invitee_user_ids" => invitee_user_ids},
+        socket
+      ) do
+    %{world: world, user: user} = socket.assigns
+    invitee_ids = Enum.map(List.wrap(invitee_user_ids), &parse_id/1)
+
+    case Game.open_pact_chat(world, user, parse_id(strike_turn), invitee_ids) do
+      {:ok, _pact} -> {:noreply, refresh_pact(socket)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("pact_commit", _params, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.pact_commit(world, user) do
+      {:ok, _member} -> {:noreply, refresh_pact(socket)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  # Story 916, criterion 7742 — reversible any time before the strike:
+  # a committed conspirator can still back out once the lord starts
+  # making concessions.
+  def handle_event("pact_decline", _params, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.pact_decline(world, user) do
+      {:ok, _member} -> {:noreply, refresh_pact(socket)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  # Criterion 7741 — secretly tips the lord off; the informer's own
+  # identity never reaches any OTHER member (`Game.pact_view/2`'s own
+  # masking already keeps a plain member row from ever naming them).
+  def handle_event("pact_inform", _params, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.pact_inform(world, user) do
+      {:ok, _member} -> {:noreply, refresh_pact(socket)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  # The lord's own pre-emption levers, available once warned
+  # (criterion 7741) — brace fully heals every one of her own cities.
+  def handle_event("brace_defenses", _params, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.brace_defenses(world, user) do
+      :ok -> {:noreply, refresh_board(socket)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  # Reposition fully heals her own Lord unit.
+  def handle_event("reposition_lord", _params, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.reposition_lord(world, user) do
+      :ok -> {:noreply, refresh_board(socket)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  # Buying off conspirators broadly eases EVERY vassal's Oath Strain at
+  # once — the lord still can't target just the plotters, since the
+  # roster stays secret even once informed.
+  def handle_event("buy_off_conspirators", _params, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.buy_off_conspirators(world, user) do
+      :ok -> {:noreply, socket |> refresh_vassalage() |> refresh_pact()}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  # Criterion 7742 — a TARGETED concession, alongside the real
+  # `"set_tribute_rate"` lever already below.
+  def handle_event("honor_protection_call", %{"vassal_user_id" => vassal_user_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.honor_protection_call(world, user, parse_id(vassal_user_id)) do
+      :ok -> {:noreply, socket |> refresh_vassalage() |> refresh_pact()}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
+  # -------------------------------------------------------------------
   # Gold Bank (story 909)
   # -------------------------------------------------------------------
 
@@ -1451,9 +1573,20 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # re-pulls its own state" pattern `:cities_changed`/`:research_changed`
   # already establish. Stories 915/919 ride this SAME broadcast for
   # every Rebellion mutation too, so `:rebellion_status`/`:rebellions_
-  # as_lord` are refreshed right alongside.
+  # as_lord` are refreshed right alongside. Story 916's own
+  # `conspiracy_heat` reads straight off the SAME `Vassalage.oath_strain`
+  # figures, so it rides along here too.
   def handle_info(:vassals_changed, socket) do
-    {:noreply, socket |> refresh_vassalage() |> refresh_rebellions()}
+    {:noreply, socket |> refresh_vassalage() |> refresh_rebellions() |> refresh_pact()}
+  end
+
+  # Story 916 — every pact chat mutation (a new pact opened, a member's
+  # own commit/decline/inform) broadcasts this world-wide; every
+  # connected view re-pulls its own masked `:pact`/`:pact_candidates`/
+  # `:pact_informed` reads, same "every connected view re-pulls its own
+  # state" pattern `:vassals_changed` already establishes.
+  def handle_info(:pact_changed, socket) do
+    {:noreply, refresh_pact(socket)}
   end
 
   # -------------------------------------------------------------------
@@ -1979,6 +2112,22 @@ defmodule BrokenOathsWeb.GameLive.Play do
     )
   end
 
+  # Story 916: single source of truth for `:pact`/`:pact_candidates`/
+  # `:pact_informed`/`:conspiracy_heat` — re-pulled inline by every
+  # pact-chat command and by the `:pact_changed`/`:vassals_changed`
+  # broadcasts, same "re-fetch on every signal" status
+  # `refresh_vassalage/1` already has.
+  defp refresh_pact(socket) do
+    %{world: world, user: user} = socket.assigns
+
+    assign(socket,
+      pact: Game.pact_view(world, user),
+      pact_candidates: Game.pact_candidates(world, user),
+      pact_informed: Game.pact_informed_notice(world, user),
+      conspiracy_heat: Game.conspiracy_heat(world, user)
+    )
+  end
+
   # Story 915 — the shared commit path both `"declare_independence"`
   # (no-params convenience) and `"confirm_declare_independence"` (the
   # two-step flow's own second half) land on: the rebel's own
@@ -2068,6 +2217,13 @@ defmodule BrokenOathsWeb.GameLive.Play do
   end
 
   defp tribute_rate_label(rate), do: "#{round(rate * 100)}%"
+
+  # Story 916, criterion 7738 — every OTHER pact member's own `status`
+  # already arrives pre-masked to `:invited` from `Game.pact_view/2`;
+  # this only ever turns that (already-secret-safe) atom into copy.
+  defp pact_status_label(:invited), do: "Outstanding"
+  defp pact_status_label(:committed), do: "Committed"
+  defp pact_status_label(:declined), do: "Declined"
 
   defp oath_agenda_options do
     [
@@ -2421,6 +2577,54 @@ defmodule BrokenOathsWeb.GameLive.Play do
              anchor). --%>
         <.vassals_panel :if={@vassals != []} vassals={@vassals} known_players={@known_players} />
 
+        <%!-- Story 916, criterion 7742 — the lord's own coarse
+             conspiracy "heat" gauge: a needle, never the pact chat's
+             own content. Same "no element at all with nothing to show"
+             posture `vassals_panel` above already has. --%>
+        <span
+          :if={@vassals != []}
+          class="badge badge-outline gap-1"
+          title="Conspiracy Heat"
+        >
+          <.icon name="hero-fire" class="w-3 h-3" />
+          <span data-test="conspiracy-heat">{@conspiracy_heat}</span>
+        </span>
+
+        <%!-- Story 916, criterion 7741 — the lord's own warning once a
+             member of a pact against her has informed: the strike turn
+             plus her three pre-emption levers. Never the roster, never
+             the informer's own identity. --%>
+        <div :if={@pact_informed} class="flex items-center gap-1" data-test="pact-informed-banner">
+          <span class="badge badge-error gap-1">
+            <.icon name="hero-exclamation-triangle" class="w-3 h-3" />
+            A vassal has warned you of a plot to strike on turn {@pact_informed.strike_turn}
+          </span>
+          <button
+            type="button"
+            phx-click="brace_defenses"
+            data-test="brace-defenses"
+            class="btn btn-xs btn-outline"
+          >
+            Brace Defenses
+          </button>
+          <button
+            type="button"
+            phx-click="reposition_lord"
+            data-test="reposition-lord"
+            class="btn btn-xs btn-outline"
+          >
+            Reposition Lord
+          </button>
+          <button
+            type="button"
+            phx-click="buy_off_conspirators"
+            data-test="buy-off-conspirators"
+            class="btn btn-xs btn-outline"
+          >
+            Buy Off Conspirators
+          </button>
+        </div>
+
         <%!-- Stories 915/919 — every Rebellion (active or ended) raised
              against this player as the FORMER LORD: the "at war" badge
              (only while still active) plus the persisted Rebellion
@@ -2556,6 +2760,143 @@ defmodule BrokenOathsWeb.GameLive.Play do
           >
             Declare Independence
           </button>
+        </div>
+
+        <%!-- Story 916 — Pact of Broken Oaths: a vassal's own
+             conspiracy composer, mirrors `alliance-button`/`chat-button`'s
+             own toggle shape. Only ever rendered for an actual vassal —
+             a free player has no lord to conspire against, and the
+             lord themself is never a FELLOW vassal (criterion 7737's
+             own second `then_`). --%>
+        <div :if={@vassal_status} class="relative">
+          <button
+            type="button"
+            data-test="pact-button"
+            phx-click="toggle_pact_panel"
+            class="btn btn-sm btn-ghost gap-1"
+          >
+            <.icon name="hero-user-group" class="w-4 h-4" />
+          </button>
+
+          <div
+            :if={@pact_panel_open?}
+            data-test="pact-panel"
+            class="card bg-base-200 shadow-xl w-80 absolute top-full right-0 mt-1 z-10"
+          >
+            <div class="card-body p-3 gap-2">
+              <h3 class="card-title text-sm">Pact of Broken Oaths</h3>
+
+              <p :if={@pact_candidates == []} class="text-xs opacity-60">
+                No fellow vassals to invite yet.
+              </p>
+
+              <form phx-submit="open_pact_chat" class="flex flex-col gap-2">
+                <div
+                  :for={candidate <- @pact_candidates}
+                  data-test={"fellow-vassal-#{candidate.user_id}"}
+                  class="flex items-center gap-2 text-sm"
+                >
+                  <input
+                    type="checkbox"
+                    name="invitee_user_ids[]"
+                    value={candidate.user_id}
+                    class="checkbox checkbox-xs"
+                  />
+                  <span class="truncate">{candidate.email}</span>
+                </div>
+
+                <div class="flex items-center gap-1">
+                  <span class="text-xs">Strike in</span>
+                  <input
+                    type="number"
+                    name="strike_turn"
+                    min="1"
+                    value="50"
+                    class="input input-xs input-bordered w-16"
+                  />
+                  <span class="text-xs">turns</span>
+                </div>
+
+                <button
+                  type="submit"
+                  data-test="open-pact-chat"
+                  class="btn btn-xs btn-primary self-start"
+                >
+                  Open Pact Chat
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <%!-- Story 916 — the pact chat itself, visible on every MEMBER's
+             own view once the pact exists (including the initiator).
+             Roster status is masked per criterion 7738: every OTHER
+             member always reads "Outstanding" regardless of their
+             real, secret answer; only the reader's own row tells the
+             truth. Commit/decline stay available even after an answer
+             is already on record (criterion 7742's own "still a
+             negotiation" reversibility). --%>
+        <div :if={@pact} data-test="pact-chat" class="card bg-base-200 shadow-xl w-80">
+          <div class="card-body p-3 gap-2">
+            <h3 class="card-title text-sm">Pact of Broken Oaths — strike turn {@pact.strike_turn}</h3>
+
+            <div
+              :if={@pact.own_status == :invited}
+              data-test="pact-invite-notice"
+              class="alert alert-warning p-2 text-xs"
+            >
+              You've been invited into a pact of rebellion.
+            </div>
+
+            <div
+              :if={@pact.informer?}
+              data-test="informer-reward"
+              class="alert alert-success p-2 text-xs"
+            >
+              Your informing has been rewarded — tribute forgiven, land granted.
+            </div>
+
+            <div data-test="pact-roster" class="flex flex-col gap-1">
+              <div
+                :for={member <- @pact.members}
+                data-test={"pact-member-#{member.user_id}"}
+                class="flex items-center justify-between text-xs"
+              >
+                <span class="truncate">{member.email}</span>
+                <span data-test={"pact-member-status-#{member.user_id}"}>
+                  {pact_status_label(member.status)}
+                </span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-1">
+              <button
+                type="button"
+                phx-click="pact_commit"
+                data-test="pact-commit"
+                class="btn btn-xs btn-primary"
+              >
+                Commit
+              </button>
+              <button
+                type="button"
+                phx-click="pact_decline"
+                data-test="pact-decline"
+                class="btn btn-xs btn-outline"
+              >
+                Decline
+              </button>
+              <button
+                type="button"
+                phx-click="pact_inform"
+                data-test="pact-inform"
+                class="btn btn-xs btn-outline btn-error"
+              >
+                Inform Lord
+              </button>
+            </div>
+          </div>
         </div>
 
         <%!-- Story 915 — the confirming warning: a second, explicit
@@ -3952,6 +4293,19 @@ defmodule BrokenOathsWeb.GameLive.Play do
           class="btn btn-xs btn-outline"
         >
           Shared Enemy
+        </button>
+        <%!-- Story 916, criterion 7742 — a TARGETED concession, alongside
+             the real `set_tribute_rate` form just below: eases this
+             ONE vassal's own Oath Strain, honoring an overdue
+             Protection Pact call. --%>
+        <button
+          type="button"
+          phx-click="honor_protection_call"
+          phx-value-vassal_user_id={@vassal.vassal_user_id}
+          data-test="honor-protection-call"
+          class="btn btn-xs btn-outline"
+        >
+          Honor Protection Call
         </button>
       </div>
 
