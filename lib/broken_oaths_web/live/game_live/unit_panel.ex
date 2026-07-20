@@ -175,6 +175,23 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
           target={target}
           unit_id={@unit_id}
         />
+
+        <%!-- Issue f7cd10db "still no way to shoot with archer": the live
+             "Shoot X" buttons above only exist when a target is in range, so
+             a selected Archer with nothing in range showed no shoot
+             affordance at all and read as "can't shoot." Always surface the
+             capability — a disabled hint when there's nothing to fire at,
+             telling the player how ranged attack works. --%>
+        <button
+          :if={:shoot in @actions and @shoot_targets == []}
+          type="button"
+          data-test="shoot-no-targets"
+          disabled
+          class="btn btn-sm btn-outline btn-disabled"
+          title="Ranged attack: move within 2 tiles of a barbarian, camp, or hostile city, then a Shoot button appears here."
+        >
+          Shoot (no target in range)
+        </button>
       </div>
     </div>
     """
