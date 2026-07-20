@@ -20,7 +20,7 @@ defmodule BrokenOathsSpex.Story913.Criterion7725Spex do
   This spec deliberately does NOT assert anything about rebellion ARMY
   SIZE or WHICH CITIES rise — both belong to story 915 (sizing) and the
   lord's separate Honor/tribute-rate lever (targeting), neither of
-  which this story or its component (`BrokenOaths.Game.OathStrain`)
+  which this story or its component (`BrokenOaths.Feudal.OathStrain`)
   owns. It only proves the negative: no auto-rebellion, vassal status
   unchanged, on both sides of the bond.
 

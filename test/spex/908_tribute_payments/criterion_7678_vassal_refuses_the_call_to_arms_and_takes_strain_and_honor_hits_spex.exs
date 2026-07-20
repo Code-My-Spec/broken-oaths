@@ -6,7 +6,7 @@ defmodule BrokenOathsSpex.Story908.Criterion7678Spex do
   publicly-legible broken obligation). A refused call is first-class
   drama" (`.code_my_spec/knowledge/feudal_vassalage_design.md`, §C).
 
-  See `criterion_7677`'s own moduledoc for the `BrokenOaths.Game.Levy`
+  See `criterion_7677`'s own moduledoc for the `BrokenOaths.Feudal.Levy`
   schema, the `"issue_levy"` judgment call, and why the war's target is
   a third, independently-joined player. This criterion refuses instead
   of answering: `"refuse_levy"`, `%{"lord_user_id" => ...}`.

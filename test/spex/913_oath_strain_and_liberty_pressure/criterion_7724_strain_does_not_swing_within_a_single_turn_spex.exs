@@ -5,7 +5,7 @@ defmodule BrokenOathsSpex.Story913.Criterion7724Spex do
   scale of hours rather than per-turn, so the social and chat layer has
   time to operate before it shifts"
   (`.code_my_spec/knowledge/feudal_vassalage_design.md`). Since no
-  `BrokenOaths.Game.OathStrain` per-tick engine exists at all today,
+  `BrokenOaths.Feudal.OathStrain` per-tick engine exists at all today,
   this scenario's own "no new events, no big swing" invariant is
   trivially satisfied right now (nothing moves the figure per-tick at
   all) — that's expected and fine; the assertions are written as real,
@@ -18,7 +18,7 @@ defmodule BrokenOathsSpex.Story913.Criterion7724Spex do
   Same substitution as the sibling criteria in this story: the
   gherkin's "Oath Strain of 70 after a spike" precondition is reached
   via five real, already-shipped refused-call-to-arms spikes
-  (`BrokenOaths.Game.Tribute.spike_oath_strain/1`, +15 each, 5×15=75) —
+  (`BrokenOaths.Feudal.Tribute.spike_oath_strain/1`, +15 each, 5×15=75) —
   both "high" and, per that same module's own moduledoc, genuinely "a
   spike."
 

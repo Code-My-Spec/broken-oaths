@@ -19,7 +19,7 @@ defmodule BrokenOathsSpex.Story909.Criterion7681Spex do
   first (`base_gold(4) = 3`, a decent real per-turn income) and then
   advances MANY real boundaries — comfortably enough, at even a modest
   few gold per turn, to exceed any plausible starting cap
-  (`BrokenOaths.Game.Bank.starting_cap/0` is 100) — reading `Fixtures.
+  (`BrokenOaths.Feudal.Bank.starting_cap/0` is 100) — reading `Fixtures.
   bank_status/2` directly after each one (a fast, sanctioned, non-UI
   read; see that delegate's own doc) until two consecutive readings
   agree, i.e. accrual has genuinely stopped, not merely slowed. The

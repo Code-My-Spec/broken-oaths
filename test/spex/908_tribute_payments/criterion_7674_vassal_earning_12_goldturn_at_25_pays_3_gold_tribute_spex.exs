@@ -17,7 +17,7 @@ defmodule BrokenOathsSpex.Story908.Criterion7674Spex do
   (`BrokenOaths.Cities.Yields.city_gold_income/2`), and `WorldServer.
   apply_tribute/1` now computes its own `income_by_player` straight
   from it every turn boundary — `set_player_gold_income_for_test` is no
-  longer read by that phase at all (see `BrokenOaths.Game.Tribute`'s
+  longer read by that phase at all (see `BrokenOaths.Feudal.Tribute`'s
   own moduledoc).
 
   Growing the vassal's captured city to size 4 a real per-turn city

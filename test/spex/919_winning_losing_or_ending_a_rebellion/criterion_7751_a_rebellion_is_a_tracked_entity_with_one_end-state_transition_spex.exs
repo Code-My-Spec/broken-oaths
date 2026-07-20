@@ -8,7 +8,7 @@ defmodule BrokenOathsSpex.Story919.Criterion7751Spex do
   (`.code_my_spec/knowledge/feudal_vassalage_design.md`, "Round 2 —
   first-class Rebellion").
 
-  `BrokenOaths.Game.Rebellion` does not exist yet — there is no
+  `BrokenOaths.Feudal.Rebellion` does not exist yet — there is no
   `lib/broken_oaths/game/rebellion.ex`, no `declare_independence`
   context function, and no `handle_event/3` clause for it anywhere in
   `GameLive.Play`. This criterion's own dependency, story 915

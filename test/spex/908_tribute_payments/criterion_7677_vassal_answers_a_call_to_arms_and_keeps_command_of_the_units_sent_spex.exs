@@ -9,7 +9,7 @@ defmodule BrokenOathsSpex.Story908.Criterion7677Spex do
   SHARE of standing army for the war's duration... Vassal keeps command
   of the pledged units" (same doc, "Round-5 decisions").
 
-  `BrokenOaths.Game.Levy` (the schema this criterion's own relationship
+  `BrokenOaths.Feudal.Levy` (the schema this criterion's own relationship
   is built on) already exists: `lord_player_id`, `vassal_player_id`,
   `target_player_id` (the war's target — a THIRD party, per the
   schema's own `validate_target_not_vassal`/`validate_target_not_lord`

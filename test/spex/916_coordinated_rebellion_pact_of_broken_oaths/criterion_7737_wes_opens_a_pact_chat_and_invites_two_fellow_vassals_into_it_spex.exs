@@ -8,7 +8,7 @@ defmodule BrokenOathsSpex.Story916.Criterion7737Spex do
   (`.code_my_spec/knowledge/feudal_vassalage_design.md`, "Round 2 —
   first-class Rebellion, Pact-in-chat").
 
-  `BrokenOaths.Game.RebellionPact` doesn't exist yet (`grep -rn
+  `BrokenOaths.Feudal.RebellionPact` doesn't exist yet (`grep -rn
   RebellionPact lib/` comes back empty), nor does any pact-chat
   affordance anywhere in `GameLive.Play`
   (`grep -rn pact_chat lib/` is equally empty). This file (and its four

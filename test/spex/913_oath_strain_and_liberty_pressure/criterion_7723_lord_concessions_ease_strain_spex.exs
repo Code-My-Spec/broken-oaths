@@ -4,7 +4,7 @@ defmodule BrokenOathsSpex.Story913.Criterion7723Spex do
   Criterion 7723 — "Oath Strain falls from investment: lord gifts, a
   granted autonomy or lowered tribute rate, and a shared enemy against
   a common foe" (`.code_my_spec/knowledge/feudal_vassalage_design.md`).
-  No `BrokenOaths.Game.OathStrain` decay engine exists yet, so both
+  No `BrokenOaths.Feudal.OathStrain` decay engine exists yet, so both
   assertions below are expected to fail today: nothing currently lowers
   `Vassalage.oath_strain` at all.
 
@@ -13,7 +13,7 @@ defmodule BrokenOathsSpex.Story913.Criterion7723Spex do
   Same substitution rationale as the sibling criteria in this story:
   the gherkin's "Oath Strain of 70" precondition has no exact real
   production path. Five real, already-shipped refused-call-to-arms
-  spikes (`BrokenOaths.Game.Tribute.spike_oath_strain/1`, +15 each,
+  spikes (`BrokenOaths.Feudal.Tribute.spike_oath_strain/1`, +15 each,
   5×15=75) land closer to the illustrative "70" than any other multiple
   of the real spike size — the SUBJECT under test ("a high strain eases
   after concessions") survives the literal-number substitution intact.

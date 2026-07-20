@@ -10,7 +10,7 @@ defmodule BrokenOathsSpex.Story915.Criterion7731Spex do
   regardless of what happens to any occupied city (that's
   criteria 7732-7736's own subject).
 
-  `BrokenOaths.Game.Rebellion` does not exist yet — nothing severs a
+  `BrokenOaths.Feudal.Rebellion` does not exist yet — nothing severs a
   Vassalage, stops tribute, or declares war today. This spec is
   expected to fail entirely on first run.
 

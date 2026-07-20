@@ -14,7 +14,7 @@ defmodule BrokenOathsSpex.Story907.Criterion7671Spex do
   concept to gate on at all today, so — like
   `BrokenOathsSpex.Story906.Criterion7663Spex`'s own "peacetime"
   criterion — this half is expected to already work; this spec is
-  `BrokenOaths.Game.Vassalization`'s own regression guard that becoming
+  `BrokenOaths.Feudal.Vassalization`'s own regression guard that becoming
   a vassal must never lock a player out of their own civilization,
   alongside its own actual RED signal (that a Vassalage relationship
   exists at all — see `BrokenOathsSpex.Story907.Criterion7666Spex`'s

@@ -40,7 +40,7 @@ defmodule BrokenOathsWeb.GameLive.FeudalCaptureUITest do
   import BrokenOaths.WorldsFixtures
 
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.Tribute
+  alias BrokenOaths.Feudal.Tribute
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.Worlds.Regions
 

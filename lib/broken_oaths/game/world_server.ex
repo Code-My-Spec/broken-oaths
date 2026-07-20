@@ -46,7 +46,7 @@ defmodule BrokenOaths.Game.WorldServer do
 
   alias BrokenOaths.Diplomacy.{Cooperation, Discovery, KnownPlayer}
 
-  alias BrokenOaths.Game.{
+  alias BrokenOaths.Feudal.{
     Bank,
     GoldLog,
     Levy,
@@ -57,13 +57,13 @@ defmodule BrokenOaths.Game.WorldServer do
     Rebellion.War,
     RebellionPact,
     RebellionPact.Conspiracy,
-    Spawner,
     Stewardship,
     Tribute,
-    Turn,
     Vassalage,
     Vassalization
   }
+
+  alias BrokenOaths.Game.{Spawner, Turn}
 
   alias BrokenOaths.Game
   alias BrokenOaths.Players.{Player, Presence}
@@ -1879,7 +1879,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # -------------------------------------------------------------------
   # Capture & Vassalization (stories 906/907) — the capture/occupy ->
   # swear-fealty flow is a thin delegation into
-  # `BrokenOaths.Game.Vassalization.apply_captures/1`
+  # `BrokenOaths.Feudal.Vassalization.apply_captures/1`
   # (`.code_my_spec/knowledge/genserver_decomposition.md`).
   # -------------------------------------------------------------------
 
@@ -2039,7 +2039,7 @@ defmodule BrokenOaths.Game.WorldServer do
 
   # -------------------------------------------------------------------
   # Alliances (story 901) — `:alliances`'s own `handle_call` is a thin
-  # delegation into `BrokenOaths.Game.Stewardship.list_alliances/2`
+  # delegation into `BrokenOaths.Feudal.Stewardship.list_alliances/2`
   # (pragdave decomposition, slice 6 — moved alongside `steward_view/2`,
   # the payload `format_alliance/3` itself carries).
   # -------------------------------------------------------------------
@@ -2181,7 +2181,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # (`.code_my_spec/knowledge/genserver_decomposition.md`).
   #
   # `:issue_levy`/`:answer_levy`/`:refuse_levy`'s own `handle_call`s are
-  # thin delegations into `BrokenOaths.Game.Levy.issue/5`/`answer/3`/
+  # thin delegations into `BrokenOaths.Feudal.Levy.issue/5`/`answer/3`/
   # `refuse/3` (pragdave decomposition, slice 6). `levy_status_for/3`
   # moved home alongside them as `Levy.status_for/3` — `format_vassal/2`
   # and `vassal_status/2` above call it directly.
@@ -2403,9 +2403,9 @@ defmodule BrokenOaths.Game.WorldServer do
   # -------------------------------------------------------------------
 
   # Pragdave decomposition, slice 6: `:bank`/`:collect_bank`/
-  # `:upgrade_bank` (`BrokenOaths.Game.Bank`) and every
+  # `:upgrade_bank` (`BrokenOaths.Feudal.Bank`) and every
   # `:steward_*`/`:alliances`/`:steward_log` `handle_call`
-  # (`BrokenOaths.Game.Stewardship`) are thin delegations into their
+  # (`BrokenOaths.Feudal.Stewardship`) are thin delegations into their
   # owning domain model
   # (`.code_my_spec/knowledge/genserver_decomposition.md`).
 

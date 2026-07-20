@@ -15,7 +15,7 @@ defmodule BrokenOathsSpex.Story917.Criterion7745Spex do
   formula (from Oath Strain) — both are story 915's own component to
   own, the same way `BrokenOathsSpex.Story913.Criterion7725Spex`'s
   own moduledoc scopes those out of ITS component
-  (`BrokenOaths.Game.OathStrain`). What this spec DOES own: proving
+  (`BrokenOaths.Feudal.OathStrain`). What this spec DOES own: proving
   the SAME single `declare_independence` action produces those two
   effects even when triggered from the seize-the-moment prompt
   (i.e. against an already-dead lord) — "the liberation mechanics are
@@ -33,7 +33,7 @@ defmodule BrokenOathsSpex.Story917.Criterion7745Spex do
 
   - Oath Strain: the SAME 7x refused-call-to-arms spike
     `criterion_7725`'s own moduledoc documents (`+15` each, clamped at
-    100 — `BrokenOaths.Game.Tribute.spike_oath_strain/1`).
+    100 — `BrokenOaths.Feudal.Tribute.spike_oath_strain/1`).
   - Honor: the lord's OWN Honor (not the vassal's) is docked by
     executing a captured garrison — `resolve_garrison_fate`,
     `"execute"`, already shipped and real

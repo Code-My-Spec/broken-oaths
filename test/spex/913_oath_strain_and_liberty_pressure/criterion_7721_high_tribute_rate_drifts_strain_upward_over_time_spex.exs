@@ -4,9 +4,9 @@ defmodule BrokenOathsSpex.Story913.Criterion7721Spex do
   Criterion 7721 — "Oath Strain rises from extraction and neglect: a
   high tribute rate... slow and sticky — it moves over many turns, not
   in one tick" (`.code_my_spec/knowledge/feudal_vassalage_design.md`).
-  No `BrokenOaths.Game.OathStrain` accrual engine exists yet, so this
+  No `BrokenOaths.Feudal.OathStrain` accrual engine exists yet, so this
   scenario is expected to fail: the vassal's own real tribute rate
-  (`BrokenOaths.Game.Tribute.set_rate_changeset/2`, already shipped by
+  (`BrokenOaths.Feudal.Tribute.set_rate_changeset/2`, already shipped by
   story 908) is raised for real, and REAL turn boundaries
   (`Fixtures.advance_turn/1`) are advanced for real, but nothing today
   reads that rate into an Oath Strain delta.

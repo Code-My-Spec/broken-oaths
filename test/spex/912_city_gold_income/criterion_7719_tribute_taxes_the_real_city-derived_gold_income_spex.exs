@@ -1,7 +1,7 @@
 defmodule BrokenOathsSpex.Story912.Criterion7719Spex do
   @moduledoc """
   Story 912 — City Gold Income
-  Criterion 7719 — `BrokenOaths.Game.Tribute` now taxes a vassal's REAL
+  Criterion 7719 — `BrokenOaths.Feudal.Tribute` now taxes a vassal's REAL
   per-turn city gold income (`Yields.city_gold_income/2`, summed by
   `WorldServer.gold_income_by_player/1`), not the test-only
   `set_player_gold_income_for_test` seam story 908 originally shipped

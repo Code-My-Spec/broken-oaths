@@ -50,10 +50,10 @@ defmodule BrokenOaths.Players.Player do
     field :camps_destroyed, :integer, default: 0
     # Story 909: the Gold Bank's own two fields — `banked_gold` (current
     # holdings, accrued while offline, up to `bank_cap`) and `bank_cap`
-    # (raised by `BrokenOaths.Game.Bank.upgrade/1`, for a gold cost).
+    # (raised by `BrokenOaths.Feudal.Bank.upgrade/1`, for a gold cost).
     # Same "never cast through `changeset/2`, mutated only via the
     # WorldServer's own diff-and-persist path" status `barbarians_killed`/
-    # `camps_destroyed` already have above — see `BrokenOaths.Game.Bank`.
+    # `camps_destroyed` already have above — see `BrokenOaths.Feudal.Bank`.
     field :banked_gold, :integer, default: 0
     field :bank_cap, :integer, default: 100
     # Story 910: the world-visible Honor reputation ledger

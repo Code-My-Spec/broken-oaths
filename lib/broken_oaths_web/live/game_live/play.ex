@@ -1164,7 +1164,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   end
 
   # "No cancel-griefing" — always refused, whitelist enforced by
-  # structural absence (`BrokenOaths.Game.Stewardship`'s own moduledoc).
+  # structural absence (`BrokenOaths.Feudal.Stewardship`'s own moduledoc).
   def handle_event(
         "steward_cancel_production_item",
         %{"owner_user_id" => owner_user_id, "city_id" => city_id, "item_id" => item_id},

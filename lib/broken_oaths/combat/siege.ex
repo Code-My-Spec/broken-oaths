@@ -62,7 +62,7 @@ defmodule BrokenOaths.Combat.Siege do
 
   ## Last free city
 
-  `no_free_cities?/2` is `BrokenOaths.Game.Vassalization`'s own trigger
+  `no_free_cities?/2` is `BrokenOaths.Feudal.Vassalization`'s own trigger
   check: "'Free city' = a city you own that no other player occupies...
   Vassalization fires at ZERO free cities" (design doc, "Round-5
   decisions"). A player who has JUST been fully occupied (every city
@@ -105,7 +105,7 @@ defmodule BrokenOaths.Combat.Siege do
   alias BrokenOaths.Game
   alias BrokenOaths.Combat.BarbarianAI
   alias BrokenOaths.Combat.CityDefense
-  alias BrokenOaths.Game.ProtectionPact
+  alias BrokenOaths.Feudal.ProtectionPact
   alias BrokenOaths.Worlds.Regions
 
   @type tile_id :: CityDefense.tile_id()
@@ -244,7 +244,7 @@ defmodule BrokenOaths.Combat.Siege do
 
   @doc """
   Whether `player_id` has ZERO free cities among `cities` — the
-  last-free-city trigger `BrokenOaths.Game.Vassalization` fires
+  last-free-city trigger `BrokenOaths.Feudal.Vassalization` fires
   vassalization on. A player owning no cities at all also reads `true`
   (vacuously), but every real player always owns at least the city that
   just triggered this check.

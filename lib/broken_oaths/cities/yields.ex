@@ -339,7 +339,7 @@ defmodule BrokenOaths.Cities.Yields do
   worked (non-center) tile — recomputed fresh from `size`/`worked_tiles`
   every call, exactly like `worked_yields/3`'s own food/production read,
   never cached on the city itself. This is the REAL basis
-  `BrokenOaths.Game.Tribute`/`BrokenOaths.Game.Bank` tax/bank each turn
+  `BrokenOaths.Feudal.Tribute`/`BrokenOaths.Feudal.Bank` tax/bank each turn
   boundary, replacing the test-only `set_player_gold_income_for_test`
   seam those two modules' own moduledocs used to document as the only
   source.

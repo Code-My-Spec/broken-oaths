@@ -3,7 +3,7 @@ defmodule BrokenOathsSpex.Story912.Criterion7718Spex do
   Story 912 — City Gold Income
   Criterion 7718 — an offline player's REAL per-turn city gold income
   accrues into their own capped Gold Bank (story 909's
-  `BrokenOaths.Game.Bank.settle_income/3`, fed a real figure —
+  `BrokenOaths.Feudal.Bank.settle_income/3`, fed a real figure —
   `BrokenOaths.Cities.Yields.city_gold_income/2` summed by `WorldServer.
   gold_income_by_player/1` — rather than story 909's own original
   test-only `set_player_gold_income_for_test` seam, which

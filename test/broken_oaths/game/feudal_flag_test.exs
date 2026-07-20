@@ -23,7 +23,7 @@ defmodule BrokenOaths.Game.FeudalFlagTest do
   use BrokenOathsTest.DataCase, async: false
 
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.Bank
+  alias BrokenOaths.Feudal.Bank
   alias BrokenOaths.Game.WorldServer
   alias BrokenOaths.Cities.Yields
   alias BrokenOaths.UsersFixtures

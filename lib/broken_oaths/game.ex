@@ -18,7 +18,7 @@ defmodule BrokenOaths.Game do
   `.code_my_spec/knowledge/genserver_decomposition.md`'s "Game API
   (973) → split by domain" target, the wrapper bodies (and their full
   narrative docs) now live in per-domain sub-facades —
-  `BrokenOaths.Game.API.Feudal` — plus the top-level
+  `BrokenOaths.Feudal` — plus the top-level
   `BrokenOaths.Cities`, `BrokenOaths.Combat`, `BrokenOaths.Diplomacy`,
   `BrokenOaths.Players`, `BrokenOaths.Technology`, `BrokenOaths.Units`,
   and `BrokenOaths.Vision` contexts (see
@@ -36,7 +36,7 @@ defmodule BrokenOaths.Game do
   alias BrokenOaths.Cities
   alias BrokenOaths.Combat
   alias BrokenOaths.Diplomacy
-  alias BrokenOaths.Game.API.Feudal
+  alias BrokenOaths.Feudal
   alias BrokenOaths.Game.WorldServer
   alias BrokenOaths.Players
   alias BrokenOaths.Technology
@@ -366,7 +366,7 @@ defmodule BrokenOaths.Game do
 
   # -------------------------------------------------------------------
   # Vassalage / Tribute (stories 907/908) —
-  # delegated to BrokenOaths.Game.API.Feudal
+  # delegated to BrokenOaths.Feudal
   # -------------------------------------------------------------------
 
   @doc "The lord's own \"Vassals\" list in `world` (story 907/908). See `Feudal.vassals/2`."
@@ -404,7 +404,7 @@ defmodule BrokenOaths.Game do
 
   # -------------------------------------------------------------------
   # Oath Strain concessions / Protection Pact (stories 913/914) —
-  # delegated to BrokenOaths.Game.API.Feudal
+  # delegated to BrokenOaths.Feudal
   # -------------------------------------------------------------------
 
   @doc "`user` (the lord) gifts `vassal_user_id`, easing their Oath Strain. See `Feudal.gift_vassal/3`."
@@ -423,7 +423,7 @@ defmodule BrokenOaths.Game do
   defdelegate mark_pact_unhonored(world, user, lord_user_id), to: Feudal
 
   # -------------------------------------------------------------------
-  # Rebellion (stories 915/919) — delegated to BrokenOaths.Game.API.Feudal
+  # Rebellion (stories 915/919) — delegated to BrokenOaths.Feudal
   # -------------------------------------------------------------------
 
   @doc "Read-only preview of what declaring independence against `lord_user_id` would do RIGHT NOW. See `Feudal.independence_preview/3`."
@@ -434,7 +434,7 @@ defmodule BrokenOaths.Game do
 
   @doc "`user` declares independence from `lord_user_id` (story 915). See `Feudal.declare_independence/3`."
   @spec declare_independence(map(), map(), term()) ::
-          {:ok, BrokenOaths.Game.Rebellion.t()}
+          {:ok, BrokenOaths.Feudal.Rebellion.t()}
           | {:error, :not_a_player | :not_a_vassal | Ecto.Changeset.t()}
   defdelegate declare_independence(world, user, lord_user_id), to: Feudal
 
@@ -466,7 +466,7 @@ defmodule BrokenOaths.Game do
 
   # -------------------------------------------------------------------
   # Coordinated Rebellion — Pact of Broken Oaths (story 916) —
-  # delegated to BrokenOaths.Game.API.Feudal
+  # delegated to BrokenOaths.Feudal
   # -------------------------------------------------------------------
 
   @doc "`user`'s own membership in an active Pact of Broken Oaths, or `nil`. See `Feudal.pact_view/2`."
@@ -479,25 +479,25 @@ defmodule BrokenOaths.Game do
 
   @doc "`user` (a vassal) opens a Pact of Broken Oaths against their own lord. See `Feudal.open_pact_chat/4`."
   @spec open_pact_chat(map(), map(), pos_integer() | String.t(), [term()]) ::
-          {:ok, BrokenOaths.Game.RebellionPact.t()}
+          {:ok, BrokenOaths.Feudal.RebellionPact.t()}
           | {:error, :not_a_player | :not_a_vassal | :invalid_strike_turn | Ecto.Changeset.t()}
   defdelegate open_pact_chat(world, user, strike_turn, invitee_user_ids), to: Feudal
 
   @doc "`user` secretly commits to strike with their own pact. See `Feudal.pact_commit/2`."
   @spec pact_commit(map(), map()) ::
-          {:ok, BrokenOaths.Game.RebellionPactMember.t()}
+          {:ok, BrokenOaths.Feudal.RebellionPactMember.t()}
           | {:error, :not_a_player | :not_a_pact_member}
   defdelegate pact_commit(world, user), to: Feudal
 
   @doc "`user` secretly declines to strike with their own pact. See `Feudal.pact_decline/2`."
   @spec pact_decline(map(), map()) ::
-          {:ok, BrokenOaths.Game.RebellionPactMember.t()}
+          {:ok, BrokenOaths.Feudal.RebellionPactMember.t()}
           | {:error, :not_a_player | :not_a_pact_member}
   defdelegate pact_decline(world, user), to: Feudal
 
   @doc "`user` secretly informs their own pact's targeted lord of the plot. See `Feudal.pact_inform/2`."
   @spec pact_inform(map(), map()) ::
-          {:ok, BrokenOaths.Game.RebellionPactMember.t()}
+          {:ok, BrokenOaths.Feudal.RebellionPactMember.t()}
           | {:error, :not_a_player | :not_a_pact_member}
   defdelegate pact_inform(world, user), to: Feudal
 
@@ -506,7 +506,7 @@ defmodule BrokenOaths.Game do
   defdelegate pact_informed_notice(world, user), to: Feudal
 
   @doc "`user`'s own coarse conspiracy \"heat\" gauge (story 916). See `Feudal.conspiracy_heat/2`."
-  @spec conspiracy_heat(map(), map()) :: BrokenOaths.Game.OathStrain.strain()
+  @spec conspiracy_heat(map(), map()) :: BrokenOaths.Feudal.OathStrain.strain()
   defdelegate conspiracy_heat(world, user), to: Feudal
 
   @doc "`user` (a lord) fully heals every one of their own cities. See `Feudal.brace_defenses/2`."
@@ -527,7 +527,7 @@ defmodule BrokenOaths.Game do
   defdelegate honor_protection_call(world, user, vassal_user_id), to: Feudal
 
   # -------------------------------------------------------------------
-  # Gold Bank (story 909) — delegated to BrokenOaths.Game.API.Feudal
+  # Gold Bank (story 909) — delegated to BrokenOaths.Feudal
   # -------------------------------------------------------------------
 
   @doc "`user`'s own bank status: `%{gold:, cap:}`. See `Feudal.bank/2`."
@@ -544,7 +544,7 @@ defmodule BrokenOaths.Game do
   defdelegate upgrade_bank(world, user), to: Feudal
 
   # -------------------------------------------------------------------
-  # Feudal Stewardship (story 910) — delegated to BrokenOaths.Game.API.Feudal
+  # Feudal Stewardship (story 910) — delegated to BrokenOaths.Feudal
   # -------------------------------------------------------------------
 
   @doc "`user`'s own world-visible Honor reputation figure. See `Feudal.honor/2`."
@@ -610,7 +610,7 @@ defmodule BrokenOaths.Game do
 
   # -------------------------------------------------------------------
   # Feudal test-only seams (gold/honor) —
-  # delegated to BrokenOaths.Game.API.Feudal
+  # delegated to BrokenOaths.Feudal
   # -------------------------------------------------------------------
 
   @doc "Test-only: set `user`'s own gold treasury directly. See `Feudal.set_player_gold_for_test/3`."

@@ -84,15 +84,15 @@ defmodule BrokenOaths.Combat.Resolver do
   into this section. Coordinates its siblings directly, per the north
   star's "cross-cutting operations are orchestrated by their OWNING
   domain model calling its siblings" rule: `BrokenOaths.Game.
-  Rebellion.War` and `BrokenOaths.Game.ProtectionPact` for the two
+  Rebellion.War` and `BrokenOaths.Feudal.ProtectionPact` for the two
   feudal PvP exceptions (never duplicated here), `BrokenOaths.Game.
   CityDefense` for the garrison-bonus lookup.
   """
 
   alias BrokenOaths.Combat.BarbarianAI
   alias BrokenOaths.Combat.CityDefense
-  alias BrokenOaths.Game.ProtectionPact
-  alias BrokenOaths.Game.Rebellion.War
+  alias BrokenOaths.Feudal.ProtectionPact
+  alias BrokenOaths.Feudal.Rebellion.War
   alias BrokenOaths.Worlds.Regions
 
   @type tile_id :: non_neg_integer()

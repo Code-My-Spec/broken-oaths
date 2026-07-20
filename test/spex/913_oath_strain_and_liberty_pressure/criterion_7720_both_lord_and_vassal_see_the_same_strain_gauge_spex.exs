@@ -9,11 +9,11 @@ defmodule BrokenOathsSpex.Story913.Criterion7720Spex do
   ## Judgment call: substituting the illustrative "42"
 
   The gherkin's own precondition ("an Oath Strain of 42") has no real
-  production path today — `BrokenOaths.Game.OathStrain` (this
+  production path today — `BrokenOaths.Feudal.OathStrain` (this
   criterion's own component) doesn't exist yet, so nothing accrues or
   decays Oath Strain over time or from lord/vassal actions except one
   thing that IS already real and shipped: story 908's refused-call-to-
-  arms spike (`BrokenOaths.Game.Tribute.spike_oath_strain/1`, +15 per
+  arms spike (`BrokenOaths.Feudal.Tribute.spike_oath_strain/1`, +15 per
   refusal, clamped at 100). Rather than fabricate a new test-only
   setter for an arbitrary starting figure (a seam this story doesn't
   own and the task brief doesn't sanction inventing), this given drives

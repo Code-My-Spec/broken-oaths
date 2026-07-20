@@ -57,8 +57,8 @@ defmodule BrokenOaths.Units.Unit do
   uses — coordinates its siblings directly, per the north star's
   "cross-cutting operations are orchestrated by their OWNING domain
   model calling its siblings" rule: `BrokenOaths.Game.Turn.move_now/2`
-  resolves the immediate step, `BrokenOaths.Game.Vassalization.
-  apply_captures/1` and `BrokenOaths.Game.Rebellion.War.
+  resolves the immediate step, `BrokenOaths.Feudal.Vassalization.
+  apply_captures/1` and `BrokenOaths.Feudal.Rebellion.War.
   process_rebellion_endings/2` are the same two post-move hooks
   (story 919's adjacent-march rebellion check) `WorldServer`'s own
   callback used to run inline.
@@ -71,9 +71,9 @@ defmodule BrokenOaths.Units.Unit do
   alias BrokenOaths.Combat.CityDefense
   alias BrokenOaths.Units.Order
   alias BrokenOaths.Players.Player
-  alias BrokenOaths.Game.Rebellion.War
+  alias BrokenOaths.Feudal.Rebellion.War
   alias BrokenOaths.Game.Turn
-  alias BrokenOaths.Game.Vassalization
+  alias BrokenOaths.Feudal.Vassalization
   alias BrokenOaths.Repo
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
@@ -99,7 +99,7 @@ defmodule BrokenOaths.Units.Unit do
           world: World.t() | Ecto.Association.NotLoaded.t(),
           player: Player.t() | Ecto.Association.NotLoaded.t() | nil,
           camp: Camp.t() | Ecto.Association.NotLoaded.t() | nil,
-          rebellion: BrokenOaths.Game.Rebellion.t() | Ecto.Association.NotLoaded.t() | nil,
+          rebellion: BrokenOaths.Feudal.Rebellion.t() | Ecto.Association.NotLoaded.t() | nil,
           inserted_at: NaiveDateTime.t() | nil,
           updated_at: NaiveDateTime.t() | nil
         }
@@ -116,14 +116,14 @@ defmodule BrokenOaths.Units.Unit do
     field :charges, :integer, default: 3
 
     # Story 915: flags a unit as part of a temporary rebellion army
-    # (spawned by `BrokenOaths.Game.Rebellion.Resolution.army_size/1`
+    # (spawned by `BrokenOaths.Feudal.Rebellion.Resolution.army_size/1`
     # at declare-independence time) — see this schema's own moduledoc.
     field :temporary, :boolean, default: false
 
     belongs_to :world, World
     belongs_to :player, Player
     belongs_to :camp, Camp
-    belongs_to :rebellion, BrokenOaths.Game.Rebellion
+    belongs_to :rebellion, BrokenOaths.Feudal.Rebellion
 
     timestamps()
   end
@@ -317,7 +317,7 @@ defmodule BrokenOaths.Units.Unit do
 
   @doc """
   Upserts `unit_id`'s own `Order` row to the given `path` — public
-  (pragdave decomposition, slice 6) so `BrokenOaths.Game.Stewardship`'s
+  (pragdave decomposition, slice 6) so `BrokenOaths.Feudal.Stewardship`'s
   own emergency-defense move can persist an order the exact same way a
   normal `queue_move/4` does, without WorldServer keeping a second,
   duplicate copy of this write.
@@ -341,7 +341,7 @@ defmodule BrokenOaths.Units.Unit do
   legal; `BrokenOaths.Game.Turn`'s dynamic collision check is what stops
   the mover adjacent to it. Public (pragdave decomposition, slice 6) —
   the same "shared, real" reason `persist_order!/2` above is public: 
-  `BrokenOaths.Game.Stewardship`'s own emergency-defense move calls this
+  `BrokenOaths.Feudal.Stewardship`'s own emergency-defense move calls this
   directly rather than WorldServer keeping a duplicate copy.
   """
   @spec bfs_path(map(), tile_id(), tile_id()) :: [tile_id()] | nil

@@ -27,9 +27,9 @@ defmodule BrokenOathsSpex.Story914.Criterion7728Spex do
   Same substitution `BrokenOathsSpex.Story913.Criterion7722Spex` already
   made for the same "an unhonored/honored Protection Pact" family: no
   real production path sets an arbitrary starting Oath Strain figure
-  (`BrokenOaths.Game.OathStrain` doesn't exist), but THREE real,
+  (`BrokenOaths.Feudal.OathStrain` doesn't exist), but THREE real,
   already-shipped refused-call-to-arms spikes
-  (`BrokenOaths.Game.Tribute.spike_oath_strain/1`, +15 each) land
+  (`BrokenOaths.Feudal.Tribute.spike_oath_strain/1`, +15 each) land
   deterministically at 45 — non-zero, real, and leaves headroom below
   the 100 ceiling for the "falls" assertion below to mean something.
   Only the illustrative literal "55" does not survive; the scenario's

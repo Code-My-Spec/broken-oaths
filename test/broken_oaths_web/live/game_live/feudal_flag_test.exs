@@ -12,7 +12,7 @@ defmodule BrokenOathsWeb.GameLive.FeudalFlagTest do
   `GameLive.Play`'s own `@feudal_enabled?` assign gates the last four
   directly (they read STRUCTURAL `Player` fields that exist, at inert
   defaults, regardless of the flag — see `BrokenOaths.Game.
-  Bank`/`BrokenOaths.Game.Stewardship`'s own moduledocs). With the flag
+  Bank`/`BrokenOaths.Feudal.Stewardship`'s own moduledocs). With the flag
   ON, the same order lands (the deeper capture/vassalization/tribute
   flow itself stays the 906/907/908 spex suites' own job; the deeper
   Bank/Stewardship flow stays the 909/910 spex suites' own job).

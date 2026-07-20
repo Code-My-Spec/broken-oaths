@@ -8,7 +8,7 @@ defmodule BrokenOathsSpex.Story914.Criterion7726Spex do
   vassal — by either a rival player OR a barbarian warband — must raise
   a Protection Pact obligation against the vassal's lord.
 
-  `BrokenOaths.Game.ProtectionPact` (this story's own component) does
+  `BrokenOaths.Feudal.ProtectionPact` (this story's own component) does
   not exist anywhere in this codebase yet — no schema, no attack
   listener, no obligation record, no UI. This spec drives the REAL
   attack surfaces this codebase already ships (story 906's `"attack"`/
@@ -119,7 +119,7 @@ defmodule BrokenOathsSpex.Story914.Criterion7726Spex do
                  "[data-test='vassal-row-#{context.other_user.id}'] [data-test='protection-call']"
                ),
                "no \"protection-call\" obligation rendered for Wes yet — " <>
-                 "BrokenOaths.Game.ProtectionPact doesn't exist"
+                 "BrokenOaths.Feudal.ProtectionPact doesn't exist"
 
         {:ok, context}
       end

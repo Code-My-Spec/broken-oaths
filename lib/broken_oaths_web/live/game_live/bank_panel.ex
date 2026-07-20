@@ -19,7 +19,7 @@ defmodule BrokenOathsWeb.GameLive.BankPanel do
   Assigns (from `Play`):
 
     * `:id` - the DOM id for this component instance
-    * `:bank` - `%{gold:, cap:}` (`BrokenOaths.Game.Bank.status/1`) —
+    * `:bank` - `%{gold:, cap:}` (`BrokenOaths.Feudal.Bank.status/1`) —
       `:bank-gold`/`:bank-cap`'s own two badges
     * `:error` - `nil`, or a short string from a refused
       `"upgrade_bank"` attempt (an empty treasury) — cleared the next
