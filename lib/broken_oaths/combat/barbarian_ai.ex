@@ -1,8 +1,8 @@
-defmodule BrokenOaths.Game.BarbarianAI do
+defmodule BrokenOaths.Combat.BarbarianAI do
   @moduledoc """
   Pure barbarian decision core: per-boundary target selection, one-hex
   step planning, and near-camp roaming. No `Repo`, no process state —
-  mirrors `BrokenOaths.Game.Combat`/`BrokenOaths.Game.Camps`'s role:
+  mirrors `BrokenOaths.Combat.Resolver`/`BrokenOaths.Combat.Camps`'s role:
   `BrokenOaths.Game.Turn` is the imperative-adjacent shell that reads a
   camp-spawned barbarian warrior out of its canonical tick-state, calls
   `decide/5` for that warrior, and applies the result (movement,
@@ -47,15 +47,15 @@ defmodule BrokenOaths.Game.BarbarianAI do
 
   Land-path distance (used for both range-checking and roam radius) is
   the same "how many hexes away, over passable land only" notion
-  `BrokenOaths.Game.Camps`/`BrokenOaths.Game.WorldServer`'s move
+  `BrokenOaths.Combat.Camps`/`BrokenOaths.Game.WorldServer`'s move
   pathfinding already use — never raw mesh-adjacency ring distance.
 
   ## Determinism
 
   The roam choice is seeded from a caller-supplied term (typically
   `{world.seed, turn, barbarian.id}`) via `:rand.seed_s/2` — the same
-  functional, non-global pattern `BrokenOaths.Game.Combat` and
-  `BrokenOaths.Game.Camps` already use. Two callers deciding the same
+  functional, non-global pattern `BrokenOaths.Combat.Resolver` and
+  `BrokenOaths.Combat.Camps` already use. Two callers deciding the same
   barbarian from the same tick-state always agree.
 
   ## Pillage and bounty

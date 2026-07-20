@@ -53,7 +53,7 @@ defmodule BrokenOathsSpex.Story917.Criterion7745Spex do
   "Cities rise" / "temporary rebellion army spawns" have no dedicated
   DOM surface yet either; this spec reads the already-established
   `city-status` badge (`:free`/`:broken`/`:occupied`,
-  `BrokenOaths.Game.Siege.status/1`) for the first, and a raw unit-count
+  `BrokenOaths.Combat.Siege.status/1`) for the first, and a raw unit-count
   delta (`Fixtures.player_units/2`, sanctioned board-state read) for
   the second — the narrowest true stand-ins available without
   fabricating a formula this story doesn't own.

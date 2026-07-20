@@ -15,7 +15,7 @@ defmodule BrokenOaths.Game.Turn.Movement do
   tick is an arrival: the order is removed entirely.
 
   This logic is genuinely cross-cutting (it reads `BrokenOaths.Game.
-  CityDefense`'s own garrison rule and `BrokenOaths.Game.Siege`'s own
+  CityDefense`'s own garrison rule and `BrokenOaths.Combat.Siege`'s own
   broken-city walk-in exception to decide what counts as "blocked") and
   has no single owning domain model — it belongs to the turn pipeline
   itself, not to `BrokenOaths.Units.Unit`. `move_now/2` is the one seam
@@ -29,7 +29,7 @@ defmodule BrokenOaths.Game.Turn.Movement do
   `BrokenOaths.Game.Turn`.
   """
 
-  alias BrokenOaths.Game.CityDefense
+  alias BrokenOaths.Combat.CityDefense
   alias BrokenOaths.Vision.Visibility
 
   @doc "Reset every unit's `movement` to its `max_movement` at the start of a tick."
@@ -162,7 +162,7 @@ defmodule BrokenOaths.Game.Turn.Movement do
   end
 
   # `tile_id => owner_player_id` of every BROKEN (0 HP), still-free city
-  # — story 906's own movement exception (`BrokenOaths.Game.Siege.
+  # — story 906's own movement exception (`BrokenOaths.Combat.Siege.
   # enterable_despite_garrison?/2`): once a city's walls are down, any
   # OTHER player's unit may step onto its own tile even past a fallen
   # (still-alive, not-yet-resolved) garrison. A healthy or already-

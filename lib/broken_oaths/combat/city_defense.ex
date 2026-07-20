@@ -1,9 +1,9 @@
-defmodule BrokenOaths.Game.CityDefense do
+defmodule BrokenOaths.Combat.CityDefense do
   @moduledoc """
   Pure city-combat core: HP and defensive strength, the garrison
   stacking exception, garrison combat bonuses, pillage-not-capture, and
   the regen/production-halt bookkeeping a turn boundary applies. No
-  `Repo`, no process state — mirrors `BrokenOaths.Game.Combat`'s role:
+  `Repo`, no process state — mirrors `BrokenOaths.Combat.Resolver`'s role:
   `BrokenOaths.Game.WorldServer` (immediate city-target attacks) and
   `BrokenOaths.Game.Turn` (regen, production halt, the barbarian-AI
   "hold adjacent to a city" case) are the imperative shells that read a
@@ -36,17 +36,17 @@ defmodule BrokenOaths.Game.CityDefense do
   ## Garrison combat bonus
 
   A unit standing on its own city's tile fights at +50% strength
-  (`BrokenOaths.Game.Combat.garrisoned_strength/2`) whether it's
+  (`BrokenOaths.Combat.Resolver.garrisoned_strength/2`) whether it's
   striking out at an adjacent barbarian (`garrisoned?/2` is the
   predicate `WorldServer` checks before passing `attacker_garrisoned?:
-  true` into `Combat.resolve/3`) or defending the walls against an
+  true` into `Resolver.resolve/3`) or defending the walls against an
   assault on the city itself (`resolve_attack/4`, below).
 
   ## Barbarian-vs-city combat
 
   `resolve_attack/4` resolves a barbarian's (or, per this story's own
   spec convention, a stand-in real player's) assault on a city:
-  damage to the city is the same Civ VI curve `Combat.damage/3` computes
+  damage to the city is the same Civ VI curve `Resolver.damage/3` computes
   for unit-vs-unit combat, attacker strength against the city's own
   defensive strength (not a single defender's). The counter-blow comes
   from the single STRONGEST living garrisoned defender (ties break on
@@ -88,19 +88,19 @@ defmodule BrokenOaths.Game.CityDefense do
   stand-in convention above) closing within `approach_range/0` (3)
   hexes of a player's city, and a city actually taking a hit.
   `approaching?/4` measures distance the same way
-  `BrokenOaths.Game.Camps.ring_band/3` places camps — raw mesh
+  `BrokenOaths.Combat.Camps.ring_band/3` places camps — raw mesh
   adjacency, not the land-only path distance
-  `BrokenOaths.Game.BarbarianAI` uses for targeting — since an alert is
+  `BrokenOaths.Combat.BarbarianAI` uses for targeting — since an alert is
   about how close a threat LOOKS on the globe, not how far it would
   have to walk to arrive.
   """
 
-  alias BrokenOaths.Game.Combat
+  alias BrokenOaths.Combat.Resolver
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
 
   @type tile_id :: non_neg_integer()
-  @type unit :: Combat.unit()
+  @type unit :: Resolver.unit()
   @type city :: %{
           optional(atom()) => term(),
           id: term(),
@@ -209,7 +209,7 @@ defmodule BrokenOaths.Game.CityDefense do
   @spec defensive_strength(city(), [unit()]) :: non_neg_integer()
   def defensive_strength(city, units) do
     garrison_defense =
-      city |> military_garrison(units) |> Enum.map(&Combat.base_strength(&1.type)) |> Enum.sum()
+      city |> military_garrison(units) |> Enum.map(&Resolver.base_strength(&1.type)) |> Enum.sum()
 
     @base_defense + @size_defense * city.size + garrison_defense
   end
@@ -236,21 +236,21 @@ defmodule BrokenOaths.Game.CityDefense do
     attacker_aura? = Keyword.get(opts, :attacker_aura?, false)
 
     resisting_strength = defensive_strength(city, units)
-    striking_strength = Combat.effective_strength(attacker, attacker_aura?)
+    striking_strength = Resolver.effective_strength(attacker, attacker_aura?)
 
     damage_to_city =
-      min(Combat.damage(striking_strength, resisting_strength, {seed, :to_city}), city.hp)
+      min(Resolver.damage(striking_strength, resisting_strength, {seed, :to_city}), city.hp)
 
     case strongest_defender(city, units) do
       nil ->
         %{damage_to_city: damage_to_city, damage_to_barbarian: 0, defender_id: nil}
 
       defender ->
-        counter_strength = Combat.garrisoned_strength(defender)
-        attacker_strength = Combat.effective_strength(attacker, attacker_aura?)
+        counter_strength = Resolver.garrisoned_strength(defender)
+        attacker_strength = Resolver.effective_strength(attacker, attacker_aura?)
 
         damage_to_barbarian =
-          Combat.damage(counter_strength, attacker_strength, {seed, :to_attacker})
+          Resolver.damage(counter_strength, attacker_strength, {seed, :to_attacker})
 
         %{
           damage_to_city: damage_to_city,
@@ -264,7 +264,7 @@ defmodule BrokenOaths.Game.CityDefense do
     city
     |> military_garrison(units)
     |> Enum.filter(&(&1.hp > 0))
-    |> Enum.sort_by(&{-Combat.base_strength(&1.type), &1.id})
+    |> Enum.sort_by(&{-Resolver.base_strength(&1.type), &1.id})
     |> List.first()
   end
 
@@ -273,7 +273,7 @@ defmodule BrokenOaths.Game.CityDefense do
   left, the city on an adjacent tile, and `attacker` isn't the city's
   own owner (a player can never attack their own city; every OTHER
   player's unit is a legal attacker here — city assault doesn't share
-  `Combat.hostile?/2`'s "no Stone Age PvP" restriction on unit-vs-unit
+  `Resolver.hostile?/2`'s "no Stone Age PvP" restriction on unit-vs-unit
   combat, per this story's own spec convention of standing a second
   real player's unit in for a barbarian).
   """
@@ -344,7 +344,7 @@ defmodule BrokenOaths.Game.CityDefense do
   (`take_damage/3` folds `pillage/2` in the SAME calculation, resetting
   HP to `pillage_hp/0` before `regen/1` is ever called), so a city THIS
   function finds at 0 is always story 906's own player-siege "broken"
-  state (`BrokenOaths.Game.Siege.broken?/1`) — the walls are down, there
+  state (`BrokenOaths.Combat.Siege.broken?/1`) — the walls are down, there
   is nothing left to regenerate, and the city stays exactly at 0 until
   it's captured, not healed back onto its feet by a passive boundary.
   """

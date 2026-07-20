@@ -18,7 +18,7 @@ defmodule BrokenOathsSpex.Story915.Criterion7733Spex do
   ## Judgment call: what "the lord's garrison stationed there" is
 
   Occupation in this codebase is a simple flag
-  (`BrokenOaths.Game.Siege`'s own `occupied_by_player_id`) set once at
+  (`BrokenOaths.Combat.Siege`'s own `occupied_by_player_id`) set once at
   capture — it does NOT require the capturing unit to keep standing on
   the tile afterward (nothing un-occupies a city if the besieger later
   walks away). "The lord's garrison stationed there" is therefore

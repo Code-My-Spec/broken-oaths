@@ -105,7 +105,7 @@ defmodule BrokenOaths.Game.Turn do
   `camps` (story 892) is read the same defensive way, via
   `Map.get(state, :camps, %{})` — every barbarian camp on the board,
   written once at a player's first founding (`WorldServer`, not this
-  module) and advanced every tick by `BrokenOaths.Game.Camps`'s own
+  module) and advanced every tick by `BrokenOaths.Combat.Camps`'s own
   spawn-loop phase. A unit belonging to a camp (a barbarian warrior)
   carries the camp's id as `camp_id` in its own map, read the same
   defensive way (`Map.get(unit, :camp_id)`) since ordinary player units
@@ -162,14 +162,14 @@ defmodule BrokenOaths.Game.Turn do
        simply waits. Successful spawns come back as `{:unit_spawned,
        spawn_event}` events -- this module never allocates a real unit
        id itself.
-    3b. camp spawn loop (story 892) -- `BrokenOaths.Game.Camps.
+    3b. camp spawn loop (story 892) -- `BrokenOaths.Combat.Camps.
        resolve_spawns/2`, threading the SAME "claimed this tick"
        occupied-tile set city completions just built.
     3c. barbarian AI loop (story 893) -- `BrokenOaths.Game.Turn.
        BarbarianPhase.resolve/3` (cross-cutting: orchestrates
        `BarbarianAI`, `Combat`, `CityDefense`, and heir scheduling
        together, so it has no single owning domain model).
-    3d. city regeneration (story 895) -- `BrokenOaths.Game.CityDefense.
+    3d. city regeneration (story 895) -- `BrokenOaths.Combat.CityDefense.
        regen_cities/2`, skipping every city phase 3c's own barbarian-AI
        assault struck THIS tick.
     4. food accrual -- `BrokenOaths.Cities.Yields.accrue_food_all/1`.
@@ -194,8 +194,8 @@ defmodule BrokenOaths.Game.Turn do
   production completions racing for a tile) resolve deterministically.
   """
 
-  alias BrokenOaths.Game.Camps
-  alias BrokenOaths.Game.CityDefense
+  alias BrokenOaths.Combat.Camps
+  alias BrokenOaths.Combat.CityDefense
   alias BrokenOaths.Cities.Improvement
   alias BrokenOaths.Cities.Production
   alias BrokenOaths.Technology.Research

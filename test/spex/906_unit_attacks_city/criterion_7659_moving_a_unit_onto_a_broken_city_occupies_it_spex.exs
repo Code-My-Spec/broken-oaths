@@ -22,7 +22,7 @@ defmodule BrokenOathsSpex.Story906.Criterion7659Spex do
   has ZERO occupants today, so `march_to/6` (an ordinary `"queue_move"`
   order) already lands the besieger's unit ON that tile without any
   collision refusal, even though nothing today changes who OWNS the
-  city as a result — that ownership change (`BrokenOaths.Game.Siege`'s
+  city as a result — that ownership change (`BrokenOaths.Combat.Siege`'s
   own job) is this criterion's real subject and RED signal.
   """
 

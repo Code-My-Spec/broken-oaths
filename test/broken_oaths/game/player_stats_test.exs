@@ -4,7 +4,7 @@ defmodule BrokenOaths.Game.PlayerStatsTest do
   use BrokenOathsTest.DataCase, async: false
 
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.BarbarianAI
+  alias BrokenOaths.Combat.BarbarianAI
   alias BrokenOaths.Game.WorldServer
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.Worlds.Regions

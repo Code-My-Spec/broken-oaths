@@ -169,8 +169,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   alias BrokenOaths.Chat
   alias BrokenOaths.Cities.{Improvement, Yields}
+  alias BrokenOaths.Combat.{Camp, CityDefense}
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.{Camp, CityDefense}
   alias BrokenOaths.Players.Presence
   alias BrokenOaths.Technology.Research
   alias BrokenOaths.Worlds

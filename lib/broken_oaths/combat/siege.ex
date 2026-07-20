@@ -1,8 +1,8 @@
-defmodule BrokenOaths.Game.Siege do
+defmodule BrokenOaths.Combat.Siege do
   @moduledoc """
   Pure PvP city siege and capture core (story 906): who may lay siege,
   how a besieged city's HP breaks WITHOUT the barbarian-vs-city
-  pillage-and-reset `BrokenOaths.Game.CityDefense.take_damage/3`
+  pillage-and-reset `BrokenOaths.Combat.CityDefense.take_damage/3`
   already applies, when a broken city is actually captured, and the
   fallen garrison's fate once it is. No `Repo`, no process state —
   mirrors `CityDefense`'s own role: `BrokenOaths.Game.WorldServer`
@@ -103,8 +103,8 @@ defmodule BrokenOaths.Game.Siege do
   """
 
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.BarbarianAI
-  alias BrokenOaths.Game.CityDefense
+  alias BrokenOaths.Combat.BarbarianAI
+  alias BrokenOaths.Combat.CityDefense
   alias BrokenOaths.Game.ProtectionPact
   alias BrokenOaths.Worlds.Regions
 
@@ -314,9 +314,9 @@ defmodule BrokenOaths.Game.Siege do
   # -------------------------------------------------------------------
 
   # Resolves immediately, like a player's own unit-vs-unit attack (see
-  # `BrokenOaths.Game.CityDefense`'s moduledoc for the damage math —
+  # `BrokenOaths.Combat.CityDefense`'s moduledoc for the damage math —
   # city defensive strength vs. attacker strength, countered by the
-  # strongest garrisoned defender). Unlike `BrokenOaths.Game.Combat.
+  # strongest garrisoned defender). Unlike `BrokenOaths.Combat.Resolver.
   # hostile?/2`'s "no Stone Age PvP" rule for unit-vs-unit combat, ANY
   # player's unit may assault ANY OTHER player's city — `validate_siege/3`
   # layers ONE new rule on top of `CityDefense.validate_attack/3`'s own
@@ -413,7 +413,7 @@ defmodule BrokenOaths.Game.Siege do
   # real-player-only "attack" surface), but a barbarian-owned
   # `%{player_id: nil}` `city.player_id` can never pay a bounty either
   # (the `payee_id` guard below), so this stays a faithful copy of
-  # `BrokenOaths.Game.Combat`'s own helper.
+  # `BrokenOaths.Combat.Resolver`'s own helper.
   defp pay_bounty_if_barbarian_fell(state, %{player_id: nil, hp: 0}, %{player_id: payee_id})
        when not is_nil(payee_id) do
     state = update_in(state.players[payee_id].gold, &(&1 + BarbarianAI.bounty_gold()))
@@ -423,7 +423,7 @@ defmodule BrokenOaths.Game.Siege do
   defp pay_bounty_if_barbarian_fell(state, _fallen, _other), do: state
 
   # A living unit of the SAME player standing next door — duplicated
-  # (not shared) from `BrokenOaths.Game.Combat`'s own copy per this
+  # (not shared) from `BrokenOaths.Combat.Resolver`'s own copy per this
   # codebase's established "small pure state-accessor helpers live
   # wherever they're needed" convention (see e.g. `Turn`'s own
   # `lord_adjacent?/2`).

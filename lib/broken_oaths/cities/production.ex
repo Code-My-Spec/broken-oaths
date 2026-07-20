@@ -88,14 +88,14 @@ defmodule BrokenOaths.Cities.Production do
 
   Civ 6's own Archer is a RANGED unit (attacks from 2 tiles away
   without retaliation); this game's whole combat model
-  (`BrokenOaths.Game.Combat`) is melee/adjacent-only — no unit anywhere
+  (`BrokenOaths.Combat.Resolver`) is melee/adjacent-only — no unit anywhere
   in this codebase has a ranged attack. Implementing true ranged combat
   is a genuine design/engineering project (attack range, no-retaliation
   math, a new UI affordance for "attack from range"), well beyond a bug
   fix's scope. This first pass ships the Archer as a buildable MELEE
   unit instead — real, buildable, fights (adjacent, both sides land a
   blow) — with stats scaled to sit between the Warrior and the Bronze
-  Spearman (`@unit_stats`/`BrokenOaths.Game.Combat`'s own
+  Spearman (`@unit_stats`/`BrokenOaths.Combat.Resolver`'s own
   `@base_strength`): strength 14 (Warrior 10, Bronze Spearman 16), 100
   HP (Warrior's own HP), cost 40 production (cheaper than the Bronze
   Spearman's 60 — Archery is a tier-2 tech but doesn't need a strategic
@@ -107,8 +107,8 @@ defmodule BrokenOaths.Cities.Production do
 
   import Ecto.Query
 
-  alias BrokenOaths.Game.CityDefense
-  alias BrokenOaths.Game.ProductionItem
+  alias BrokenOaths.Combat.CityDefense
+  alias BrokenOaths.Cities.ProductionItem
   alias BrokenOaths.Technology.Research
   alias BrokenOaths.Cities.Yields
   alias BrokenOaths.Repo
@@ -488,7 +488,7 @@ defmodule BrokenOaths.Cities.Production do
 
   @doc """
   Bank this turn's production for every city in `state.cities`, skipping
-  any city still serving `BrokenOaths.Game.CityDefense.production_halted?/2`'s
+  any city still serving `BrokenOaths.Combat.CityDefense.production_halted?/2`'s
   pillage freeze (story 895) -- that city's queue simply doesn't move
   this boundary; its banked progress is untouched, not lost. `state` is
   the canonical tick-state described in `BrokenOaths.Game.Turn`.

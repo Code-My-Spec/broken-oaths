@@ -212,7 +212,7 @@ defmodule BrokenOathsSpex.Story895.Criterion7567Spex do
   end
 
   # Raw mesh-adjacency BFS distance from `from` to `to` — the same
-  # notion `BrokenOaths.Game.Camps.ring_band/3` places camps by, used
+  # notion `BrokenOaths.Combat.Camps.ring_band/3` places camps by, used
   # here only to rank camps by "how far from the action," not to
   # validate any land-path route.
   defp mesh_distance(world, from, to, max_depth \\ 40) do

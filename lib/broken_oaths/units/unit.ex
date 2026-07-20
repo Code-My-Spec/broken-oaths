@@ -5,15 +5,15 @@ defmodule BrokenOaths.Units.Unit do
   points.
 
   `player_id` is nullable: a barbarian warrior (`type: :barbarian_warrior`,
-  spawned by `BrokenOaths.Game.Camps`, story 892) has no owning player —
-  the seam `BrokenOaths.Game.Combat.hostile?/2` recognizes — and instead
+  spawned by `BrokenOaths.Combat.Camps`, story 892) has no owning player —
+  the seam `BrokenOaths.Combat.Resolver.hostile?/2` recognizes — and instead
   carries `camp_id`, the camp that spawned it (used to cap "alive
   warriors per camp" at 2). An ordinary player-owned unit always sets
   `player_id` and leaves `camp_id` nil; the two are never both set.
 
   One unit per hex is a hard rule, with two exceptions: a city's own
   tile (story 895's garrison exception — see
-  `BrokenOaths.Game.CityDefense.garrison_room?/2`), and, out in the open
+  `BrokenOaths.Combat.CityDefense.garrison_room?/2`), and, out in the open
   field, exactly one non-combat unit stacking with exactly one combat
   unit of the SAME owner (v0.2.1 playtest issue 5df5de88 — a worker or
   settler may walk with a warrior/lord/bronze-spearman escort — see
@@ -53,7 +53,7 @@ defmodule BrokenOaths.Units.Unit do
   awareness; `WorldServer`'s own `:queue_move` `handle_call` is a thin
   delegation into this function. Orders execute immediately with
   whatever movement the unit has left, the same "resolve now, don't
-  wait for a turn boundary" shape `BrokenOaths.Game.Combat.attack/4`
+  wait for a turn boundary" shape `BrokenOaths.Combat.Resolver.attack/4`
   uses — coordinates its siblings directly, per the north star's
   "cross-cutting operations are orchestrated by their OWNING domain
   model calling its siblings" rule: `BrokenOaths.Game.Turn.move_now/2`
@@ -67,8 +67,8 @@ defmodule BrokenOaths.Units.Unit do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias BrokenOaths.Game.Camp
-  alias BrokenOaths.Game.CityDefense
+  alias BrokenOaths.Combat.Camp
+  alias BrokenOaths.Combat.CityDefense
   alias BrokenOaths.Units.Order
   alias BrokenOaths.Players.Player
   alias BrokenOaths.Game.Rebellion.War
@@ -424,7 +424,7 @@ defmodule BrokenOaths.Units.Unit do
   # -------------------------------------------------------------------
   # Shared, trivial lookups — duplicated rather than reaching back into
   # `WorldServer`, matching the sibling `BrokenOaths.Cities.City`/
-  # `BrokenOaths.Game.Combat`'s own "pure, process-unaware,
+  # `BrokenOaths.Combat.Resolver`'s own "pure, process-unaware,
   # unit-testable with no GenServer running" contract (small private
   # helper copies rather than expanding public APIs).
   # -------------------------------------------------------------------

@@ -3,7 +3,7 @@ defmodule BrokenOaths.Cities.CityTest do
 
   alias BrokenOaths.Cities.City
   alias BrokenOaths.Players.Player
-  alias BrokenOaths.Game.ProductionItem
+  alias BrokenOaths.Cities.ProductionItem
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.WorldsFixtures
 

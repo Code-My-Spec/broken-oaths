@@ -1,7 +1,7 @@
-defmodule BrokenOaths.Game.CombatTest do
+defmodule BrokenOaths.Combat.ResolverTest do
   use ExUnit.Case, async: true
 
-  alias BrokenOaths.Game.Combat
+  alias BrokenOaths.Combat.Resolver
 
   # Same unit() shape/defaults as turn_test.exs, plus player_id/type
   # defaults suited to combat fixtures.
@@ -31,40 +31,40 @@ defmodule BrokenOaths.Game.CombatTest do
 
   describe "base_strength/1" do
     test "matches the design doc's per-type table" do
-      assert Combat.base_strength(:lord) == 12
-      assert Combat.base_strength(:warrior) == 10
-      assert Combat.base_strength(:settler) == 0
-      assert Combat.base_strength(:worker) == 0
+      assert Resolver.base_strength(:lord) == 12
+      assert Resolver.base_strength(:warrior) == 10
+      assert Resolver.base_strength(:settler) == 0
+      assert Resolver.base_strength(:worker) == 0
     end
 
     test "the Bronze Spearman (story 903) matches civ6_tech_tree.md's recommendation" do
-      assert Combat.base_strength(:bronze_spearman) == 16
+      assert Resolver.base_strength(:bronze_spearman) == 16
     end
 
     # QA issue da39e50b "No archer" — a first-pass MELEE unit (this
     # engine has no ranged-attack model), strength 14: above the
     # Warrior (10), below the Bronze Spearman (16).
     test "the Archer (QA issue da39e50b) sits between the Warrior and the Bronze Spearman" do
-      assert Combat.base_strength(:archer) == 14
+      assert Resolver.base_strength(:archer) == 14
     end
   end
 
   describe "effective_strength/2" do
     test "a full-HP unit fights at its plain base strength" do
-      assert Combat.effective_strength(unit(1, hp: 100, max_hp: 100)) == 10.0
+      assert Resolver.effective_strength(unit(1, hp: 100, max_hp: 100)) == 10.0
     end
 
     test "a unit at 0 HP fights at half strength — the wounded floor" do
-      assert Combat.effective_strength(unit(1, hp: 0, max_hp: 100)) == 5.0
+      assert Resolver.effective_strength(unit(1, hp: 0, max_hp: 100)) == 5.0
     end
 
     test "criterion 7575's exact figure: a warrior at 20/100 HP fights at strength 6" do
-      assert Combat.effective_strength(unit(1, hp: 20, max_hp: 100)) == 6.0
+      assert Resolver.effective_strength(unit(1, hp: 20, max_hp: 100)) == 6.0
     end
 
     test "the lord's aura adds +2 strength before the wounded penalty scales it" do
       full = unit(1, type: :warrior, hp: 100, max_hp: 100)
-      assert Combat.effective_strength(full, true) == 12.0
+      assert Resolver.effective_strength(full, true) == 12.0
 
       # At 20/100 HP (0.6x), the aura is folded in BEFORE scaling:
       # (10 + 2) * 0.6 = 7.2 — not 6.0 (aura ignored) or 6.5 (a raw +2
@@ -72,12 +72,12 @@ defmodule BrokenOaths.Game.CombatTest do
       # wounded+aura'd unit (see this module's moduledoc for the
       # judgment call); this test pins the chosen behavior.
       wounded = unit(1, type: :warrior, hp: 20, max_hp: 100)
-      assert_in_delta Combat.effective_strength(wounded, true), 7.2, 1.0e-9
+      assert_in_delta Resolver.effective_strength(wounded, true), 7.2, 1.0e-9
     end
 
     test "the lord itself carries innate strength 12 with no self-aura" do
       lord = unit(1, type: :lord, hp: 150, max_hp: 150)
-      assert Combat.effective_strength(lord) == 12.0
+      assert Resolver.effective_strength(lord) == 12.0
     end
   end
 
@@ -89,7 +89,7 @@ defmodule BrokenOaths.Game.CombatTest do
 
       for seed <- 1..50 do
         %{damage_to_defender: dealt, damage_to_attacker: taken} =
-          Combat.resolve(a, d, seed: {:equal, seed})
+          Resolver.resolve(a, d, seed: {:equal, seed})
 
         assert dealt in lo..hi
         assert taken in lo..hi
@@ -105,7 +105,7 @@ defmodule BrokenOaths.Game.CombatTest do
 
       for seed <- 1..100 do
         %{damage_to_defender: dealt, damage_to_attacker: taken} =
-          Combat.resolve(a, d, seed: {:asymmetric, seed})
+          Resolver.resolve(a, d, seed: {:asymmetric, seed})
 
         assert dealt in lo..hi
         assert taken in counter_lo..counter_hi
@@ -120,7 +120,7 @@ defmodule BrokenOaths.Game.CombatTest do
 
       for seed <- 1..100 do
         dealt =
-          Combat.resolve(a, d, seed: {:aura, seed}, attacker_aura?: true).damage_to_defender
+          Resolver.resolve(a, d, seed: {:aura, seed}, attacker_aura?: true).damage_to_defender
 
         assert dealt in lo..hi
       end
@@ -130,8 +130,8 @@ defmodule BrokenOaths.Game.CombatTest do
       a = unit(1)
       d = unit(2, player_id: nil)
 
-      first = Combat.resolve(a, d, seed: "fixed-seed")
-      second = Combat.resolve(a, d, seed: "fixed-seed")
+      first = Resolver.resolve(a, d, seed: "fixed-seed")
+      second = Resolver.resolve(a, d, seed: "fixed-seed")
 
       assert first == second
     end
@@ -142,7 +142,7 @@ defmodule BrokenOaths.Game.CombatTest do
 
       outcomes =
         for seed <- 1..30, into: MapSet.new() do
-          Combat.resolve(a, d, seed: seed).damage_to_defender
+          Resolver.resolve(a, d, seed: seed).damage_to_defender
         end
 
       assert MapSet.size(outcomes) > 1
@@ -153,8 +153,8 @@ defmodule BrokenOaths.Game.CombatTest do
       dying = unit(2, hp: 1, max_hp: 100, player_id: nil)
       full_hp = %{dying | hp: 100}
 
-      dying_result = Combat.resolve(a, dying, seed: "same")
-      full_hp_result = Combat.resolve(a, full_hp, seed: "same")
+      dying_result = Resolver.resolve(a, dying, seed: "same")
+      full_hp_result = Resolver.resolve(a, full_hp, seed: "same")
 
       # A near-dead defender is weaker (its own wounded strength deals
       # less), never zero — the counter-blow always lands.
@@ -173,7 +173,7 @@ defmodule BrokenOaths.Game.CombatTest do
 
       for seed <- 1..100 do
         %{damage_to_defender: dealt, damage_to_attacker: taken} =
-          Combat.resolve(spearman, barbarian, seed: {:bronze_spearman, seed})
+          Resolver.resolve(spearman, barbarian, seed: {:bronze_spearman, seed})
 
         assert dealt in lo..hi
         assert taken in counter_lo..counter_hi
@@ -187,7 +187,7 @@ defmodule BrokenOaths.Game.CombatTest do
       {dealt_total, taken_total} =
         Enum.reduce(1..200, {0, 0}, fn seed, {dealt_acc, taken_acc} ->
           %{damage_to_defender: dealt, damage_to_attacker: taken} =
-            Combat.resolve(spearman, barbarian, seed: {:bronze_spearman_avg, seed})
+            Resolver.resolve(spearman, barbarian, seed: {:bronze_spearman_avg, seed})
 
           {dealt_acc + dealt, taken_acc + taken}
         end)
@@ -206,7 +206,7 @@ defmodule BrokenOaths.Game.CombatTest do
 
       for seed <- 1..100 do
         %{damage_to_defender: dealt, damage_to_attacker: taken} =
-          Combat.resolve(archer, barbarian, seed: {:archer, seed})
+          Resolver.resolve(archer, barbarian, seed: {:archer, seed})
 
         assert dealt in lo..hi
         assert taken in counter_lo..counter_hi
@@ -218,7 +218,7 @@ defmodule BrokenOaths.Game.CombatTest do
       warrior = unit(2, type: :warrior, hp: 100, max_hp: 100, player_id: 2)
 
       %{damage_to_defender: dealt, damage_to_attacker: taken} =
-        Combat.resolve(archer, warrior, seed: {:archer_melee, 1})
+        Resolver.resolve(archer, warrior, seed: {:archer_melee, 1})
 
       assert dealt > 0
       assert taken > 0
@@ -227,20 +227,20 @@ defmodule BrokenOaths.Game.CombatTest do
 
   describe "camp_damage/2" do
     test "a strength-10 Warrior deals 10 flat damage, no roll" do
-      assert Combat.camp_damage(unit(1, type: :warrior, hp: 100, max_hp: 100)) == 10
+      assert Resolver.camp_damage(unit(1, type: :warrior, hp: 100, max_hp: 100)) == 10
     end
 
     test "a strength-12 Lord deals 12 flat damage" do
-      assert Combat.camp_damage(unit(1, type: :lord, hp: 150, max_hp: 150)) == 12
+      assert Resolver.camp_damage(unit(1, type: :lord, hp: 150, max_hp: 150)) == 12
     end
 
     test "a wounded attacker deals proportionally less camp damage" do
       wounded = unit(1, type: :warrior, hp: 20, max_hp: 100)
-      assert Combat.camp_damage(wounded) == 6
+      assert Resolver.camp_damage(wounded) == 6
     end
 
     test "the lord's aura raises camp damage the same way it raises combat strength" do
-      assert Combat.camp_damage(unit(1, type: :warrior, hp: 100, max_hp: 100), true) == 12
+      assert Resolver.camp_damage(unit(1, type: :warrior, hp: 100, max_hp: 100), true) == 12
     end
   end
 
@@ -248,19 +248,19 @@ defmodule BrokenOaths.Game.CombatTest do
     test "a unit with a real owning player is never a legal target — no Stone Age PvP" do
       attacker = unit(1, player_id: 1)
       other_player = unit(2, player_id: 2)
-      refute Combat.hostile?(attacker, other_player)
+      refute Resolver.hostile?(attacker, other_player)
     end
 
     test "a unit's own side is never hostile to itself" do
       attacker = unit(1, player_id: 1)
       same_player = unit(2, player_id: 1)
-      refute Combat.hostile?(attacker, same_player)
+      refute Resolver.hostile?(attacker, same_player)
     end
 
     test "a nil-owned unit is the barbarian seam — hostile" do
       attacker = unit(1, player_id: 1)
       barbarian = unit(2, player_id: nil)
-      assert Combat.hostile?(attacker, barbarian)
+      assert Resolver.hostile?(attacker, barbarian)
     end
   end
 
@@ -269,28 +269,28 @@ defmodule BrokenOaths.Game.CombatTest do
       a = unit(1, movement: 0, tile_id: 1)
       d = unit(2, tile_id: 2, player_id: nil)
 
-      assert Combat.validate_attack(a, d, [2]) == {:error, :out_of_movement}
+      assert Resolver.validate_attack(a, d, [2]) == {:error, :out_of_movement}
     end
 
     test "refuses a defender on a non-adjacent tile" do
       a = unit(1, tile_id: 1)
       d = unit(2, tile_id: 99, player_id: nil)
 
-      assert Combat.validate_attack(a, d, [2, 3, 4]) == {:error, :not_adjacent}
+      assert Resolver.validate_attack(a, d, [2, 3, 4]) == {:error, :not_adjacent}
     end
 
     test "refuses an adjacent, in-movement attack on a real player's unit" do
       a = unit(1, tile_id: 1, player_id: 1)
       d = unit(2, tile_id: 2, player_id: 2)
 
-      assert Combat.validate_attack(a, d, [2]) == {:error, :not_hostile}
+      assert Resolver.validate_attack(a, d, [2]) == {:error, :not_hostile}
     end
 
     test "allows an adjacent, in-movement attack on a hostile (nil-owned) unit" do
       a = unit(1, tile_id: 1, player_id: 1)
       d = unit(2, tile_id: 2, player_id: nil)
 
-      assert Combat.validate_attack(a, d, [2]) == :ok
+      assert Resolver.validate_attack(a, d, [2]) == :ok
     end
   end
 end

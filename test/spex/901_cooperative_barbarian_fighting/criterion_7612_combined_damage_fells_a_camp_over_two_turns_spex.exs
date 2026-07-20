@@ -7,7 +7,7 @@ defmodule BrokenOathsSpex.Story901.Criterion7612Spex do
   the accumulated damage (stone_age.md §8.2, "combined attacks deal
   cumulative damage").
 
-  A camp's HP total is `BrokenOaths.Game.Camp.max_hp/0` (100 at time of
+  A camp's HP total is `BrokenOaths.Combat.Camp.max_hp/0` (100 at time of
   writing, read fresh from the pushed camp payload rather than
   hardcoded); a full-HP Warrior's `attack_camp` deals a flat, unrolled
   10 (story 894 criterion 7559 — no counter, no random roll), so ten

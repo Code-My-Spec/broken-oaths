@@ -124,7 +124,7 @@ defmodule BrokenOaths.Units.UnitTest do
   # `20260716190000_drop_unit_tile_uniqueness_for_city_garrisons` — a
   # city's own tile is now a deliberate stacking exception (up to 3
   # friendly military units, plus any number of civilians; see
-  # `BrokenOaths.Game.CityDefense.garrison_room?/2`), and Postgres has
+  # `BrokenOaths.Combat.CityDefense.garrison_room?/2`), and Postgres has
   # no built-in "unique except on these specific tiles" constraint, so
   # "one unit per hex" moved entirely to the application layer
   # (`WorldServer.occupied_by_own?/4` at queue time, `Turn`'s

@@ -17,7 +17,7 @@ defmodule BrokenOathsSpex.Story906.Criterion7652Spex do
   This criterion is this story's own acceptance test for that
   already-real capability, not a new code path — it's expected to
   already be green, unlike this story's later capture-flow criteria
-  (7657 on), which exercise genuinely new `BrokenOaths.Game.Siege`
+  (7657 on), which exercise genuinely new `BrokenOaths.Combat.Siege`
   behavior.
 
   Both players are real, driven through their own `GameLive.Play`

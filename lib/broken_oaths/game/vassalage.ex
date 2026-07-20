@@ -2,7 +2,7 @@ defmodule BrokenOaths.Game.Vassalage do
   @moduledoc """
   The player-to-player feudal relationship record (story 907): created
   automatically the moment a capture leaves the defeated player with
-  zero free cities (see `BrokenOaths.Game.Siege.no_free_cities?/2` and
+  zero free cities (see `BrokenOaths.Combat.Siege.no_free_cities?/2` and
   `BrokenOaths.Game.Vassalization`, the module that actually creates
   rows of this schema).
 
@@ -28,7 +28,7 @@ defmodule BrokenOaths.Game.Vassalage do
   Honor itself has no ledger of its own yet anywhere in this codebase
   (no story surfaces a number for it in this batch) — the "Honor ledger
   hooks" the design doc calls for are the call sites this schema's own
-  callers (`BrokenOaths.Game.Siege`'s garrison-fate choice,
+  callers (`BrokenOaths.Combat.Siege`'s garrison-fate choice,
   `BrokenOaths.Game.Tribute`'s levy refusal) already document as future
   Honor deltas, not a column on this table.
   """

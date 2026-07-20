@@ -42,8 +42,8 @@ defmodule BrokenOaths.Worlds.Resources do
   of seed + frequency (see that module's own moduledoc). Every roll
   hashes `{seed, tile_id, kind}` through `:erlang.phash2/2` into a
   3-integer `:rand.seed_s/2` state and draws exactly one value —
-  the same seeded-roll idiom `BrokenOaths.Game.Combat.roll/1` and
-  `BrokenOaths.Game.Camps`'s `seeded_pick/3` already establish, so two
+  the same seeded-roll idiom `BrokenOaths.Combat.Resolver.roll/1` and
+  `BrokenOaths.Combat.Camps`'s `seeded_pick/3` already establish, so two
   calls with the same seed always agree regardless of what else is
   happening in this process.
 

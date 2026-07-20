@@ -1,7 +1,7 @@
-defmodule BrokenOaths.Game.BarbarianAITest do
+defmodule BrokenOaths.Combat.BarbarianAITest do
   use ExUnit.Case, async: true
 
-  alias BrokenOaths.Game.BarbarianAI
+  alias BrokenOaths.Combat.BarbarianAI
   alias BrokenOaths.Game.Spawner
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World

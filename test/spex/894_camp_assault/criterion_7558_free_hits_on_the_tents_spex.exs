@@ -9,7 +9,7 @@ defmodule BrokenOathsSpex.Story894.Criterion7558Spex do
   Surface note: attacking a camp is inferred to reuse the same
   `"attack"` hook story 891 established for unit-vs-unit combat
   (criterion 7533), swapping `target_unit_id` for `target_camp_id`
-  since a camp is not a `Game.Unit` — `BrokenOaths.Game.Camps` doesn't
+  since a camp is not a `Game.Unit` — `BrokenOaths.Combat.Camps` doesn't
   exist yet, so this is this spec's judgment call for the event shape,
   the same status story 892's `"game:camps"` push inference carries.
   Combat resolution is likewise assumed to reuse the `"game:combat"`

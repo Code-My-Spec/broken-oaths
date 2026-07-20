@@ -13,7 +13,7 @@ defmodule BrokenOathsSpex.Story906.Criterion7654Spex do
   effective damage (0 strength) but is neither refused nor left with
   its movement untouched (`WorldServer.resolve_city_attack/3`
   unconditionally zeroes `attacker.movement` on ANY resolved attack,
-  civilian or not) — this criterion is `BrokenOaths.Game.Siege`'s own
+  civilian or not) — this criterion is `BrokenOaths.Combat.Siege`'s own
   acceptance test that a civilian besieger is refused outright, not
   merely ineffective. `data-test="combat-error"` is the same alert
   `criterion_7653` already reads; a fresh `combat_error_message/1`

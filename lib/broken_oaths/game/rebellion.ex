@@ -208,7 +208,7 @@ defmodule BrokenOaths.Game.Rebellion.Resolution do
   PURE resolution math for `BrokenOaths.Game.Rebellion` (stories
   915/917/919) — no `Repo`, no `IO`, no process state. Every function
   here takes plain data (a `Rebellion.t()`, primitive numbers, or the
-  same open `city()`/`unit()` maps `BrokenOaths.Game.Siege` already
+  same open `city()`/`unit()` maps `BrokenOaths.Combat.Siege` already
   works with) and returns a new value or an `Ecto.Changeset.t()` — the
   caller (the FUTURE `WorldServer` integration, out of THIS task's own
   scope) is responsible for all `Repo` writes, unit spawning/removal,
@@ -367,7 +367,7 @@ defmodule BrokenOaths.Game.Rebellion.Resolution do
 
   alias BrokenOaths.Game.OathStrain
   alias BrokenOaths.Game.Rebellion
-  alias BrokenOaths.Game.Siege
+  alias BrokenOaths.Combat.Siege
 
   @type city :: Siege.city()
   @type player_id :: integer()

@@ -1,7 +1,7 @@
-defmodule BrokenOaths.Game.CampsTest do
+defmodule BrokenOaths.Combat.CampsTest do
   use ExUnit.Case, async: true
 
-  alias BrokenOaths.Game.Camps
+  alias BrokenOaths.Combat.Camps
   alias BrokenOaths.Game.Spawner
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World

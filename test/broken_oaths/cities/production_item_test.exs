@@ -1,9 +1,9 @@
-defmodule BrokenOaths.Game.ProductionItemTest do
+defmodule BrokenOaths.Cities.ProductionItemTest do
   use BrokenOathsTest.DataCase, async: true
 
   alias BrokenOaths.Cities.City
   alias BrokenOaths.Players.Player
-  alias BrokenOaths.Game.ProductionItem
+  alias BrokenOaths.Cities.ProductionItem
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.WorldsFixtures
 

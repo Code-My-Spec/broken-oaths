@@ -18,8 +18,8 @@ defmodule BrokenOaths.Game do
   `.code_my_spec/knowledge/genserver_decomposition.md`'s "Game API
   (973) → split by domain" target, the wrapper bodies (and their full
   narrative docs) now live in per-domain sub-facades —
-  `BrokenOaths.Game.API.Feudal`, `.Combat`, `.Diplomacy` — plus the
-  top-level `BrokenOaths.Cities`, `BrokenOaths.Players`,
+  `BrokenOaths.Game.API.Feudal`, `.Diplomacy` — plus the top-level
+  `BrokenOaths.Cities`, `BrokenOaths.Combat`, `BrokenOaths.Players`,
   `BrokenOaths.Technology`, `BrokenOaths.Units`, and `BrokenOaths.
   Vision` contexts (see
   `.code_my_spec/knowledge/genserver_decomposition.md`'s "Target bounded
@@ -34,7 +34,8 @@ defmodule BrokenOaths.Game do
   """
 
   alias BrokenOaths.Cities
-  alias BrokenOaths.Game.API.{Combat, Diplomacy, Feudal}
+  alias BrokenOaths.Combat
+  alias BrokenOaths.Game.API.{Diplomacy, Feudal}
   alias BrokenOaths.Game.WorldServer
   alias BrokenOaths.Players
   alias BrokenOaths.Technology
@@ -125,7 +126,7 @@ defmodule BrokenOaths.Game do
   separate check: with capture/vassalage/tribute never created, the
   underlying reads (`vassals/2`, `vassal_status/2`, a city's own
   `Siege.status/1`) stay empty/`:free` on their own. Barbarian city
-  assault (`BrokenOaths.Game.CityDefense`'s pillage path, driven
+  assault (`BrokenOaths.Combat.CityDefense`'s pillage path, driven
   entirely by `BrokenOaths.Game.Turn`'s own barbarian-AI phase) never
   touches this flag either way — it was never part of the feudal batch.
   """
@@ -192,7 +193,7 @@ defmodule BrokenOaths.Game do
 
   # -------------------------------------------------------------------
   # Combat (attack, attack_city, garrison fate, camp assault) —
-  # delegated to BrokenOaths.Game.API.Combat
+  # delegated to BrokenOaths.Combat
   # -------------------------------------------------------------------
 
   @doc "Order `unit_id` to attack `target_unit_id` (adjacent, hostile barbarian targets only). See `Combat.attack/4`."

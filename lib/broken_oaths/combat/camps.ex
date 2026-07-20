@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.Camps do
+defmodule BrokenOaths.Combat.Camps do
   @moduledoc """
   Pure barbarian-camp core: first-founding wilderness placement and the
   per-camp spawn cadence. No `Repo`, no process state — mirrors
@@ -80,10 +80,10 @@ defmodule BrokenOaths.Game.Camps do
   return either a reply tuple or an updated `state` — no `GenServer`, no
   `handle_*`, no process awareness. `WorldServer`'s own `:attack_camp`
   `handle_call` is a thin delegation into `attack_camp/4`, mirroring
-  `BrokenOaths.Game.Combat`'s own "Attack orchestration" section for
+  `BrokenOaths.Combat.Resolver`'s own "Attack orchestration" section for
   unit-vs-unit combat. Coordinates its siblings directly, per the north
   star's "cross-cutting operations are orchestrated by their OWNING
-  domain model calling its siblings" rule: `BrokenOaths.Game.Combat` for
+  domain model calling its siblings" rule: `BrokenOaths.Combat.Resolver` for
   the flat camp-damage math and adjacency/target-legality validation,
   `BrokenOaths.Game.Cooperation` for the per-player damage ledger and
   proportional bounty split once a camp falls.
@@ -92,12 +92,12 @@ defmodule BrokenOaths.Game.Camps do
 
   Placement rolls are seeded from a caller-supplied term (typically
   `{world.seed, city_tile_id}`) via `:rand.seed_s/2` — the same
-  functional, non-global pattern `BrokenOaths.Game.Combat` and
+  functional, non-global pattern `BrokenOaths.Combat.Resolver` and
   `BrokenOaths.Worlds.Noise` already use. The same seed always yields
   the same placement.
   """
 
-  alias BrokenOaths.Game.Combat
+  alias BrokenOaths.Combat.Resolver
   alias BrokenOaths.Game.Cooperation
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
@@ -397,8 +397,8 @@ defmodule BrokenOaths.Game.Camps do
   @doc """
   Resolve an immediate "attack_camp" request: `user`'s own `unit_id`
   strikes `camp_id` right now, against whatever movement the attacker
-  has left — flat damage, no counter-attack (`Combat.camp_damage/2`),
-  resolving immediately like `Combat.attack/4` rather than queuing. An
+  has left — flat damage, no counter-attack (`Resolver.camp_damage/2`),
+  resolving immediately like `Resolver.attack/4` rather than queuing. An
   already-destroyed (or nonexistent) camp is refused the same way an
   already-dead unit target is. `WorldServer`'s own `:attack_camp`
   `handle_call` wraps this with persistence and the broadcast.
@@ -420,7 +420,7 @@ defmodule BrokenOaths.Game.Camps do
       true ->
         adjacent_tile_ids = Regions.adjacent_tiles(state.world, attacker.tile_id)
 
-        case Combat.validate_camp_attack(attacker, camp, adjacent_tile_ids) do
+        case Resolver.validate_camp_attack(attacker, camp, adjacent_tile_ids) do
           :ok ->
             {result, new_state} = resolve_camp_attack(state, attacker, camp)
             {:ok, result, new_state}
@@ -433,11 +433,11 @@ defmodule BrokenOaths.Game.Camps do
 
   @doc """
   Resolve a single already-validated camp exchange: `attack_camp/4`'s
-  own post-`Combat.validate_camp_attack/3` step.
+  own post-`Resolver.validate_camp_attack/3` step.
   """
   @spec resolve_camp_attack(map(), map(), camp()) :: {attack_outcome(), map()}
   def resolve_camp_attack(state, attacker, camp) do
-    dealt = Combat.camp_damage(attacker, lord_adjacent?(state, attacker))
+    dealt = Resolver.camp_damage(attacker, lord_adjacent?(state, attacker))
     new_camp = %{camp | hp: max(camp.hp - dealt, 0)}
     new_attacker = %{attacker | movement: 0}
 
@@ -506,7 +506,7 @@ defmodule BrokenOaths.Game.Camps do
   # are already gone from `state.units`, so presence alone means
   # living, and a lord's own tile is never its own neighbor, so this
   # never accidentally self-buffs the lord. Duplicated (not shared)
-  # into `BrokenOaths.Game.Combat`/`WorldServer` per this codebase's own
+  # into `BrokenOaths.Combat.Resolver`/`WorldServer` per this codebase's own
   # established "small pure state-accessor helpers live wherever
   # they're needed" convention (see e.g. `Combat`'s own
   # `lord_adjacent?/2`).

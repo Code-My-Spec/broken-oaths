@@ -20,7 +20,7 @@ defmodule BrokenOathsSpex.Story906.Criterion7663Spex do
   (queue production) through the ordinary `GameLive.Play` surface?
   `Game.queue_production/4` has no occupation concept to gate on at
   all today, so this half is expected to already work — this spec is
-  `BrokenOaths.Game.Siege`'s own regression guard that capture must
+  `BrokenOaths.Combat.Siege`'s own regression guard that capture must
   never lock the owner out of their own city, alongside its own actual
   RED signal (the `city-status` badge itself).
   """

@@ -86,7 +86,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
 
   use BrokenOathsWeb, :live_component
 
-  alias BrokenOaths.Game.CityDefense
+  alias BrokenOaths.Combat.CityDefense
   alias BrokenOaths.Cities.Production
   alias BrokenOaths.Technology.Research
   alias BrokenOaths.Cities.Yields

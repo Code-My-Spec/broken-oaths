@@ -39,28 +39,25 @@ defmodule BrokenOaths.Game.WorldServer do
 
   import Ecto.Query
 
-  alias BrokenOaths.Cities.{City, Improvement, Production, Yields}
+  alias BrokenOaths.Cities.{City, Improvement, Production, ProductionItem, Yields}
+
+  alias BrokenOaths.Combat.{Camp, Camps, CityDefense, Siege}
+  alias BrokenOaths.Combat.Resolver
 
   alias BrokenOaths.Game.{
     Bank,
-    Camp,
-    Camps,
-    CityDefense,
-    Combat,
     Cooperation,
     Discovery,
     GoldLog,
     KnownPlayer,
     Levy,
     OathStrain.Ledger,
-    ProductionItem,
     ProtectionPact,
     Rebellion,
     Rebellion.Resolution,
     Rebellion.War,
     RebellionPact,
     RebellionPact.Conspiracy,
-    Siege,
     Spawner,
     Stewardship,
     Tribute,
@@ -235,7 +232,7 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   def handle_call({:attack, user, unit_id, target_unit_id}, _from, state) do
-    case Combat.attack(state, user, unit_id, target_unit_id) do
+    case Resolver.attack(state, user, unit_id, target_unit_id) do
       {:ok, result, new_state} ->
         case persist_tick(state, new_state) do
           :ok ->
@@ -1416,20 +1413,20 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   # Test-only: resolve an attack FROM a barbarian, bypassing the
-  # player-ownership check `Combat.attack/4` requires (a barbarian has no
+  # player-ownership check `Resolver.attack/4` requires (a barbarian has no
   # owning player/session to drive it through the ordinary "attack"
   # event). Story 893 (barbarian AI) is what will drive this for real;
   # until then this reuses the exact same validate+resolve pipeline
-  # `Combat.attack/4` uses, same narrow, documented-bridge status as
+  # `Resolver.attack/4` uses, same narrow, documented-bridge status as
   # `:spawn_barbarian_for_test` above.
   def handle_call({:resolve_barbarian_attack_for_test, attacker_id, target_id}, _from, state) do
     attacker = Map.fetch!(state.units, attacker_id)
     defender = Map.fetch!(state.units, target_id)
     adjacent_tile_ids = Regions.adjacent_tiles(state.world, attacker.tile_id)
 
-    case Combat.validate_attack(attacker, defender, adjacent_tile_ids) do
+    case Resolver.validate_attack(attacker, defender, adjacent_tile_ids) do
       :ok ->
-        {result, new_state} = Combat.resolve_attack(state, attacker, defender)
+        {result, new_state} = Resolver.resolve_attack(state, attacker, defender)
 
         case persist_tick(state, new_state) do
           :ok ->
@@ -1862,19 +1859,19 @@ defmodule BrokenOaths.Game.WorldServer do
 
   # -------------------------------------------------------------------
   # Attack (story 891/893/896/899/914) — the "attack" `handle_call` is a
-  # thin delegation into `BrokenOaths.Game.Combat.attack/4`
+  # thin delegation into `BrokenOaths.Combat.Resolver.attack/4`
   # (`.code_my_spec/knowledge/genserver_decomposition.md`).
   # -------------------------------------------------------------------
 
   # -------------------------------------------------------------------
   # Camp assault (story 894) — the "attack_camp" `handle_call` is a thin
-  # delegation into `BrokenOaths.Game.Camps.attack_camp/4`
+  # delegation into `BrokenOaths.Combat.Camps.attack_camp/4`
   # (`.code_my_spec/knowledge/genserver_decomposition.md`).
   # -------------------------------------------------------------------
 
   # -------------------------------------------------------------------
   # City assault (story 895/906) — the "attack_city"/"resolve_garrison_fate"
-  # `handle_call`s are thin delegations into `BrokenOaths.Game.Siege`
+  # `handle_call`s are thin delegations into `BrokenOaths.Combat.Siege`
   # (`.code_my_spec/knowledge/genserver_decomposition.md`).
   # -------------------------------------------------------------------
 
@@ -2181,7 +2178,7 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   # `:resolve_garrison_fate`'s own `handle_call` is a thin delegation
-  # into `BrokenOaths.Game.Siege.apply_garrison_fate/4`
+  # into `BrokenOaths.Combat.Siege.apply_garrison_fate/4`
   # (`.code_my_spec/knowledge/genserver_decomposition.md`).
   #
   # `:issue_levy`/`:answer_levy`/`:refuse_levy`'s own `handle_call`s are
@@ -2555,7 +2552,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # `spawn_wilderness_camps/3`) — this only reconciles what the tick
   # itself advances: `spawn_counter` (every camp, every tick), `hp`
   # (story 894's camp assault), and `destroyed_at` (also story 894 — a
-  # camp reduced to 0 HP, both via `BrokenOaths.Game.Camps.attack_camp/4`
+  # camp reduced to 0 HP, both via `BrokenOaths.Combat.Camps.attack_camp/4`
   # immediately and
   # via `Turn`'s barbarian AI loop pillaging nothing of the camp itself,
   # only ever set here).
@@ -2573,7 +2570,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # after `spawn_new_player/2`'s initial 50. Story 904 adds two more,
   # riding the same diff-and-persist path: `barbarians_killed` (bumped
   # alongside every bounty payout) and `camps_destroyed` (bumped
-  # alongside every reward-share payout `BrokenOaths.Game.Camps.
+  # alongside every reward-share payout `BrokenOaths.Combat.Camps.
   # attack_camp/4` triggers).
   defp persist_player_changes(old_players, new_players) do
     for {id, player} <- new_players, Map.get(old_players, id) != player do

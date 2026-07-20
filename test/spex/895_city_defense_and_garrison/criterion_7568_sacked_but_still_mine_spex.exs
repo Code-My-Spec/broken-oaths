@@ -12,7 +12,7 @@ defmodule BrokenOathsSpex.Story895.Criterion7568Spex do
   spex"): the original version drove a SECOND REAL REGISTERED PLAYER's
   own warrior over the immediate `"attack"`/`target_city_id` surface
   as a barbarian stand-in — the same convention story 906's own
-  criterion 7652 moduledoc names. Story 906 (`BrokenOaths.Game.Siege`)
+  criterion 7652 moduledoc names. Story 906 (`BrokenOaths.Combat.Siege`)
   now makes THAT surface break a city (capture path) instead of
   pillaging it, which is correct for a real player attack but wrong
   for what this criterion actually means to test. Genuine pillage still
@@ -23,7 +23,7 @@ defmodule BrokenOathsSpex.Story895.Criterion7568Spex do
   warrior over THAT path instead, via `Fixtures.spawn_barbarian/3` +
   `Fixtures.advance_turn/1` — no second player needed at all.
 
-  Reach note: `BrokenOaths.Game.BarbarianAI`'s own leash (5 hexes from
+  Reach note: `BrokenOaths.Combat.BarbarianAI`'s own leash (5 hexes from
   the warrior's OWN camp) means a camp from THIS city's own founding
   (always 8-15 hexes out, story 892) can never reach the founding city
   itself — the same reach constraint criterion 7554 (story 893) already

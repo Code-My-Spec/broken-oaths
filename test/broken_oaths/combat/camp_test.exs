@@ -1,7 +1,7 @@
-defmodule BrokenOaths.Game.CampTest do
+defmodule BrokenOaths.Combat.CampTest do
   use BrokenOathsTest.DataCase, async: true
 
-  alias BrokenOaths.Game.Camp
+  alias BrokenOaths.Combat.Camp
   alias BrokenOaths.WorldsFixtures
 
   defp valid_attrs do

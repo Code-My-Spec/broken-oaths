@@ -3,10 +3,10 @@ defmodule BrokenOaths.Game.Turn.BarbarianPhase do
   Story 893's barbarian AI loop — the turn-pipeline phase `BrokenOaths.
   Game.Turn.tick/1` runs after production/camp-spawn completions:
   every EXISTING camp-spawned warrior (`Map.get(unit, :camp_id)` set; a
-  warrior spawned earlier THIS SAME tick by `BrokenOaths.Game.Camps`'s
+  warrior spawned earlier THIS SAME tick by `BrokenOaths.Combat.Camps`'s
   own spawn loop is not in `state.units` yet and simply waits for the
   next boundary) gets exactly one decision from `BarbarianAI.decide/6`:
-  attack an adjacent player unit (`Combat.resolve/3`, same
+  attack an adjacent player unit (`Resolver.resolve/3`, same
   simultaneous-exchange math a player's own attack uses — a barbarian
   dying pays its killer's owner `BarbarianAI.bounty_gold/0`, and a lord
   dying schedules an heir exactly like `WorldServer`'s own combat
@@ -19,7 +19,7 @@ defmodule BrokenOaths.Game.Turn.BarbarianPhase do
   against that city, applied through `CityDefense.take_damage/3`
   (folding in `CityDefense.pillage/2` the instant HP hits 0), with
   every city a barbarian actually struck THIS tick tracked so
-  `BrokenOaths.Game.CityDefense.regen_cities/2` knows to skip its
+  `BrokenOaths.Combat.CityDefense.regen_cities/2` knows to skip its
   regen. A true hold (nothing adjacent at all) is unchanged. Entering a
   tile with a `:complete` improvement pillages it
   (`Improvement.pillage/1`). Warriors resolve in ascending unit id
@@ -35,9 +35,9 @@ defmodule BrokenOaths.Game.Turn.BarbarianPhase do
   `BrokenOaths.Game.Turn`.
   """
 
-  alias BrokenOaths.Game.BarbarianAI
-  alias BrokenOaths.Game.CityDefense
-  alias BrokenOaths.Game.Combat
+  alias BrokenOaths.Combat.BarbarianAI
+  alias BrokenOaths.Combat.CityDefense
+  alias BrokenOaths.Combat.Resolver
   alias BrokenOaths.Cities.Improvement
   alias BrokenOaths.Worlds.Regions
 
@@ -46,7 +46,7 @@ defmodule BrokenOaths.Game.Turn.BarbarianPhase do
   call, resolved in ascending unit id order (same determinism rule as
   every other phase in the tick pipeline) while threading `spawn_occupied`
   (this tick's own occupied-tile set, built by `BrokenOaths.Game.
-  Production.resolve_completions/1` and `BrokenOaths.Game.Camps.
+  Production.resolve_completions/1` and `BrokenOaths.Combat.Camps.
   resolve_spawns/2`) so two barbarians in the same tick never step on
   each other, and so an already-existing barbarian can't roam or hunt
   onto a tile a spawn placed THIS SAME tick either.
@@ -215,7 +215,7 @@ defmodule BrokenOaths.Game.Turn.BarbarianPhase do
   end
 
   # Simultaneous exchange, same math a player's own attack uses
-  # (`BrokenOaths.Game.Combat.resolve_attack/3`) — a dying defender still lands its
+  # (`BrokenOaths.Combat.Resolver.resolve_attack/3`) — a dying defender still lands its
   # counter-blow. A barbarian that dies here pays its killer's owner
   # the bounty; a lord that dies here schedules an heir exactly like a
   # player-initiated kill would. `defender_garrisoned?` (story 895):
@@ -225,7 +225,7 @@ defmodule BrokenOaths.Game.Turn.BarbarianPhase do
     seed = {state.world.seed, state.turn, barbarian.id, target.id}
 
     %{damage_to_defender: dealt, damage_to_attacker: taken} =
-      Combat.resolve(barbarian, target,
+      Resolver.resolve(barbarian, target,
         seed: seed,
         defender_aura?: lord_adjacent?(state, target),
         defender_garrisoned?: CityDefense.garrisoned?(target, Map.values(state.cities))

@@ -1021,7 +1021,7 @@ defmodule BrokenOathsSpex.SharedGivens do
   already-shipped dishonorable act: executing a captured garrison
   "costs Honor" (`.code_my_spec/knowledge/feudal_vassalage_design.md`,
   "Round-4 final foundation mechanics"), already wired end-to-end since
-  story 906 (`BrokenOaths.Game.Siege.apply_execute_honor_penalty/1`,
+  story 906 (`BrokenOaths.Combat.Siege.apply_execute_honor_penalty/1`,
   the real `"resolve_garrison_fate"` event — see
   `BrokenOathsSpex.Story906.Criterion7662Spex`). Honor is described as
   the lord's own WORLD-VISIBLE reputation

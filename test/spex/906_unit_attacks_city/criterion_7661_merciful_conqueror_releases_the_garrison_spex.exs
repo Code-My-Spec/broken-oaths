@@ -19,7 +19,7 @@ defmodule BrokenOathsSpex.Story906.Criterion7661Spex do
      a tile with living occupants (the entering-own-garrison exception
      only applies to the MOVER'S OWN city) — so a besieger literally
      cannot walk onto a still-garrisoned tile at all right now, broken
-     city or not. `BrokenOaths.Game.Siege`'s own job is to lift that
+     city or not. `BrokenOaths.Combat.Siege`'s own job is to lift that
      refusal once the CITY itself (not the garrisoned unit's own HP,
      which `Game.CityDefense.resolve_attack/4` never touches) has
      broken — the garrison is defeated/surrendered along with the

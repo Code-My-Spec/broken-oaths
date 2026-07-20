@@ -13,7 +13,7 @@ defmodule BrokenOathsSpex.Story906.Criterion7658Spex do
   895, already covers the barbarian-vs-city case of this same rule).
   This is this story's own acceptance test that the SAME relief applies
   to a PvP siege — one partial hit, then enough quiet turns for regen
-  alone to fully heal it back up, never touching `BrokenOaths.Game.Siege`'s
+  alone to fully heal it back up, never touching `BrokenOaths.Combat.Siege`'s
   new "broken" state at all.
   """
 

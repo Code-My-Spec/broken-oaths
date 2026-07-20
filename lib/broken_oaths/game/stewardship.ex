@@ -129,7 +129,7 @@ defmodule BrokenOaths.Game.Stewardship do
   alias BrokenOaths.Game.Cooperation
   alias BrokenOaths.Players.Presence
   alias BrokenOaths.Cities.Production
-  alias BrokenOaths.Game.ProductionItem
+  alias BrokenOaths.Cities.ProductionItem
   alias BrokenOaths.Game.StewardLog
   alias BrokenOaths.Game.Turn
   alias BrokenOaths.Units.Unit

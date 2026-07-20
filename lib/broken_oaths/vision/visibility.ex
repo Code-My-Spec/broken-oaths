@@ -30,8 +30,8 @@ defmodule BrokenOaths.Vision.Visibility do
   """
 
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.Combat
-  alias BrokenOaths.Game.Siege
+  alias BrokenOaths.Combat.Resolver
+  alias BrokenOaths.Combat.Siege
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
 
@@ -234,10 +234,10 @@ defmodule BrokenOaths.Vision.Visibility do
   # `warriors` nests the camp's own spawned units (matched by
   # `camp_id`, never by tile — a second warrior can land on an
   # adjacent tile, not the camp's own) — attack/defense both read off
-  # `Combat.base_strength/1` rather than a second hardcoded 15, so the
+  # `Resolver.base_strength/1` rather than a second hardcoded 15, so the
   # combat curve and this display can never drift apart.
   defp format_camp(camp, state) do
-    strength = Combat.base_strength(:barbarian_warrior)
+    strength = Resolver.base_strength(:barbarian_warrior)
 
     warriors =
       for {_id, unit} <- state.units, Map.get(unit, :camp_id) == camp.id do

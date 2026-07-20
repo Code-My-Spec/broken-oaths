@@ -26,7 +26,7 @@ defmodule BrokenOaths.Game.RebellionPact.Conspiracy do
 
   alias BrokenOaths.Game
   alias BrokenOaths.Cities.City
-  alias BrokenOaths.Game.CityDefense
+  alias BrokenOaths.Combat.CityDefense
   alias BrokenOaths.Game.OathStrain
   alias BrokenOaths.Game.Rebellion.War
   alias BrokenOaths.Game.RebellionPact

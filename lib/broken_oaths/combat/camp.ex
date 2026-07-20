@@ -1,8 +1,8 @@
-defmodule BrokenOaths.Game.Camp do
+defmodule BrokenOaths.Combat.Camp do
   @moduledoc """
   A barbarian camp on the board: which tile it sits on, its HP (capped
   at 100), a spawn counter counting turns toward its next warrior (see
-  `BrokenOaths.Game.Camps` for the cadence rules), and when it was
+  `BrokenOaths.Combat.Camps` for the cadence rules), and when it was
   destroyed (`nil` while it still stands). Persisted like units/cities —
   the `WorldServer` holds the canonical in-memory copy (see
   `BrokenOaths.Game.Turn`'s moduledoc for the tick-state contract) and

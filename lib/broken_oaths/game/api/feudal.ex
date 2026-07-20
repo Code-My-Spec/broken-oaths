@@ -156,7 +156,7 @@ defmodule BrokenOaths.Game.API.Feudal do
   a temporary rebellion army (`BrokenOaths.Game.Rebellion.Resolution.
   army_size/1`) flagged `temporary: true`, and opens a state of war
   between the two (a narrow, rebellion-scoped PvP exception —
-  `BrokenOaths.Game.Combat.hostile?/2` itself never changes). Creates a
+  `BrokenOaths.Combat.Resolver.hostile?/2` itself never changes). Creates a
   persisted, first-class `BrokenOaths.Game.Rebellion` row (`status:
   :active`) naming both parties and recording the split, the army size,
   and the start turn.

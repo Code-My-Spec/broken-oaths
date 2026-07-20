@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.API.Combat do
+defmodule BrokenOaths.Combat do
   @moduledoc """
   Attack orders (unit-vs-unit, camp assault, city siege), garrison
   fate, and the barbarian-camp ground-truth/test seams. Thin
@@ -17,7 +17,7 @@ defmodule BrokenOaths.Game.API.Combat do
 
   @doc """
   Order `unit_id` to attack `target_unit_id`: adjacent, hostile
-  (barbarian) targets only — see `BrokenOaths.Game.Combat` for the
+  (barbarian) targets only — see `BrokenOaths.Combat.Resolver` for the
   legality rules and damage math. Resolves immediately, like
   `queue_move/4`, and spends all of the attacker's remaining movement.
   """
@@ -50,7 +50,7 @@ defmodule BrokenOaths.Game.API.Combat do
   Order `unit_id` to attack `city_id` (story 895): adjacent, not the
   attacker's own city. Resolves immediately, like `attack/4` — damage
   to the city's own HP (pillaged, not captured, at 0 — see
-  `BrokenOaths.Game.CityDefense`) and counter-attack damage the
+  `BrokenOaths.Combat.CityDefense`) and counter-attack damage the
   attacker takes from the city's strongest garrisoned defender (0 if
   undefended).
   """

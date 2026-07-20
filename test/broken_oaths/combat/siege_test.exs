@@ -1,8 +1,8 @@
-defmodule BrokenOaths.Game.SiegeTest do
+defmodule BrokenOaths.Combat.SiegeTest do
   use ExUnit.Case, async: true
 
-  alias BrokenOaths.Game.CityDefense
-  alias BrokenOaths.Game.Siege
+  alias BrokenOaths.Combat.CityDefense
+  alias BrokenOaths.Combat.Siege
 
   defp unit(id, opts) do
     max_hp = Keyword.get(opts, :max_hp, 100)

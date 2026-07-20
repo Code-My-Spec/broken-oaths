@@ -4,7 +4,7 @@ defmodule BrokenOaths.Game.Vassalization do
   `BrokenOaths.Game.Vassalage`, mirroring `BrokenOaths.Game.
   Cooperation`'s own "pure changeset, no `Repo`" role for `Alliance`.
   `BrokenOaths.Game.WorldServer` is the imperative shell that calls into
-  this module once `BrokenOaths.Game.Siege.materialize_captures/2`
+  this module once `BrokenOaths.Combat.Siege.materialize_captures/2`
   reports a fresh capture, actually persists the row, and pushes the
   notifications both players see.
 
@@ -60,7 +60,7 @@ defmodule BrokenOaths.Game.Vassalization do
   """
 
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.Siege
+  alias BrokenOaths.Combat.Siege
   alias BrokenOaths.Game.Vassalage
   alias BrokenOaths.Game.WorldServer
   alias BrokenOaths.Repo

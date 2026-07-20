@@ -37,7 +37,7 @@ defmodule BrokenOaths.Game.ProtectionPact do
   `WorldServer` restart any more than an in-flight combat resolution
   does. It is represented here as a plain map (`call/0`), the same
   "typed map, not a struct, not a schema" convention
-  `BrokenOaths.Game.CityDefense.city/0` and `BrokenOaths.Game.Siege`
+  `BrokenOaths.Combat.CityDefense.city/0` and `BrokenOaths.Combat.Siege`
   already use for combat-adjacent entities the `WorldServer` holds in
   its own tick-state (`state.protection_calls`, `state.
   protection_honored_counts` — both plain, un-initialized-at-boot maps
@@ -92,7 +92,7 @@ defmodule BrokenOaths.Game.ProtectionPact do
     * the lord's own Honor, docked by `broken_honor_penalty/0`
       ("a public Honor hit" — deliberately unclamped, mirroring
       `BrokenOaths.Game.Tribute.apply_refusal_honor_penalty/1` and
-      `BrokenOaths.Game.Siege.apply_execute_honor_penalty/1`'s own
+      `BrokenOaths.Combat.Siege.apply_execute_honor_penalty/1`'s own
       `honor - N` shape: Honor has no floor in this codebase);
     * a smaller, realm-wide contagion spike (`spike_contagion/1`) on
       every OTHER vassal of the same lord — "every vassal in the

@@ -2,7 +2,7 @@ defmodule BrokenOaths.Game.Discovery do
   @moduledoc """
   Pure first-contact detection (story 899): the moment a player's own
   CURRENT vision reveals another player's unit or city. No `Repo`, no
-  process state — mirrors `BrokenOaths.Game.CityDefense`'s role:
+  process state — mirrors `BrokenOaths.Combat.CityDefense`'s role:
   `BrokenOaths.Game.WorldServer` is the imperative shell that holds the
   canonical tick-state (see `BrokenOaths.Game.Turn`'s moduledoc for that
   shape) plus the set of already-known player pairs, calls into this

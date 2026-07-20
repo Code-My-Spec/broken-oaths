@@ -15,7 +15,7 @@ defmodule BrokenOathsSpex.Story915.Criterion7735Spex do
   scenario needs NO throwaway-garrison depression step at all: Honor
   only ever moves DOWNWARD in this codebase today (executing a fallen
   garrison is the sole real, shipped Honor delta —
-  `BrokenOaths.Game.Siege.apply_execute_honor_penalty/1` — releasing
+  `BrokenOaths.Combat.Siege.apply_execute_honor_penalty/1` — releasing
   one is neutral, and nothing raises Honor). A lord who has captured
   nobody dishonorably (this scenario's own Mira-analog, "Ada," never
   executes any garrison) is therefore, by construction, already the

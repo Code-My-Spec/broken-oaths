@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.ProductionItem do
+defmodule BrokenOaths.Cities.ProductionItem do
   @moduledoc """
   One entry in a city's production queue — what's being built, how much
   production is banked toward it, and its total cost. The lowest-id

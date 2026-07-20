@@ -8,7 +8,7 @@ defmodule BrokenOathsSpex.Story907.Criterion7666Spex do
   (`.code_my_spec/knowledge/feudal_vassalage_design.md`, "The one-line
   pitch"). This is 907's own acceptance test that the RELATIONSHIP
   itself gets created and surfaces in both players' UIs, building on
-  story 906's own capture mechanic (`BrokenOaths.Game.Siege`) — see
+  story 906's own capture mechanic (`BrokenOaths.Combat.Siege`) — see
   `BrokenOathsSpex.Story906.Criterion7659Spex`'s own moduledoc for why
   an ungarrisoned broken city's tile is already walkable today with no
   collision refusal (the capture itself, and everything downstream of

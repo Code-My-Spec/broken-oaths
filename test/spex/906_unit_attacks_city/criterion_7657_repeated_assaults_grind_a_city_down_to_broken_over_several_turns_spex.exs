@@ -5,7 +5,7 @@ defmodule BrokenOathsSpex.Story906.Criterion7657Spex do
   across several turn boundaries eventually grinds its HP to 0 — and,
   unlike a barbarian's assault (story 895, `Game.CityDefense.pillage/2`),
   a broken player city STAYS at 0 HP rather than being instantly reset
-  to 50 with a population loss. This is `BrokenOaths.Game.Siege`'s own
+  to 50 with a population loss. This is `BrokenOaths.Combat.Siege`'s own
   new "broken" state — the first genuinely new mechanic this story
   introduces (`criterion_7652`-`criterion_7656` all exercise combat/
   defense math that already worked before this story landed).

@@ -16,7 +16,7 @@ defmodule BrokenOaths.Cities.City do
   population cost un-works a tile without un-claiming it — story 883).
 
   The production queue lives in a separate table
-  (`BrokenOaths.Game.ProductionItem`) rather than an embedded list:
+  (`BrokenOaths.Cities.ProductionItem`) rather than an embedded list:
   each item needs a stable, independently-addressable id for
   `cancel_production_item/4`, and insertion order (lowest id = head =
   current) is a natural fit for a `has_many`.
@@ -48,14 +48,14 @@ defmodule BrokenOaths.Cities.City do
   import Ecto.Changeset
   import Ecto.Query
 
-  alias BrokenOaths.Game.Camp
-  alias BrokenOaths.Game.Camps
-  alias BrokenOaths.Game.CityDefense
+  alias BrokenOaths.Combat.Camp
+  alias BrokenOaths.Combat.Camps
+  alias BrokenOaths.Combat.CityDefense
   alias BrokenOaths.Players.Player
   alias BrokenOaths.Cities.Production
-  alias BrokenOaths.Game.ProductionItem
+  alias BrokenOaths.Cities.ProductionItem
   alias BrokenOaths.Technology.Research
-  alias BrokenOaths.Game.Siege
+  alias BrokenOaths.Combat.Siege
   alias BrokenOaths.Units.Unit
   alias BrokenOaths.Cities.Yields
   alias BrokenOaths.Repo
@@ -93,7 +93,7 @@ defmodule BrokenOaths.Cities.City do
     field :food, :integer, default: 0
     field :territory, {:array, :integer}, default: []
     field :worked_tiles, {:array, :integer}, default: []
-    # Story 895 — see `BrokenOaths.Game.CityDefense` for the combat math
+    # Story 895 — see `BrokenOaths.Combat.CityDefense` for the combat math
     # both fields back: `hp` (capped at 100, mirrors `game_camps.hp`)
     # and `production_halted_until` (nil until the city is ever
     # pillaged; the turn number its frozen production resumes at).
@@ -104,7 +104,7 @@ defmodule BrokenOaths.Cities.City do
     # catalog entry); read back by `BrokenOaths.Cities.Yields.accrue_food/3`
     # for its +2 food/turn bonus.
     field :has_granary, :boolean, default: false
-    # Story 906 — the siege capture flow (`BrokenOaths.Game.Siege`):
+    # Story 906 — the siege capture flow (`BrokenOaths.Combat.Siege`):
     # `nil` while free (the owner's own, unoccupied by anyone else);
     # set to the captor's player once a broken (0 HP) city is walked
     # into. Peacetime rule (Round-5 decisions): the original owner

@@ -7,7 +7,7 @@ defmodule BrokenOathsSpex.Story892.Criterion7543Spex do
   player's claimed region (the region-boundary bias — see Three Amigos
   notes on story 892). Total/far ranges narrowed from 5-8/4-6 in the
   v0.2.1 playtest balance pass (issue 04931763, "barbarians spawn too
-  quickly, or are too strong") — see `BrokenOaths.Game.Camps`'s own
+  quickly, or are too strong") — see `BrokenOaths.Combat.Camps`'s own
   moduledoc for the full before/after numbers and the same pass's
   minimum-spacing rule (covered by `CampsTest`, unit-level; no UI
   surface exists to assert inter-camp distance through here).
@@ -20,7 +20,7 @@ defmodule BrokenOathsSpex.Story892.Criterion7543Spex do
   The immediately-visible in-region camps ARE asserted through the
   real surface: the "game:camps" push (mirroring "game:cities") that
   `GameLive.Play` pushes on every board refresh — inferred surface,
-  not yet implemented (component under test: `BrokenOaths.Game.Camps`).
+  not yet implemented (component under test: `BrokenOaths.Combat.Camps`).
 
   "Biased toward region boundaries" is operationalized here as "not a
   tile inside the founding player's own claimed region" — the region
