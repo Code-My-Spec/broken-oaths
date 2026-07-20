@@ -168,16 +168,15 @@ defmodule BrokenOathsWeb.GameLive.Play do
   use BrokenOathsWeb, :live_view
 
   alias BrokenOaths.Chat
-  alias BrokenOaths.Cities.{Improvement, Yields}
-  alias BrokenOaths.Combat.{Camp, CityDefense}
+  alias BrokenOaths.Cities.Yields
   alias BrokenOaths.Game
   alias BrokenOaths.Players.Presence
   alias BrokenOaths.Technology.Research
   alias BrokenOaths.Worlds
-  alias BrokenOaths.Worlds.{Generator, Globe, Regions, Resources, Terrain, Weather}
+  alias BrokenOaths.Worlds.{Generator, Globe, Regions, Weather}
+  alias BrokenOathsWeb.GameLive.{BoardOverlays, FeudalTopBar, Modals, PlayView}
 
   @default_scale 700
-  @max_pitch 1.50
 
   # Story 892, criterion 7550 — shown once, on a player's first
   # founding only. Exact wording from `.code_my_spec/stories/stone_age.md`
@@ -206,7 +205,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         mesh = Globe.get(world.frequency)
         %{terrain: terrain_map} = Generator.generate_maps(world.seed, mesh)
         units = Game.units_visible_to(world, user)
-        {yaw, pitch} = camera_on(units, mesh)
+        {yaw, pitch} = PlayView.camera_on(units, mesh)
 
         socket =
           socket
@@ -363,8 +362,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # tests), falls straight through to the plain by-id lookup —
   # unchanged from before this fix.
   def handle_event("select_unit", %{"unit_id" => unit_id} = params, socket) do
-    unit_id = parse_id(unit_id)
-    tile_id = params |> Map.get("tile_id") |> parse_id()
+    unit_id = PlayView.parse_id(unit_id)
+    tile_id = params |> Map.get("tile_id") |> PlayView.parse_id()
 
     %{
       units: units,
@@ -375,11 +374,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
       selected_city_id: current_city_id
     } = socket.assigns
 
-    stack = if tile_id, do: owned_stack_on_tile(world, user, tile_id), else: []
+    stack = if tile_id, do: PlayView.owned_stack_on_tile(world, user, tile_id), else: []
     city_on_tile = tile_id && Enum.find(cities, &(&1.tile_id == tile_id))
 
     socket =
-      case next_tile_selection(stack, city_on_tile, current_unit_id, current_city_id) do
+      case PlayView.next_tile_selection(stack, city_on_tile, current_unit_id, current_city_id) do
         {:city, city} ->
           apply_city_panel(socket, city)
 
@@ -402,9 +401,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # in the pushed window.
   def handle_event("select_tile", %{"tile_id" => tile_id}, socket) do
     %{world: world, improvements: improvements, player_research: player_research} = socket.assigns
-    tile_id = parse_id(tile_id)
+    tile_id = PlayView.parse_id(tile_id)
     terrain = Regions.terrain(world, tile_id)
-    resource = visible_resource(world, tile_id, player_research)
+    resource = PlayView.visible_resource(world, tile_id, player_research)
     yields = Yields.tile_yield(terrain, resource)
     improvement = Enum.find(improvements, &(&1.tile_id == tile_id))
 
@@ -412,7 +411,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
       assign(socket,
         selected_tile: %{
           id: tile_id,
-          terrain: terrain_label(terrain),
+          terrain: PlayView.terrain_label(terrain),
           food: yields.food,
           production: yields.production,
           improvement: improvement,
@@ -437,15 +436,15 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # selection, same one-side-panel rule as `select_unit`.
   def handle_event("select_city", %{"city_id" => city_id}, socket) do
     %{world: world, cities: cities} = socket.assigns
-    city_id = parse_id(city_id)
+    city_id = PlayView.parse_id(city_id)
     city = Enum.find(cities, &(&1.id == city_id))
 
     socket =
       assign(socket,
         selected_city_id: city_id,
         selected_city: city,
-        assignable_tiles: assignable_tiles(world, city),
-        copper_access?: copper_access?(world, city),
+        assignable_tiles: PlayView.assignable_tiles(world, city),
+        copper_access?: PlayView.copper_access?(world, city),
         city_error: nil,
         selected_unit_id: nil,
         selected_unit: nil,
@@ -465,7 +464,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # a time): a camp lives in `@camps` (already fog-filtered by
   # `Game.camps_visible_to/2`), never a fresh `Game` read.
   def handle_event("select_camp", %{"camp_id" => camp_id}, socket) do
-    camp_id = parse_id(camp_id)
+    camp_id = PlayView.parse_id(camp_id)
     camp = Enum.find(socket.assigns.camps, &(&1.id == camp_id))
 
     socket =
@@ -529,21 +528,24 @@ defmodule BrokenOathsWeb.GameLive.Play do
   def handle_event("found_city", %{"unit_id" => unit_id}, socket) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.found_city(world, user, parse_id(unit_id)) do
+    case Game.found_city(world, user, PlayView.parse_id(unit_id)) do
       :ok ->
         {:noreply, socket |> assign(city_error: nil) |> maybe_flash_barbarian_warning()}
 
       {:error, reason} ->
-        {:noreply, assign(socket, city_error: city_error_message(reason))}
+        {:noreply, assign(socket, city_error: PlayView.city_error_message(reason))}
     end
   end
 
   def handle_event("queue_production", %{"city_id" => city_id, "item" => item}, socket) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.queue_production(world, user, parse_id(city_id), item) do
-      :ok -> {:noreply, assign(socket, city_error: nil)}
-      {:error, reason} -> {:noreply, assign(socket, city_error: city_error_message(reason))}
+    case Game.queue_production(world, user, PlayView.parse_id(city_id), item) do
+      :ok ->
+        {:noreply, assign(socket, city_error: nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, city_error: PlayView.city_error_message(reason))}
     end
   end
 
@@ -554,9 +556,17 @@ defmodule BrokenOathsWeb.GameLive.Play do
       ) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.cancel_production_item(world, user, parse_id(city_id), parse_id(item_id)) do
-      :ok -> {:noreply, assign(socket, city_error: nil)}
-      {:error, reason} -> {:noreply, assign(socket, city_error: city_error_message(reason))}
+    case Game.cancel_production_item(
+           world,
+           user,
+           PlayView.parse_id(city_id),
+           PlayView.parse_id(item_id)
+         ) do
+      :ok ->
+        {:noreply, assign(socket, city_error: nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, city_error: PlayView.city_error_message(reason))}
     end
   end
 
@@ -567,9 +577,17 @@ defmodule BrokenOathsWeb.GameLive.Play do
       ) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.reorder_production_item(world, user, parse_id(city_id), parse_id(item_id)) do
-      :ok -> {:noreply, assign(socket, city_error: nil)}
-      {:error, reason} -> {:noreply, assign(socket, city_error: city_error_message(reason))}
+    case Game.reorder_production_item(
+           world,
+           user,
+           PlayView.parse_id(city_id),
+           PlayView.parse_id(item_id)
+         ) do
+      :ok ->
+        {:noreply, assign(socket, city_error: nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, city_error: PlayView.city_error_message(reason))}
     end
   end
 
@@ -578,13 +596,16 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # the two (unwork vs. work), so a missing key means nil, not an error.
   def handle_event("assign_worked_tile", params, socket) do
     %{world: world, user: user} = socket.assigns
-    city_id = parse_id(params["city_id"])
-    from_tile = parse_id(params["from_tile_id"])
-    to_tile = parse_id(params["to_tile_id"])
+    city_id = PlayView.parse_id(params["city_id"])
+    from_tile = PlayView.parse_id(params["from_tile_id"])
+    to_tile = PlayView.parse_id(params["to_tile_id"])
 
     case Game.assign_worked_tile(world, user, city_id, from_tile, to_tile) do
-      :ok -> {:noreply, assign(socket, city_error: nil)}
-      {:error, reason} -> {:noreply, assign(socket, city_error: city_error_message(reason))}
+      :ok ->
+        {:noreply, assign(socket, city_error: nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, city_error: PlayView.city_error_message(reason))}
     end
   end
 
@@ -592,15 +613,18 @@ defmodule BrokenOathsWeb.GameLive.Play do
     %{world: world, user: user, selected_city_id: city_id} = socket.assigns
 
     case Game.rename_city(world, user, city_id, name) do
-      :ok -> {:noreply, assign(socket, city_error: nil)}
-      {:error, reason} -> {:noreply, assign(socket, city_error: city_error_message(reason))}
+      :ok ->
+        {:noreply, assign(socket, city_error: nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, city_error: PlayView.city_error_message(reason))}
     end
   end
 
   def handle_event("start_improvement", %{"unit_id" => unit_id, "kind" => kind}, socket) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.start_improvement(world, user, parse_id(unit_id), kind) do
+    case Game.start_improvement(world, user, PlayView.parse_id(unit_id), kind) do
       :ok ->
         # Refresh inline (not just via the async :improvements_changed
         # broadcast) so the dig-progress badge appears in the same
@@ -608,7 +632,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         {:noreply, socket |> assign(improvement_error: nil) |> refresh_board()}
 
       {:error, reason} ->
-        {:noreply, assign(socket, improvement_error: improvement_error_message(reason))}
+        {:noreply, assign(socket, improvement_error: PlayView.improvement_error_message(reason))}
     end
   end
 
@@ -619,12 +643,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
   def handle_event("cancel_improvement", %{"unit_id" => unit_id}, socket) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.cancel_improvement(world, user, parse_id(unit_id)) do
+    case Game.cancel_improvement(world, user, PlayView.parse_id(unit_id)) do
       :ok ->
         {:noreply, socket |> assign(improvement_error: nil) |> refresh_board()}
 
       {:error, reason} ->
-        {:noreply, assign(socket, improvement_error: improvement_error_message(reason))}
+        {:noreply, assign(socket, improvement_error: PlayView.improvement_error_message(reason))}
     end
   end
 
@@ -635,7 +659,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # hidden tile data ever travels to the client to make them so.
   def handle_event("queue_move", %{"unit_id" => unit_id, "to_point" => [x, y, z]}, socket)
       when is_number(x) and is_number(y) and is_number(z) do
-    to_tile = nearest_tile(socket.assigns.mesh, {x, y, z})
+    to_tile = PlayView.nearest_tile(socket.assigns.mesh, {x, y, z})
     handle_event("queue_move", %{"unit_id" => unit_id, "to_tile" => to_tile}, socket)
   end
 
@@ -655,8 +679,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # button would silently no-op as `{:error, :invalid_tile}`.
   def handle_event("queue_move", %{"unit_id" => unit_id, "to_tile" => to_tile}, socket) do
     %{world: world, user: user} = socket.assigns
-    unit_id = parse_id(unit_id)
-    to_tile = parse_id(to_tile)
+    unit_id = PlayView.parse_id(unit_id)
+    to_tile = PlayView.parse_id(to_tile)
 
     case Game.queue_move(world, user, unit_id, to_tile) do
       {:ok, %{path: path}} ->
@@ -668,7 +692,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         {:noreply, socket}
 
       {:error, reason} ->
-        {:noreply, assign(socket, order_error: order_error_message(reason))}
+        {:noreply, assign(socket, order_error: PlayView.order_error_message(reason))}
     end
   end
 
@@ -680,7 +704,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   def handle_event("attack", %{"unit_id" => unit_id, "target_unit_id" => target_unit_id}, socket) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.attack(world, user, parse_id(unit_id), parse_id(target_unit_id)) do
+    case Game.attack(world, user, PlayView.parse_id(unit_id), PlayView.parse_id(target_unit_id)) do
       {:ok, %{damage_dealt: dealt, damage_taken: taken}} ->
         socket =
           socket
@@ -690,7 +714,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         {:noreply, socket}
 
       {:error, reason} ->
-        {:noreply, assign(socket, combat_error: combat_error_message(reason))}
+        {:noreply, assign(socket, combat_error: PlayView.combat_error_message(reason))}
     end
   end
 
@@ -702,7 +726,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
   def handle_event("attack", %{"unit_id" => unit_id, "target_camp_id" => target_camp_id}, socket) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.attack_camp(world, user, parse_id(unit_id), parse_id(target_camp_id)) do
+    case Game.attack_camp(
+           world,
+           user,
+           PlayView.parse_id(unit_id),
+           PlayView.parse_id(target_camp_id)
+         ) do
       {:ok, %{damage_dealt: dealt, damage_taken: taken}} ->
         socket =
           socket
@@ -712,7 +741,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         {:noreply, socket}
 
       {:error, reason} ->
-        {:noreply, assign(socket, combat_error: combat_error_message(reason))}
+        {:noreply, assign(socket, combat_error: PlayView.combat_error_message(reason))}
     end
   end
 
@@ -724,7 +753,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
   def handle_event("attack", %{"unit_id" => unit_id, "target_city_id" => target_city_id}, socket) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.attack_city(world, user, parse_id(unit_id), parse_id(target_city_id)) do
+    case Game.attack_city(
+           world,
+           user,
+           PlayView.parse_id(unit_id),
+           PlayView.parse_id(target_city_id)
+         ) do
       {:ok, %{damage_dealt: dealt, damage_taken: taken}} ->
         socket =
           socket
@@ -734,7 +768,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         {:noreply, socket}
 
       {:error, reason} ->
-        {:noreply, assign(socket, combat_error: combat_error_message(reason))}
+        {:noreply, assign(socket, combat_error: PlayView.combat_error_message(reason))}
     end
   end
 
@@ -769,7 +803,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   def handle_event("choose_hidden_agenda", %{"agenda" => agenda}, socket) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.choose_hidden_agenda(world, user, parse_agenda(agenda)) do
+    case Game.choose_hidden_agenda(world, user, PlayView.parse_agenda(agenda)) do
       :ok -> {:noreply, refresh_vassalage(socket)}
       {:error, _reason} -> {:noreply, socket}
     end
@@ -785,7 +819,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
       ) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.set_tribute_rate(world, user, parse_id(vassal_user_id), parse_percent(rate)) do
+    case Game.set_tribute_rate(
+           world,
+           user,
+           PlayView.parse_id(vassal_user_id),
+           PlayView.parse_percent(rate)
+         ) do
       :ok -> {:noreply, refresh_vassalage(socket)}
       {:error, _reason} -> {:noreply, socket}
     end
@@ -808,9 +847,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
     case Game.issue_levy(
            world,
            user,
-           parse_id(vassal_user_id),
-           parse_id(target_user_id),
-           parse_fraction(share)
+           PlayView.parse_id(vassal_user_id),
+           PlayView.parse_id(target_user_id),
+           PlayView.parse_fraction(share)
          ) do
       :ok -> {:noreply, refresh_vassalage(socket)}
       {:error, _reason} -> {:noreply, socket}
@@ -820,7 +859,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   def handle_event("answer_levy", %{"lord_user_id" => lord_user_id}, socket) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.answer_levy(world, user, parse_id(lord_user_id)) do
+    case Game.answer_levy(world, user, PlayView.parse_id(lord_user_id)) do
       :ok -> {:noreply, refresh_vassalage(socket)}
       {:error, _reason} -> {:noreply, socket}
     end
@@ -829,7 +868,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   def handle_event("refuse_levy", %{"lord_user_id" => lord_user_id}, socket) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.refuse_levy(world, user, parse_id(lord_user_id)) do
+    case Game.refuse_levy(world, user, PlayView.parse_id(lord_user_id)) do
       :ok -> {:noreply, refresh_vassalage(socket)}
       {:error, _reason} -> {:noreply, socket}
     end
@@ -845,7 +884,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
       ) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.gift_vassal(world, user, parse_id(vassal_user_id)) do
+    case Game.gift_vassal(world, user, PlayView.parse_id(vassal_user_id)) do
       :ok -> {:noreply, refresh_vassalage(socket)}
       {:error, _reason} -> {:noreply, socket}
     end
@@ -862,8 +901,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
     case Game.declare_shared_enemy(
            world,
            user,
-           parse_id(vassal_user_id),
-           parse_id(enemy_user_id)
+           PlayView.parse_id(vassal_user_id),
+           PlayView.parse_id(enemy_user_id)
          ) do
       :ok -> {:noreply, refresh_vassalage(socket)}
       {:error, _reason} -> {:noreply, socket}
@@ -877,7 +916,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   def handle_event("mark_pact_unhonored", %{"lord_user_id" => lord_user_id}, socket) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.mark_pact_unhonored(world, user, parse_id(lord_user_id)) do
+    case Game.mark_pact_unhonored(world, user, PlayView.parse_id(lord_user_id)) do
       :ok -> {:noreply, refresh_vassalage(socket)}
       {:error, _reason} -> {:noreply, socket}
     end
@@ -896,7 +935,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
     %{world: world, user: user} = socket.assigns
 
     preview =
-      case Game.independence_preview(world, user, parse_id(lord_user_id)) do
+      case Game.independence_preview(world, user, PlayView.parse_id(lord_user_id)) do
         {:ok, result} -> result
         {:error, _reason} -> nil
       end
@@ -919,7 +958,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # gets this right the instant it clicks.
   def handle_event("declare_independence", %{"lord_user_id" => lord_user_id}, socket) do
     %{world: world} = socket.assigns
-    lord_id = parse_id(lord_user_id)
+    lord_id = PlayView.parse_id(lord_user_id)
 
     if Game.lord_fallen?(world, lord_id) do
       do_confirm_declare_independence(socket, lord_id)
@@ -943,7 +982,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # Story 915 — step two: actually severs the oath, resolves risings,
   # spawns the temporary army, and opens the war.
   def handle_event("confirm_declare_independence", %{"lord_user_id" => lord_user_id}, socket) do
-    do_confirm_declare_independence(socket, parse_id(lord_user_id))
+    do_confirm_declare_independence(socket, PlayView.parse_id(lord_user_id))
   end
 
   def handle_event("declare_independence_cancel", _params, socket) do
@@ -960,9 +999,15 @@ defmodule BrokenOathsWeb.GameLive.Play do
         socket
       ) do
     %{world: world, user: user} = socket.assigns
-    reparations_gold = parse_optional_int(Map.get(params, "reparations_gold"))
+    reparations_gold = PlayView.parse_optional_int(Map.get(params, "reparations_gold"))
 
-    case Game.offer_peace(world, user, parse_id(counterparty_user_id), outcome, reparations_gold) do
+    case Game.offer_peace(
+           world,
+           user,
+           PlayView.parse_id(counterparty_user_id),
+           outcome,
+           reparations_gold
+         ) do
       :ok -> {:noreply, refresh_rebellions(socket)}
       {:error, _reason} -> {:noreply, socket}
     end
@@ -971,7 +1016,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   def handle_event("accept_peace", %{"counterparty_user_id" => counterparty_user_id}, socket) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.accept_peace(world, user, parse_id(counterparty_user_id)) do
+    case Game.accept_peace(world, user, PlayView.parse_id(counterparty_user_id)) do
       :ok -> {:noreply, socket |> refresh_vassalage() |> refresh_rebellions() |> refresh_board()}
       {:error, _reason} -> {:noreply, socket}
     end
@@ -980,7 +1025,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   def handle_event("reject_peace", %{"counterparty_user_id" => counterparty_user_id}, socket) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.reject_peace(world, user, parse_id(counterparty_user_id)) do
+    case Game.reject_peace(world, user, PlayView.parse_id(counterparty_user_id)) do
       :ok -> {:noreply, refresh_rebellions(socket)}
       {:error, _reason} -> {:noreply, socket}
     end
@@ -1008,9 +1053,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
         socket
       ) do
     %{world: world, user: user} = socket.assigns
-    invitee_ids = Enum.map(List.wrap(invitee_user_ids), &parse_id/1)
+    invitee_ids = Enum.map(List.wrap(invitee_user_ids), &PlayView.parse_id/1)
 
-    case Game.open_pact_chat(world, user, parse_id(strike_turn), invitee_ids) do
+    case Game.open_pact_chat(world, user, PlayView.parse_id(strike_turn), invitee_ids) do
       {:ok, _pact} -> {:noreply, refresh_pact(socket)}
       {:error, _reason} -> {:noreply, socket}
     end
@@ -1087,7 +1132,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   def handle_event("honor_protection_call", %{"vassal_user_id" => vassal_user_id}, socket) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.honor_protection_call(world, user, parse_id(vassal_user_id)) do
+    case Game.honor_protection_call(world, user, PlayView.parse_id(vassal_user_id)) do
       :ok -> {:noreply, socket |> refresh_vassalage() |> refresh_pact()}
       {:error, _reason} -> {:noreply, socket}
     end
@@ -1115,8 +1160,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
     %{world: world, user: user} = socket.assigns
 
     case Game.upgrade_bank(world, user) do
-      :ok -> {:noreply, socket |> assign(bank_error: nil) |> refresh_board()}
-      {:error, reason} -> {:noreply, assign(socket, bank_error: bank_error_message(reason))}
+      :ok ->
+        {:noreply, socket |> assign(bank_error: nil) |> refresh_board()}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, bank_error: PlayView.bank_error_message(reason))}
     end
   end
 
@@ -1132,7 +1180,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # every steward action on the same "refresh after acting" footing).
   def handle_event("steward_collect_bank", %{"owner_user_id" => owner_user_id}, socket) do
     %{world: world, user: user} = socket.assigns
-    Game.steward_collect_bank(world, user, parse_id(owner_user_id))
+    Game.steward_collect_bank(world, user, PlayView.parse_id(owner_user_id))
     {:noreply, refresh_board(socket)}
   end
 
@@ -1154,12 +1202,15 @@ defmodule BrokenOathsWeb.GameLive.Play do
     case Game.steward_queue_production(
            world,
            user,
-           parse_id(owner_user_id),
-           parse_id(city_id),
+           PlayView.parse_id(owner_user_id),
+           PlayView.parse_id(city_id),
            item
          ) do
-      :ok -> {:noreply, socket |> assign(steward_error: nil) |> refresh_after_steward_action()}
-      {:error, reason} -> {:noreply, assign(socket, steward_error: steward_error_message(reason))}
+      :ok ->
+        {:noreply, socket |> assign(steward_error: nil) |> refresh_after_steward_action()}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, steward_error: PlayView.steward_error_message(reason))}
     end
   end
 
@@ -1175,9 +1226,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
     Game.steward_cancel_production_item(
       world,
       user,
-      parse_id(owner_user_id),
-      parse_id(city_id),
-      parse_id(item_id)
+      PlayView.parse_id(owner_user_id),
+      PlayView.parse_id(city_id),
+      PlayView.parse_id(item_id)
     )
 
     {:noreply, refresh_board(socket)}
@@ -1191,7 +1242,14 @@ defmodule BrokenOathsWeb.GameLive.Play do
         socket
       ) do
     %{world: world, user: user} = socket.assigns
-    Game.steward_disband_unit(world, user, parse_id(owner_user_id), parse_id(unit_id))
+
+    Game.steward_disband_unit(
+      world,
+      user,
+      PlayView.parse_id(owner_user_id),
+      PlayView.parse_id(unit_id)
+    )
+
     {:noreply, refresh_board(socket)}
   end
 
@@ -1204,7 +1262,15 @@ defmodule BrokenOathsWeb.GameLive.Play do
         socket
       ) do
     %{world: world, user: user} = socket.assigns
-    Game.steward_queue_move(world, user, parse_id(owner_user_id), parse_id(unit_id), to_tile)
+
+    Game.steward_queue_move(
+      world,
+      user,
+      PlayView.parse_id(owner_user_id),
+      PlayView.parse_id(unit_id),
+      to_tile
+    )
+
     {:noreply, refresh_board(socket)}
   end
 
@@ -1230,16 +1296,16 @@ defmodule BrokenOathsWeb.GameLive.Play do
     case Game.steward_defend(
            world,
            user,
-           parse_id(owner_user_id),
-           parse_id(unit_id),
-           parse_id(to_tile)
+           PlayView.parse_id(owner_user_id),
+           PlayView.parse_id(unit_id),
+           PlayView.parse_id(to_tile)
          ) do
       :ok ->
         {:noreply, socket |> assign(steward_error: nil) |> refresh_after_steward_action()}
 
       {:error, reason} ->
         {:noreply,
-         assign(socket, steward_error: steward_error_message(reason))
+         assign(socket, steward_error: PlayView.steward_error_message(reason))
          |> refresh_after_steward_action()}
     end
   end
@@ -1259,9 +1325,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
     Game.steward_attack(
       world,
       user,
-      parse_id(owner_user_id),
-      parse_id(unit_id),
-      parse_id(target_camp_id)
+      PlayView.parse_id(owner_user_id),
+      PlayView.parse_id(unit_id),
+      PlayView.parse_id(target_camp_id)
     )
 
     {:noreply, refresh_board(socket)}
@@ -1274,7 +1340,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # was picked, in `:chat_target_user_id`, into that component's own
   # assigns.
   def handle_event("open_chat", %{"user_id" => user_id}, socket) do
-    {:noreply, assign(socket, chat_open: true, chat_target_user_id: parse_id(user_id))}
+    {:noreply, assign(socket, chat_open: true, chat_target_user_id: PlayView.parse_id(user_id))}
   end
 
   def handle_event("abandon_world", _params, socket) do
@@ -1327,7 +1393,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   def handle_event("select_research", %{"tech" => tech}, socket) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.set_research(world, user, parse_tech(tech)) do
+    case Game.set_research(world, user, PlayView.parse_tech(tech)) do
       :ok -> {:noreply, refresh_research(socket)}
       {:error, _reason} -> {:noreply, socket}
     end
@@ -1596,46 +1662,6 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # Helpers
   # -------------------------------------------------------------------
 
-  # QA issue 3525f2ba — the mobile drawer toggle for the Known Players/
-  # Progress panels (see their own wrappers in `render/1`): pure client
-  # `Phoenix.LiveView.JS`, no server round trip, since neither panel's
-  # OWN state changes — only which one is visible. Opening either closes
-  # the other, so a phone never has both durable panels open at once
-  # (criterion: "Mobile can only support a single contextual menu").
-  # `md:` and up never calls this at all — the toggle buttons that
-  # invoke it are themselves `md:hidden`.
-  defp toggle_mobile_panel(id) do
-    other =
-      if id == "mobile-known-players", do: "mobile-progress-panel", else: "mobile-known-players"
-
-    %JS{}
-    |> JS.toggle(to: "##{id}")
-    |> JS.hide(to: "##{other}")
-  end
-
-  # Camera aimed at the centroid of the player's own units at spawn
-  # (criterion: returning player resumes with the camera on their
-  # civilization). Never recomputed after mount — later refreshes must
-  # not yank the view out from under the player.
-  defp camera_on([], _mesh), do: {0.0, 0.0}
-
-  defp camera_on(units, mesh) do
-    {sx, sy, sz} =
-      units
-      |> Enum.map(fn unit -> Globe.tile(mesh, unit.tile_id).center end)
-      |> Enum.reduce({0.0, 0.0, 0.0}, fn {x, y, z}, {ax, ay, az} -> {ax + x, ay + y, az + z} end)
-
-    case :math.sqrt(sx * sx + sy * sy + sz * sz) do
-      norm when norm > 0.0 ->
-        {:math.atan2(sy / norm, sx / norm), :math.asin(clamp(sz / norm))}
-
-      _ ->
-        {0.0, 0.0}
-    end
-  end
-
-  defp clamp(z), do: max(-1.0, min(1.0, z))
-
   # "First founding" is read back from the real surface (a player's own
   # city count) rather than threading a flag through `Game.found_city/3`'s
   # return value — founding always adds exactly one city, so having
@@ -1714,14 +1740,15 @@ defmodule BrokenOathsWeb.GameLive.Play do
       explored: explored,
       selected_unit: selected_unit,
       selected_order: selected_unit && selected_unit.order,
-      allowed_improvements: worker_allowed_improvements(world, selected_unit, player_research),
-      current_dig: worker_current_dig(improvements, selected_unit),
-      attackable_cities: attackable_cities(world, selected_unit, enemy_cities),
+      allowed_improvements:
+        PlayView.worker_allowed_improvements(world, selected_unit, player_research),
+      current_dig: PlayView.worker_current_dig(improvements, selected_unit),
+      attackable_cities: PlayView.attackable_cities(world, selected_unit, enemy_cities),
       enemy_cities: enemy_cities,
       captured_cities: captured_cities,
       selected_city: selected_city,
-      assignable_tiles: assignable_tiles(world, selected_city),
-      copper_access?: copper_access?(world, selected_city),
+      assignable_tiles: PlayView.assignable_tiles(world, selected_city),
+      copper_access?: PlayView.copper_access?(world, selected_city),
       selected_camp: selected_camp,
       known_players: Game.known_players(world, user),
       player_stats: Game.player_stats(world, user),
@@ -1749,21 +1776,6 @@ defmodule BrokenOathsWeb.GameLive.Play do
   defp refresh_research(socket) do
     %{world: world, user: user} = socket.assigns
     assign(socket, player_research: Game.player_research(world, user))
-  end
-
-  # `TechPanel`'s `phx-value-tech` arrives as a string — `Research`'s
-  # own catalog is a fixed, compile-time set of atoms, so
-  # `String.to_existing_atom/1` is always safe for a legitimate tech
-  # name (same safety argument `WorldServer.player_research_map/1`
-  # already makes for `banked_science`'s keys); anything else becomes
-  # an atom `Research.set_research/2` is guaranteed to refuse as
-  # `:invalid_tech`.
-  defp parse_tech(tech) when is_atom(tech), do: tech
-
-  defp parse_tech(tech) when is_binary(tech) do
-    String.to_existing_atom(tech)
-  rescue
-    ArgumentError -> :invalid_tech
   end
 
   # A queued order's remaining route renders whenever its unit is
@@ -1839,11 +1851,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
     enemy_cities = Map.get(socket.assigns, :enemy_cities, [])
 
     known = Enum.uniq(visible ++ explored)
-    tiles = Enum.map(known, &tile_row(&1, mesh, terrain_map))
+    tiles = Enum.map(known, &PlayView.tile_row(&1, mesh, terrain_map))
     levels = Weather.map(world.seed, mesh)
 
     city_markers =
-      Enum.map(cities, &city_marker/1) ++ Enum.map(enemy_cities, &enemy_city_marker/1)
+      Enum.map(cities, &PlayView.city_marker/1) ++
+        Enum.map(enemy_cities, &PlayView.enemy_city_marker/1)
 
     socket
     |> push_event("game:window", %{tiles: tiles})
@@ -1852,47 +1865,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
     |> push_event("game:cities", %{cities: city_markers})
     |> push_camps(camps)
     |> push_improvements(improvements)
-    |> push_resources(known_resources(known, world, player_research))
+    |> push_resources(PlayView.known_resources(known, world, player_research))
     |> push_event("globe3d:airspace", %{
       levels: levels,
       arc: Float.round(1.1071 / mesh.frequency, 5)
     })
-  end
-
-  # Bonus/strategic-resource billboards (stories 905/911) for every
-  # currently KNOWN tile — every bonus resource is visible from the
-  # first look, unconditionally (criterion 7649), so this reads off
-  # the very same `known` set `tile_row/3` already iterates rather
-  # than a separate fog-gated `Game` read the way camps/improvements
-  # need. Copper (story 911's strategic resource) is the one
-  # exception: `visible_resource/3` filters it out of a tile that IS
-  # otherwise known until the viewing player has completed Bronze
-  # Working (`Research.copper_revealed?/1`) — see that helper's own
-  # doc for the full reveal rule.
-  defp known_resources(known, world, player_research) do
-    for tile_id <- known,
-        resource = visible_resource(world, tile_id, player_research),
-        resource != nil,
-        do: %{tile_id: tile_id, kind: resource}
-  end
-
-  # Story 911 — the one reveal-tech exception to "resources are visible
-  # unconditionally" (criterion 7649): Copper stays invisible to a
-  # player until they've completed Bronze Working, mirroring Civ 6's
-  # own "Bronze Working reveals Iron" convention. Every OTHER resource
-  # kind passes straight through unchanged.
-  # `BrokenOaths.Worlds.Resources.at/2` itself places Copper on the map
-  # unconditionally (it has no concept of a viewing player) — this is
-  # the ONE place that ground truth gets filtered down to what a
-  # specific player currently knows, shared by both the `"game:
-  # resources"` push (`known_resources/3` above) and the `select_tile`
-  # handler's own single-tile read below, so the two surfaces can never
-  # disagree about whether a given player has seen Copper yet.
-  defp visible_resource(world, tile_id, player_research) do
-    case Resources.at(world, tile_id) do
-      :copper -> if Research.copper_revealed?(player_research), do: :copper, else: nil
-      other -> other
-    end
   end
 
   # Content-diffed against the last-pushed value: refresh_board/1 runs
@@ -1970,112 +1947,6 @@ defmodule BrokenOathsWeb.GameLive.Play do
     end
   end
 
-  # The board only needs enough to place and label a billboard —
-  # territory/queue/food stay in the CityPanel assign, not the client.
-  # `hostile: false` — the client's `.Board` hook uses this to decide
-  # left-click select-vs-ignore and right-click move-vs-attack (QA
-  # issue 56ee521a).
-  defp city_marker(city),
-    do: city |> Map.take([:id, :name, :tile_id, :size]) |> Map.put(:hostile, false)
-
-  # QA issue 56ee521a — the enemy-city sibling of `city_marker/1`,
-  # `hostile: true`. `:broken` (QA issue 7f91cff2) rides straight
-  # through from `Game.enemy_cities_visible_to/2`'s own `Siege.broken?/1`
-  # read — the `.Board` hook's `orderMove/1` needs it to route a
-  # right-click at a 0-HP hostile city to `queue_move` (occupy) instead
-  # of another `attack`.
-  defp enemy_city_marker(city),
-    do:
-      city
-      |> Map.take([:id, :name, :tile_id, :size, :hp, :broken])
-      |> Map.put(:hostile, true)
-
-  # "Grassland Hills · Woods" — base, then relief when not flat, then
-  # feature when present.
-  defp terrain_label(%Terrain{base: base, relief: relief, feature: feature}) do
-    [base, relief != :flat && relief, feature]
-    |> Enum.filter(& &1)
-    |> Enum.map_join(" · ", &(&1 |> to_string() |> String.capitalize()))
-  end
-
-  defp improvement_summary(%{kind: kind, status: :complete}),
-    do: "#{kind |> to_string() |> String.capitalize()} (complete)"
-
-  defp improvement_summary(%{kind: kind, status: :pillaged}),
-    do: "#{kind |> to_string() |> String.capitalize()} (pillaged — a worker repairs it in 1 turn)"
-
-  defp improvement_summary(%{kind: kind, status: :building, progress: progress}),
-    do: "#{kind |> to_string() |> String.capitalize()} under construction (#{progress} banked)"
-
-  # Story 905, criterion 7649 — a bonus resource is visible
-  # unconditionally, the instant the tile itself is looked at (no
-  # reveal tech, matching `civ6_resources.md` §3.5's "bonus resources
-  # have no reveal-tech"). Copper (story 911) is the one exception —
-  # `visible_resource/3` already filters it to `nil` until Bronze
-  # Working is done, so `select_tile`'s own `resource` field never
-  # reaches this label with `:copper` for a player who hasn't unlocked
-  # it yet; this clause only ever fires once it's genuinely revealed.
-  defp resource_label(:cattle), do: "Cattle"
-  defp resource_label(:sheep), do: "Sheep"
-  defp resource_label(:wheat), do: "Wheat"
-  defp resource_label(:stone), do: "Stone"
-  defp resource_label(:copper), do: "Copper"
-
-  # Compact row for the client painter:
-  # [id, color, decor, tex, cx, cy, cz, corner1x, corner1y, corner1z, ...]
-  defp tile_row(tile_id, mesh, terrain_map) do
-    tile = Globe.tile(mesh, tile_id)
-    terrain = Map.get(terrain_map, tile_id)
-    {cx, cy, cz} = tile.center
-    corners = Enum.flat_map(tile.corners, fn {x, y, z} -> [round4(x), round4(y), round4(z)] end)
-
-    [
-      tile.id,
-      Terrain.color(terrain),
-      Terrain.decor(terrain),
-      Terrain.texture(terrain),
-      round4(cx),
-      round4(cy),
-      round4(cz) | corners
-    ]
-  end
-
-  defp round4(f), do: Float.round(f, 4)
-
-  # The mesh tile whose center is nearest the given unit-sphere point
-  # (max dot product). Linear over the mesh — ~29k tiles at f=54, a few
-  # ms once per right-click.
-  defp nearest_tile(mesh, {x, y, z}) do
-    {id, _tile} =
-      Enum.max_by(mesh.tiles, fn {_id, tile} ->
-        {cx, cy, cz} = tile.center
-        cx * x + cy * y + cz * z
-      end)
-
-    id
-  end
-
-  defp order_error_message(:not_owner), do: "You don't control that unit."
-  defp order_error_message(:occupied), do: "Another unit already holds that tile."
-  defp order_error_message(:impassable), do: "That terrain can't be crossed."
-  defp order_error_message(:unreachable), do: "There's no path there."
-  defp order_error_message(_other), do: "That order can't be queued."
-
-  defp combat_error_message(:not_owner), do: "You don't control that unit."
-  defp combat_error_message(:invalid_target), do: "That target no longer exists."
-  defp combat_error_message(:out_of_movement), do: "That unit has no movement left to attack."
-  defp combat_error_message(:not_adjacent), do: "That target is out of range."
-
-  defp combat_error_message(:not_hostile),
-    do: "Stone Age players cannot fight each other — only barbarians can be attacked."
-
-  defp combat_error_message(:own_city), do: "You can't attack your own city."
-
-  defp combat_error_message(:not_military),
-    do: "Only military units can lay siege to a city — civilians cannot besiege."
-
-  defp combat_error_message(_other), do: "That attack can't be ordered."
-
   # -------------------------------------------------------------------
   # Vassalage / Tribute helpers (stories 906/907/908)
   # -------------------------------------------------------------------
@@ -2083,9 +1954,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
   defp resolve_garrison_fate(socket, city_id, choice) do
     %{world: world, user: user} = socket.assigns
 
-    case Game.resolve_garrison_fate(world, user, parse_id(city_id), choice) do
-      :ok -> {:noreply, socket}
-      {:error, reason} -> {:noreply, assign(socket, combat_error: combat_error_message(reason))}
+    case Game.resolve_garrison_fate(world, user, PlayView.parse_id(city_id), choice) do
+      :ok ->
+        {:noreply, socket}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, combat_error: PlayView.combat_error_message(reason))}
     end
   end
 
@@ -2178,207 +2052,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
     |> refresh_vassalage()
   end
 
-  defp parse_agenda("restore"), do: :restore
-  defp parse_agenda("usurp"), do: :usurp
-  defp parse_agenda("kingmaker"), do: :kingmaker
-  defp parse_agenda("merchant_prince"), do: :merchant_prince
-  defp parse_agenda(_other), do: :invalid
-
-  # `"50"` (a 0-100 percentage string, the tribute-rate control's own
-  # scale) -> `0.5` (the `Vassalage.tribute_rate` fraction).
-  defp parse_percent(percent) when is_binary(percent) do
-    case Float.parse(percent) do
-      {value, _rest} -> value / 100
-      :error -> 0.0
-    end
-  end
-
-  defp parse_percent(percent) when is_number(percent), do: percent / 100
-
-  # `"0.5"` (the pledged-share control's own scale, already a fraction)
-  # -> `0.5`.
-  defp parse_fraction(fraction) when is_binary(fraction) do
-    case Float.parse(fraction) do
-      {value, _rest} -> value
-      :error -> 0.0
-    end
-  end
-
-  defp parse_fraction(fraction) when is_number(fraction), do: fraction
-
-  # Story 919 — `"reparations_gold"`'s own optional scale: blank/missing
-  # reads as no reparations at all, never a crash on an empty string.
-  defp parse_optional_int(nil), do: nil
-  defp parse_optional_int(""), do: nil
-  defp parse_optional_int(value) when is_integer(value), do: value
-
-  defp parse_optional_int(value) when is_binary(value) do
-    case Integer.parse(value) do
-      {int, _rest} -> int
-      :error -> nil
-    end
-  end
-
-  defp tribute_rate_label(rate), do: "#{round(rate * 100)}%"
-
-  # Story 916, criterion 7738 — every OTHER pact member's own `status`
-  # already arrives pre-masked to `:invited` from `Game.pact_view/2`;
-  # this only ever turns that (already-secret-safe) atom into copy.
-  defp pact_status_label(:invited), do: "Outstanding"
-  defp pact_status_label(:committed), do: "Committed"
-  defp pact_status_label(:declined), do: "Declined"
-
-  defp oath_agenda_options do
-    [
-      {"restore", "Restore — reclaim your fallen realm"},
-      {"usurp", "Usurp — seize your lord's own throne"},
-      {"kingmaker", "Kingmaker — decide who rules"},
-      {"merchant_prince", "Merchant Prince — build wealth beyond war"}
-    ]
-  end
-
   # -------------------------------------------------------------------
   # City loop helpers
   # -------------------------------------------------------------------
 
-  # Which improvement kinds a worker could start on the tile it's
-  # standing on right now — same terrain gate `WorldServer` enforces
-  # (`Regions.tile_class/2` == :land, then `Improvement.allowed?/2`),
-  # computed here purely so `UnitPanel` only ever offers legal actions
-  # (story 882, criterion 7482: Farm is never offered on hills/forest).
-  # The dig under the selected worker's feet, if one is in progress —
-  # the unit panel shows it as live progress (issue b5cc4ae9: silent
-  # success on Build read as a dead button).
-  defp worker_current_dig(improvements, %{type: :worker, tile_id: tile_id}),
-    do: Enum.find(improvements, &(&1.tile_id == tile_id and &1.status == :building))
-
-  defp worker_current_dig(_improvements, _unit), do: nil
-
-  defp worker_allowed_improvements(_world, nil, _player_research), do: []
-
-  defp worker_allowed_improvements(_world, %{type: type}, _player_research) when type != :worker,
-    do: []
-
-  defp worker_allowed_improvements(world, %{tile_id: tile_id}, player_research) do
-    if Regions.tile_class(world, tile_id) == :land do
-      terrain = Regions.terrain(world, tile_id)
-      resource = Resources.at(world, tile_id)
-
-      # `:mine` uses the resource-aware gate (QA issue 5a30ad3f — Copper
-      # guaranteed near spawn can land off-Hills); Farm/Road stay
-      # terrain-only.
-      terrain_kinds =
-        Enum.filter([:farm, :mine, :road], fn
-          :mine -> Improvement.mine_allowed?(terrain, resource)
-          kind -> Improvement.allowed?(kind, terrain)
-        end)
-
-      if pasture_offered?(world, tile_id, player_research) do
-        terrain_kinds ++ [:pasture]
-      else
-        terrain_kinds
-      end
-    else
-      []
-    end
-  end
-
-  # Pasture (story 905, criterion 7648) only ever renders once the tile
-  # carries an animal resource AND the selecting player has researched
-  # Animal Husbandry — mirrors the terrain gate above, just sourced from
-  # the resource layer + research instead of `Improvement.allowed?/2`.
-  defp pasture_offered?(world, tile_id, player_research) do
-    Improvement.resource_allowed?(Resources.at(world, tile_id)) and
-      pasture_enabled?(player_research)
-  end
-
-  defp pasture_enabled?(nil), do: false
-  defp pasture_enabled?(player_research), do: Research.pasture_enabled?(player_research)
-
-  # Territory tiles `CityPanel` may offer a "Work" action for: not the
-  # always-free center, not already worked, and workable terrain — the
-  # same gate `WorldServer.validate_assign/3` enforces. `CityPanel` has
-  # no world/terrain access of its own (purely presentational), so this
-  # is computed here whenever the selected city changes.
-  defp assignable_tiles(_world, nil), do: []
-
-  defp assignable_tiles(world, city) do
-    worked = MapSet.new(city.worked_tiles)
-
-    city.territory
-    |> Enum.reject(&(&1 == city.tile_id or MapSet.member?(worked, &1)))
-    |> Enum.filter(&Yields.workable?(Regions.terrain(world, &1)))
-  end
-
-  # Story 911 — whether `city` currently has Copper access: a Copper
-  # tile anywhere in its own `territory` (worked or not — a pure
-  # ACCESS GATE, no stockpile/consumption). `CityPanel` has no world
-  # access of its own (purely presentational, same reason
-  # `assignable_tiles/2` above is pre-computed here), so this is
-  # computed alongside it whenever the selected city changes and
-  # handed down as the `:copper_access?` assign.
-  defp copper_access?(_world, nil), do: false
-
-  defp copper_access?(world, city),
-    do: Enum.any?(city.territory, &(Resources.at(world, &1) == :copper))
-
-  # QA issue 56ee521a — the "surface an attack affordance" half of the
-  # fix: enemy cities adjacent to the CURRENTLY SELECTED unit, but only
-  # once that unit is a military type (`CityDefense.military?/1` — a
-  # civilian can no more attack a city through this button than through
-  # `Siege.validate_siege/3` itself would allow). Powers `UnitPanel`'s
-  # own per-city button — "Attack" for an intact city, wired to the
-  # existing `"attack"`/`target_city_id` handler, or "Move In" once the
-  # city is `broken` (QA issue 7f91cff2), wired to `"queue_move"`/
-  # `to_tile` instead — the discoverable-button sibling to the
-  # right-click gesture the `.Board` hook's own `orderMove/1` already
-  # offers (and, since 7f91cff2, already routes the same way).
-  defp attackable_cities(_world, nil, _enemy_cities), do: []
-
-  defp attackable_cities(world, unit, enemy_cities) do
-    if CityDefense.military?(unit) do
-      adjacent = MapSet.new(Regions.adjacent_tiles(world, unit.tile_id))
-
-      enemy_cities
-      |> Enum.filter(&MapSet.member?(adjacent, &1.tile_id))
-      |> Enum.map(&Map.take(&1, [:id, :name, :tile_id, :broken]))
-    else
-      []
-    end
-  end
-
-  defp parse_id(nil), do: nil
-  defp parse_id(""), do: nil
-  defp parse_id(id) when is_integer(id), do: id
-  defp parse_id(id) when is_binary(id), do: String.to_integer(id)
-
-  # QA issue d403faa6: this player's own units currently standing on
-  # `tile_id`, sorted into a stable (by id) order — the "stack"
-  # `next_unit_in_stack/2` cycles through on repeat clicks. Reads fresh
-  # off `Game.player_units/2` (already scoped to this player's own
-  # units, unlike `socket.assigns.units`'s fog-filtered — and
-  # ownership-blind — entries) rather than the pushed board state, the
-  # same authoritative-read pattern every other command handler in this
-  # module already uses.
-  defp owned_stack_on_tile(world, user, tile_id) do
-    world
-    |> Game.player_units(user)
-    |> Enum.filter(&(&1.tile_id == tile_id))
-    |> Enum.sort_by(& &1.id)
-  end
-
-  # Pure cycling rule, kept separate from the `Game.player_units/2` read
-  # above so it's trivially unit-testable. Repeated clicks on one tile
-  # cycle through everything selectable there: each of the player's own
-  # units in `owned_stack_on_tile/3` order, THEN (QA issue adc8c79e) the
-  # player's own city on that tile — so a unit parked on a city no longer
-  # hides it. Given the current selection (`current_unit_id` when a unit
-  # is selected, `current_city_id` when a city is, both possibly on a
-  # different tile), returns the selection AFTER it, wrapping past the
-  # last back to the first. `:none` when the tile has neither an owned
-  # stack nor an owned city — the caller then falls back to the plain
-  # by-id unit lookup (foreign unit, or a tile_id-less test click),
-  # unchanged from before.
   # Shared unit-panel selection (the `select_unit` cycle and its by-id
   # fallthrough both land here): open the unit side panel and clear every
   # other panel, exactly as the handler did inline before the cycle was
@@ -2390,10 +2067,14 @@ defmodule BrokenOathsWeb.GameLive.Play do
       selected_unit: unit,
       selected_order: unit && unit.order,
       allowed_improvements:
-        worker_allowed_improvements(socket.assigns.world, unit, socket.assigns.player_research),
-      current_dig: worker_current_dig(socket.assigns.improvements, unit),
+        PlayView.worker_allowed_improvements(
+          socket.assigns.world,
+          unit,
+          socket.assigns.player_research
+        ),
+      current_dig: PlayView.worker_current_dig(socket.assigns.improvements, unit),
       attackable_cities:
-        attackable_cities(socket.assigns.world, unit, socket.assigns.enemy_cities),
+        PlayView.attackable_cities(socket.assigns.world, unit, socket.assigns.enemy_cities),
       order_error: nil,
       improvement_error: nil,
       selected_city_id: nil,
@@ -2415,8 +2096,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
     |> assign(
       selected_city_id: city.id,
       selected_city: city,
-      assignable_tiles: assignable_tiles(socket.assigns.world, city),
-      copper_access?: copper_access?(socket.assigns.world, city),
+      assignable_tiles: PlayView.assignable_tiles(socket.assigns.world, city),
+      copper_access?: PlayView.copper_access?(socket.assigns.world, city),
       city_error: nil,
       selected_unit_id: nil,
       selected_unit: nil,
@@ -2428,89 +2109,6 @@ defmodule BrokenOathsWeb.GameLive.Play do
     )
     |> push_city_selection()
   end
-
-  defp next_tile_selection([], nil, _current_unit_id, _current_city_id), do: :none
-
-  defp next_tile_selection(stack, city, current_unit_id, current_city_id) do
-    cycle = Enum.map(stack, &{:unit, &1}) ++ if(city, do: [{:city, city}], else: [])
-
-    idx =
-      Enum.find_index(cycle, fn
-        {:unit, u} -> u.id == current_unit_id
-        {:city, c} -> c.id == current_city_id
-      end)
-
-    case idx do
-      nil -> List.first(cycle)
-      i -> Enum.at(cycle, rem(i + 1, length(cycle)))
-    end
-  end
-
-  defp city_error_message(:not_owner), do: "You don't control that city."
-  defp city_error_message(:not_settler), do: "Only a settler can found a city."
-  defp city_error_message(:invalid_terrain), do: "A city can't be founded there."
-  defp city_error_message(:too_close), do: "Too close to an existing city."
-  defp city_error_message(:invalid_item), do: "That can't be queued."
-  defp city_error_message(:size_one), do: "This city needs a second citizen first."
-  defp city_error_message(:not_found), do: "That item is no longer queued."
-  defp city_error_message(:invalid_name), do: "Enter a name for the city."
-  defp city_error_message(:not_worked), do: "That tile isn't currently worked."
-  defp city_error_message(:invalid_tile), do: "The city center can't be reassigned."
-  defp city_error_message(:not_territory), do: "That tile isn't part of the city."
-  defp city_error_message(:already_worked), do: "That tile already has a citizen."
-  # Story 911 — the Bronze Spearman's Copper access gate, distinct from
-  # the plain `:locked` a missing Bronze Age reports (unchanged, story
-  # 903) — mirrors the exact "Requires Copper" wording
-  # `GameLive.CityPanel`'s own always-visible requirement note already
-  # renders (criterion 7708), so the toast and the production menu
-  # never disagree about the reason.
-  defp city_error_message(:copper_required), do: "Requires Copper."
-
-  defp city_error_message(:size_exceeded),
-    do: "This city has no idle citizen — unassign a worked tile first."
-
-  defp city_error_message(_other), do: "That action can't be completed."
-
-  defp improvement_error_message(:not_owner), do: "You don't control that unit."
-  defp improvement_error_message(:not_worker), do: "Only a worker can build improvements."
-
-  defp improvement_error_message(:invalid_improvement),
-    do: "That improvement isn't allowed there."
-
-  defp improvement_error_message(:invalid_terrain),
-    do: "That terrain won't support that improvement."
-
-  defp improvement_error_message(:occupied_improvement),
-    do: "This tile already has a completed improvement."
-
-  defp improvement_error_message(:no_active_build),
-    do: "There's no build in progress here to cancel."
-
-  defp improvement_error_message(_other), do: "That improvement can't be started."
-
-  defp bank_error_message(:insufficient_gold), do: "You can't afford that upgrade yet."
-  defp bank_error_message(_other), do: "The bank refused that action."
-
-  # QA issue bd93cc0a — production-stewardship + emergency-defend error
-  # surface, same "transient, connection-only" status `city_error`/
-  # `bank_error` already have.
-  defp steward_error_message(:not_eligible), do: "You aren't eligible to steward them."
-  defp steward_error_message(:owner_online), do: "They're back online — stewardship has ended."
-  defp steward_error_message(:not_found), do: "That city isn't theirs to steward."
-  defp steward_error_message(:not_constructive), do: "That build isn't on the steward whitelist."
-  defp steward_error_message(:invalid_item), do: "That can't be queued."
-  defp steward_error_message(:size_one), do: "This city needs a second citizen first."
-  defp steward_error_message(:already_built), do: "They've already built one."
-  defp steward_error_message(:locked), do: "They haven't unlocked that yet."
-  defp steward_error_message(:copper_required), do: "That build requires Copper access."
-  defp steward_error_message(:not_owner), do: "That unit isn't theirs to command."
-
-  defp steward_error_message(:not_under_attack),
-    do: "They aren't under attack — there's nothing to defend against right now."
-
-  defp steward_error_message(:unreachable), do: "That tile isn't reachable."
-  defp steward_error_message(:feudal_disabled), do: "Stewardship isn't available right now."
-  defp steward_error_message(_other), do: "That steward action was refused."
 
   # -------------------------------------------------------------------
   # Render
@@ -2545,430 +2143,27 @@ defmodule BrokenOathsWeb.GameLive.Play do
              be user-facing (`BrokenOathsWeb.GameLive.FeudalFlagTest`'s
              own "with the flag OFF" case asserts none of the three ever
              render). --%>
-        <%= if @feudal_enabled? do %>
-          <%!-- Story 909: the Gold Bank — holdings/cap badges +
-               Collect/Upgrade, always mounted (a fresh player's own
-               bank starts empty, never absent). --%>
-          <.live_component
-            module={BrokenOathsWeb.GameLive.BankPanel}
-            id="bank-panel"
-            bank={@bank}
-            error={@bank_error}
-          />
-
-          <%!-- Story 910: the world-visible Honor reputation figure —
-               sibling to `player-gold`/the bank badges above. The
-               number lives in its OWN innermost
-               `data-test="player-honor"` span (icon kept OUTSIDE it) —
-               mirrors `BankPanel`'s own `bank-gold`/`bank-cap`
-               structure, since a spec's own `data-test="player-honor"[^>]*>(-?\d+)`
-               regex needs the digit immediately after that span's own
-               closing tag, not after a sibling icon's markup. --%>
-          <span class="badge badge-outline gap-1" title="Honor">
-            <.icon name="hero-scale" class="w-3 h-3" />
-            <span data-test="player-honor">{@honor}</span>
-          </span>
-
-          <%!-- Story 910: every steward action taken on my own behalf
-               while I was away — always mounted (an empty log is a
-               real, renderable state, not an absent one). --%>
-          <.steward_log_panel steward_log={@steward_log} />
-        <% end %>
-
-        <%!-- Story 907: the lord's own Vassals list — only mounted while
-             non-empty (criterion 7667's own "no vassals-list at all"
-             anchor). --%>
-        <.vassals_panel :if={@vassals != []} vassals={@vassals} known_players={@known_players} />
-
-        <%!-- Story 916, criterion 7742 — the lord's own coarse
-             conspiracy "heat" gauge: a needle, never the pact chat's
-             own content. Same "no element at all with nothing to show"
-             posture `vassals_panel` above already has. --%>
-        <span
-          :if={@vassals != []}
-          class="badge badge-outline gap-1"
-          title="Conspiracy Heat"
-        >
-          <.icon name="hero-fire" class="w-3 h-3" />
-          <span data-test="conspiracy-heat">{@conspiracy_heat}</span>
-        </span>
-
-        <%!-- Story 916, criterion 7741 — the lord's own warning once a
-             member of a pact against her has informed: the strike turn
-             plus her three pre-emption levers. Never the roster, never
-             the informer's own identity. --%>
-        <div :if={@pact_informed} class="flex items-center gap-1" data-test="pact-informed-banner">
-          <span class="badge badge-error gap-1">
-            <.icon name="hero-exclamation-triangle" class="w-3 h-3" />
-            A vassal has warned you of a plot to strike on turn {@pact_informed.strike_turn}
-          </span>
-          <button
-            type="button"
-            phx-click="brace_defenses"
-            data-test="brace-defenses"
-            class="btn btn-xs btn-outline"
-          >
-            Brace Defenses
-          </button>
-          <button
-            type="button"
-            phx-click="reposition_lord"
-            data-test="reposition-lord"
-            class="btn btn-xs btn-outline"
-          >
-            Reposition Lord
-          </button>
-          <button
-            type="button"
-            phx-click="buy_off_conspirators"
-            data-test="buy-off-conspirators"
-            class="btn btn-xs btn-outline"
-          >
-            Buy Off Conspirators
-          </button>
-        </div>
-
-        <%!-- Stories 915/919 — every Rebellion (active or ended) raised
-             against this player as the FORMER LORD: the "at war" badge
-             (only while still active) plus the persisted Rebellion
-             panel itself (criterion 7747). --%>
-        <div :for={rebellion <- @rebellions_as_lord} class="flex items-center gap-1">
-          <span
-            :if={rebellion.status == :active}
-            class="badge badge-error gap-1"
-            data-test="at-war-with"
-          >
-            <.icon name="hero-fire" class="w-3 h-3" /> At war with {rebellion.rebel_email}
-          </span>
-
-          <.rebellion_panel rebellion={rebellion} viewer_user_id={@user.id} />
-        </div>
-
-        <%!-- QA issue ffa66192: the conqueror's own captured-city
-             tracker — only mounted while non-empty, same "no element at
-             all while there's nothing to show" posture `vassals_panel`
-             above already has. Surfaces the Execute/Release choice for
-             any still-living fallen garrison. --%>
-        <.captured_cities_panel
-          :if={@captured_cities != []}
+        <FeudalTopBar.panel
+          feudal_enabled?={@feudal_enabled?}
+          bank={@bank}
+          bank_error={@bank_error}
+          honor={@honor}
+          steward_log={@steward_log}
+          vassals={@vassals}
+          known_players={@known_players}
+          conspiracy_heat={@conspiracy_heat}
+          pact_informed={@pact_informed}
+          rebellions_as_lord={@rebellions_as_lord}
+          user={@user}
           captured_cities={@captured_cities}
+          vassal_status={@vassal_status}
+          declare_independence_lord_user_id={@declare_independence_lord_user_id}
+          independence_preview={@independence_preview}
+          rebellion_status={@rebellion_status}
+          pact={@pact}
+          pact_panel_open?={@pact_panel_open?}
+          pact_candidates={@pact_candidates}
         />
-
-        <%!-- Story 917 — a durable, re-mountable "seize the moment"
-             prompt: rendered any time this vassal's own oath is still
-             active AND their lord's own Lord unit is currently dead
-             (`@vassal_status.lord_fallen?`), so it survives a fresh
-             mount/reconnect rather than a fire-once toast a player
-             could simply miss. Nests the SAME `"declare_independence"`
-             action (story 915) directly inside the prompt — clicking
-             it now commits immediately (see that event's own
-             `handle_event/3` doc for why a dead lord skips the
-             two-step confirm). --%>
-        <div
-          :if={@vassal_status && @vassal_status.lord_fallen?}
-          class="alert alert-warning flex items-center gap-2"
-          data-test="seize-the-moment-prompt"
-        >
-          <.icon name="hero-exclamation-triangle" class="w-4 h-4" />
-          <span>Your lord has fallen — seize the moment</span>
-          <button
-            type="button"
-            phx-click="declare_independence"
-            phx-value-lord_user_id={@vassal_status.lord_user_id}
-            data-test="declare-independence-action"
-            class="btn btn-xs btn-error"
-          >
-            Declare Independence
-          </button>
-        </div>
-
-        <%!-- Story 907/908: a subjugated player's own oath — sworn-to
-             badge, the rate they feel, and their own latest levy status
-             — plus, QA issue dae2e65d, real Answer/Refuse controls
-             while a call to arms is still pending. --%>
-        <div :if={@vassal_status} class="flex items-center gap-1">
-          <span class="badge badge-secondary gap-1" data-test="vassal-status">
-            Sworn to {@vassal_status.lord_email}
-          </span>
-          <span class="badge badge-outline" data-test="my-tribute-rate">
-            {tribute_rate_label(@vassal_status.tribute_rate)}
-          </span>
-          <%!-- Story 913: the vassal's OWN read of their Oath Strain —
-               sibling to `my-tribute-rate` above, same "icon outside,
-               digit in its own innermost span" structure `player-honor`
-               already sets, since a spec's own
-               `data-test="my-oath-strain"[^>]*>(\d+)` regex needs the
-               digit immediately after this span's own opening tag. --%>
-          <span class="badge badge-outline gap-1" title="Oath Strain">
-            <.icon name="hero-fire" class="w-3 h-3" />
-            <span data-test="my-oath-strain">{@vassal_status.oath_strain}</span>
-          </span>
-          <span :if={@vassal_status.levy_status} class="badge badge-outline" data-test="levy-status">
-            {@vassal_status.levy_status}
-          </span>
-          <%!-- Story 914: a Protection Pact call actively raised for
-               THIS vassal — only rendered while one is active, same
-               "no element at all with nothing to show" posture
-               `levy-status` above already has. --%>
-          <span
-            :if={@vassal_status.protection_call}
-            class="badge badge-error badge-sm"
-            data-test="my-protection-call"
-          >
-            Under attack — protection requested from {@vassal_status.lord_email} (<span data-test="my-protection-window">{@vassal_status.protection_call.window_remaining}</span> turns left)
-          </span>
-          <button
-            :if={@vassal_status.protection_call}
-            type="button"
-            phx-click="mark_pact_unhonored"
-            phx-value-lord_user_id={@vassal_status.lord_user_id}
-            data-test="mark-pact-unhonored"
-            class="btn btn-xs btn-outline btn-error"
-          >
-            Mark Unhonored
-          </button>
-          <%!-- QA issue dae2e65d — the vassal's own Answer/Refuse
-               controls, only while a call to arms actually awaits a
-               response (`:pending`); `:answered`/`:refused` are past
-               tense, the badge above alone. --%>
-          <button
-            :if={@vassal_status.levy_status == :pending}
-            type="button"
-            phx-click="answer_levy"
-            phx-value-lord_user_id={@vassal_status.lord_user_id}
-            data-test="answer-levy"
-            class="btn btn-xs btn-primary"
-          >
-            Answer
-          </button>
-          <button
-            :if={@vassal_status.levy_status == :pending}
-            type="button"
-            phx-click="refuse_levy"
-            phx-value-lord_user_id={@vassal_status.lord_user_id}
-            data-test="refuse-levy"
-            class="btn btn-xs btn-outline btn-error"
-          >
-            Refuse
-          </button>
-
-          <%!-- Story 915 — the irreversible choice: step one raises the
-               confirming warning below, commits nothing. --%>
-          <button
-            type="button"
-            phx-click="declare_independence"
-            phx-value-lord_user_id={@vassal_status.lord_user_id}
-            data-test="declare-independence"
-            class="btn btn-xs btn-outline btn-error"
-          >
-            Declare Independence
-          </button>
-        </div>
-
-        <%!-- Story 916 — Pact of Broken Oaths: a vassal's own
-             conspiracy composer, mirrors `alliance-button`/`chat-button`'s
-             own toggle shape. Only ever rendered for an actual vassal —
-             a free player has no lord to conspire against, and the
-             lord themself is never a FELLOW vassal (criterion 7737's
-             own second `then_`). --%>
-        <div :if={@vassal_status} class="relative">
-          <button
-            type="button"
-            data-test="pact-button"
-            phx-click="toggle_pact_panel"
-            class="btn btn-sm btn-ghost gap-1"
-          >
-            <.icon name="hero-user-group" class="w-4 h-4" />
-          </button>
-
-          <div
-            :if={@pact_panel_open?}
-            data-test="pact-panel"
-            class="card bg-base-200 shadow-xl w-80 absolute top-full right-0 mt-1 z-10"
-          >
-            <div class="card-body p-3 gap-2">
-              <h3 class="card-title text-sm">Pact of Broken Oaths</h3>
-
-              <p :if={@pact_candidates == []} class="text-xs opacity-60">
-                No fellow vassals to invite yet.
-              </p>
-
-              <form phx-submit="open_pact_chat" class="flex flex-col gap-2">
-                <div
-                  :for={candidate <- @pact_candidates}
-                  data-test={"fellow-vassal-#{candidate.user_id}"}
-                  class="flex items-center gap-2 text-sm"
-                >
-                  <input
-                    type="checkbox"
-                    name="invitee_user_ids[]"
-                    value={candidate.user_id}
-                    class="checkbox checkbox-xs"
-                  />
-                  <span class="truncate">{candidate.email}</span>
-                </div>
-
-                <div class="flex items-center gap-1">
-                  <span class="text-xs">Strike in</span>
-                  <input
-                    type="number"
-                    name="strike_turn"
-                    min="1"
-                    value="50"
-                    class="input input-xs input-bordered w-16"
-                  />
-                  <span class="text-xs">turns</span>
-                </div>
-
-                <button
-                  type="submit"
-                  data-test="open-pact-chat"
-                  class="btn btn-xs btn-primary self-start"
-                >
-                  Open Pact Chat
-                </button>
-              </form>
-            </div>
-          </div>
-        </div>
-
-        <%!-- Story 916 — the pact chat itself, visible on every MEMBER's
-             own view once the pact exists (including the initiator).
-             Roster status is masked per criterion 7738: every OTHER
-             member always reads "Outstanding" regardless of their
-             real, secret answer; only the reader's own row tells the
-             truth. Commit/decline stay available even after an answer
-             is already on record (criterion 7742's own "still a
-             negotiation" reversibility). --%>
-        <div :if={@pact} data-test="pact-chat" class="card bg-base-200 shadow-xl w-80">
-          <div class="card-body p-3 gap-2">
-            <h3 class="card-title text-sm">Pact of Broken Oaths — strike turn {@pact.strike_turn}</h3>
-
-            <div
-              :if={@pact.own_status == :invited}
-              data-test="pact-invite-notice"
-              class="alert alert-warning p-2 text-xs"
-            >
-              You've been invited into a pact of rebellion.
-            </div>
-
-            <div
-              :if={@pact.informer?}
-              data-test="informer-reward"
-              class="alert alert-success p-2 text-xs"
-            >
-              Your informing has been rewarded — tribute forgiven, land granted.
-            </div>
-
-            <div data-test="pact-roster" class="flex flex-col gap-1">
-              <div
-                :for={member <- @pact.members}
-                data-test={"pact-member-#{member.user_id}"}
-                class="flex items-center justify-between text-xs"
-              >
-                <span class="truncate">{member.email}</span>
-                <span data-test={"pact-member-status-#{member.user_id}"}>
-                  {pact_status_label(member.status)}
-                </span>
-              </div>
-            </div>
-
-            <div class="flex items-center gap-1">
-              <button
-                type="button"
-                phx-click="pact_commit"
-                data-test="pact-commit"
-                class="btn btn-xs btn-primary"
-              >
-                Commit
-              </button>
-              <button
-                type="button"
-                phx-click="pact_decline"
-                data-test="pact-decline"
-                class="btn btn-xs btn-outline"
-              >
-                Decline
-              </button>
-              <button
-                type="button"
-                phx-click="pact_inform"
-                data-test="pact-inform"
-                class="btn btn-xs btn-outline btn-error"
-              >
-                Inform Lord
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <%!-- Story 915 — the confirming warning: a second, explicit
-             click actually severs the oath (`"confirm_declare_
-             independence"`). --%>
-        <div
-          :if={@declare_independence_lord_user_id}
-          class="modal modal-open"
-          data-test="declare-independence-warning"
-        >
-          <div class="modal-box">
-            <h3 class="font-bold text-lg">Declare Independence?</h3>
-            <p class="py-2 opacity-70">
-              This immediately severs your oath and opens a state of war. There is no going back.
-            </p>
-            <div class="modal-action">
-              <button phx-click="declare_independence_cancel" class="btn btn-ghost">Cancel</button>
-              <button
-                type="button"
-                phx-click="confirm_declare_independence"
-                phx-value-lord_user_id={@declare_independence_lord_user_id}
-                class="btn btn-error"
-                data-test="confirm-declare-independence"
-              >
-                Confirm — Declare Independence
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <%!-- Story 915, criterion 7732 — the read-only preview: each
-             occupied city marked will-rise/stays-loyal plus the
-             predicted temporary army size, entirely before the player
-             commits (no hidden dice roll). --%>
-        <div
-          :if={@independence_preview}
-          class="flex items-center gap-1"
-          data-test="independence-preview"
-        >
-          <span
-            :for={city <- @independence_preview.cities}
-            class="badge badge-outline badge-sm"
-            data-test={"rise-preview-city-#{city.city_id}"}
-          >
-            {if city.will_rise?, do: "will rise", else: "stays loyal"}
-          </span>
-          <span class="badge badge-outline gap-1" title="Predicted rebellion army">
-            <.icon name="hero-users" class="w-3 h-3" />
-            <span data-test="rebellion-army-preview">{@independence_preview.army_size}</span>
-          </span>
-        </div>
-
-        <%!-- Stories 915/919 — the rebel's own war state: the "at war"
-             badge (only while the Rebellion is still active) and the
-             persisted, first-class Rebellion panel, any status — the
-             story-919 lifecycle settles it exactly once and this keeps
-             reading that same row. --%>
-        <div :if={@rebellion_status} class="flex items-center gap-1">
-          <span
-            :if={@rebellion_status.status == :active}
-            class="badge badge-error gap-1"
-            data-test="at-war-with"
-          >
-            <.icon name="hero-fire" class="w-3 h-3" />
-            At war with {@rebellion_status.former_lord_email}
-          </span>
-
-          <.rebellion_panel rebellion={@rebellion_status} viewer_user_id={@user.id} />
-        </div>
 
         <.live_component
           module={BrokenOathsWeb.GameLive.AgePanel}
@@ -3001,49 +2196,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
         <.link navigate={~p"/play"} class="btn btn-sm btn-ghost">All Worlds</.link>
       </div>
 
-      <div :if={@confirm_abandon?} class="modal modal-open">
-        <div class="modal-box">
-          <h3 class="font-bold text-lg">Abandon this world?</h3>
-          <p class="py-4 opacity-70">
-            Your civilization will be wiped and your region freed for another player. This cannot be undone.
-          </p>
-          <div class="modal-action">
-            <button phx-click="abandon_cancel" class="btn btn-ghost">Cancel</button>
-            <button phx-click="abandon_confirm" class="btn btn-error" data-test="abandon-confirm">
-              Abandon Forever
-            </button>
-          </div>
-        </div>
-      </div>
+      <Modals.abandon_confirm confirm_abandon?={@confirm_abandon?} />
 
-      <%!-- Story 907 — the Oath screen: raised the moment a capture
-           leaves this player with zero free cities, closed the instant
-           they secretly pick a Hidden Agenda (`choose_hidden_agenda`). --%>
-      <div
-        :if={@vassal_status && @vassal_status.agenda_pending?}
-        class="modal modal-open"
-        data-test="oath-screen"
-      >
-        <div class="modal-box">
-          <h3 class="font-bold text-lg">Terms of Oath</h3>
-          <p class="py-2 opacity-70">
-            Your last free city has fallen. You are sworn to {@vassal_status.lord_email} — but your
-            story is far from over. Choose the ambition you'll secretly pursue as a vassal:
-          </p>
-          <div class="flex flex-col gap-2">
-            <button
-              :for={{agenda, label} <- oath_agenda_options()}
-              type="button"
-              phx-click="choose_hidden_agenda"
-              phx-value-agenda={agenda}
-              data-test={"agenda-option-#{agenda}"}
-              class="btn btn-outline justify-start"
-            >
-              {label}
-            </button>
-          </div>
-        </div>
-      </div>
+      <Modals.oath_screen vassal_status={@vassal_status} />
 
       <div class="flex flex-1 min-h-0 relative">
         <div
@@ -3063,233 +2218,31 @@ defmodule BrokenOathsWeb.GameLive.Play do
           </div>
         </div>
 
-        <%!-- Story 899/900/901: the durable Known Players roster +
-             discovery toast affordance, the chat button/panel beside it,
-             and the alliance button/panel beside that. `KnownPlayersPanel`
-             is hidden while `ChatPanel` is open — its own contact list
-             reuses the same "known-player-ID" row shape, so only one of
-             the two is ever on the page at once (the same "one side panel
-             at a time" rule Play already applies to unit/city selection).
-             `AlliancePanel` uses its own distinct "ally-candidate-ID"/
-             "alliance-ID" naming (see its own moduledoc), so it never
-             needs that same exclusion — both button rows stay reachable
-             together.
-
-             QA issue 3525f2ba: below `md` (a phone) the always-on w-64
-             Known Players card, stacked against the Progress panel and
-             the top status bar, left no room for the board at all. The
-             SAME single `KnownPlayersPanel` mount below just gets a
-             `hidden md:block` wrapper — one instance, never duplicated
-             (a second copy would collide on `known-player-ID`, breaking
-             the very one-match-per-selector contract the `ChatPanel`
-             exclusion above already depends on) — collapsed behind a
-             small `md:hidden` toggle button that shows/hides it and
-             closes the Progress drawer in turn (`toggle_mobile_panel/1`),
-             so a phone never has both durable panels open together.
-             `md:` and up ignores all of this — the toggle button itself
-             never renders there, and `md:block` always wins regardless
-             of the toggle's last mobile-only state. --%>
-        <div class="absolute top-4 right-4 flex flex-col gap-2 items-end">
-          <button
-            :if={!@chat_open}
-            type="button"
-            phx-click={toggle_mobile_panel("mobile-known-players")}
-            class="btn btn-sm btn-circle btn-ghost bg-base-200 shadow-sm md:hidden"
-            data-test="mobile-known-players-toggle"
-            aria-label="Known Players"
-          >
-            <.icon name="hero-users" class="w-4 h-4" />
-          </button>
-
-          <div id="mobile-known-players" class="hidden md:block">
-            <.live_component
-              :if={!@chat_open}
-              module={BrokenOathsWeb.GameLive.KnownPlayersPanel}
-              id="known-players-panel"
-              known_players={@known_players}
-            />
-          </div>
-
-          <div class="flex gap-2">
-            <.live_component
-              module={BrokenOathsWeb.GameLive.ChatPanel}
-              id="chat-panel"
-              world={@world}
-              user={@user}
-              chat_target_user_id={@chat_target_user_id}
-            />
-
-            <.live_component
-              module={BrokenOathsWeb.GameLive.AlliancePanel}
-              id="alliance-panel"
-              world={@world}
-              user={@user}
-              known_players={@known_players}
-            />
-          </div>
-        </div>
-
-        <div class="absolute top-4 left-4 flex flex-col gap-2 items-start">
-          <div :if={@order_error} class="alert alert-error w-auto shadow-lg" data-test="order-error">
-            <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@order_error}
-          </div>
-
-          <div
-            :if={@combat_error}
-            class="alert alert-error w-auto shadow-lg"
-            data-test="combat-error"
-          >
-            <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@combat_error}
-          </div>
-
-          <div :if={@city_error} class="alert alert-error w-auto shadow-lg" data-test="city-error">
-            <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@city_error}
-          </div>
-
-          <div
-            :if={@improvement_error}
-            class="alert alert-error w-auto shadow-lg"
-            data-test="improvement-error"
-          >
-            <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@improvement_error}
-          </div>
-
-          <%!-- QA issue bd93cc0a: production-stewardship + emergency-
-               defend refusal surface, same toast pattern as every other
-               error above. --%>
-          <div
-            :if={@steward_error}
-            class="alert alert-error w-auto shadow-lg"
-            data-test="steward-error"
-          >
-            <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@steward_error}
-          </div>
-        </div>
-
-        <%!-- Story 904: the Stone Age progress panel — always visible,
-             unrelated to unit/city selection, same "durable, not a
-             selection-triggered side panel" status `KnownPlayersPanel`
-             already has (see that component's own moduledoc).
-
-             QA issue 3525f2ba: the same mobile-drawer treatment as the
-             Known Players panel above — one `ProgressPanel` mount,
-             `hidden md:block`, collapsed behind a `md:hidden` toggle
-             that closes the Known Players drawer in turn. --%>
-        <div class="absolute bottom-4 left-4 flex flex-col gap-2 items-start">
-          <button
-            type="button"
-            phx-click={toggle_mobile_panel("mobile-progress-panel")}
-            class="btn btn-sm btn-circle btn-ghost bg-base-200 shadow-sm md:hidden"
-            data-test="mobile-progress-toggle"
-            aria-label="Progress"
-          >
-            <.icon name="hero-chart-bar" class="w-4 h-4" />
-          </button>
-
-          <div id="mobile-progress-panel" class="hidden md:block">
-            <.live_component
-              module={BrokenOathsWeb.GameLive.ProgressPanel}
-              id="progress-panel"
-              player_research={@player_research}
-              cities_founded={length(@cities)}
-              camps_destroyed={@player_stats.camps_destroyed}
-              barbarians_killed={@player_stats.barbarians_killed}
-              players_discovered={length(@known_players)}
-            />
-          </div>
-        </div>
-
-        <%!-- QA issue e51a31be "UI issues" — the selection detail pane
-             (tile/unit/city/camp): absolutely positioned so it never
-             stretches to the board's full height or crowds board-viewport
-             out of the flex row (the original bug — a plain flow child
-             under a `relative` container with no `items-start` stretched
-             to 100% height and sat directly under the top-right corner
-             overlays), sized to its own content, anchored to the one
-             free corner (top-right is Known Players/Chat/Alliance,
-             bottom-left is Progress), and capped/scrollable so even a
-             tall panel never covers the whole board. Every panel gets
-             its own close (X), routed through the shared
-             "clear_selection" handler. --%>
-        <div
-          :if={@selected_tile || @selected_unit || @selected_city || @selected_camp}
-          data-test="detail-pane"
-          class="absolute bottom-4 right-4 z-20 max-h-[70vh] overflow-y-auto flex flex-col gap-2"
-        >
-          <div
-            :if={@selected_tile}
-            class="card bg-base-200/95 shadow-xl w-64 relative"
-            data-test="tile-panel"
-          >
-            <button
-              type="button"
-              phx-click="clear_selection"
-              data-test="close-tile-panel"
-              class="btn btn-ghost btn-xs btn-circle absolute top-1 right-1"
-            >
-              <.icon name="hero-x-mark" class="w-4 h-4" />
-            </button>
-            <div class="card-body p-4 gap-1">
-              <h3 class="card-title text-sm pr-6" data-test="tile-terrain">
-                {@selected_tile.terrain}
-              </h3>
-              <p class="text-xs opacity-80" data-test="tile-yields">
-                +{@selected_tile.food} food · +{@selected_tile.production} production
-              </p>
-              <p :if={@selected_tile.improvement} class="text-xs" data-test="tile-improvement">
-                {improvement_summary(@selected_tile.improvement)}
-              </p>
-              <p :if={@selected_tile.resource} class="text-xs" data-test="tile-resource">
-                {resource_label(@selected_tile.resource)}
-              </p>
-            </div>
-          </div>
-
-          <%!-- QA issue 748348fe "barbarian camp issues" — a camp under
-               siege now shows its own HP, the same "watch it drop"
-               readout `city-hp` already gives a besieged city. --%>
-          <div
-            :if={@selected_camp}
-            class="card bg-base-200/95 shadow-xl w-64 relative"
-            data-test="camp-panel"
-          >
-            <button
-              type="button"
-              phx-click="clear_selection"
-              data-test="close-camp-panel"
-              class="btn btn-ghost btn-xs btn-circle absolute top-1 right-1"
-            >
-              <.icon name="hero-x-mark" class="w-4 h-4" />
-            </button>
-            <div class="card-body p-4 gap-1">
-              <h3 class="card-title text-sm pr-6" data-test="camp-name">Barbarian Camp</h3>
-              <span class="badge badge-error badge-outline w-fit" data-test="camp-hp">
-                {@selected_camp.hp}/{Camp.max_hp()}
-              </span>
-            </div>
-          </div>
-
-          <.live_component
-            :if={@selected_unit}
-            module={BrokenOathsWeb.GameLive.UnitPanel}
-            id="unit-panel"
-            unit={@selected_unit}
-            order={@selected_order}
-            allowed_improvements={@allowed_improvements}
-            current_dig={@current_dig}
-            attackable_cities={@attackable_cities}
-          />
-
-          <.live_component
-            :if={@selected_city}
-            module={BrokenOathsWeb.GameLive.CityPanel}
-            id="city-panel"
-            city={@selected_city}
-            assignable_tiles={@assignable_tiles}
-            player_research={@player_research}
-            copper_access?={@copper_access?}
-          />
-        </div>
+        <BoardOverlays.overlays
+          chat_open={@chat_open}
+          known_players={@known_players}
+          world={@world}
+          user={@user}
+          chat_target_user_id={@chat_target_user_id}
+          order_error={@order_error}
+          combat_error={@combat_error}
+          city_error={@city_error}
+          improvement_error={@improvement_error}
+          steward_error={@steward_error}
+          player_research={@player_research}
+          cities={@cities}
+          player_stats={@player_stats}
+          selected_tile={@selected_tile}
+          selected_camp={@selected_camp}
+          selected_unit={@selected_unit}
+          selected_order={@selected_order}
+          allowed_improvements={@allowed_improvements}
+          current_dig={@current_dig}
+          attackable_cities={@attackable_cities}
+          selected_city={@selected_city}
+          assignable_tiles={@assignable_tiles}
+          copper_access?={@copper_access?}
+        />
       </div>
 
       <%!-- Canvas-only board: no tile DOM. Camera (drag rotate + wheel zoom)
@@ -4072,533 +3025,6 @@ defmodule BrokenOathsWeb.GameLive.Play do
           }
         }
       </script>
-    </div>
-    """
-  end
-
-  # -------------------------------------------------------------------
-  # Vassalage / Tribute components (stories 906/907/908)
-  # -------------------------------------------------------------------
-
-  # -------------------------------------------------------------------
-  # Rebellion components (stories 915/919)
-  # -------------------------------------------------------------------
-
-  # The persisted, first-class Rebellion panel — new judgment call,
-  # criterion 7747: `data-test="rebellion-panel"` wraps every field the
-  # design doc calls for (status, both parties, the start turn, the
-  # spawned army size, and the risen/contested city counts), rendered
-  # identically on BOTH the rebel's own view and the former lord's own.
-  # Story 919 (criterion 7754) grows the negotiated-peace affordance
-  # inline: a pending offer's own Accept/Reject (only for whichever
-  # side did NOT make the offer), or a fresh Offer Peace form while the
-  # war is still active and nothing is pending.
-  attr :rebellion, :map, required: true
-  attr :viewer_user_id, :integer, required: true
-
-  defp rebellion_panel(assigns) do
-    ~H"""
-    <div
-      data-test="rebellion-panel"
-      class="flex flex-col gap-1 text-xs border border-base-300 rounded-box p-2"
-    >
-      <div class="flex items-center justify-between gap-2">
-        <span class="font-semibold">
-          <span data-test="rebellion-rebel">{@rebellion.rebel_email}</span>
-          vs <span data-test="rebellion-former-lord">{@rebellion.former_lord_email}</span>
-        </span>
-        <span class="badge badge-outline badge-sm" data-test="rebellion-status">
-          {@rebellion.status}
-        </span>
-      </div>
-
-      <div class="flex items-center gap-2 opacity-70">
-        <span>Turn <span data-test="rebellion-started-turn">{@rebellion.started_turn}</span></span>
-        <span>Army <span data-test="rebellion-army-size">{@rebellion.army_size}</span></span>
-        <span>
-          Risen <span data-test="rebellion-risen-cities">{length(@rebellion.risen_city_ids)}</span>
-        </span>
-        <span>
-          Contested
-          <span data-test="rebellion-contested-cities">{length(@rebellion.loyal_city_ids)}</span>
-        </span>
-      </div>
-
-      <div
-        :if={@rebellion.pending_peace_offer}
-        class="flex flex-col gap-1"
-        data-test="pending-peace-offer"
-      >
-        <span>
-          {@rebellion.pending_peace_offer.offered_by_email} offers peace: {peace_outcome_label(
-            @rebellion.pending_peace_offer.outcome
-          )}
-          <span :if={@rebellion.pending_peace_offer.reparations_gold}>
-            ({@rebellion.pending_peace_offer.reparations_gold} gold reparations)
-          </span>
-        </span>
-        <div
-          :if={@rebellion.pending_peace_offer.offered_by_user_id != @viewer_user_id}
-          class="flex gap-1"
-        >
-          <button
-            type="button"
-            phx-click="accept_peace"
-            phx-value-counterparty_user_id={@rebellion.pending_peace_offer.offered_by_user_id}
-            data-test="accept-peace"
-            class="btn btn-xs btn-primary"
-          >
-            Accept
-          </button>
-          <button
-            type="button"
-            phx-click="reject_peace"
-            phx-value-counterparty_user_id={@rebellion.pending_peace_offer.offered_by_user_id}
-            data-test="reject-peace"
-            class="btn btn-xs btn-outline"
-          >
-            Reject
-          </button>
-        </div>
-      </div>
-
-      <form
-        :if={@rebellion.status == :active and is_nil(@rebellion.pending_peace_offer)}
-        phx-submit="offer_peace"
-        class="flex items-center gap-1"
-        data-test={"offer-peace-form-#{@rebellion.id}"}
-      >
-        <input
-          type="hidden"
-          name="counterparty_user_id"
-          value={rebellion_counterparty_user_id(@rebellion, @viewer_user_id)}
-        />
-        <select name="outcome" class="select select-xs">
-          <option value="independence">Grant independence</option>
-          <option value="restored_vassal">Restore as vassal</option>
-        </select>
-        <input
-          type="number"
-          name="reparations_gold"
-          min="0"
-          placeholder="gold"
-          class="input input-xs w-16"
-        />
-        <button type="submit" data-test="offer-peace" class="btn btn-xs btn-outline">
-          Offer Peace
-        </button>
-      </form>
-    </div>
-    """
-  end
-
-  defp rebellion_counterparty_user_id(rebellion, viewer_user_id) do
-    if viewer_user_id == rebellion.rebel_user_id,
-      do: rebellion.former_lord_user_id,
-      else: rebellion.rebel_user_id
-  end
-
-  defp peace_outcome_label(:independence), do: "full independence"
-  defp peace_outcome_label(:restored_vassal), do: "restored vassalage"
-
-  # The lord's own "Vassals" list — a dropdown so it never crowds the
-  # top bar; only mounted at all while `@vassals` is non-empty
-  # (`BrokenOathsSpex.Story907.Criterion7667Spex`'s own anchor: no
-  # `vassals-list` element exists at all for a lord with zero vassals).
-  attr :vassals, :list, required: true
-  attr :known_players, :list, required: true
-
-  defp vassals_panel(assigns) do
-    ~H"""
-    <div data-test="vassals-list" class="dropdown dropdown-end">
-      <div tabindex="0" role="button" class="btn btn-sm btn-outline gap-1">
-        <.icon name="hero-users" class="w-3 h-3" /> Vassals ({length(@vassals)})
-      </div>
-      <div
-        tabindex="0"
-        class="dropdown-content z-10 menu p-3 shadow bg-base-100 rounded-box w-80 gap-3"
-      >
-        <.vassal_row :for={vassal <- @vassals} vassal={vassal} known_players={@known_players} />
-      </div>
-    </div>
-    """
-  end
-
-  attr :vassal, :map, required: true
-  attr :known_players, :list, required: true
-
-  defp vassal_row(assigns) do
-    assigns = assign(assigns, :levy_targets, levy_targets(assigns.known_players, assigns.vassal))
-
-    ~H"""
-    <div
-      data-test={"vassal-row-#{@vassal.vassal_user_id}"}
-      class="flex flex-col gap-1 border-b border-base-300 pb-2 last:border-b-0"
-    >
-      <div class="flex items-center justify-between gap-2">
-        <span class="text-sm">{@vassal.email}</span>
-        <span class="badge badge-outline badge-sm" data-test="vassal-tribute-rate">
-          {tribute_rate_label(@vassal.tribute_rate)}
-        </span>
-      </div>
-
-      <div class="flex items-center justify-between text-xs opacity-70">
-        <span>Oath Strain <span data-test="vassal-oath-strain">{@vassal.oath_strain}</span></span>
-        <span :if={@vassal.levy_status} data-test="levy-status">{@vassal.levy_status}</span>
-      </div>
-
-      <%!-- Story 913 (criterion 7721): the strain gauge's own drivers
-           breakdown — a narrow tooltip-style surface naming the
-           tribute rate as a contributor, the Three Amigos notes' own
-           open "how is the gauge surfaced" question resolved to the
-           narrowest literal reading of the scenario's own words. --%>
-      <div class="text-xs opacity-50" data-test="oath-strain-drivers">
-        Driven by tribute rate: {tribute_rate_label(@vassal.tribute_rate)}
-      </div>
-
-      <%!-- Story 914: an active Protection Pact call raised against
-           THIS vassal — only rendered while one is active, mirroring
-           `levy-status`'s own "no element at all with nothing to show"
-           posture above. --%>
-      <div :if={@vassal.protection_call} class="text-xs text-error" data-test="protection-call">
-        {@vassal.email} is under attack — respond within
-        <span data-test="protection-window">{@vassal.protection_call.window_remaining}</span>
-        turn(s)
-      </div>
-
-      <%!-- Story 914 (criterion 7730): a running ledger of calls
-           honored for this vassal — always rendered (an empty tally is
-           a real, renderable "0", not an absent element), same posture
-           `oath-strain-drivers` above already takes. --%>
-      <div class="text-xs opacity-50">
-        Protection honored:
-        <span data-test="protection-honored-count">{@vassal.protection_honored_count}</span>
-      </div>
-
-      <div class="flex items-center gap-1">
-        <button
-          type="button"
-          phx-click="gift_vassal"
-          phx-value-vassal_user_id={@vassal.vassal_user_id}
-          phx-value-gift="warrior"
-          data-test="gift-vassal"
-          class="btn btn-xs btn-outline"
-        >
-          Gift
-        </button>
-        <button
-          :if={@levy_targets != []}
-          type="button"
-          phx-click="declare_shared_enemy"
-          phx-value-vassal_user_id={@vassal.vassal_user_id}
-          phx-value-enemy_user_id={hd(@levy_targets).user_id}
-          data-test="declare-shared-enemy"
-          class="btn btn-xs btn-outline"
-        >
-          Shared Enemy
-        </button>
-        <%!-- Story 916, criterion 7742 — a TARGETED concession, alongside
-             the real `set_tribute_rate` form just below: eases this
-             ONE vassal's own Oath Strain, honoring an overdue
-             Protection Pact call. --%>
-        <button
-          type="button"
-          phx-click="honor_protection_call"
-          phx-value-vassal_user_id={@vassal.vassal_user_id}
-          data-test="honor-protection-call"
-          class="btn btn-xs btn-outline"
-        >
-          Honor Protection Call
-        </button>
-      </div>
-
-      <form phx-submit="set_tribute_rate" class="flex items-center gap-1">
-        <input type="hidden" name="vassal_user_id" value={@vassal.vassal_user_id} />
-        <input
-          type="number"
-          name="rate"
-          min="0"
-          max="100"
-          value={round(@vassal.tribute_rate * 100)}
-          class="input input-xs input-bordered w-16"
-        />
-        <span class="text-xs">%</span>
-        <button type="submit" class="btn btn-xs">Set Rate</button>
-      </form>
-
-      <%!-- QA issue dae2e65d — the lord's own "issue a call to arms"
-           control: pick a third-party target (never the vassal
-           themselves — `@levy_targets` already excludes them, mirroring
-           `Levy`'s own `validate_target_not_vassal` guard) and a
-           pledged share, wired to the existing `"issue_levy"` handler.
-           Only rendered while there's an actual legal target known
-           (`@levy_targets != []`) — an empty `<select>` would only ever
-           be refused server-side anyway. --%>
-      <form
-        :if={@levy_targets != []}
-        phx-submit="issue_levy"
-        class="flex flex-col gap-1"
-        data-test={"issue-levy-form-#{@vassal.vassal_user_id}"}
-      >
-        <input type="hidden" name="vassal_user_id" value={@vassal.vassal_user_id} />
-        <div class="flex items-center gap-1">
-          <select name="target_user_id" class="select select-xs select-bordered flex-1">
-            <option :for={target <- @levy_targets} value={target.user_id}>{target.email}</option>
-          </select>
-          <input
-            type="number"
-            name="share"
-            min="0.1"
-            max="1"
-            step="0.1"
-            value="0.5"
-            class="input input-xs input-bordered w-16"
-          />
-        </div>
-        <button type="submit" data-test="issue-levy" class="btn btn-xs btn-outline self-start">
-          Call to Arms
-        </button>
-      </form>
-
-      <%!-- Story 910: stewarding an OFFLINE vassal's bank — a lord may
-           always steward their own vassal (`Stewardship.steward_role/4`
-           always resolves `:lord` here), so this only ever hides on
-           `online?`, never on eligibility. --%>
-      <button
-        :if={!@vassal.online?}
-        type="button"
-        phx-click="steward_collect_bank"
-        phx-value-owner_user_id={@vassal.vassal_user_id}
-        data-test="steward-collect-bank"
-        class="btn btn-xs btn-outline self-start"
-      >
-        Steward: Collect Bank
-      </button>
-
-      <%!-- QA issue bd93cc0a: production stewardship — set this
-           OFFLINE vassal's own production queue from the
-           CONSTRUCTIVE-only whitelist (`Stewardship.
-           constructive_item?/1`, already filtered server-side into
-           `@vassal.steward.cities`'s own `catalog`). One compact form
-           PER city rather than a single cross-city dropdown pair — two
-           cities can offer different catalogs (research/Copper access
-           differ per city), and a shared `<select>` pair would need its
-           own JS to keep the item options in sync with whichever city
-           is picked. --%>
-      <div :for={city <- steward_cities_with_catalog(@vassal.steward)} class="flex flex-col gap-1">
-        <span class="text-xs opacity-70">{city.name}</span>
-        <form
-          phx-submit="steward_queue_production"
-          data-test={"steward-production-#{city.id}"}
-          class="flex items-center gap-1"
-        >
-          <input type="hidden" name="owner_user_id" value={@vassal.vassal_user_id} />
-          <input type="hidden" name="city_id" value={city.id} />
-          <select name="item" class="select select-xs select-bordered flex-1">
-            <option :for={type <- city.catalog} value={type}>{steward_item_label(type)}</option>
-          </select>
-          <button
-            type="submit"
-            data-test={"steward-queue-production-#{city.id}"}
-            class="btn btn-xs btn-outline"
-          >
-            Steward: Set Production
-          </button>
-        </form>
-      </div>
-
-      <%!-- QA issue bd93cc0a: emergency defense — only ever offered
-           while this OFFLINE vassal is genuinely `Stewardship.
-           under_attack?/1`; each button issues a strictly adjacent
-           `"steward_defend"` order (`Stewardship.
-           defend_target_allowed?/3`'s own gate) for one of their own
-           threatened units. --%>
-      <div
-        :if={
-          @vassal.steward && @vassal.steward.under_attack? &&
-            @vassal.steward.threatened_units != []
-        }
-        data-test={"steward-defend-#{@vassal.vassal_user_id}"}
-        class="flex flex-col gap-1"
-      >
-        <span class="text-xs text-error font-medium">Under attack!</span>
-        <.steward_defend_unit
-          :for={unit <- @vassal.steward.threatened_units}
-          unit={unit}
-          owner_user_id={@vassal.vassal_user_id}
-        />
-      </div>
-    </div>
-    """
-  end
-
-  # -------------------------------------------------------------------
-  # Steward controls (QA issue bd93cc0a) — shared between `vassal_row`
-  # above and `GameLive.AlliancePanel`'s own `alliance_row` (a plain
-  # markup duplication, same status "Steward: Collect Bank" already
-  # has across the two modules — see that button's own moduledoc note
-  # for why alliance stewardship bubbles straight to `Play` with no
-  # `phx-target` instead of routing through the component).
-  # -------------------------------------------------------------------
-
-  # Only offer a city's own production form once it actually HAS a
-  # non-empty constructive catalog to offer — a size-1, freshly founded
-  # city with no research yet still has `[:settler, :worker, :warrior]`
-  # (the always-available baseline), so in practice this only ever
-  # excludes `nil` (the vassal is online, nothing to steward).
-  defp steward_cities_with_catalog(nil), do: []
-
-  defp steward_cities_with_catalog(steward),
-    do: Enum.filter(steward.cities, &(&1.catalog != []))
-
-  attr :unit, :map, required: true
-  attr :owner_user_id, :any, required: true
-
-  defp steward_defend_unit(assigns) do
-    ~H"""
-    <div data-test={"steward-unit-#{@unit.id}"} class="flex flex-col gap-1">
-      <span class="text-xs">
-        {steward_unit_label(@unit.type)} ({@unit.hp}/{@unit.max_hp})
-      </span>
-      <div class="flex flex-wrap gap-1">
-        <button
-          :for={tile_id <- @unit.adjacent_tile_ids}
-          type="button"
-          phx-click="steward_defend"
-          phx-value-owner_user_id={@owner_user_id}
-          phx-value-unit_id={@unit.id}
-          phx-value-to_tile={tile_id}
-          data-test={"steward-defend-#{@unit.id}-#{tile_id}"}
-          class="btn btn-xs btn-error btn-outline"
-        >
-          Defend → Tile {tile_id}
-        </button>
-      </div>
-    </div>
-    """
-  end
-
-  defp steward_item_label(:settler), do: "Settler"
-  defp steward_item_label(:worker), do: "Worker"
-  defp steward_item_label(:warrior), do: "Warrior"
-  defp steward_item_label(:granary), do: "Granary"
-  defp steward_item_label(:bronze_spearman), do: "Bronze Spearman"
-  defp steward_item_label(type), do: type |> to_string() |> String.capitalize()
-
-  defp steward_unit_label(:lord), do: "Lord"
-  defp steward_unit_label(:settler), do: "Settler"
-  defp steward_unit_label(:worker), do: "Worker"
-  defp steward_unit_label(:warrior), do: "Warrior"
-  defp steward_unit_label(:bronze_spearman), do: "Bronze Spearman"
-  defp steward_unit_label(type), do: type |> to_string() |> String.capitalize()
-
-  # QA issue dae2e65d — legal call-to-arms targets for `vassal`: every
-  # known civilization EXCEPT the vassal themselves (`Levy`'s own
-  # `validate_target_not_vassal`/`validate_target_not_lord` schema
-  # guards already refuse both server-side; this just keeps the
-  # dropdown from ever offering an option that would only bounce).
-  defp levy_targets(known_players, vassal),
-    do: Enum.reject(known_players, &(&1.user_id == vassal.vassal_user_id))
-
-  # -------------------------------------------------------------------
-  # Captured Cities (QA issue ffa66192 — the execute/release UI)
-  # -------------------------------------------------------------------
-
-  # The conqueror's own tracker for cities they've personally captured
-  # — a dropdown, same "never crowd the top bar" reasoning
-  # `vassals_panel` above already uses; only mounted while non-empty
-  # (`Play`'s own render gates on `@captured_cities != []`).
-  attr :captured_cities, :list, required: true
-
-  defp captured_cities_panel(assigns) do
-    ~H"""
-    <div data-test="captured-cities-panel" class="dropdown dropdown-end">
-      <div tabindex="0" role="button" class="btn btn-sm btn-outline btn-warning gap-1">
-        <.icon name="hero-flag" class="w-3 h-3" /> Captured ({length(@captured_cities)})
-      </div>
-      <div
-        tabindex="0"
-        class="dropdown-content z-10 menu p-3 shadow bg-base-100 rounded-box w-72 gap-2"
-      >
-        <.captured_city_row :for={city <- @captured_cities} city={city} />
-      </div>
-    </div>
-    """
-  end
-
-  attr :city, :map, required: true
-
-  defp captured_city_row(assigns) do
-    ~H"""
-    <div
-      data-test={"captured-city-#{@city.id}"}
-      class="flex flex-col gap-1 border-b border-base-300 pb-2 last:border-b-0"
-    >
-      <span class="text-sm font-medium">{@city.name}</span>
-
-      <div :if={@city.fallen_garrison?} class="flex flex-col gap-1" data-test="fallen-garrison-choice">
-        <span class="text-xs opacity-70">A fallen garrison awaits your judgment.</span>
-        <div class="flex items-center gap-1">
-          <button
-            type="button"
-            phx-click="resolve_garrison_fate"
-            phx-value-city_id={@city.id}
-            phx-value-choice="release"
-            data-test={"release-garrison-#{@city.id}"}
-            class="btn btn-xs btn-outline"
-          >
-            Release
-          </button>
-          <button
-            type="button"
-            phx-click="resolve_garrison_fate"
-            phx-value-city_id={@city.id}
-            phx-value-choice="execute"
-            data-test={"execute-garrison-#{@city.id}"}
-            class="btn btn-xs btn-error"
-          >
-            Execute
-          </button>
-        </div>
-      </div>
-
-      <span :if={!@city.fallen_garrison?} class="text-xs opacity-60">
-        Secured — no living defenders remain.
-      </span>
-    </div>
-    """
-  end
-
-  # -------------------------------------------------------------------
-  # Steward log (story 910)
-  # -------------------------------------------------------------------
-
-  attr :steward_log, :list, required: true
-
-  defp steward_log_panel(assigns) do
-    ~H"""
-    <div data-test="steward-log" class="dropdown dropdown-end">
-      <div tabindex="0" role="button" class="btn btn-sm btn-ghost gap-1">
-        <.icon name="hero-clipboard-document-list" class="w-3 h-3" />
-        Steward Log ({length(@steward_log)})
-      </div>
-      <div
-        tabindex="0"
-        class="dropdown-content z-10 menu p-3 shadow bg-base-100 rounded-box w-80 gap-1"
-      >
-        <p :if={@steward_log == []} class="text-xs opacity-60">
-          No steward actions taken on your behalf yet.
-        </p>
-        <div
-          :for={entry <- @steward_log}
-          data-test="steward-log-entry"
-          class="flex items-center justify-between gap-2 text-xs border-b border-base-300 pb-1 last:border-b-0"
-        >
-          <span class="truncate">{entry.steward_email}</span>
-          <span class="opacity-70">{entry.action}</span>
-          <span :if={entry.sabotage} class="badge badge-error badge-xs">sabotage</span>
-        </div>
-      </div>
     </div>
     """
   end
