@@ -17,11 +17,10 @@ defmodule BrokenOaths.Game.Unit do
   field, exactly one non-combat unit stacking with exactly one combat
   unit of the SAME owner (v0.2.1 playtest issue 5df5de88 — a worker or
   settler may walk with a warrior/lord/bronze-spearman escort — see
-  `BrokenOaths.Game.WorldServer.field_stack_room?/2` and
+  `field_stack_room?/2` below and
   `BrokenOaths.Game.Turn.entering_field_stack_with_room?/2`). It's
-  enforced at the application layer
-  (`BrokenOaths.Game.WorldServer.occupied_by_own?/4` at queue time,
-  `BrokenOaths.Game.Turn`'s movement collision check at tick time)
+  enforced at the application layer (`occupied_by_own?/4` below at queue
+  time, `BrokenOaths.Game.Turn`'s movement collision check at tick time)
   rather than a blanket DB unique index — see migration
   `20260716190000` for why a DB-level constraint can no longer express
   this rule.
@@ -40,17 +39,48 @@ defmodule BrokenOaths.Game.Unit do
   (`BrokenOaths.Game.WorldServer.persist_unit_changes/2` diffs
   `state.units` and deletes whatever's missing). Every other unit type
   simply carries the default and never reads it.
+
+  ## Queue move (pragdave decomposition, slice 4)
+
+  `queue_move/4` is the pure, process-unaware "domain model" home for
+  the unit-movement "queue_move" command logic
+  `BrokenOaths.Game.WorldServer` used to bury inline as private `do_*`
+  functions (see `.code_my_spec/knowledge/genserver_decomposition.md`).
+  It takes the WorldServer's own tick-`state` plus plain args and
+  returns either an ok-tuple carrying both the pre-move and post-move
+  `state` (persist_tick's own before/after diff needs both) or
+  `{:error, reason}` — no `GenServer`, no `handle_*`, no process
+  awareness; `WorldServer`'s own `:queue_move` `handle_call` is a thin
+  delegation into this function. Orders execute immediately with
+  whatever movement the unit has left, the same "resolve now, don't
+  wait for a turn boundary" shape `BrokenOaths.Game.Combat.attack/4`
+  uses — coordinates its siblings directly, per the north star's
+  "cross-cutting operations are orchestrated by their OWNING domain
+  model calling its siblings" rule: `BrokenOaths.Game.Turn.move_now/2`
+  resolves the immediate step, `BrokenOaths.Game.Vassalization.
+  apply_captures/1` and `BrokenOaths.Game.Rebellion.War.
+  process_rebellion_endings/2` are the same two post-move hooks
+  (story 919's adjacent-march rebellion check) `WorldServer`'s own
+  callback used to run inline.
   """
 
   use Ecto.Schema
   import Ecto.Changeset
 
   alias BrokenOaths.Game.Camp
+  alias BrokenOaths.Game.CityDefense
+  alias BrokenOaths.Game.Order
   alias BrokenOaths.Game.Player
+  alias BrokenOaths.Game.Rebellion.War
+  alias BrokenOaths.Game.Turn
+  alias BrokenOaths.Game.Vassalization
+  alias BrokenOaths.Repo
+  alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
 
   @type unit_type ::
           :lord | :settler | :warrior | :worker | :barbarian_warrior | :bronze_spearman | :archer
+  @type tile_id :: non_neg_integer()
 
   @type t :: %__MODULE__{
           id: integer() | nil,
@@ -155,5 +185,194 @@ defmodule BrokenOaths.Game.Unit do
     else
       changeset
     end
+  end
+
+  # -------------------------------------------------------------------
+  # Queue move (stories 875/899/919) — moved home from
+  # `BrokenOaths.Game.WorldServer`'s own `do_queue_move/4` — see this
+  # module's own "Queue move" moduledoc section above.
+  # -------------------------------------------------------------------
+
+  @doc """
+  Queue (and immediately execute) a move order: `user`'s own `unit_id`
+  paths toward `to_tile` over `:land` tiles, avoiding currently-occupied
+  intermediate tiles (the destination itself may be occupied — see
+  `bfs_path/3` below), persists the order, then resolves as much of it
+  as the unit's remaining movement allows this instant
+  (`Turn.move_now/2`), applying any resulting capture/vassalization and
+  rebellion-ending fallout.
+
+  Returns `{:ok, result, state_before_move, state_after_move,
+  capture_events}` on success — both states are handed back because
+  `WorldServer`'s own `persist_tick/2` diffs the state right after the
+  order was queued/persisted against the one after `Turn.move_now/2`
+  ran, not the very original request state.
+  """
+  @spec queue_move(map(), map(), term(), tile_id()) ::
+          {:ok, %{path: [tile_id()]}, map(), map(), [term()]} | {:error, atom()}
+  def queue_move(state, user, unit_id, to_tile) do
+    case do_queue_move(state, user, unit_id, to_tile) do
+      {:ok, _path, queued} ->
+        moved = Turn.move_now(queued, unit_id)
+        {moved, capture_events} = Vassalization.apply_captures(moved)
+        # Story 919: an adjacent march can knock a rebel out of the
+        # fight (or hand the former lord back every risen city) without
+        # ever needing a full turn boundary — see `War.
+        # process_rebellion_endings/2`'s own doc for why this immediate
+        # hook matters alongside its `Turn`-tick call site.
+        moved = War.process_rebellion_endings(moved, :move)
+
+        remaining =
+          case Map.get(moved.orders, unit_id) do
+            %{path: rest} -> rest
+            nil -> []
+          end
+
+        {:ok, %{path: remaining}, queued, moved, capture_events}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp do_queue_move(state, user, unit_id, to_tile) do
+    player = find_player(state, user.id)
+    unit = Map.get(state.units, unit_id)
+
+    cond do
+      is_nil(player) or is_nil(unit) or unit.player_id != player.id ->
+        {:error, :not_owner}
+
+      not is_integer(to_tile) or to_tile < 0 or
+          to_tile >= 10 * state.world.frequency * state.world.frequency + 2 ->
+        {:error, :invalid_tile}
+
+      Regions.tile_class(state.world, to_tile) != :land ->
+        {:error, :impassable}
+
+      occupied_by_own?(state, to_tile, player.id, unit) ->
+        {:error, :occupied}
+
+      true ->
+        case bfs_path(state, unit.tile_id, to_tile) do
+          [] ->
+            {:error, :unreachable}
+
+          nil ->
+            {:error, :unreachable}
+
+          path ->
+            persist_order!(unit_id, path)
+
+            new_state = %{
+              state
+              | orders:
+                  Map.put(state.orders, unit_id, %{kind: :move, path: path, status: :pending})
+            }
+
+            {:ok, path, new_state}
+        end
+    end
+  end
+
+  # A player can never stack their own units, but a tile another player
+  # currently holds is still a valid target — Turn's dynamic collision
+  # check (not this queue-time check) is what halts the mover if the
+  # tile is still occupied when they actually arrive. Story 895's
+  # exception: `mover`'s own city's own tile allows up to
+  # `CityDefense.garrison_cap/0` military units (civilians always fit,
+  # uncounted) — see `CityDefense.garrison_room?/2`. Every OTHER own
+  # tile keeps a tighter, but not all-or-nothing, rule (v0.2.1 playtest
+  # issue 5df5de88): exactly one non-combat unit may stack with exactly
+  # one combat unit out in the open field — `field_stack_room?/2` below
+  # — so a worker/settler can walk with a warrior escort without a
+  # city underfoot. `Turn.blocked?/6` mirrors this same allowance for
+  # the dynamic, tick-time collision check.
+  defp occupied_by_own?(state, tile_id, player_id, mover) do
+    own_units_here =
+      for {_id, u} <- state.units, u.tile_id == tile_id, u.player_id == player_id, do: u
+
+    case Enum.find(state.cities, fn {_id, c} ->
+           c.tile_id == tile_id and c.player_id == player_id
+         end) do
+      nil -> not field_stack_room?(mover, own_units_here)
+      _own_city -> not CityDefense.garrison_room?(mover, own_units_here)
+    end
+  end
+
+  # Room for `mover` on a non-city tile already holding `own_units_here`
+  # (all same-owner, by construction — see `occupied_by_own?/4`'s own
+  # `own_units_here` filter): empty is always room; a lone existing unit
+  # leaves room only for the OTHER combat class (one civilian + one
+  # combat, either order); two or more units already there is always
+  # full. `CityDefense.military?/1` is the same combat/civilian split
+  # story 895's own garrison rule uses (`:lord`/`:warrior`/
+  # `:bronze_spearman` are combat; everything else is civilian).
+  defp field_stack_room?(_mover, []), do: true
+
+  defp field_stack_room?(mover, [only]),
+    do: CityDefense.military?(only) != CityDefense.military?(mover)
+
+  defp field_stack_room?(_mover, _units), do: false
+
+  defp persist_order!(unit_id, path) do
+    attrs = %{unit_id: unit_id, kind: :move, path: path, status: :pending}
+
+    case Repo.get_by(Order, unit_id: unit_id) do
+      nil -> %Order{} |> Order.changeset(attrs) |> Repo.insert!()
+      existing -> existing |> Order.changeset(attrs) |> Repo.update!()
+    end
+  end
+
+  # Shortest path over :land tiles, excluding `from`, including `to`.
+  # Plan around units that are on the board RIGHT NOW: occupied tiles
+  # are impassable as intermediate steps (an equally short free path
+  # must be preferred; a knowingly-blocked plan would interrupt on step
+  # one). The DESTINATION may be occupied — approaching another player's
+  # tile is legal; Turn's dynamic collision check is what stops the
+  # mover adjacent to it.
+  defp bfs_path(state, from, to) do
+    occupied =
+      for {_id, u} <- state.units, u.tile_id != from, into: MapSet.new(), do: u.tile_id
+
+    bfs_loop(state.world, occupied, :queue.from_list([{from, []}]), MapSet.new([from]), to)
+  end
+
+  defp bfs_loop(world, occupied, queue, visited, to) do
+    case :queue.out(queue) do
+      {:empty, _} ->
+        nil
+
+      {{:value, {^to, path}}, _rest} ->
+        Enum.reverse(path)
+
+      {{:value, {tile, path}}, rest} ->
+        neighbors =
+          world
+          |> Regions.adjacent_tiles(tile)
+          |> Enum.filter(
+            &(Regions.tile_class(world, &1) == :land and not MapSet.member?(visited, &1) and
+                (&1 == to or not MapSet.member?(occupied, &1)))
+          )
+
+        {queue, visited} =
+          Enum.reduce(neighbors, {rest, visited}, fn n, {q, v} ->
+            {:queue.in({n, [n | path]}, q), MapSet.put(v, n)}
+          end)
+
+        bfs_loop(world, occupied, queue, visited, to)
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Shared, trivial lookups — duplicated rather than reaching back into
+  # `WorldServer`, matching the sibling `BrokenOaths.Game.City`/
+  # `BrokenOaths.Game.Combat`'s own "pure, process-unaware,
+  # unit-testable with no GenServer running" contract (small private
+  # helper copies rather than expanding public APIs).
+  # -------------------------------------------------------------------
+
+  defp find_player(state, user_id) do
+    state.players |> Map.values() |> Enum.find(&(&1.user_id == user_id))
   end
 end

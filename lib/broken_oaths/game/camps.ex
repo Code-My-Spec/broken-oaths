@@ -70,6 +70,24 @@ defmodule BrokenOaths.Game.Camps do
   `ready?` camp that can't find a free landing tile keeps its counter
   climbing so it fires again as soon as a tile is free.
 
+  ## Camp assault (story 894, pragdave decomposition slice 4)
+
+  `attack_camp/4` and `resolve_camp_attack/3` are the pragdave-pattern
+  "domain model" home (`.code_my_spec/knowledge/genserver_decomposition.md`)
+  for the unit-vs-camp "attack_camp" flow `BrokenOaths.Game.WorldServer`
+  used to bury inline: they take the WorldServer's own tick-`state` (see
+  `BrokenOaths.Game.Turn`'s moduledoc for that shape) plus plain args and
+  return either a reply tuple or an updated `state` — no `GenServer`, no
+  `handle_*`, no process awareness. `WorldServer`'s own `:attack_camp`
+  `handle_call` is a thin delegation into `attack_camp/4`, mirroring
+  `BrokenOaths.Game.Combat`'s own "Attack orchestration" section for
+  unit-vs-unit combat. Coordinates its siblings directly, per the north
+  star's "cross-cutting operations are orchestrated by their OWNING
+  domain model calling its siblings" rule: `BrokenOaths.Game.Combat` for
+  the flat camp-damage math and adjacency/target-legality validation,
+  `BrokenOaths.Game.Cooperation` for the per-player damage ledger and
+  proportional bounty split once a camp falls.
+
   ## Determinism
 
   Placement rolls are seeded from a caller-supplied term (typically
@@ -79,6 +97,8 @@ defmodule BrokenOaths.Game.Camps do
   the same placement.
   """
 
+  alias BrokenOaths.Game.Combat
+  alias BrokenOaths.Game.Cooperation
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
 
@@ -90,6 +110,7 @@ defmodule BrokenOaths.Game.Camps do
           spawn_counter: non_neg_integer(),
           destroyed_at: term() | nil
         }
+  @type attack_outcome :: %{damage_dealt: non_neg_integer(), damage_taken: non_neg_integer()}
 
   @spawn_cadence 3
   @max_warriors 2
@@ -277,6 +298,142 @@ defmodule BrokenOaths.Game.Camps do
   @doc "Reset a camp's spawn counter after a warrior has actually been placed."
   @spec spawned(camp()) :: camp()
   def spawned(camp), do: %{camp | spawn_counter: 0}
+
+  # -------------------------------------------------------------------
+  # Camp assault (story 894) — moved home from `BrokenOaths.Game.
+  # WorldServer`'s own `do_attack_camp/4`/`resolve_camp_attack/3`; see
+  # this module's own "Camp assault" moduledoc section above.
+  # -------------------------------------------------------------------
+
+  @doc """
+  Resolve an immediate "attack_camp" request: `user`'s own `unit_id`
+  strikes `camp_id` right now, against whatever movement the attacker
+  has left — flat damage, no counter-attack (`Combat.camp_damage/2`),
+  resolving immediately like `Combat.attack/4` rather than queuing. An
+  already-destroyed (or nonexistent) camp is refused the same way an
+  already-dead unit target is. `WorldServer`'s own `:attack_camp`
+  `handle_call` wraps this with persistence and the broadcast.
+  """
+  @spec attack_camp(map(), map(), term(), term()) ::
+          {:ok, attack_outcome(), map()} | {:error, term()}
+  def attack_camp(state, user, unit_id, camp_id) do
+    player = find_player(state, user.id)
+    attacker = Map.get(state.units, unit_id)
+    camp = Map.get(state.camps, camp_id)
+
+    cond do
+      is_nil(player) or is_nil(attacker) or attacker.player_id != player.id ->
+        {:error, :not_owner}
+
+      is_nil(camp) or not is_nil(camp.destroyed_at) ->
+        {:error, :invalid_target}
+
+      true ->
+        adjacent_tile_ids = Regions.adjacent_tiles(state.world, attacker.tile_id)
+
+        case Combat.validate_camp_attack(attacker, camp, adjacent_tile_ids) do
+          :ok ->
+            {result, new_state} = resolve_camp_attack(state, attacker, camp)
+            {:ok, result, new_state}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
+
+  @doc """
+  Resolve a single already-validated camp exchange: `attack_camp/4`'s
+  own post-`Combat.validate_camp_attack/3` step.
+  """
+  @spec resolve_camp_attack(map(), map(), camp()) :: {attack_outcome(), map()}
+  def resolve_camp_attack(state, attacker, camp) do
+    dealt = Combat.camp_damage(attacker, lord_adjacent?(state, attacker))
+    new_camp = %{camp | hp: max(camp.hp - dealt, 0)}
+    new_attacker = %{attacker | movement: 0}
+
+    state =
+      %{state | units: Map.put(state.units, attacker.id, new_attacker)}
+      |> record_camp_damage(camp.id, attacker.player_id, dealt)
+      |> apply_camp_damage(new_camp)
+
+    {%{damage_dealt: dealt, damage_taken: 0}, state}
+  end
+
+  # Story 901: every hit against a camp — from ANY player, not just
+  # whoever eventually lands the killing blow — accumulates in the
+  # in-memory damage ledger `apply_camp_damage/2`'s own `Cooperation.
+  # split_bounty/3` call reads once the camp falls. Kept only in memory
+  # (`state.camp_contributions`), never persisted — same known, narrow
+  # limitation `WorldServer`'s own `pending_heirs` doc calls out for
+  # equally ephemeral cross-tick bookkeeping: a restart mid-siege loses
+  # the running tally (the camp's own HP, being a real persisted
+  # column, is unaffected).
+  defp record_camp_damage(state, camp_id, player_id, dealt) do
+    contributions =
+      Cooperation.record_damage(camp_contributions(state), camp_id, player_id, dealt)
+
+    Map.put(state, :camp_contributions, contributions)
+  end
+
+  defp camp_contributions(state), do: Map.get(state, :camp_contributions, %{})
+
+  # Story 894/901, criterion 7560/7614/7615: 0 HP destroys the camp —
+  # `destroyed_at` stops `advance/2` from ever spawning again and drops
+  # it from `WorldServer`'s fog-filtered `visible_camps/2` surface.
+  # `destroy_reward/0` splits proportionally across every player who
+  # ever struck THIS camp (`Cooperation.split_bounty/3`, reading the
+  # ledger `record_camp_damage/3` built above) — a sole attacker's own
+  # 100% share is still the WHOLE reward, never a smaller "default" cut
+  # (criterion 7615). The ledger entry is forgotten immediately after: a
+  # camp is destroyed exactly once, and nothing else ever reads its
+  # history. Orphaned warriors are untouched — they're separate `Unit`
+  # rows, not nested under the camp in `state.units` (criterion 7561).
+  defp apply_camp_damage(state, %{hp: 0} = camp) do
+    destroyed = %{camp | destroyed_at: NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)}
+    shares = Cooperation.split_bounty(camp_contributions(state), camp.id, destroy_reward())
+
+    %{state | camps: Map.put(state.camps, camp.id, destroyed)}
+    |> pay_shares(shares)
+    |> Map.put(:camp_contributions, Cooperation.forget(camp_contributions(state), camp.id))
+  end
+
+  defp apply_camp_damage(state, camp) do
+    %{state | camps: Map.put(state.camps, camp.id, camp)}
+  end
+
+  # Story 904: every contributor paid a reward share also gets their
+  # own `camps_destroyed` career total bumped — the same "credit
+  # everyone who struck it, not just the killing blow" philosophy
+  # `Cooperation.split_bounty/3` already applies to the gold itself.
+  defp pay_shares(state, shares) do
+    Enum.reduce(shares, state, fn {player_id, gold}, acc ->
+      acc = update_in(acc.players[player_id].gold, &(&1 + gold))
+      update_in(acc.players[player_id].camps_destroyed, &(&1 + 1))
+    end)
+  end
+
+  # A living unit of the SAME player standing next door — dead units
+  # are already gone from `state.units`, so presence alone means
+  # living, and a lord's own tile is never its own neighbor, so this
+  # never accidentally self-buffs the lord. Duplicated (not shared)
+  # into `BrokenOaths.Game.Combat`/`WorldServer` per this codebase's own
+  # established "small pure state-accessor helpers live wherever
+  # they're needed" convention (see e.g. `Combat`'s own
+  # `lord_adjacent?/2`).
+  defp lord_adjacent?(state, unit) do
+    adjacent_tile_ids = Regions.adjacent_tiles(state.world, unit.tile_id)
+
+    state.units
+    |> Map.values()
+    |> Enum.any?(
+      &(&1.type == :lord and &1.player_id == unit.player_id and &1.tile_id in adjacent_tile_ids)
+    )
+  end
+
+  defp find_player(state, user_id) do
+    state.players |> Map.values() |> Enum.find(&(&1.user_id == user_id))
+  end
 
   # -------------------------------------------------------------------
   # Seeded random selection

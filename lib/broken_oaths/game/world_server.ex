@@ -220,19 +220,8 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   def handle_call({:queue_move, user, unit_id, to_tile}, _from, state) do
-    case do_queue_move(state, user, unit_id, to_tile) do
-      {:ok, _path, queued} ->
-        # Orders execute immediately with whatever movement the unit has
-        # left; the turn boundary only recharges and continues.
-        moved = Turn.move_now(queued, unit_id)
-        {moved, capture_events} = Vassalization.apply_captures(moved)
-        # Story 919: an adjacent march can knock a rebel out of the
-        # fight (or hand the former lord back every risen city) without
-        # ever needing a full turn boundary — see `process_rebellion_
-        # endings/1`'s own doc for why this immediate hook matters
-        # alongside its `run_tick/1` call site.
-        moved = War.process_rebellion_endings(moved, :move)
-
+    case Unit.queue_move(state, user, unit_id, to_tile) do
+      {:ok, result, queued, moved, capture_events} ->
         case persist_tick(queued, moved) do
           :ok ->
             broadcast(
@@ -240,13 +229,7 @@ defmodule BrokenOaths.Game.WorldServer do
               [:units_changed | approach_alert_events(state, moved)] ++ capture_events
             )
 
-            remaining =
-              case Map.get(moved.orders, unit_id) do
-                %{path: rest} -> rest
-                nil -> []
-              end
-
-            {:reply, {:ok, %{path: remaining}}, moved}
+            {:reply, {:ok, result}, moved}
 
           :stale ->
             # A competing instance advanced the world under us — drop the
@@ -277,7 +260,7 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   def handle_call({:attack_camp, user, unit_id, camp_id}, _from, state) do
-    case do_attack_camp(state, user, unit_id, camp_id) do
+    case Camps.attack_camp(state, user, unit_id, camp_id) do
       {:ok, result, new_state} ->
         case persist_tick(state, new_state) do
           :ok ->
@@ -1909,88 +1892,15 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   # -------------------------------------------------------------------
-  # Queue move
+  # Queue move (stories 875/899/919) — the "queue_move" `handle_call` is
+  # a thin delegation into `BrokenOaths.Game.Unit.queue_move/4`
+  # (`.code_my_spec/knowledge/genserver_decomposition.md`), which now
+  # owns `do_queue_move/4`, `occupied_by_own?/4`, and `field_stack_room?/2`.
+  # `persist_order!/2`, `bfs_path/3`, and `bfs_loop/5` stay here too
+  # (duplicated, not removed) — `resolve_steward_defend/4`'s own
+  # emergency-defense move below still calls them directly, and
+  # Stewardship/Feudal orchestration is out of this slice's scope.
   # -------------------------------------------------------------------
-
-  defp do_queue_move(state, user, unit_id, to_tile) do
-    player = find_player(state, user.id)
-    unit = Map.get(state.units, unit_id)
-
-    cond do
-      is_nil(player) or is_nil(unit) or unit.player_id != player.id ->
-        {:error, :not_owner}
-
-      not is_integer(to_tile) or to_tile < 0 or
-          to_tile >= 10 * state.world.frequency * state.world.frequency + 2 ->
-        {:error, :invalid_tile}
-
-      Regions.tile_class(state.world, to_tile) != :land ->
-        {:error, :impassable}
-
-      occupied_by_own?(state, to_tile, player.id, unit) ->
-        {:error, :occupied}
-
-      true ->
-        case bfs_path(state, unit.tile_id, to_tile) do
-          [] ->
-            {:error, :unreachable}
-
-          nil ->
-            {:error, :unreachable}
-
-          path ->
-            persist_order!(unit_id, path)
-
-            new_state = %{
-              state
-              | orders:
-                  Map.put(state.orders, unit_id, %{kind: :move, path: path, status: :pending})
-            }
-
-            {:ok, path, new_state}
-        end
-    end
-  end
-
-  # A player can never stack their own units, but a tile another player
-  # currently holds is still a valid target — Turn's dynamic collision
-  # check (not this queue-time check) is what halts the mover if the
-  # tile is still occupied when they actually arrive. Story 895's
-  # exception: `mover`'s own city's own tile allows up to
-  # `CityDefense.garrison_cap/0` military units (civilians always fit,
-  # uncounted) — see `CityDefense.garrison_room?/2`. Every OTHER own
-  # tile keeps a tighter, but not all-or-nothing, rule (v0.2.1 playtest
-  # issue 5df5de88): exactly one non-combat unit may stack with exactly
-  # one combat unit out in the open field — `field_stack_room?/2` below
-  # — so a worker/settler can walk with a warrior escort without a
-  # city underfoot. `Turn.blocked?/6` mirrors this same allowance for
-  # the dynamic, tick-time collision check.
-  defp occupied_by_own?(state, tile_id, player_id, mover) do
-    own_units_here =
-      for {_id, u} <- state.units, u.tile_id == tile_id, u.player_id == player_id, do: u
-
-    case Enum.find(state.cities, fn {_id, c} ->
-           c.tile_id == tile_id and c.player_id == player_id
-         end) do
-      nil -> not field_stack_room?(mover, own_units_here)
-      _own_city -> not CityDefense.garrison_room?(mover, own_units_here)
-    end
-  end
-
-  # Room for `mover` on a non-city tile already holding `own_units_here`
-  # (all same-owner, by construction — see `occupied_by_own?/4`'s own
-  # `own_units_here` filter): empty is always room; a lone existing unit
-  # leaves room only for the OTHER combat class (one civilian + one
-  # combat, either order); two or more units already there is always
-  # full. `CityDefense.military?/1` is the same combat/civilian split
-  # story 895's own garrison rule uses (`:lord`/`:warrior`/
-  # `:bronze_spearman` are combat; everything else is civilian).
-  defp field_stack_room?(_mover, []), do: true
-
-  defp field_stack_room?(mover, [only]),
-    do: CityDefense.military?(only) != CityDefense.military?(mover)
-
-  defp field_stack_room?(_mover, _units), do: false
 
   defp persist_order!(unit_id, path) do
     attrs = %{unit_id: unit_id, kind: :move, path: path, status: :pending}
@@ -2048,103 +1958,10 @@ defmodule BrokenOaths.Game.WorldServer do
   # -------------------------------------------------------------------
 
   # -------------------------------------------------------------------
-  # Camp assault (story 894)
+  # Camp assault (story 894) — the "attack_camp" `handle_call` is a thin
+  # delegation into `BrokenOaths.Game.Camps.attack_camp/4`
+  # (`.code_my_spec/knowledge/genserver_decomposition.md`).
   # -------------------------------------------------------------------
-
-  # Resolves immediately, like `Combat.attack/4` — flat damage, no counter
-  # (see `Combat.camp_damage/2`). An already-destroyed (or nonexistent)
-  # camp is refused the same way an already-dead unit target is.
-  defp do_attack_camp(state, user, unit_id, camp_id) do
-    player = find_player(state, user.id)
-    attacker = Map.get(state.units, unit_id)
-    camp = Map.get(state.camps, camp_id)
-
-    cond do
-      is_nil(player) or is_nil(attacker) or attacker.player_id != player.id ->
-        {:error, :not_owner}
-
-      is_nil(camp) or not is_nil(camp.destroyed_at) ->
-        {:error, :invalid_target}
-
-      true ->
-        adjacent_tile_ids = Regions.adjacent_tiles(state.world, attacker.tile_id)
-
-        case Combat.validate_camp_attack(attacker, camp, adjacent_tile_ids) do
-          :ok ->
-            {result, new_state} = resolve_camp_attack(state, attacker, camp)
-            {:ok, result, new_state}
-
-          {:error, reason} ->
-            {:error, reason}
-        end
-    end
-  end
-
-  defp resolve_camp_attack(state, attacker, camp) do
-    dealt = Combat.camp_damage(attacker, lord_adjacent?(state, attacker))
-    new_camp = %{camp | hp: max(camp.hp - dealt, 0)}
-    new_attacker = %{attacker | movement: 0}
-
-    state =
-      %{state | units: Map.put(state.units, attacker.id, new_attacker)}
-      |> record_camp_damage(camp.id, attacker.player_id, dealt)
-      |> apply_camp_damage(new_camp)
-
-    {%{damage_dealt: dealt, damage_taken: 0}, state}
-  end
-
-  # Story 901: every hit against a camp — from ANY player, not just
-  # whoever eventually lands the killing blow — accumulates in the
-  # in-memory damage ledger `split_bounty/2` (below) reads once the
-  # camp falls. Kept only in memory (`state.camp_contributions`), never
-  # persisted — same known, narrow limitation `WorldServer`'s own
-  # `pending_heirs` doc calls out for equally ephemeral cross-tick
-  # bookkeeping: a restart mid-siege loses the running tally (the
-  # camp's own HP, being a real persisted column, is unaffected).
-  defp record_camp_damage(state, camp_id, player_id, dealt) do
-    contributions =
-      Cooperation.record_damage(camp_contributions(state), camp_id, player_id, dealt)
-
-    Map.put(state, :camp_contributions, contributions)
-  end
-
-  defp camp_contributions(state), do: Map.get(state, :camp_contributions, %{})
-
-  # Story 894/901, criterion 7560/7614/7615: 0 HP destroys the camp —
-  # `destroyed_at` stops `Camps.advance/2` from ever spawning again
-  # (already handled, story 892) and drops it from `visible_camps/2`'s
-  # fog-filtered surface. `Camps.destroy_reward/0` splits proportionally
-  # across every player who ever struck THIS camp
-  # (`Cooperation.split_bounty/3`, reading the ledger `record_camp_damage/3`
-  # built above) — a sole attacker's own 100% share is still the WHOLE
-  # reward, never a smaller "default" cut (criterion 7615). The ledger
-  # entry is forgotten immediately after: a camp is destroyed exactly
-  # once, and nothing else ever reads its history. Orphaned warriors are
-  # untouched — they're separate `Unit` rows, not nested under the camp
-  # in `state.units` (criterion 7561).
-  defp apply_camp_damage(state, %{hp: 0} = camp) do
-    destroyed = %{camp | destroyed_at: NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)}
-    shares = Cooperation.split_bounty(camp_contributions(state), camp.id, Camps.destroy_reward())
-
-    %{state | camps: Map.put(state.camps, camp.id, destroyed)}
-    |> pay_shares(shares)
-    |> Map.put(:camp_contributions, Cooperation.forget(camp_contributions(state), camp.id))
-  end
-
-  defp apply_camp_damage(state, camp) do
-    %{state | camps: Map.put(state.camps, camp.id, camp)}
-  end
-
-  # Story 904: every contributor paid a reward share also gets their
-  # own `camps_destroyed` career total bumped — the same "credit
-  # everyone who struck it, not just the killing blow" philosophy
-  # `Cooperation.split_bounty/3` already applies to the gold itself.
-  defp pay_shares(state, shares) do
-    Enum.reduce(shares, state, fn {player_id, gold}, acc ->
-      acc = update_in(acc.players[player_id].gold, &(&1 + gold))
-      update_in(acc.players[player_id].camps_destroyed, &(&1 + 1))
-    end)
-  end
 
   # -------------------------------------------------------------------
   # City assault (story 895/906) — the "attack_city"/"resolve_garrison_fate"
@@ -2312,20 +2129,6 @@ defmodule BrokenOaths.Game.WorldServer do
         online? = Presence.online?(world, %{id: player.user_id})
         Map.put(players, player_id, Bank.settle_income(player, income, online?))
     end
-  end
-
-  # A living unit of the SAME player standing next door — dead units
-  # are already gone from `state.units`, so presence alone means
-  # living, and a lord's own tile is never its own neighbor, so this
-  # never accidentally self-buffs the lord.
-  defp lord_adjacent?(state, unit) do
-    adjacent_tile_ids = Regions.adjacent_tiles(state.world, unit.tile_id)
-
-    state.units
-    |> Map.values()
-    |> Enum.any?(
-      &(&1.type == :lord and &1.player_id == unit.player_id and &1.tile_id in adjacent_tile_ids)
-    )
   end
 
   # -------------------------------------------------------------------
@@ -3209,8 +3012,8 @@ defmodule BrokenOaths.Game.WorldServer do
   # logged AND dinged on the steward's own Honor, even though the move
   # itself is still refused. Only every gate clearing actually queues
   # and immediately resolves the move (`bfs_path/3` + `Turn.move_now/2`,
-  # the same "orders execute immediately" pattern `do_queue_move/4`
-  # already establishes).
+  # the same "orders execute immediately" pattern `BrokenOaths.Game.Unit.
+  # queue_move/4` already establishes).
   defp do_steward_defend(state, steward_user, owner_user_id, unit_id, to_tile) do
     with {:ok, steward_player, owner_player} <-
            fetch_steward_context(state, steward_user, owner_user_id),
@@ -3553,7 +3356,8 @@ defmodule BrokenOaths.Game.WorldServer do
   # `spawn_wilderness_camps/3`) — this only reconciles what the tick
   # itself advances: `spawn_counter` (every camp, every tick), `hp`
   # (story 894's camp assault), and `destroyed_at` (also story 894 — a
-  # camp reduced to 0 HP, both via `do_attack_camp/4` immediately and
+  # camp reduced to 0 HP, both via `BrokenOaths.Game.Camps.attack_camp/4`
+  # immediately and
   # via `Turn`'s barbarian AI loop pillaging nothing of the camp itself,
   # only ever set here).
   defp persist_camp_changes(old_camps, new_camps) do
@@ -3570,7 +3374,8 @@ defmodule BrokenOaths.Game.WorldServer do
   # after `spawn_new_player/2`'s initial 50. Story 904 adds two more,
   # riding the same diff-and-persist path: `barbarians_killed` (bumped
   # alongside every bounty payout) and `camps_destroyed` (bumped
-  # alongside every reward-share payout, `pay_shares/2`).
+  # alongside every reward-share payout `BrokenOaths.Game.Camps.
+  # attack_camp/4` triggers).
   defp persist_player_changes(old_players, new_players) do
     for {id, player} <- new_players, Map.get(old_players, id) != player do
       Repo.update_all(from(p in Player, where: p.id == ^id),
