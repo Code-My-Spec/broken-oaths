@@ -91,10 +91,13 @@ defmodule BrokenOaths.Game do
         {:ok, world}
 
       world = Enum.find(active, &(not MapSet.member?(member_ids, &1.id) and not world_full?(&1))) ->
-        join_world(world, user)
+        with {:ok, _player} <- join_world(world, user), do: {:ok, world}
 
       true ->
-        with {:ok, world} <- Worlds.create_open_world(), do: join_world(world, user)
+        with {:ok, world} <- Worlds.create_open_world(),
+             {:ok, _player} <- join_world(world, user) do
+          {:ok, world}
+        end
     end
   end
 
