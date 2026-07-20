@@ -73,7 +73,7 @@ defmodule BrokenOathsSpex.Story893.Criterion7554Spex do
   assertions — a real result of a genuinely live, multi-camp world,
   but irrelevant to what this criterion actually tests (ONE camp's own
   target-selection decision). `Fixtures.isolate_camp/2` (new,
-  narrow, documented-bridge status — see `BrokenOaths.Game.WorldServer`'s
+  narrow, documented-bridge status — see `BrokenOaths.Simulation.WorldServer`'s
   `:isolate_camp_for_test` handler) destroys every OTHER camp and
   hard-deletes their warriors the moment the tracked camp is known —
   before city1 even starts growing — so no other actor exists to

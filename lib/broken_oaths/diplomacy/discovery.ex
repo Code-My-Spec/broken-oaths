@@ -3,8 +3,8 @@ defmodule BrokenOaths.Diplomacy.Discovery do
   Pure first-contact detection (story 899): the moment a player's own
   CURRENT vision reveals another player's unit or city. No `Repo`, no
   process state — mirrors `BrokenOaths.Combat.CityDefense`'s role:
-  `BrokenOaths.Game.WorldServer` is the imperative shell that holds the
-  canonical tick-state (see `BrokenOaths.Game.Turn`'s moduledoc for that
+  `BrokenOaths.Simulation.WorldServer` is the imperative shell that holds the
+  canonical tick-state (see `BrokenOaths.Simulation.Turn`'s moduledoc for that
   shape) plus the set of already-known player pairs, calls into this
   module at every turn boundary, and persists whatever comes back as
   `BrokenOaths.Diplomacy.KnownPlayer` rows.
@@ -33,7 +33,7 @@ defmodule BrokenOaths.Diplomacy.Discovery do
   ## Tick orchestration + known-players read (pragdave decomposition, slice 5)
 
   `apply_discoveries/2` is the tick-time "logic out of the GenServer"
-  home for `BrokenOaths.Game.WorldServer`'s own former private
+  home for `BrokenOaths.Simulation.WorldServer`'s own former private
   `apply_discoveries/2` — takes the pre-tick `state` and post-tick
   `ticked` state, folds every `new_contacts/2` pair into `ticked`'s own
   in-memory `known_players` `MapSet` (both directions, mirroring the

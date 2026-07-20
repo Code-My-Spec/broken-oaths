@@ -1,7 +1,7 @@
 defmodule BrokenOaths.Players do
   @moduledoc """
   A player's own treasury and lifetime stats within a world. Thin
-  `GenServer.call` wrappers onto each world's `BrokenOaths.Game.WorldServer`;
+  `GenServer.call` wrappers onto each world's `BrokenOaths.Simulation.WorldServer`;
   see `BrokenOaths.Game`'s own moduledoc for the process architecture
   every function here round-trips through.
 
@@ -12,7 +12,7 @@ defmodule BrokenOaths.Players do
   needs to know this module exists.
   """
 
-  alias BrokenOaths.Game.WorldServer
+  alias BrokenOaths.Simulation.WorldServer
 
   @doc "`user`'s current gold in `world`."
   def gold(world, user), do: WorldServer.call(world, {:gold, user})

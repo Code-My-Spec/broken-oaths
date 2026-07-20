@@ -13,7 +13,7 @@ defmodule BrokenOathsSpex.Story906.Criterion7660Spex do
   badge judgment call and `grind_city/6`'s regen-aware cap.
 
   The defending player's own Lord already spawns on a tile adjacent to
-  their city's founding tile (`BrokenOaths.Game.Spawner`'s own doc), so
+  their city's founding tile (`BrokenOaths.Simulation.Spawner`'s own doc), so
   "moves a fresh defender onto their own broken city's tile" is a
   one-hop march, not a long one — reusing `march_to/6` on `context.
   other_play_live`/`context.other_user` this time, not the besieger's.

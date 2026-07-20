@@ -5,7 +5,7 @@ defmodule BrokenOaths.Worlds.World do
   QA-fast world ticks every 5s while the default pace stays the
   original 60s, each independently, since `turn_seconds` is read off
   this struct rather than a single hardcoded process-wide constant
-  (see `BrokenOaths.Game.WorldServer`'s ticking doc).
+  (see `BrokenOaths.Simulation.WorldServer`'s ticking doc).
 
   `turn_seconds` is set once, at creation, via `creation_changeset/2`
   (`Worlds.create_world/1`) and never cast by the ordinary
@@ -14,7 +14,7 @@ defmodule BrokenOaths.Worlds.World do
   in progress.
 
   `paused` is a dev-only QA control flag (see
-  `BrokenOathsWeb.DevQaController` and `BrokenOaths.Game.WorldServer`'s
+  `BrokenOathsWeb.DevQaController` and `BrokenOaths.Simulation.WorldServer`'s
   ticking doc) — a paused world's turn clock never advances on its own,
   though `WorldServer.call(world, :advance_turn)` still steps it
   manually. Persisted so a paused QA world stays frozen across a

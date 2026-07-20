@@ -347,7 +347,7 @@ defmodule BrokenOaths.Feudal.Rebellion.Resolution do
   intentionally the FULL extent of story 917's heir logic this task
   owns — a pure decision function, no `Repo`, no timing.
 
-  **Integration note, NOT wired here:** `BrokenOaths.Game.WorldServer`
+  **Integration note, NOT wired here:** `BrokenOaths.Simulation.WorldServer`
   already ships `schedule_heir_if_lord_fell/3` (story 896) — an
   UNCONDITIONAL heir respawn exactly 10 turns after ANY Lord unit's
   death, with no awareness of `Vassalage` or `Rebellion` at all. Story

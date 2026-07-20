@@ -9,7 +9,7 @@ defmodule BrokenOathsWeb.GameLive.PlayTest do
   """
 
   # `async: false` — mounting `GameLive.Play` spawns a real
-  # `BrokenOaths.Game.WorldServer` GenServer, a process outside this
+  # `BrokenOaths.Simulation.WorldServer` GenServer, a process outside this
   # test's own sandbox ownership; the DB sandbox only auto-allows
   # other processes when it's running in SHARED mode (`async: false`
   # here — see `BrokenOathsTest.DataCase.setup_sandbox/1`'s own

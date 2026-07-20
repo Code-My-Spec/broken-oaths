@@ -3,7 +3,7 @@ defmodule BrokenOaths.Cities.City do
   A founded city — world/player/tile, a renameable name, accumulated
   food and size, claimed territory, and which territory tiles are
   currently worked. Persisted like units/orders: the `WorldServer`
-  holds the canonical in-memory copy (see `BrokenOaths.Game.Turn`'s
+  holds the canonical in-memory copy (see `BrokenOaths.Simulation.Turn`'s
   moduledoc for the tick-state contract) and diffs it against this
   table on each command/tick.
 
@@ -25,7 +25,7 @@ defmodule BrokenOaths.Cities.City do
 
   `found_city/3`, `assign_worked_tile/5`, and `rename_city/4` are the
   pure, process-unaware "domain model" home for the command logic
-  `BrokenOaths.Game.WorldServer` used to bury inline as private
+  `BrokenOaths.Simulation.WorldServer` used to bury inline as private
   `do_*` functions (see
   `.code_my_spec/knowledge/genserver_decomposition.md`). Each takes
   the WorldServer's own tick-`state` plus plain args and returns

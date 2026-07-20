@@ -1,10 +1,10 @@
-defmodule BrokenOaths.Game.Turn.HeirSuccession do
+defmodule BrokenOaths.Simulation.Turn.HeirSuccession do
   @moduledoc """
   Story 896's heir-succession phase: any player whose lord died
-  (scheduled by `BrokenOaths.Game.WorldServer`'s combat handler, or by
-  `BrokenOaths.Game.Turn.BarbarianPhase`'s own barbarian-initiated kill,
+  (scheduled by `BrokenOaths.Simulation.WorldServer`'s combat handler, or by
+  `BrokenOaths.Simulation.Turn.BarbarianPhase`'s own barbarian-initiated kill,
   into `state.pending_heirs`, `%{player_id => arrival_turn}` — not part
-  of `BrokenOaths.Game.Turn`'s own canonical state contract, read
+  of `BrokenOaths.Simulation.Turn`'s own canonical state contract, read
   defensively via `Map.get(state, :pending_heirs, %{})` since most
   hand-built tick-state test maps predate this field) whose
   `arrival_turn` has now passed gets a fresh Lord at their capital
@@ -18,7 +18,7 @@ defmodule BrokenOaths.Game.Turn.HeirSuccession do
   a fallen lord's replacement touches `Player`/`Unit`/`City` at once),
   so this phase lives on the turn pipeline itself rather than on any
   one of its siblings — `state` throughout is the canonical tick-state
-  described in `BrokenOaths.Game.Turn`.
+  described in `BrokenOaths.Simulation.Turn`.
   """
 
   @doc "Spawn a fresh Lord for every player whose `pending_heirs` arrival turn has passed."

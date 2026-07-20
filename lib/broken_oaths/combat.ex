@@ -2,7 +2,7 @@ defmodule BrokenOaths.Combat do
   @moduledoc """
   Attack orders (unit-vs-unit, camp assault, city siege), garrison
   fate, and the barbarian-camp ground-truth/test seams. Thin
-  `GenServer.call` wrappers onto each world's `BrokenOaths.Game.WorldServer`;
+  `GenServer.call` wrappers onto each world's `BrokenOaths.Simulation.WorldServer`;
   see `BrokenOaths.Game`'s own moduledoc for the process architecture
   every function here round-trips through.
 
@@ -13,7 +13,7 @@ defmodule BrokenOaths.Combat do
   needs to know this module exists.
   """
 
-  alias BrokenOaths.Game.WorldServer
+  alias BrokenOaths.Simulation.WorldServer
 
   @doc """
   Order `unit_id` to attack `target_unit_id`: adjacent, hostile
@@ -89,7 +89,7 @@ defmodule BrokenOaths.Combat do
 
   @doc """
   Test-only: place a real barbarian warrior directly on `tile_id` — see
-  `BrokenOaths.Game.WorldServer`'s `:spawn_barbarian_for_test` handler
+  `BrokenOaths.Simulation.WorldServer`'s `:spawn_barbarian_for_test` handler
   for the same documented, narrow-exception status `set_unit_hp_for_test/3`
   already has. `camp_id` (nil by default — ownerless, no AI, story 891's
   original behavior) ties the warrior to a REAL camp so story 893's
@@ -103,7 +103,7 @@ defmodule BrokenOaths.Combat do
   @doc """
   Test-only: move a barbarian directly onto `tile_id`, applying
   `Turn`'s own pillage-on-entry rule as a single isolated write rather
-  than a full tick boundary — see `BrokenOaths.Game.WorldServer`'s
+  than a full tick boundary — see `BrokenOaths.Simulation.WorldServer`'s
   `:move_barbarian_for_test` handler for the same documented,
   narrow-exception status. `:ok` or `{:error, :occupied}`.
   """
@@ -114,7 +114,7 @@ defmodule BrokenOaths.Combat do
   @doc """
   Test-only: destroy every camp except `keep_camp_id` and hard-delete
   every unit already tied to one of those other camps — see
-  `BrokenOaths.Game.WorldServer`'s `:isolate_camp_for_test` handler for
+  `BrokenOaths.Simulation.WorldServer`'s `:isolate_camp_for_test` handler for
   the same documented, narrow-exception status.
   """
   @spec isolate_camp_for_test(map(), term()) :: :ok
@@ -123,7 +123,7 @@ defmodule BrokenOaths.Combat do
 
   @doc """
   Test-only: hard-delete every warrior currently tied to `camp_id`,
-  without touching the camp itself — see `BrokenOaths.Game.WorldServer`'s
+  without touching the camp itself — see `BrokenOaths.Simulation.WorldServer`'s
   `:clear_camp_warriors_for_test` handler for the same documented,
   narrow-exception status.
   """
@@ -134,7 +134,7 @@ defmodule BrokenOaths.Combat do
   @doc """
   Test-only: resolve an attack FROM a barbarian (no owning player/session
   exists to drive this through `attack/4`) — see
-  `BrokenOaths.Game.WorldServer`'s `:resolve_barbarian_attack_for_test`
+  `BrokenOaths.Simulation.WorldServer`'s `:resolve_barbarian_attack_for_test`
   handler for the same documented, narrow-exception status
   `spawn_barbarian_for_test/2` has.
   """
@@ -149,7 +149,7 @@ defmodule BrokenOaths.Combat do
 
   @doc """
   Dev-only QA control surface: set `camp_id`'s HP directly, bypassing
-  combat — see `BrokenOaths.Game.WorldServer`'s `:set_camp_hp_for_test`
+  combat — see `BrokenOaths.Simulation.WorldServer`'s `:set_camp_hp_for_test`
   handler for the same documented, narrow-exception status
   `set_unit_hp_for_test/3` has.
   """

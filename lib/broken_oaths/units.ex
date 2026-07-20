@@ -1,7 +1,7 @@
 defmodule BrokenOaths.Units do
   @moduledoc """
   Unit reads and movement orders. Thin `GenServer.call` wrappers onto
-  each world's `BrokenOaths.Game.WorldServer`; see `BrokenOaths.Game`'s
+  each world's `BrokenOaths.Simulation.WorldServer`; see `BrokenOaths.Game`'s
   own moduledoc for the process architecture every function here
   round-trips through.
 
@@ -12,7 +12,7 @@ defmodule BrokenOaths.Units do
   needs to know this module exists.
   """
 
-  alias BrokenOaths.Game.WorldServer
+  alias BrokenOaths.Simulation.WorldServer
 
   @doc "All of `user`'s units in `world`, each carrying its queued order (if any)."
   def player_units(world, user), do: WorldServer.call(world, {:player_units, user})
@@ -38,7 +38,7 @@ defmodule BrokenOaths.Units do
   @doc """
   Test-only: instantly restore `unit_id`'s movement to its own max,
   bypassing the turn boundary that would normally do it — see
-  `BrokenOaths.Game.WorldServer`'s `:recharge_unit_for_test` handler for
+  `BrokenOaths.Simulation.WorldServer`'s `:recharge_unit_for_test` handler for
   the same documented, narrow-exception status.
   """
   @spec recharge_unit_for_test(map(), term()) :: :ok
@@ -47,7 +47,7 @@ defmodule BrokenOaths.Units do
 
   @doc """
   Test-only: instantly relocate `unit_id` to `tile_id`, bypassing
-  movement/pathing/turn boundaries — see `BrokenOaths.Game.WorldServer`'s
+  movement/pathing/turn boundaries — see `BrokenOaths.Simulation.WorldServer`'s
   `:relocate_unit_for_test` handler for the same documented,
   narrow-exception status. `:ok` or `{:error, :occupied}`.
   """
@@ -59,7 +59,7 @@ defmodule BrokenOaths.Units do
   Dev-only QA control surface: place a REAL player-owned unit
   (`:warrior | :worker | :settler | :lord`) at `tile_id` with that
   type's starting stats (`BrokenOaths.Cities.Production.unit_stats/1`) —
-  see `BrokenOaths.Game.WorldServer`'s `:spawn_unit_for_test` handler
+  see `BrokenOaths.Simulation.WorldServer`'s `:spawn_unit_for_test` handler
   for the same documented, narrow-exception status
   `spawn_barbarian_for_test/2` has. Returns the spawned unit's map
   (`id`, `tile_id`, `hp`, ...).
@@ -71,7 +71,7 @@ defmodule BrokenOaths.Units do
   @doc """
   Dev-only QA control surface: hard-delete `unit_id` outright — needed
   to clear a camp's barbarian garrison without waiting for combat. See
-  `BrokenOaths.Game.WorldServer`'s `:remove_unit_for_test` handler for
+  `BrokenOaths.Simulation.WorldServer`'s `:remove_unit_for_test` handler for
   the same documented, narrow-exception status.
   """
   @spec remove_unit_for_test(map(), term()) :: :ok

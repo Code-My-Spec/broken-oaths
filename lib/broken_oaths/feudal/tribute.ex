@@ -3,7 +3,7 @@ defmodule BrokenOaths.Feudal.Tribute do
   Per-turn gold tribute and call-to-arms levy business rules (story
   908), built on top of `BrokenOaths.Feudal.Vassalage` and
   `BrokenOaths.Feudal.Levy` — mirrors `BrokenOaths.Diplomacy.Cooperation`'s own
-  "pure math/changesets, no `Repo`" role: `BrokenOaths.Game.WorldServer`
+  "pure math/changesets, no `Repo`" role: `BrokenOaths.Simulation.WorldServer`
   is the imperative shell that reads every active vassalage out of the
   DB once per turn boundary, calls `collect_all/5`, and persists the
   gold/`BrokenOaths.Feudal.GoldLog` result — plus the immediate
@@ -28,7 +28,7 @@ defmodule BrokenOaths.Feudal.Tribute do
   own gap used to document: `BrokenOaths.Cities.Yields.city_gold_income/2`
   (a per-size base plus worked-Coast-tile gold, recomputed fresh every
   boundary) — `collect_all/5`'s own `income_by_player` argument is now
-  supplied by `BrokenOaths.Game.WorldServer`'s `apply_tribute/1`,
+  supplied by `BrokenOaths.Simulation.WorldServer`'s `apply_tribute/1`,
   summing that REAL figure over every city a vassal owns
   (`gold_income_by_player/1`), not the test-only
   `:set_player_gold_income_for_test` seam this module used to be the

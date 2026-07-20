@@ -5,7 +5,7 @@ defmodule BrokenOaths.Game.PlayerStatsTest do
 
   alias BrokenOaths.Game
   alias BrokenOaths.Combat.BarbarianAI
-  alias BrokenOaths.Game.WorldServer
+  alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.WorldsFixtures

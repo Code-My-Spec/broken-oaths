@@ -1,12 +1,12 @@
 defmodule BrokenOathsWeb.DevQaControllerTest do
   # async: false — every action lazily starts a Registry-addressed
   # WorldServer GenServer for the fixture world (see
-  # `BrokenOaths.Game.WorldServerTest`'s own reasoning).
+  # `BrokenOaths.Simulation.WorldServerTest`'s own reasoning).
   use BrokenOathsTest.ConnCase, async: false
 
   alias BrokenOaths.Game
   alias BrokenOaths.Units.Unit
-  alias BrokenOaths.Game.WorldServer
+  alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.Repo
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.WorldsFixtures

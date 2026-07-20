@@ -1,7 +1,7 @@
 defmodule BrokenOaths.Diplomacy do
   @moduledoc """
   Discovery/known-players and alliance/cooperation. Thin
-  `GenServer.call` wrappers onto each world's `BrokenOaths.Game.WorldServer`;
+  `GenServer.call` wrappers onto each world's `BrokenOaths.Simulation.WorldServer`;
   see `BrokenOaths.Game`'s own moduledoc for the process architecture
   every function here round-trips through. (Chat lives in its own
   separate context already — see `BrokenOaths.Chat` — and stays there.)
@@ -13,7 +13,7 @@ defmodule BrokenOaths.Diplomacy do
   needs to know this module exists.
   """
 
-  alias BrokenOaths.Game.WorldServer
+  alias BrokenOaths.Simulation.WorldServer
 
   @doc """
   Every civilization `user` has discovered in `world` (story 899):

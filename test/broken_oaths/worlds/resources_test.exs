@@ -1,7 +1,7 @@
 defmodule BrokenOaths.Worlds.ResourcesTest do
   use ExUnit.Case, async: true
 
-  alias BrokenOaths.Game.Spawner
+  alias BrokenOaths.Simulation.Spawner
   alias BrokenOaths.Worlds.Globe
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.Resources

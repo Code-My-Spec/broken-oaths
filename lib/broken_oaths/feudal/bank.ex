@@ -5,7 +5,7 @@ defmodule BrokenOaths.Feudal.Bank do
   Player` (migration `20260718130000`) — mirrors `BrokenOaths.Game.
   Tribute`'s own "pure math, no `Repo`" role, plus (pragdave
   decomposition, slice 6 — `.code_my_spec/knowledge/genserver_decomposition.md`)
-  the state-taking orchestration `BrokenOaths.Game.WorldServer` used to
+  the state-taking orchestration `BrokenOaths.Simulation.WorldServer` used to
   bury inline as private `do_*` functions: `status_for/2`, `collect_for/2`,
   `upgrade_for/2`, and `apply_income/3` each take the WorldServer's own
   tick-`state` (or the relevant substructure) plus plain args and return

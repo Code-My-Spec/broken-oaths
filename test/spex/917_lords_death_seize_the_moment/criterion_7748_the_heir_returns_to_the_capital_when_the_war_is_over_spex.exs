@@ -9,7 +9,7 @@ defmodule BrokenOathsSpex.Story917.Criterion7748Spex do
 
   ## Flagged conflict with the ALREADY-SHIPPED story 896 heir mechanic
 
-  `BrokenOaths.Game.Turn`'s `schedule_heir_if_lord_fell/3`
+  `BrokenOaths.Simulation.Turn`'s `schedule_heir_if_lord_fell/3`
   (`lib/broken_oaths/game/world_server.ex`) already respawns a fresh
   Lord unit at a player's capital exactly 10 turn boundaries after
   ANY Lord unit hits 0 HP — UNCONDITIONALLY, with no

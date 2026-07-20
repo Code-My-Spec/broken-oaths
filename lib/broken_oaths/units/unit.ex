@@ -18,9 +18,9 @@ defmodule BrokenOaths.Units.Unit do
   unit of the SAME owner (v0.2.1 playtest issue 5df5de88 — a worker or
   settler may walk with a warrior/lord/bronze-spearman escort — see
   `field_stack_room?/2` below and
-  `BrokenOaths.Game.Turn.entering_field_stack_with_room?/2`). It's
+  `BrokenOaths.Simulation.Turn.entering_field_stack_with_room?/2`). It's
   enforced at the application layer (`occupied_by_own?/4` below at queue
-  time, `BrokenOaths.Game.Turn`'s movement collision check at tick time)
+  time, `BrokenOaths.Simulation.Turn`'s movement collision check at tick time)
   rather than a blanket DB unique index — see migration
   `20260716190000` for why a DB-level constraint can no longer express
   this rule.
@@ -32,11 +32,11 @@ defmodule BrokenOaths.Units.Unit do
 
   `charges` (story 882 playtest update, issue 1caa87e9 — Civ 6 Builder
   convention) defaults to 3 and is generic on the schema, but only a
-  `:worker` ever spends it: `BrokenOaths.Game.Turn` decrements it by
+  `:worker` ever spends it: `BrokenOaths.Simulation.Turn` decrements it by
   one for each COMPLETED Farm or Mine (never Road, which is
   charge-exempt) and removes the unit outright once its last charge is
   spent — the same removal path a combat death already uses
-  (`BrokenOaths.Game.WorldServer.persist_unit_changes/2` diffs
+  (`BrokenOaths.Simulation.WorldServer.persist_unit_changes/2` diffs
   `state.units` and deletes whatever's missing). Every other unit type
   simply carries the default and never reads it.
 
@@ -44,7 +44,7 @@ defmodule BrokenOaths.Units.Unit do
 
   `queue_move/4` is the pure, process-unaware "domain model" home for
   the unit-movement "queue_move" command logic
-  `BrokenOaths.Game.WorldServer` used to bury inline as private `do_*`
+  `BrokenOaths.Simulation.WorldServer` used to bury inline as private `do_*`
   functions (see `.code_my_spec/knowledge/genserver_decomposition.md`).
   It takes the WorldServer's own tick-`state` plus plain args and
   returns either an ok-tuple carrying both the pre-move and post-move
@@ -56,7 +56,7 @@ defmodule BrokenOaths.Units.Unit do
   wait for a turn boundary" shape `BrokenOaths.Combat.Resolver.attack/4`
   uses — coordinates its siblings directly, per the north star's
   "cross-cutting operations are orchestrated by their OWNING domain
-  model calling its siblings" rule: `BrokenOaths.Game.Turn.move_now/2`
+  model calling its siblings" rule: `BrokenOaths.Simulation.Turn.move_now/2`
   resolves the immediate step, `BrokenOaths.Feudal.Vassalization.
   apply_captures/1` and `BrokenOaths.Feudal.Rebellion.War.
   process_rebellion_endings/2` are the same two post-move hooks
@@ -72,7 +72,7 @@ defmodule BrokenOaths.Units.Unit do
   alias BrokenOaths.Units.Order
   alias BrokenOaths.Players.Player
   alias BrokenOaths.Feudal.Rebellion.War
-  alias BrokenOaths.Game.Turn
+  alias BrokenOaths.Simulation.Turn
   alias BrokenOaths.Feudal.Vassalization
   alias BrokenOaths.Repo
   alias BrokenOaths.Worlds.Regions
@@ -189,7 +189,7 @@ defmodule BrokenOaths.Units.Unit do
 
   # -------------------------------------------------------------------
   # Queue move (stories 875/899/919) — moved home from
-  # `BrokenOaths.Game.WorldServer`'s own `do_queue_move/4` — see this
+  # `BrokenOaths.Simulation.WorldServer`'s own `do_queue_move/4` — see this
   # module's own "Queue move" moduledoc section above.
   # -------------------------------------------------------------------
 
@@ -338,7 +338,7 @@ defmodule BrokenOaths.Units.Unit do
   impassable as intermediate steps (an equally short free path must be
   preferred; a knowingly-blocked plan would interrupt on step one). The
   DESTINATION may be occupied — approaching another player's tile is
-  legal; `BrokenOaths.Game.Turn`'s dynamic collision check is what stops
+  legal; `BrokenOaths.Simulation.Turn`'s dynamic collision check is what stops
   the mover adjacent to it. Public (pragdave decomposition, slice 6) —
   the same "shared, real" reason `persist_order!/2` above is public: 
   `BrokenOaths.Feudal.Stewardship`'s own emergency-defense move calls this
@@ -379,7 +379,7 @@ defmodule BrokenOaths.Units.Unit do
   end
 
   # -------------------------------------------------------------------
-  # Healing (moved from `BrokenOaths.Game.Turn`'s own private
+  # Healing (moved from `BrokenOaths.Simulation.Turn`'s own private
   # `heal_units/1`, the tick-decomposition pass, see
   # `.code_my_spec/knowledge/genserver_decomposition.md`)
   # -------------------------------------------------------------------
@@ -388,12 +388,12 @@ defmodule BrokenOaths.Units.Unit do
   Heal every unit in `state.units` that spent no movement this tick.
   "Unmoved" is read straight off this tick's own movement ledger: a
   unit that spent zero movement points still holds `movement ==
-  max_movement` after `BrokenOaths.Game.Turn.Movement.resolve_orders/1`
+  max_movement` after `BrokenOaths.Simulation.Turn.Movement.resolve_orders/1`
   ran, whether that's because it had no order or because its order was
   blocked before its first step. Heals 15 HP garrisoned on its own
   city's own tile, 10 HP anywhere else in its owner's territory, 0
   outside it. `state` is the canonical tick-state described in
-  `BrokenOaths.Game.Turn`.
+  `BrokenOaths.Simulation.Turn`.
   """
   @spec heal_all(map()) :: map()
   def heal_all(state) do

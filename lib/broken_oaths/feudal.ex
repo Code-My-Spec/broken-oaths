@@ -4,7 +4,7 @@ defmodule BrokenOaths.Feudal do
   pacts, rebellion (including the Pact of Broken Oaths), stewardship,
   levies, the Gold Bank, and Honor — the feudal PvP batch (stories
   907-919). Thin `GenServer.call` wrappers onto each world's
-  `BrokenOaths.Game.WorldServer`; see `BrokenOaths.Game`'s own moduledoc
+  `BrokenOaths.Simulation.WorldServer`; see `BrokenOaths.Game`'s own moduledoc
   for the process architecture every function here round-trips through,
   and `BrokenOaths.Game.feudal_enabled?/0` for the single dormancy gate
   every one of these entry points respects.
@@ -16,7 +16,7 @@ defmodule BrokenOaths.Feudal do
   needs to know this module exists.
   """
 
-  alias BrokenOaths.Game.WorldServer
+  alias BrokenOaths.Simulation.WorldServer
 
   # -------------------------------------------------------------------
   # Vassalage / Tribute (stories 907/908)
@@ -112,7 +112,7 @@ defmodule BrokenOaths.Feudal do
   The vassal (`user`) marks their own bond with `lord_user_id`
   unhonored — spikes their own Oath Strain
   (`BrokenOaths.Feudal.OathStrain.spike_broken_protection_pact/1`). See
-  `BrokenOaths.Game.WorldServer`'s own `handle_call/3` doc for how this
+  `BrokenOaths.Simulation.WorldServer`'s own `handle_call/3` doc for how this
   narrow, vassal-driven seam differs from the real Protection Pact
   engine's own broken-pact resolution (a window genuinely expiring
   unanswered — story 914).
@@ -476,7 +476,7 @@ defmodule BrokenOaths.Feudal do
   @doc """
   Test-only: set `user`'s own gold treasury directly, standing in for a
   per-turn city gold YIELD this codebase has no real source for yet —
-  see `BrokenOaths.Game.WorldServer`'s `:set_player_gold_for_test`
+  see `BrokenOaths.Simulation.WorldServer`'s `:set_player_gold_for_test`
   handler for the same documented, narrow-exception status
   `set_unit_hp_for_test/3` already has.
   """
@@ -487,7 +487,7 @@ defmodule BrokenOaths.Feudal do
   @doc """
   Test-only: declares `user`'s per-turn gold INCOME, separate from
   their actual treasury balance (`set_player_gold_for_test/3`) — see
-  `BrokenOaths.Game.WorldServer`'s `:set_player_gold_income_for_test`
+  `BrokenOaths.Simulation.WorldServer`'s `:set_player_gold_income_for_test`
   handler for the full rationale and its CURRENT, narrower status now
   that story 912 shipped a real per-turn city gold income mechanic:
   `apply_tribute/1`/`apply_bank/1` compute their own figure straight

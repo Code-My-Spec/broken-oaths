@@ -3,7 +3,7 @@ defmodule BrokenOaths.Feudal.OathStrain.Ledger do
   Pure, process-unaware APPLICATION of `BrokenOaths.Feudal.OathStrain`'s
   math across the `BrokenOaths.Feudal.Vassalage` rows in the WorldServer's
   own tick-`state` — the pragdave-pattern "domain model" home for the
-  Oath Strain orchestration `BrokenOaths.Game.WorldServer` used to bury
+  Oath Strain orchestration `BrokenOaths.Simulation.WorldServer` used to bury
   inline (see `.code_my_spec/knowledge/genserver_decomposition.md`).
 
   `BrokenOaths.Feudal.OathStrain` itself stays a PURE math module (no

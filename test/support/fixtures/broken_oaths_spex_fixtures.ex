@@ -162,7 +162,7 @@ defmodule BrokenOathsSpex.Fixtures do
   # YIELD mechanic exists anywhere in this codebase yet (`Game.Yields`
   # has no gold field at all; a player's gold only ever moves via
   # barbarian bounty/camp-destroy rewards, both one-off, never a
-  # recurring income) — see `BrokenOaths.Game.WorldServer`'s
+  # recurring income) — see `BrokenOaths.Simulation.WorldServer`'s
   # `:set_player_gold_for_test` handler for the full rationale.
   defdelegate set_player_gold(world, user, gold),
     to: BrokenOaths.Game,
@@ -171,7 +171,7 @@ defmodule BrokenOathsSpex.Fixtures do
   # Deliberate, narrow exception to "read-only" above, same status as
   # `set_player_gold/3`: a SEPARATE per-turn gold INCOME declaration,
   # distinct from the treasury balance `set_player_gold/3` sets — see
-  # `BrokenOaths.Game.WorldServer`'s `:set_player_gold_income_for_test`
+  # `BrokenOaths.Simulation.WorldServer`'s `:set_player_gold_income_for_test`
   # handler for why story 908's "debt on an empty treasury" criterion
   # needs the two kept apart. Nothing reads this yet (`BrokenOaths.
   # Game.Tribute` doesn't exist) — a documented contract for that
@@ -190,7 +190,7 @@ defmodule BrokenOathsSpex.Fixtures do
   # the same "no real source exists yet to reach this figure quickly"
   # gap `set_player_gold/3` already papers over, not a stand-in for the
   # RISING itself (`Rebellion.Resolution` still computes that for real
-  # off whatever Honor this sets). See `BrokenOaths.Game.WorldServer`'s
+  # off whatever Honor this sets). See `BrokenOaths.Simulation.WorldServer`'s
   # `:set_player_honor_for_test` handler for the full rationale.
   defdelegate set_player_honor(world, user, honor),
     to: BrokenOaths.Game,

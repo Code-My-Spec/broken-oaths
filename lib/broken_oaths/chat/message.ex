@@ -11,7 +11,7 @@ defmodule BrokenOaths.Chat.Message do
   `BrokenOaths.Chat.mark_read/3` clears it for the recipient, set
   directly via `Repo.update_all` (not through this module's
   `changeset/2`, which only ever governs message creation) the same
-  way `BrokenOaths.Game.WorldServer` bulk-updates `Exploration` rows.
+  way `BrokenOaths.Simulation.WorldServer` bulk-updates `Exploration` rows.
   """
 
   use Ecto.Schema

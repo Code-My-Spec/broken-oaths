@@ -5,7 +5,7 @@ defmodule BrokenOaths.Game.ReorderProductionTest do
   use BrokenOathsTest.DataCase, async: false
 
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.WorldServer
+  alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.WorldsFixtures
 

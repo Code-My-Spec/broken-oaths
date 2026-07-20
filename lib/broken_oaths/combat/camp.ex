@@ -5,7 +5,7 @@ defmodule BrokenOaths.Combat.Camp do
   `BrokenOaths.Combat.Camps` for the cadence rules), and when it was
   destroyed (`nil` while it still stands). Persisted like units/cities —
   the `WorldServer` holds the canonical in-memory copy (see
-  `BrokenOaths.Game.Turn`'s moduledoc for the tick-state contract) and
+  `BrokenOaths.Simulation.Turn`'s moduledoc for the tick-state contract) and
   diffs it against this table on each tick.
 
   A camp has no owning player: it's wilderness state, seeded once at a

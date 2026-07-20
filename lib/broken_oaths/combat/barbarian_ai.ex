@@ -3,7 +3,7 @@ defmodule BrokenOaths.Combat.BarbarianAI do
   Pure barbarian decision core: per-boundary target selection, one-hex
   step planning, and near-camp roaming. No `Repo`, no process state —
   mirrors `BrokenOaths.Combat.Resolver`/`BrokenOaths.Combat.Camps`'s role:
-  `BrokenOaths.Game.Turn` is the imperative-adjacent shell that reads a
+  `BrokenOaths.Simulation.Turn` is the imperative-adjacent shell that reads a
   camp-spawned barbarian warrior out of its canonical tick-state, calls
   `decide/5` for that warrior, and applies the result (movement,
   `Combat.resolve/3`, pillage) back into the tick.
@@ -47,7 +47,7 @@ defmodule BrokenOaths.Combat.BarbarianAI do
 
   Land-path distance (used for both range-checking and roam radius) is
   the same "how many hexes away, over passable land only" notion
-  `BrokenOaths.Combat.Camps`/`BrokenOaths.Game.WorldServer`'s move
+  `BrokenOaths.Combat.Camps`/`BrokenOaths.Simulation.WorldServer`'s move
   pathfinding already use — never raw mesh-adjacency ring distance.
 
   ## Determinism

@@ -29,7 +29,7 @@ defmodule BrokenOathsSpex.Case do
 
     # QA issue (test-isolation flake): a spex scenario's `given_`/
     # `when_`/`then_` steps lazily start a real, Registry-addressed
-    # `BrokenOaths.Game.WorldServer` (via `Fixtures.world_fixture/1` and
+    # `BrokenOaths.Simulation.WorldServer` (via `Fixtures.world_fixture/1` and
     # every `Game.*` call that follows) but this case template used to
     # register no teardown for it at all. A `WorldServer` left running
     # after the test returns can still be asked something — most often
@@ -53,7 +53,7 @@ defmodule BrokenOathsSpex.Case do
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 
-  # Stops every `BrokenOaths.Game.WorldServer` currently running under
+  # Stops every `BrokenOaths.Simulation.WorldServer` currently running under
   # `BrokenOaths.GameSupervisor` — not just the world(s) THIS test
   # happens to know about. Every spex test registers this same `on_exit`
   # (this module is the ONLY spex case template), so by the time any

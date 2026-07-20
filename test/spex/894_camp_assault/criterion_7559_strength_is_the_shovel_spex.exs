@@ -55,7 +55,7 @@ defmodule BrokenOathsSpex.Story894.Criterion7559Spex do
   hits below 10, or even (confirmed empirically) kill the warrior
   outright, which no HP fixture can undo after the fact.
   `Fixtures.recharge_unit/2` (new, narrow, documented-bridge status —
-  see `BrokenOaths.Game.WorldServer`'s `:recharge_unit_for_test`
+  see `BrokenOaths.Simulation.WorldServer`'s `:recharge_unit_for_test`
   handler) restores movement directly with no live tick at all, so
   there's nothing left for the warrior to be exposed to between swings.
   """

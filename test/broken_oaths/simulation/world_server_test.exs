@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.WorldServerTest do
+defmodule BrokenOaths.Simulation.WorldServerTest do
   # async: false — exercises a named, Registry-addressed GenServer.
   use BrokenOathsTest.DataCase, async: false
 
@@ -8,7 +8,7 @@ defmodule BrokenOaths.Game.WorldServerTest do
   alias BrokenOaths.Cities.Improvement
   alias BrokenOaths.Technology.PlayerResearch
   alias BrokenOaths.Units.Unit
-  alias BrokenOaths.Game.WorldServer
+  alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.Repo
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.Worlds.Regions

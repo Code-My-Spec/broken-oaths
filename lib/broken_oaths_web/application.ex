@@ -17,7 +17,7 @@ defmodule BrokenOathsWeb.Application do
         {DNSCluster, query: Application.get_env(:broken_oaths, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: BrokenOaths.PubSub},
         # One WorldServer per active game world, lazily started and
-        # addressed by world id (see BrokenOaths.Game.WorldServer).
+        # addressed by world id (see BrokenOaths.Simulation.WorldServer).
         {Registry, keys: :unique, name: BrokenOaths.GameRegistry},
         {DynamicSupervisor, name: BrokenOaths.GameSupervisor, strategy: :one_for_one},
         # Per-(world, player) online tracking (see BrokenOaths.Players.Presence):

@@ -24,7 +24,7 @@ defmodule BrokenOathsSpex.Story917.Criterion7750Spex do
 
   ## Note — this criterion may already be (coincidentally) satisfied
 
-  `BrokenOaths.Game.Turn`'s already-shipped `schedule_heir_if_lord_fell/3`
+  `BrokenOaths.Simulation.Turn`'s already-shipped `schedule_heir_if_lord_fell/3`
   (story 896, unconditional, no `Vassalage`/`Rebellion` awareness at
   all — see `criterion_7748`'s own moduledoc) already respawns an
   heir exactly 10 turns after ANY Lord unit's death, regardless of

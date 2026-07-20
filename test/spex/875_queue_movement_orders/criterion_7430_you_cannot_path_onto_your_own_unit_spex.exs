@@ -11,7 +11,7 @@ defmodule BrokenOathsSpex.Story875.Criterion7430Spex do
   (issue 5df5de88): a Lord and a Settler — the only two units a fresh
   spawn provides, which this scenario originally paired — are now a
   DELIBERATELY allowed stack (one combat, one non-combat unit; see
-  `BrokenOaths.Game.WorldServer.field_stack_room?/2`). This scenario's
+  `BrokenOaths.Simulation.WorldServer.field_stack_room?/2`). This scenario's
   own subject is still real and enforced — a player can never stack
   two of their own units of the SAME combat class — so it now spawns a
   second Settler (`Fixtures.spawn_unit/4`) to exercise that.

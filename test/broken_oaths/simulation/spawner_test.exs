@@ -1,7 +1,7 @@
-defmodule BrokenOaths.Game.SpawnerTest do
+defmodule BrokenOaths.Simulation.SpawnerTest do
   use ExUnit.Case, async: true
 
-  alias BrokenOaths.Game.Spawner
+  alias BrokenOaths.Simulation.Spawner
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
 

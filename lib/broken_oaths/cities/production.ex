@@ -7,7 +7,7 @@ defmodule BrokenOaths.Cities.Production do
   completed-unit spawn placement, the settler population cost and
   size-1 guard, and city-founding validation (terrain, 4-hex spacing).
   No `Repo`: `complete/3` returns spawn intents as data (`spawn_event`)
-  rather than inserting units itself — `BrokenOaths.Game.WorldServer`
+  rather than inserting units itself — `BrokenOaths.Simulation.WorldServer`
   is the only place real unit ids get allocated.
 
   ## The flat production base
@@ -32,7 +32,7 @@ defmodule BrokenOaths.Cities.Production do
 
   `queue_production/4`, `reorder_production_item/4`, and
   `cancel_production_item/4` are the pure, process-unaware "domain
-  model" home for the command logic `BrokenOaths.Game.WorldServer` used
+  model" home for the command logic `BrokenOaths.Simulation.WorldServer` used
   to bury inline as private `do_*` functions (see
   `.code_my_spec/knowledge/genserver_decomposition.md`). Each takes the
   WorldServer's own tick-`state` plus plain args and returns `{:ok,
@@ -481,7 +481,7 @@ defmodule BrokenOaths.Cities.Production do
   end
 
   # -------------------------------------------------------------------
-  # Tick-loop accrual (moved from `BrokenOaths.Game.Turn`'s own private
+  # Tick-loop accrual (moved from `BrokenOaths.Simulation.Turn`'s own private
   # `accrue_production/1`/`accrue_or_skip/2`, the tick-decomposition
   # pass — see `.code_my_spec/knowledge/genserver_decomposition.md`)
   # -------------------------------------------------------------------
@@ -491,7 +491,7 @@ defmodule BrokenOaths.Cities.Production do
   any city still serving `BrokenOaths.Combat.CityDefense.production_halted?/2`'s
   pillage freeze (story 895) -- that city's queue simply doesn't move
   this boundary; its banked progress is untouched, not lost. `state` is
-  the canonical tick-state described in `BrokenOaths.Game.Turn`.
+  the canonical tick-state described in `BrokenOaths.Simulation.Turn`.
   """
   @spec accrue_cities(map()) :: map()
   def accrue_cities(state) do
@@ -623,7 +623,7 @@ defmodule BrokenOaths.Cities.Production do
   end
 
   # -------------------------------------------------------------------
-  # Tick-loop completion resolution (moved from `BrokenOaths.Game.Turn`'s
+  # Tick-loop completion resolution (moved from `BrokenOaths.Simulation.Turn`'s
   # own private `resolve_completions/1`/`resolve_city_completion/2`, the
   # tick-decomposition pass)
   # -------------------------------------------------------------------
@@ -643,7 +643,7 @@ defmodule BrokenOaths.Cities.Production do
   in the same tick otherwise silently refunds the settler's population
   cost the instant a well-fed city crosses its next growth threshold).
   `state` is the canonical tick-state described in
-  `BrokenOaths.Game.Turn`.
+  `BrokenOaths.Simulation.Turn`.
 
   Returns `{new_state, spawn_events, occupied, settled_this_tick}`.
   """

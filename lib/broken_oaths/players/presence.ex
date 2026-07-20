@@ -5,7 +5,7 @@ defmodule BrokenOaths.Players.Presence do
   WorldServer`'s own board (`BrokenOathsWeb.GameLive.Play`).
 
   Fills a real gap: the world-process architecture already tracks
-  coarse, WORLD-level liveness (a `BrokenOaths.Game.WorldServer`'s own
+  coarse, WORLD-level liveness (a `BrokenOaths.Simulation.WorldServer`'s own
   ticking; nothing about a single player's own connection), but nothing
   before this module could answer "is THIS player online right now" —
   the question both Gold Bank accrual (story 909, offline-vs-logged-in

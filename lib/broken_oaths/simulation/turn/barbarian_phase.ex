@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.Turn.BarbarianPhase do
+defmodule BrokenOaths.Simulation.Turn.BarbarianPhase do
   @moduledoc """
   Story 893's barbarian AI loop — the turn-pipeline phase `BrokenOaths.
   Game.Turn.tick/1` runs after production/camp-spawn completions:
@@ -32,7 +32,7 @@ defmodule BrokenOaths.Game.Turn.BarbarianPhase do
   rather than on any one of its siblings.
 
   `state` throughout is the canonical tick-state described in
-  `BrokenOaths.Game.Turn`.
+  `BrokenOaths.Simulation.Turn`.
   """
 
   alias BrokenOaths.Combat.BarbarianAI

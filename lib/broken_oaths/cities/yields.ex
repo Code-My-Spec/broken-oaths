@@ -87,7 +87,7 @@ defmodule BrokenOaths.Cities.Yields do
   the city's current `size`/`worked_tiles` — nothing about gold is
   cached on the city struct itself, the same "always live, never
   stale" contract `worked_yields/3` already keeps for food/production.
-  `BrokenOaths.Game.WorldServer`'s `apply_tribute/1`/`apply_bank/1`
+  `BrokenOaths.Simulation.WorldServer`'s `apply_tribute/1`/`apply_bank/1`
   sum this over every city a player owns once per turn boundary — see
   those modules' own moduledocs for the treasury-while-online/
   bank-while-offline split this feeds.
@@ -282,7 +282,7 @@ defmodule BrokenOaths.Cities.Yields do
   end
 
   # -------------------------------------------------------------------
-  # Tick-loop food accrual (moved from `BrokenOaths.Game.Turn`'s own
+  # Tick-loop food accrual (moved from `BrokenOaths.Simulation.Turn`'s own
   # private `accrue_food/1`, the tick-decomposition pass, see
   # `.code_my_spec/knowledge/genserver_decomposition.md`)
   # -------------------------------------------------------------------
@@ -290,7 +290,7 @@ defmodule BrokenOaths.Cities.Yields do
   @doc """
   Bank this turn's food income (`accrue_food/3`) for every city in
   `state.cities`. `state` is the canonical tick-state described in
-  `BrokenOaths.Game.Turn`.
+  `BrokenOaths.Simulation.Turn`.
   """
   @spec accrue_food_all(map()) :: map()
   def accrue_food_all(state) do
@@ -458,7 +458,7 @@ defmodule BrokenOaths.Cities.Yields do
   state still threads through to its siblings' own territory checks
   below -- only ITS OWN growth is skipped, nothing else about this
   tick's bookkeeping changes. `state` is the canonical tick-state
-  described in `BrokenOaths.Game.Turn`.
+  described in `BrokenOaths.Simulation.Turn`.
   """
   @spec grow_cities(map(), MapSet.t()) :: map()
   def grow_cities(state, settled_this_tick) do

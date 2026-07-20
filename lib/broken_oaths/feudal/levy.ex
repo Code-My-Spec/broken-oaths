@@ -19,7 +19,7 @@ defmodule BrokenOaths.Feudal.Levy do
 
   `issue/5`, `answer/3`, and `refuse/3` are the state-taking "domain
   model" home (`.code_my_spec/knowledge/genserver_decomposition.md`)
-  for the command logic `BrokenOaths.Game.WorldServer` used to bury
+  for the command logic `BrokenOaths.Simulation.WorldServer` used to bury
   inline as private `do_*` functions: each takes the WorldServer's own
   tick-`state` plus plain args and returns either a plain ok/error
   tuple or one that also carries an updated `state` — no `GenServer`,

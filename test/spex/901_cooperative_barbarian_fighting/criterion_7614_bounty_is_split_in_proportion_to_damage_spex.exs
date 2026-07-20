@@ -9,7 +9,7 @@ defmodule BrokenOathsSpex.Story901.Criterion7614Spex do
   among participants" — the Three Amigos' resolution of "how the
   bounty splits" is "proportional to damage").
 
-  As of this writing `BrokenOaths.Game.WorldServer`'s
+  As of this writing `BrokenOaths.Simulation.WorldServer`'s
   `pay_bounty_if_barbarian_fell/2` pays the FULL `Camps.destroy_reward/0`
   (30 gold) to whichever single player's attacker's own `do_attack_camp`
   call happens to zero the camp's HP — there is no notion of "who else

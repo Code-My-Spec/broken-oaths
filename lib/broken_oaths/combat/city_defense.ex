@@ -4,8 +4,8 @@ defmodule BrokenOaths.Combat.CityDefense do
   stacking exception, garrison combat bonuses, pillage-not-capture, and
   the regen/production-halt bookkeeping a turn boundary applies. No
   `Repo`, no process state — mirrors `BrokenOaths.Combat.Resolver`'s role:
-  `BrokenOaths.Game.WorldServer` (immediate city-target attacks) and
-  `BrokenOaths.Game.Turn` (regen, production halt, the barbarian-AI
+  `BrokenOaths.Simulation.WorldServer` (immediate city-target attacks) and
+  `BrokenOaths.Simulation.Turn` (regen, production halt, the barbarian-AI
   "hold adjacent to a city" case) are the imperative shells that read a
   city and its garrison out of the canonical tick-state, call into this
   module, and write the result back.
@@ -28,7 +28,7 @@ defmodule BrokenOaths.Combat.CityDefense do
   military units may stand together there. `garrison_room?/2` is the
   single predicate both the queue-time occupancy check
   (`WorldServer.do_queue_move/4`) and the tick-time movement collision
-  check (`BrokenOaths.Game.Turn.attempt_step/2`) call to decide whether
+  check (`BrokenOaths.Simulation.Turn.attempt_step/2`) call to decide whether
   one more unit fits — a civilian mover always fits (and never counts
   against the cap); a military mover fits only while fewer than 3
   military units already stand there.
@@ -323,7 +323,7 @@ defmodule BrokenOaths.Combat.CityDefense do
   @doc """
   Whether `city`'s production is still frozen at `turn` (the CURRENT,
   not-yet-incremented turn a boundary is about to advance FROM — see
-  `BrokenOaths.Game.Turn.tick/1`'s own phase ordering). A city pillaged
+  `BrokenOaths.Simulation.Turn.tick/1`'s own phase ordering). A city pillaged
   at turn T freezes accrual for exactly the three boundaries that bump
   the turn from T→T+1, T+1→T+2, and T+2→T+3 (`production_halted_until`
   is `T + pillage_halt_boundaries/0`); the boundary that bumps T+3→T+4
@@ -354,20 +354,20 @@ defmodule BrokenOaths.Combat.CityDefense do
   def regen(city), do: %{city | hp: min(@max_hp, city.hp + @regen_per_boundary)}
 
   # -------------------------------------------------------------------
-  # Tick-loop regen (story 895 -- moved from `BrokenOaths.Game.Turn`'s
+  # Tick-loop regen (story 895 -- moved from `BrokenOaths.Simulation.Turn`'s
   # own private `regen_cities/2`, the tick-decomposition pass, see
   # `.code_my_spec/knowledge/genserver_decomposition.md`)
   # -------------------------------------------------------------------
 
   @doc """
   Regen every city in `state.cities` via `regen/1`, EXCEPT any city id
-  in `attacked_cities` -- this tick's own `BrokenOaths.Game.Turn.
+  in `attacked_cities` -- this tick's own `BrokenOaths.Simulation.Turn.
   BarbarianPhase` assaults -- which is left exactly as the assault left
-  it this boundary. A city hit through `BrokenOaths.Game.WorldServer`'s
+  it this boundary. A city hit through `BrokenOaths.Simulation.WorldServer`'s
   immediate, out-of-tick "attack" surface never suppresses this -- only
   an attack that's part of THIS tick's own AI phase does, so the very
   next boundary after an out-of-band hit still regens. `state` is the
-  canonical tick-state described in `BrokenOaths.Game.Turn`.
+  canonical tick-state described in `BrokenOaths.Simulation.Turn`.
   """
   @spec regen_cities(map(), MapSet.t()) :: map()
   def regen_cities(state, attacked_cities) do

@@ -14,7 +14,7 @@ defmodule BrokenOathsSpex.Story875.Criterion7426Spex do
   (issue 5df5de88): the blocker here is now a SECOND, freshly spawned
   Settler (`Fixtures.spawn_unit/4`) rather than the player's Lord — a
   Lord (combat) and a Settler (non-combat) are now a DELIBERATELY
-  allowed stack (see `BrokenOaths.Game.WorldServer.
+  allowed stack (see `BrokenOaths.Simulation.WorldServer.
   field_stack_room?/2`), so a Lord claiming the walker's next step
   would no longer collide with it at all. Two Settlers are the same
   combat class, so this scenario's own subject — a genuine collision —

@@ -337,7 +337,7 @@ defmodule BrokenOaths.Technology.Research do
   One turn's worth of research: bank `income` toward `current_research`,
   then complete it if that reached its cost. Returns
   `{new_player_research, completed_tech | nil}` — the shape
-  `BrokenOaths.Game.Turn`'s own tick phases return (an optional event
+  `BrokenOaths.Simulation.Turn`'s own tick phases return (an optional event
   alongside the new state), ready to drive a `{:tech_completed, ...}`
   event the same way `{:unit_spawned, ...}` is built from
   `BrokenOaths.Cities.Production.complete/3`.
@@ -368,7 +368,7 @@ defmodule BrokenOaths.Technology.Research do
   and any player row created before this state key existed) is treated
   as `new/0` for this tick only — a player with `current_research: nil`
   simply banks nothing, same no-op `accrue/2` documents. `state` is the
-  canonical tick-state described in `BrokenOaths.Game.Turn`.
+  canonical tick-state described in `BrokenOaths.Simulation.Turn`.
 
   Returns `{new_state, tech_completed_events}`.
   """

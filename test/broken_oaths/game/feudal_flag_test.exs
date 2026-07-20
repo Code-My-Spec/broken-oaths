@@ -24,7 +24,7 @@ defmodule BrokenOaths.Game.FeudalFlagTest do
 
   alias BrokenOaths.Game
   alias BrokenOaths.Feudal.Bank
-  alias BrokenOaths.Game.WorldServer
+  alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.Cities.Yields
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.Worlds.Regions

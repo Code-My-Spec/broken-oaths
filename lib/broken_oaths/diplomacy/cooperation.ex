@@ -4,7 +4,7 @@ defmodule BrokenOaths.Diplomacy.Cooperation do
   a shared barbarian target, the proportional bounty split once that
   target falls, and the alliance propose/accept business rules built on
   top of `BrokenOaths.Diplomacy.Alliance`. Mirrors `BrokenOaths.Game.
-  Combat`'s role: `BrokenOaths.Game.WorldServer` holds the damage
+  Combat`'s role: `BrokenOaths.Simulation.WorldServer` holds the damage
   ledger (in memory, keyed by target id) alongside its canonical
   tick-state, calls into this module on every camp-assault swing, and
   persists whatever gold `split_bounty/3` computes.
@@ -38,7 +38,7 @@ defmodule BrokenOaths.Diplomacy.Cooperation do
 
   `propose_alliance/3` and `accept_alliance/3` are the imperative
   wrappers around them (pragdave decomposition, slice 5 — moved home
-  from `BrokenOaths.Game.WorldServer`'s own former private
+  from `BrokenOaths.Simulation.WorldServer`'s own former private
   `do_propose_alliance/3`/`do_accept_alliance/3`): resolve `state`'s
   own players, look up whatever `Alliance` row already exists for the
   pair, build the changeset via `propose/4`/`accept/2` above, and

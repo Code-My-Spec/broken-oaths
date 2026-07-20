@@ -3,8 +3,8 @@ defmodule BrokenOaths.Game do
   Bounded context for gameplay — join, movement orders, turn advancement,
   fog-filtered reads. A thin client onto each world's `WorldServer`, the
   single serialization point for that world's state (see
-  `BrokenOaths.Game.WorldServer`'s moduledoc for the process architecture
-  and `BrokenOaths.Game.Turn`'s moduledoc for the tick-state contract
+  `BrokenOaths.Simulation.WorldServer`'s moduledoc for the process architecture
+  and `BrokenOaths.Simulation.Turn`'s moduledoc for the tick-state contract
   every read here is filtered through).
 
   Every function that touches a specific world's live state — everything
@@ -37,7 +37,7 @@ defmodule BrokenOaths.Game do
   alias BrokenOaths.Combat
   alias BrokenOaths.Diplomacy
   alias BrokenOaths.Feudal
-  alias BrokenOaths.Game.WorldServer
+  alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.Players
   alias BrokenOaths.Technology
   alias BrokenOaths.Units
@@ -128,7 +128,7 @@ defmodule BrokenOaths.Game do
   underlying reads (`vassals/2`, `vassal_status/2`, a city's own
   `Siege.status/1`) stay empty/`:free` on their own. Barbarian city
   assault (`BrokenOaths.Combat.CityDefense`'s pillage path, driven
-  entirely by `BrokenOaths.Game.Turn`'s own barbarian-AI phase) never
+  entirely by `BrokenOaths.Simulation.Turn`'s own barbarian-AI phase) never
   touches this flag either way — it was never part of the feudal batch.
   """
   @spec feudal_enabled?() :: boolean()

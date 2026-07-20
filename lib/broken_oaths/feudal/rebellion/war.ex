@@ -2,7 +2,7 @@ defmodule BrokenOaths.Feudal.Rebellion.War do
   @moduledoc """
   Pure, process-unaware orchestration for the Rebellion war itself
   (stories 915/919) — the pragdave-pattern "domain model" home for the
-  logic `BrokenOaths.Game.WorldServer` used to bury inline (see
+  logic `BrokenOaths.Simulation.WorldServer` used to bury inline (see
   `.code_my_spec/knowledge/genserver_decomposition.md`).
 
   Every function here takes the WorldServer's own tick-`state` (or the
@@ -49,7 +49,7 @@ defmodule BrokenOaths.Feudal.Rebellion.War do
   alias BrokenOaths.Units.Unit
   alias BrokenOaths.Feudal.Vassalage
   alias BrokenOaths.Feudal.Vassalization
-  alias BrokenOaths.Game.WorldServer
+  alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.Repo
   alias BrokenOaths.Users
 

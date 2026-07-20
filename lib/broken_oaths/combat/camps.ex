@@ -2,8 +2,8 @@ defmodule BrokenOaths.Combat.Camps do
   @moduledoc """
   Pure barbarian-camp core: first-founding wilderness placement and the
   per-camp spawn cadence. No `Repo`, no process state — mirrors
-  `BrokenOaths.Game.Spawner`'s role for camps: `BrokenOaths.Game.Turn`
-  and `BrokenOaths.Game.WorldServer` are the imperative shells that read
+  `BrokenOaths.Simulation.Spawner`'s role for camps: `BrokenOaths.Simulation.Turn`
+  and `BrokenOaths.Simulation.WorldServer` are the imperative shells that read
   camps out of the canonical tick-state, call into this module, and
   write the result back.
 
@@ -15,7 +15,7 @@ defmodule BrokenOaths.Combat.Camps do
     * 1-2 tiles already inside the founding player's own claimed
       region — "near" camps, immediately known to the player because
       they're on home turf (no fog-of-war roll needed for them; see
-      `BrokenOaths.Game.WorldServer`'s camp-visibility filter).
+      `BrokenOaths.Simulation.WorldServer`'s camp-visibility filter).
     * 4-5 tiles 8-15 hexes out (raw mesh-adjacency distance from the
       founding city), outside the claimed region and not already
       explored — "far" camps, the region-boundary bias.
@@ -65,7 +65,7 @@ defmodule BrokenOaths.Combat.Camps do
   whether it's `ready?` — cadence reached (every 3 turns) AND the camp
   currently holds fewer than 2 living warriors. The caller places the
   actual warrior (a real `Game.Unit`, `player_id: nil`, tagged with
-  this camp's id — see `BrokenOaths.Game.Turn`'s "camp spawn loop"
+  this camp's id — see `BrokenOaths.Simulation.Turn`'s "camp spawn loop"
   phase) and only then calls `spawned/1` to reset the counter; a
   `ready?` camp that can't find a free landing tile keeps its counter
   climbing so it fires again as soon as a tile is free.
@@ -74,9 +74,9 @@ defmodule BrokenOaths.Combat.Camps do
 
   `attack_camp/4` and `resolve_camp_attack/3` are the pragdave-pattern
   "domain model" home (`.code_my_spec/knowledge/genserver_decomposition.md`)
-  for the unit-vs-camp "attack_camp" flow `BrokenOaths.Game.WorldServer`
+  for the unit-vs-camp "attack_camp" flow `BrokenOaths.Simulation.WorldServer`
   used to bury inline: they take the WorldServer's own tick-`state` (see
-  `BrokenOaths.Game.Turn`'s moduledoc for that shape) plus plain args and
+  `BrokenOaths.Simulation.Turn`'s moduledoc for that shape) plus plain args and
   return either a reply tuple or an updated `state` — no `GenServer`, no
   `handle_*`, no process awareness. `WorldServer`'s own `:attack_camp`
   `handle_call` is a thin delegation into `attack_camp/4`, mirroring
@@ -316,7 +316,7 @@ defmodule BrokenOaths.Combat.Camps do
   tick by either loop (not yet in `state.units`) still reserves its
   tile against an already-existing barbarian roaming or hunting onto
   it. `state` is the canonical tick-state described in
-  `BrokenOaths.Game.Turn`.
+  `BrokenOaths.Simulation.Turn`.
 
   Returns `{new_state, spawn_events, occupied}`.
   """
@@ -335,7 +335,7 @@ defmodule BrokenOaths.Combat.Camps do
   end
 
   # Ordinary units never set :camp_id — read defensively, the same way
-  # `BrokenOaths.Game.Turn`'s own `pending_heirs` reads unfamiliar keys
+  # `BrokenOaths.Simulation.Turn`'s own `pending_heirs` reads unfamiliar keys
   # elsewhere in the canonical tick-state.
   defp camp_alive_counts(units) do
     Enum.reduce(units, %{}, fn {_id, unit}, counts ->

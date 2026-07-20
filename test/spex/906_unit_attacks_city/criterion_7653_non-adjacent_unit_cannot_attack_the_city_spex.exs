@@ -11,7 +11,7 @@ defmodule BrokenOathsSpex.Story906.Criterion7653Spex do
   handler as `combat_error_message(:not_adjacent)` — see
   `BrokenOathsSpex.Story906.Criterion7652Spex`'s own moduledoc for why
   city assault predates this story). No march is needed to prove
-  "non-adjacent": `BrokenOaths.Game.Spawner`'s own doc guarantees each
+  "non-adjacent": `BrokenOaths.Simulation.Spawner`'s own doc guarantees each
   joining player's region is claimed independently and spawn tiles are
   chosen well inside it, so `context.user`'s own Lord — left exactly
   where it spawned, never moved — is not adjacent to a city

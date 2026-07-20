@@ -37,7 +37,7 @@ defmodule BrokenOathsSpex.Story917.Criterion7745Spex do
   - Honor: the lord's OWN Honor (not the vassal's) is docked by
     executing a captured garrison — `resolve_garrison_fate`,
     `"execute"`, already shipped and real
-    (`BrokenOaths.Game.WorldServer.apply_garrison_fate_honor/3` ->
+    (`BrokenOaths.Simulation.WorldServer.apply_garrison_fate_honor/3` ->
     `Siege.apply_execute_honor_penalty/1`), the same mechanism
     `BrokenOathsSpex.Story906.Criterion7662Spex` already exercises.
     This spec grinds the vassal's OWN city down (undefended, same

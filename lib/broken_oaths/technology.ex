@@ -14,7 +14,7 @@ defmodule BrokenOaths.Technology do
   needs to know this module exists.
   """
 
-  alias BrokenOaths.Game.WorldServer
+  alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.Technology.Research
 
   @doc """

@@ -1,9 +1,9 @@
-defmodule BrokenOaths.Game.WorldServer do
+defmodule BrokenOaths.Simulation.WorldServer do
   @moduledoc """
   One GenServer per world — the imperative shell around the pure
-  `BrokenOaths.Game.Turn` core (see `.code_my_spec/architecture/decisions/world-process-architecture.md`).
+  `BrokenOaths.Simulation.Turn` core (see `.code_my_spec/architecture/decisions/world-process-architecture.md`).
 
-  Holds the canonical tick-state (see `BrokenOaths.Game.Turn`'s moduledoc)
+  Holds the canonical tick-state (see `BrokenOaths.Simulation.Turn`'s moduledoc)
   in memory, addressed via `BrokenOaths.GameRegistry` and started lazily
   under `BrokenOaths.GameSupervisor`. All reads and writes for a given
   world funnel through its single process, so joins, moves, and turn
@@ -63,7 +63,7 @@ defmodule BrokenOaths.Game.WorldServer do
     Vassalization
   }
 
-  alias BrokenOaths.Game.{Spawner, Turn}
+  alias BrokenOaths.Simulation.{Spawner, Turn}
 
   alias BrokenOaths.Game
   alias BrokenOaths.Players.{Player, Presence}
@@ -2474,7 +2474,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # A unit missing from `new_units` that was present in `old_units` was
   # destroyed this delta (combat, or a worker expending its last build
   # charge — story 882 playtest update, issue 1caa87e9, see
-  # `BrokenOaths.Game.Turn`'s "Improvement progress" section — outside
+  # `BrokenOaths.Simulation.Turn`'s "Improvement progress" section — outside
   # of `found_city`'s own dedicated delete) — swept from the DB here
   # rather than left as a zombie row. `found_city` still deletes its
   # consumed settler immediately, in its own transaction, same as

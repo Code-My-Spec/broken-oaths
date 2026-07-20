@@ -3,9 +3,9 @@ defmodule BrokenOaths.Combat.Resolver do
   Pure combat core: effective strength, the Civ VI damage curve,
   simultaneous attacker/defender resolution, the lord's adjacency aura,
   flat-strength camp damage, and adjacency/target-legality validation.
-  No `Repo`, no process state — `BrokenOaths.Game.WorldServer` is the
+  No `Repo`, no process state — `BrokenOaths.Simulation.WorldServer` is the
   imperative shell that reads units out of its canonical tick-state
-  (see `BrokenOaths.Game.Turn`'s moduledoc for that shape), calls into
+  (see `BrokenOaths.Simulation.Turn`'s moduledoc for that shape), calls into
   this module, and writes the result back.
 
   ## Effective strength
@@ -74,9 +74,9 @@ defmodule BrokenOaths.Combat.Resolver do
 
   `attack/4` and `resolve_attack/3` are the pragdave-pattern "domain
   model" home (`.code_my_spec/knowledge/genserver_decomposition.md`)
-  for the unit-vs-unit "attack" flow `BrokenOaths.Game.WorldServer`
+  for the unit-vs-unit "attack" flow `BrokenOaths.Simulation.WorldServer`
   used to bury inline: they take the WorldServer's own tick-`state`
-  (see `BrokenOaths.Game.Turn`'s moduledoc for that shape) plus plain
+  (see `BrokenOaths.Simulation.Turn`'s moduledoc for that shape) plus plain
   args and return either a reply tuple or an updated `state` — no
   `GenServer`, no `handle_*`, no process awareness. `WorldServer`'s own
   `:attack` `handle_call` (and the test-only
@@ -305,7 +305,7 @@ defmodule BrokenOaths.Combat.Resolver do
 
   # -------------------------------------------------------------------
   # Attack orchestration (stories 891/893/896/899/914) — moved home
-  # from `BrokenOaths.Game.WorldServer`; see this module's own
+  # from `BrokenOaths.Simulation.WorldServer`; see this module's own
   # "Attack orchestration" moduledoc section above.
   # -------------------------------------------------------------------
 
@@ -436,7 +436,7 @@ defmodule BrokenOaths.Combat.Resolver do
   # are already gone from `state.units`, so presence alone means
   # living, and a lord's own tile is never its own neighbor, so this
   # never accidentally self-buffs the lord. Duplicated (not shared)
-  # into `BrokenOaths.Combat.Siege`/`BrokenOaths.Game.Turn`/`WorldServer`
+  # into `BrokenOaths.Combat.Siege`/`BrokenOaths.Simulation.Turn`/`WorldServer`
   # per this codebase's own established "small pure state-accessor
   # helpers live wherever they're needed" convention (see e.g. `Turn`'s
   # own `lord_adjacent?/2`).

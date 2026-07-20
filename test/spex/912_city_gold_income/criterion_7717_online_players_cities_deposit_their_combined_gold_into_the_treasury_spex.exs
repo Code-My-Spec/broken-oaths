@@ -3,7 +3,7 @@ defmodule BrokenOathsSpex.Story912.Criterion7717Spex do
   Story 912 — City Gold Income
   Criterion 7717 — an online player's cities deposit their COMBINED
   gold income into the treasury every turn boundary
-  (`BrokenOaths.Game.WorldServer.gold_income_by_player/1` sums
+  (`BrokenOaths.Simulation.WorldServer.gold_income_by_player/1` sums
   `Yields.city_gold_income/2` over every city a player owns, then
   `apply_bank/1` routes the total straight to `:gold` while `Presence.
   online?/2` reads true).

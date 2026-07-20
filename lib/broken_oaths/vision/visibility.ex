@@ -63,7 +63,7 @@ defmodule BrokenOaths.Vision.Visibility do
   end
 
   # -------------------------------------------------------------------
-  # Tick-loop exploration (moved from `BrokenOaths.Game.Turn`'s own
+  # Tick-loop exploration (moved from `BrokenOaths.Simulation.Turn`'s own
   # private `refresh_explored/1`, the tick-decomposition pass, see
   # `.code_my_spec/knowledge/genserver_decomposition.md`)
   # -------------------------------------------------------------------
@@ -73,7 +73,7 @@ defmodule BrokenOaths.Vision.Visibility do
   can see this tick (`visible_tiles/2`), unioned onto whatever they'd
   already explored before — explored tiles are permanent, never
   forgotten. `state` is the canonical tick-state described in
-  `BrokenOaths.Game.Turn`.
+  `BrokenOaths.Simulation.Turn`.
   """
   @spec refresh_explored(map()) :: map()
   def refresh_explored(state) do
@@ -91,7 +91,7 @@ defmodule BrokenOaths.Vision.Visibility do
   @doc """
   The per-player fog filter.
 
-  `state` is the canonical tick-state described in `BrokenOaths.Game.Turn`.
+  `state` is the canonical tick-state described in `BrokenOaths.Simulation.Turn`.
   Returns only what `player_id` is allowed to see: their own explored
   history, their current visibility, their own units always, and other
   players' units only while standing on a tile that is currently visible

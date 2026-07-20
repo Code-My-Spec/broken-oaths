@@ -20,7 +20,7 @@ defmodule BrokenOaths.Feudal.ProtectionPact do
   `resolve_protection_call_if_dead/2`, `apply_protection_pact_ticks/1`,
   `honor_protection_call/3`) is the imperative shell this module's own
   original moduledoc anticipated as a "separate, coordinated wiring
-  pass" — moved HOME here from `BrokenOaths.Game.WorldServer` per the
+  pass" — moved HOME here from `BrokenOaths.Simulation.WorldServer` per the
   pragdave-pattern "logic lives with the domain model that owns it"
   rule (see `.code_my_spec/knowledge/genserver_decomposition.md`).
   Every function in this layer takes the WorldServer's own tick-`state`

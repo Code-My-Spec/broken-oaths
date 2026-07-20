@@ -6,7 +6,7 @@ defmodule BrokenOaths.Feudal.Stewardship do
   `BrokenOaths.Feudal.Vassalization`'s own "pure changeset/decision
   logic, no `Repo`" role, plus (pragdave decomposition, slice 6 —
   `.code_my_spec/knowledge/genserver_decomposition.md`) the state-taking
-  orchestration `BrokenOaths.Game.WorldServer` used to bury inline as
+  orchestration `BrokenOaths.Simulation.WorldServer` used to bury inline as
   private `do_*`/`resolve_*` functions. Each state-taking function below
   takes the WorldServer's own tick-`state` (or the relevant
   substructure) plus plain args and returns either a plain value or an
@@ -88,7 +88,7 @@ defmodule BrokenOaths.Feudal.Stewardship do
       `:steward_defend` — on the genuinely-defensive path it calls
       `BrokenOaths.Units.Unit.bfs_path/3` +
       `BrokenOaths.Units.Unit.persist_order!/2` +
-      `BrokenOaths.Game.Turn.move_now/2`, the exact same "orders
+      `BrokenOaths.Simulation.Turn.move_now/2`, the exact same "orders
       execute immediately" sequence `Unit.queue_move/4` already
       establishes for an ordinary move.
 
@@ -131,7 +131,7 @@ defmodule BrokenOaths.Feudal.Stewardship do
   alias BrokenOaths.Cities.Production
   alias BrokenOaths.Cities.ProductionItem
   alias BrokenOaths.Feudal.StewardLog
-  alias BrokenOaths.Game.Turn
+  alias BrokenOaths.Simulation.Turn
   alias BrokenOaths.Units.Unit
   alias BrokenOaths.Feudal.Vassalage
   alias BrokenOaths.Repo

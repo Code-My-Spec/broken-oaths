@@ -2,7 +2,7 @@ defmodule BrokenOaths.Cities do
   @moduledoc """
   City founding/renaming, worked tiles, the production queue, and
   improvements (worker digs). Thin `GenServer.call` wrappers onto each
-  world's `BrokenOaths.Game.WorldServer`; see `BrokenOaths.Game`'s own
+  world's `BrokenOaths.Simulation.WorldServer`; see `BrokenOaths.Game`'s own
   moduledoc for the process architecture every function here
   round-trips through.
 
@@ -13,7 +13,7 @@ defmodule BrokenOaths.Cities do
   needs to know this module exists.
   """
 
-  alias BrokenOaths.Game.WorldServer
+  alias BrokenOaths.Simulation.WorldServer
 
   @doc """
   Found a city on `unit_id`'s tile: the settler must be `user`'s, the
@@ -105,7 +105,7 @@ defmodule BrokenOaths.Cities do
   def cancel_improvement(world, user, unit_id),
     do: WorldServer.call(world, {:cancel_improvement, user, unit_id})
 
-  @doc "All of `user`'s cities in `world` (see `BrokenOaths.Game.WorldServer` for the shape)."
+  @doc "All of `user`'s cities in `world` (see `BrokenOaths.Simulation.WorldServer` for the shape)."
   def player_cities(world, user), do: WorldServer.call(world, {:player_cities, user})
 
   @doc "A tile's completed improvement (`nil | :farm | :mine | :road`)."
@@ -113,7 +113,7 @@ defmodule BrokenOaths.Cities do
 
   @doc """
   Test-only: instantly place a COMPLETE improvement of `kind` on
-  `tile_id`, bypassing the real build — see `BrokenOaths.Game.WorldServer`'s
+  `tile_id`, bypassing the real build — see `BrokenOaths.Simulation.WorldServer`'s
   `:complete_improvement_for_test` handler for the same documented,
   narrow-exception status. Returns the improvement's map (`tile_id`,
   `kind`, `progress`, `status`, `builder_unit_id`).
@@ -125,7 +125,7 @@ defmodule BrokenOaths.Cities do
   @doc """
   Test-only: grant `city_id` Copper access (story 911) by appending a
   real Copper tile onto its own territory — see
-  `BrokenOaths.Game.WorldServer`'s `:grant_copper_access_for_test`
+  `BrokenOaths.Simulation.WorldServer`'s `:grant_copper_access_for_test`
   handler for the same documented, narrow-exception status
   `complete_improvement_for_test/3` already has. `:ok`, or
   `{:error, :no_copper_on_map}` if this world's own placement rolled

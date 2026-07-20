@@ -2,7 +2,7 @@ defmodule BrokenOaths.Feudal.RebellionPact.Conspiracy do
   @moduledoc """
   Pure, process-unaware orchestration for the Pact of Broken Oaths
   (story 916) — the pragdave-pattern "domain model" home for the
-  coordinated-rebellion logic `BrokenOaths.Game.WorldServer` used to
+  coordinated-rebellion logic `BrokenOaths.Simulation.WorldServer` used to
   bury inline (see `.code_my_spec/knowledge/genserver_decomposition.md`).
 
   Every function here takes the WorldServer's own tick-`state` (or the

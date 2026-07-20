@@ -5,8 +5,8 @@ defmodule BrokenOaths.Combat.Siege do
   pillage-and-reset `BrokenOaths.Combat.CityDefense.take_damage/3`
   already applies, when a broken city is actually captured, and the
   fallen garrison's fate once it is. No `Repo`, no process state —
-  mirrors `CityDefense`'s own role: `BrokenOaths.Game.WorldServer`
-  (the immediate "attack"/movement surfaces) and `BrokenOaths.Game.Turn`
+  mirrors `CityDefense`'s own role: `BrokenOaths.Simulation.WorldServer`
+  (the immediate "attack"/movement surfaces) and `BrokenOaths.Simulation.Turn`
   (the movement-collision exception below) are the imperative shells
   that read cities/units out of the canonical tick-state, call into
   this module, and write the result back.
@@ -53,7 +53,7 @@ defmodule BrokenOaths.Combat.Siege do
   call after every movement-producing change — a city already
   `occupied?/1` is skipped, so calling this twice in a row never
   double-reports the same capture. `enterable_despite_garrison?/2` is
-  the sibling predicate `BrokenOaths.Game.Turn`'s own movement-collision
+  the sibling predicate `BrokenOaths.Simulation.Turn`'s own movement-collision
   check (`blocked?/6`) calls: once a city is broken, ANY other player's
   unit may step onto its tile even with the fallen (still-alive, not
   yet resolved) garrison still standing there — the walls are down, the
@@ -95,7 +95,7 @@ defmodule BrokenOaths.Combat.Siege do
   "domain model" home (`.code_my_spec/knowledge/genserver_decomposition.md`)
   for the two immediate, stateful surfaces `BrokenOaths.Game.
   WorldServer` used to bury inline: they take the WorldServer's own
-  tick-`state` (see `BrokenOaths.Game.Turn`'s moduledoc for that shape)
+  tick-`state` (see `BrokenOaths.Simulation.Turn`'s moduledoc for that shape)
   plus plain args and return either a reply tuple or an updated
   `state` — no `GenServer`, no `handle_*`, no process awareness.
   `WorldServer`'s own `:attack_city`/`:resolve_garrison_fate`
@@ -309,7 +309,7 @@ defmodule BrokenOaths.Combat.Siege do
 
   # -------------------------------------------------------------------
   # City assault orchestration (stories 895/906) — moved home from
-  # `BrokenOaths.Game.WorldServer`; see this module's own "City assault
+  # `BrokenOaths.Simulation.WorldServer`; see this module's own "City assault
   # + garrison-fate orchestration" moduledoc section above.
   # -------------------------------------------------------------------
 
@@ -459,7 +459,7 @@ defmodule BrokenOaths.Combat.Siege do
 
   # -------------------------------------------------------------------
   # Garrison-fate orchestration (story 906, QA issue ed1ff4c0) — moved
-  # home from `BrokenOaths.Game.WorldServer`.
+  # home from `BrokenOaths.Simulation.WorldServer`.
   # -------------------------------------------------------------------
 
   @doc """

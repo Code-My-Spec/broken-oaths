@@ -14,7 +14,7 @@ defmodule BrokenOaths.Feudal.OathStrain do
   CLAMPED `strain()` — no `Repo`, no changesets, no process state, the
   same "pure math/changesets-only" role `BrokenOaths.Feudal.Tribute`
   documents for itself, minus even the changeset-building (that's the
-  imperative shell's job once this ships: `BrokenOaths.Game.WorldServer`
+  imperative shell's job once this ships: `BrokenOaths.Simulation.WorldServer`
   reads a `Vassalage.oath_strain`, calls one of these, and persists the
   result — see the moduledoc note below on `Tribute.spike_oath_strain/1`
   for why that wiring is deliberately NOT part of this module yet).

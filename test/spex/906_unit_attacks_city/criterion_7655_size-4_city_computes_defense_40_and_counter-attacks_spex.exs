@@ -15,7 +15,7 @@ defmodule BrokenOathsSpex.Story906.Criterion7655Spex do
   baseline.
 
   A player's Lord spawns on a DIFFERENT tile than their Settler
-  (`BrokenOaths.Game.Spawner`'s own doc: "`settler_tile` is ... distinct
+  (`BrokenOaths.Simulation.Spawner`'s own doc: "`settler_tile` is ... distinct
   from `lord_tile`"), so founding a city on the settler's tile and never
   moving the Lord onto it leaves the city genuinely ungarrisoned —
   `Game.CityDefense.military_garrison/2` finds nothing standing on the

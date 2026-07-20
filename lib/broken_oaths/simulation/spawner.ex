@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.Spawner do
+defmodule BrokenOaths.Simulation.Spawner do
   @moduledoc """
   Spawn placement — pure selection of a new player's region and starting
   tiles. No `Repo` calls: the caller (a `Game` context function) turns the

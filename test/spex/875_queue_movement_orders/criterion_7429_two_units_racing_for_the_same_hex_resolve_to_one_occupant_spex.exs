@@ -11,7 +11,7 @@ defmodule BrokenOathsSpex.Story875.Criterion7429Spex do
   (issue 5df5de88): a Lord and a Settler — the only two units a fresh
   spawn provides, which this scenario originally raced against each
   other — are now a DELIBERATELY allowed stack (one combat, one
-  non-combat unit; see `BrokenOaths.Game.WorldServer.
+  non-combat unit; see `BrokenOaths.Simulation.WorldServer.
   field_stack_room?/2`), so two of them converging on a shared tile
   would now correctly end up sharing it rather than colliding. This
   scenario's own subject — same-CLASS convergence still resolves to

@@ -1,7 +1,7 @@
-defmodule BrokenOaths.Game.Turn.Movement do
+defmodule BrokenOaths.Simulation.Turn.Movement do
   @moduledoc """
   Pure simultaneous-move resolution — the turn-pipeline-specific phase
-  `BrokenOaths.Game.Turn.tick/1` runs first, every tick: reset every
+  `BrokenOaths.Simulation.Turn.tick/1` runs first, every tick: reset every
   unit's movement to its max, then resolve every `:pending` move order
   in lockstep rounds (one step per round per still-active mover,
   movers processed in ascending unit id each round for determinism). A
@@ -20,13 +20,13 @@ defmodule BrokenOaths.Game.Turn.Movement do
   has no single owning domain model — it belongs to the turn pipeline
   itself, not to `BrokenOaths.Units.Unit`. `move_now/2` is the one seam
   `BrokenOaths.Units.Unit.queue_move/4` and `BrokenOaths.Game.
-  Stewardship` call directly (via `BrokenOaths.Game.Turn.move_now/2`,
+  Stewardship` call directly (via `BrokenOaths.Simulation.Turn.move_now/2`,
   which delegates here) to resolve a freshly-queued order's first steps
   immediately rather than waiting for the next tick boundary — same
   collision semantics as the tick's own resolution.
 
   `state` throughout is the canonical tick-state described in
-  `BrokenOaths.Game.Turn`.
+  `BrokenOaths.Simulation.Turn`.
   """
 
   alias BrokenOaths.Combat.CityDefense

@@ -23,7 +23,7 @@ defmodule BrokenOaths.Cities.Improvement do
   improvement, so a worker can freely build a Road across a tile that
   already carries (or is still building) a Farm or a Mine, and vice
   versa — the two live as independent rows, keyed by `(world_id,
-  tile_id, kind)`, and `BrokenOaths.Game.WorldServer` holds them in two
+  tile_id, kind)`, and `BrokenOaths.Simulation.WorldServer` holds them in two
   separate in-memory maps (`state.improvements` for the yield slot,
   `state.roads` for the road slot) for exactly this reason. Farm, Mine,
   and Pasture remain mutually exclusive with EACH OTHER on a given tile
@@ -49,7 +49,7 @@ defmodule BrokenOaths.Cities.Improvement do
 
   `start_improvement/4` and `cancel_improvement/3` are the pure,
   process-unaware "domain model" home for the command logic
-  `BrokenOaths.Game.WorldServer` used to bury inline as private `do_*`
+  `BrokenOaths.Simulation.WorldServer` used to bury inline as private `do_*`
   functions (see `.code_my_spec/knowledge/genserver_decomposition.md`).
   Each takes the WorldServer's own tick-`state` plus plain args and
   returns `{:ok, new_state} | {:error, reason}` (or, for the two read
@@ -60,12 +60,12 @@ defmodule BrokenOaths.Cities.Improvement do
   ## Advance / orphaned-builder cleanup (tick-decomposition pass)
 
   `advance/1` and `clear_orphaned_builders/1` are the pure "tick phase"
-  home for the improvement-progress logic `BrokenOaths.Game.Turn`
+  home for the improvement-progress logic `BrokenOaths.Simulation.Turn`
   used to bury inline as private functions (see
   `.code_my_spec/knowledge/genserver_decomposition.md`'s "Turn (1,318)
   -> a pure pipeline that SEQUENCES each domain's own tick phase" —
   improvement advancement is squarely this module's own concept, so it
-  moved home). `BrokenOaths.Game.Turn.tick/1` calls both, at the same
+  moved home). `BrokenOaths.Simulation.Turn.tick/1` calls both, at the same
   two points in the pipeline the inline code used to run at, over the
   SAME canonical tick-`state` every other functional-core module reads.
 
@@ -134,7 +134,7 @@ defmodule BrokenOaths.Cities.Improvement do
     field :status, Ecto.Enum, values: [:building, :complete, :pillaged], default: :building
     # Story 902 — see the moduledoc's "Mining's 3-turn unlock" section.
     # Nullable: a row written before this field existed (or a hand-built
-    # `BrokenOaths.Game.Turn` tick-state map in a unit test) simply has
+    # `BrokenOaths.Simulation.Turn` tick-state map in a unit test) simply has
     # none, and every reader falls back to `duration/1`.
     field :duration, :integer
 
@@ -228,7 +228,7 @@ defmodule BrokenOaths.Cities.Improvement do
   # -------------------------------------------------------------------
 
   # `state` throughout this section is the canonical tick-state
-  # described in `BrokenOaths.Game.Turn`.
+  # described in `BrokenOaths.Simulation.Turn`.
 
   @doc """
   Advance every improvement (both `state.improvements`, the yield slot,
@@ -284,7 +284,7 @@ defmodule BrokenOaths.Cities.Improvement do
   # Story 902, criterion 7628 — `improvement.duration` (set once, at
   # build-start, by `persist_start_improvement!/3` below) overrides the
   # kind's hardcoded base when present; a hand-built tick-state map
-  # with no `:duration` key at all (most `BrokenOaths.Game.Turn` unit
+  # with no `:duration` key at all (most `BrokenOaths.Simulation.Turn` unit
   # tests, and any improvement kind that never gets a research-gated
   # override) falls back to `duration/1` exactly as before this story.
   defp finish_or_progress(improvement, units) do
@@ -311,7 +311,7 @@ defmodule BrokenOaths.Cities.Improvement do
   # charge-exempt pending an explicit PM call. A worker with no charges
   # left after this decrement is expended: removed from `state.units`
   # outright, in the SAME tick its last charge is spent — the same
-  # removal path `BrokenOaths.Game.WorldServer.persist_unit_changes/2`
+  # removal path `BrokenOaths.Simulation.WorldServer.persist_unit_changes/2`
   # already sweeps a combat death through (diffs `state.units`, deletes
   # whatever's missing).
   defp spend_charge(units, unit_id, kind) when kind in [:farm, :mine] do
@@ -331,7 +331,7 @@ defmodule BrokenOaths.Cities.Improvement do
 
   # `advance/1` (above) already clears a builder that's gone or walked
   # away — but only as of the START of this tick. Combat
-  # (`BrokenOaths.Game.Turn.BarbarianPhase`'s barbarian AI loop, or a
+  # (`BrokenOaths.Simulation.Turn.BarbarianPhase`'s barbarian AI loop, or a
   # player's own "attack") can kill a unit LATER in this SAME tick,
   # after `advance/1` already ran; if that unit was mid-build, its
   # improvement still carries a `builder_unit_id` pointing at a row

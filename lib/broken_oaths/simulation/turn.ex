@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.Turn do
+defmodule BrokenOaths.Simulation.Turn do
   @moduledoc """
   Pure turn pipeline — `tick/1` resolves every queued move order
   simultaneously and advances the turn counter. No processes, no `Repo`
@@ -11,7 +11,7 @@ defmodule BrokenOaths.Game.Turn do
   `.code_my_spec/knowledge/genserver_decomposition.md`). Every phase's
   actual behavior lives on the domain model that owns it (or, for the
   handful genuinely cross-cutting with no single owner, on a
-  `BrokenOaths.Game.Turn.*` submodule); this module wires the ORDER and
+  `BrokenOaths.Simulation.Turn.*` submodule); this module wires the ORDER and
   threads state/events between them. See the "City loop phases" section
   below for exactly which module owns which phase, and the note on each
   phase's own function doc for the full behavior contract.
@@ -97,7 +97,7 @@ defmodule BrokenOaths.Game.Turn do
   `pending_heirs` (story 896) is read defensively via
   `Map.get(state, :pending_heirs, %{})` — a scheduled-heir arrival turn
   per player, written by `WorldServer`'s combat handler on a lord's
-  death, resolved by `BrokenOaths.Game.Turn.HeirSuccession`'s own tick
+  death, resolved by `BrokenOaths.Simulation.Turn.HeirSuccession`'s own tick
   phase. It's the one field in this contract every other functional-core
   module (and most of this module's own tests, built before it
   existed) can safely omit; nothing breaks if it's absent.
@@ -129,7 +129,7 @@ defmodule BrokenOaths.Game.Turn do
   by `BrokenOaths.Cities.Improvement`'s own advance phase exactly the
   same way (that module's own advance/pillage/charge logic is agnostic
   to which of the two maps an improvement happens to live in; only
-  `BrokenOaths.Game.WorldServer` — the imperative shell — cares, since
+  `BrokenOaths.Simulation.WorldServer` — the imperative shell — cares, since
   it's the one enforcing which slot a given `kind` belongs to and
   persisting each slot to its own DB row). See `BrokenOaths.Cities.Improvement`'s
   own moduledoc for the full rationale.
@@ -139,7 +139,7 @@ defmodule BrokenOaths.Game.Turn do
 
   ## Movement resolution
 
-  `BrokenOaths.Game.Turn.Movement` (`reset_movement/1`, `resolve_orders/1`)
+  `BrokenOaths.Simulation.Turn.Movement` (`reset_movement/1`, `resolve_orders/1`)
   — see that module's own moduledoc for the full lockstep-round
   collision contract. At the start of a tick every unit's `movement`
   resets to its `max_movement`; orders with `status: :pending` then
@@ -165,7 +165,7 @@ defmodule BrokenOaths.Game.Turn do
     3b. camp spawn loop (story 892) -- `BrokenOaths.Combat.Camps.
        resolve_spawns/2`, threading the SAME "claimed this tick"
        occupied-tile set city completions just built.
-    3c. barbarian AI loop (story 893) -- `BrokenOaths.Game.Turn.
+    3c. barbarian AI loop (story 893) -- `BrokenOaths.Simulation.Turn.
        BarbarianPhase.resolve/3` (cross-cutting: orchestrates
        `BarbarianAI`, `Combat`, `CityDefense`, and heir scheduling
        together, so it has no single owning domain model).
@@ -180,7 +180,7 @@ defmodule BrokenOaths.Game.Turn do
     6. healing -- `BrokenOaths.Units.Unit.heal_all/1`: a unit that spent
        no movement this tick heals 15 HP garrisoned on its own city's
        tile, 10 HP anywhere else in its owner's territory, 0 outside it.
-    7. heir succession -- `BrokenOaths.Game.Turn.HeirSuccession.resolve/2`
+    7. heir succession -- `BrokenOaths.Simulation.Turn.HeirSuccession.resolve/2`
        (cross-cutting: touches `Player`/`Unit`/`City` at once with no
        single owning domain model). Any player whose lord died gets a
        fresh Lord at their capital this tick, plus a
@@ -199,9 +199,9 @@ defmodule BrokenOaths.Game.Turn do
   alias BrokenOaths.Cities.Improvement
   alias BrokenOaths.Cities.Production
   alias BrokenOaths.Technology.Research
-  alias BrokenOaths.Game.Turn.BarbarianPhase
-  alias BrokenOaths.Game.Turn.HeirSuccession
-  alias BrokenOaths.Game.Turn.Movement
+  alias BrokenOaths.Simulation.Turn.BarbarianPhase
+  alias BrokenOaths.Simulation.Turn.HeirSuccession
+  alias BrokenOaths.Simulation.Turn.Movement
   alias BrokenOaths.Units.Unit
   alias BrokenOaths.Vision.Visibility
   alias BrokenOaths.Cities.Yields
@@ -311,7 +311,7 @@ defmodule BrokenOaths.Game.Turn do
   only recharges movement and continues whatever path remains. Same
   collision semantics as the tick: a step into an occupied tile
   interrupts the order in place. Delegates entirely to
-  `BrokenOaths.Game.Turn.Movement.move_now/2` — see that module's own
+  `BrokenOaths.Simulation.Turn.Movement.move_now/2` — see that module's own
   doc for the full behavior.
   """
   @spec move_now(state(), term()) :: state()

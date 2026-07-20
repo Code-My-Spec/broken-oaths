@@ -2,7 +2,7 @@ defmodule BrokenOaths.Vision do
   @moduledoc """
   Fog-filtered read surface — "what does the fog show" for a player
   right now. Thin `GenServer.call` wrappers onto each world's
-  `BrokenOaths.Game.WorldServer`; see `BrokenOaths.Game`'s own moduledoc
+  `BrokenOaths.Simulation.WorldServer`; see `BrokenOaths.Game`'s own moduledoc
   for the process architecture every function here round-trips through.
 
   Extracted from `BrokenOaths.Game` (see
@@ -12,7 +12,7 @@ defmodule BrokenOaths.Vision do
   needs to know this module exists.
   """
 
-  alias BrokenOaths.Game.WorldServer
+  alias BrokenOaths.Simulation.WorldServer
 
   @doc "Fog-filtered units `user` can currently see — own units always, others only while visible."
   def units_visible_to(world, user), do: WorldServer.call(world, {:units_visible_to, user})

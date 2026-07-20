@@ -3,7 +3,7 @@ defmodule BrokenOaths.Feudal.Vassalization do
   The subjugation pivot (story 907): the business rules built on top of
   `BrokenOaths.Feudal.Vassalage`, mirroring `BrokenOaths.Game.
   Cooperation`'s own "pure changeset, no `Repo`" role for `Alliance`.
-  `BrokenOaths.Game.WorldServer` is the imperative shell that calls into
+  `BrokenOaths.Simulation.WorldServer` is the imperative shell that calls into
   this module once `BrokenOaths.Combat.Siege.materialize_captures/2`
   reports a fresh capture, actually persists the row, and pushes the
   notifications both players see.
@@ -50,7 +50,7 @@ defmodule BrokenOaths.Feudal.Vassalization do
   "domain model" home (`.code_my_spec/knowledge/genserver_decomposition.md`)
   for the capture/occupy → swear-fealty flow `BrokenOaths.Game.
   WorldServer` used to bury inline: they take the WorldServer's own
-  tick-`state` (see `BrokenOaths.Game.Turn`'s moduledoc for that shape)
+  tick-`state` (see `BrokenOaths.Simulation.Turn`'s moduledoc for that shape)
   plus plain args and return either a reply tuple or an updated
   `state` — no `GenServer`, no `handle_*`, no process awareness.
   `WorldServer`'s own `:queue_move` handler and tick loop are thin
@@ -62,7 +62,7 @@ defmodule BrokenOaths.Feudal.Vassalization do
   alias BrokenOaths.Game
   alias BrokenOaths.Combat.Siege
   alias BrokenOaths.Feudal.Vassalage
-  alias BrokenOaths.Game.WorldServer
+  alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.Repo
   alias BrokenOaths.Users
 
@@ -134,7 +134,7 @@ defmodule BrokenOaths.Feudal.Vassalization do
 
   # -------------------------------------------------------------------
   # Capture -> vassalization orchestration (stories 906/907) — moved
-  # home from `BrokenOaths.Game.WorldServer`; see this module's own
+  # home from `BrokenOaths.Simulation.WorldServer`; see this module's own
   # "Capture -> vassalization orchestration" moduledoc section above.
   # -------------------------------------------------------------------
 
