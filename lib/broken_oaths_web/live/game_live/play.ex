@@ -435,7 +435,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # `click/1`) opens the city panel — mutually exclusive with unit
   # selection, same one-side-panel rule as `select_unit`.
   def handle_event("select_city", %{"city_id" => city_id}, socket) do
-    %{world: world, cities: cities} = socket.assigns
+    %{world: world, user: user, cities: cities} = socket.assigns
     city_id = PlayView.parse_id(city_id)
     city = Enum.find(cities, &(&1.id == city_id))
 
@@ -444,7 +444,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         selected_city_id: city_id,
         selected_city: city,
         assignable_tiles: PlayView.assignable_tiles(world, city),
-        copper_access?: PlayView.copper_access?(world, city),
+        copper_access?: Game.copper_access?(world, user),
         city_error: nil,
         selected_unit_id: nil,
         selected_unit: nil,
@@ -1748,7 +1748,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
       captured_cities: captured_cities,
       selected_city: selected_city,
       assignable_tiles: PlayView.assignable_tiles(world, selected_city),
-      copper_access?: PlayView.copper_access?(world, selected_city),
+      copper_access?: Game.copper_access?(world, user),
       selected_camp: selected_camp,
       known_players: Game.known_players(world, user),
       player_stats: Game.player_stats(world, user),
@@ -2097,7 +2097,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
       selected_city_id: city.id,
       selected_city: city,
       assignable_tiles: PlayView.assignable_tiles(socket.assigns.world, city),
-      copper_access?: PlayView.copper_access?(socket.assigns.world, city),
+      copper_access?: Game.copper_access?(socket.assigns.world, socket.assigns.user),
       city_error: nil,
       selected_unit_id: nil,
       selected_unit: nil,

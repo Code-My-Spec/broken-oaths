@@ -108,6 +108,18 @@ defmodule BrokenOaths.Cities do
   @doc "All of `user`'s cities in `world` (see `BrokenOaths.Simulation.WorldServer` for the shape)."
   def player_cities(world, user), do: WorldServer.call(world, {:player_cities, user})
 
+  @doc """
+  Whether `user`'s player currently has Copper access (story 911
+  rework, QA issue 3e6c124c "Copper availability wrong"): PLAYER-WIDE
+  — true once they have at least one COMPLETED Mine improvement
+  sitting on a Copper tile within territory ANY of their own cities
+  controls, regardless of which city's panel happens to be open. See
+  `BrokenOaths.Cities.Production.player_copper_access?/2` for the
+  actual rule.
+  """
+  @spec copper_access?(map(), map()) :: boolean()
+  def copper_access?(world, user), do: WorldServer.call(world, {:copper_access?, user})
+
   @doc "A tile's completed improvement (`nil | :farm | :mine | :road`)."
   def tile_improvement(world, tile_id), do: WorldServer.call(world, {:tile_improvement, tile_id})
 
@@ -123,13 +135,16 @@ defmodule BrokenOaths.Cities do
     do: WorldServer.call(world, {:complete_improvement_for_test, tile_id, kind})
 
   @doc """
-  Test-only: grant `city_id` Copper access (story 911) by appending a
-  real Copper tile onto its own territory — see
+  Test-only: grant `city_id`'s owning PLAYER Copper access (story 911,
+  reworked for QA issue 3e6c124c "Copper availability wrong") by
+  appending a real Copper tile onto `city_id`'s own territory AND
+  instantly completing a Mine on it — see
   `BrokenOaths.Simulation.WorldServer`'s `:grant_copper_access_for_test`
   handler for the same documented, narrow-exception status
-  `complete_improvement_for_test/3` already has. `:ok`, or
-  `{:error, :no_copper_on_map}` if this world's own placement rolled
-  no Copper anywhere.
+  `complete_improvement_for_test/3` already has. Copper access is now
+  PLAYER-WIDE, so this grants it to every city that player owns, not
+  only `city_id`. `:ok`, or `{:error, :no_copper_on_map}` if this
+  world's own placement rolled no Copper anywhere.
   """
   @spec grant_copper_access_for_test(map(), term()) ::
           :ok | {:error, :no_copper_on_map | :not_found}

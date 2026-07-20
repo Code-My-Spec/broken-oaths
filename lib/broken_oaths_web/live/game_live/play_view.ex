@@ -296,18 +296,6 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
     |> Enum.filter(&Yields.workable?(Regions.terrain(world, &1)))
   end
 
-  # Story 911 — whether `city` currently has Copper access: a Copper
-  # tile anywhere in its own `territory` (worked or not — a pure
-  # ACCESS GATE, no stockpile/consumption). `CityPanel` has no world
-  # access of its own (purely presentational, same reason
-  # `assignable_tiles/2` above is pre-computed here), so this is
-  # computed alongside it whenever the selected city changes and
-  # handed down as the `:copper_access?` assign.
-  def copper_access?(_world, nil), do: false
-
-  def copper_access?(world, city),
-    do: Enum.any?(city.territory, &(Resources.at(world, &1) == :copper))
-
   # QA issue 56ee521a — the "surface an attack affordance" half of the
   # fix: enemy cities adjacent to the CURRENTLY SELECTED unit, but only
   # once that unit is a military type (`CityDefense.military?/1` — a

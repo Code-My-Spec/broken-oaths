@@ -254,11 +254,15 @@ defmodule BrokenOathsSpex.Fixtures do
 
   # Deliberate, narrow exception to "read-only" above, same status as
   # `complete_improvement/3`: story 911's Copper access gate needs a
-  # deterministic way to grant a city Copper access without depending
+  # deterministic way to grant a PLAYER Copper access without depending
   # on where the world's own Copper tiles happen to fall relative to
   # wherever a settler started — appends a REAL Copper tile's id onto
-  # `city_id`'s own territory. `:ok`, or `{:error, :no_copper_on_map}`
-  # if this world's own placement rolled no Copper anywhere.
+  # `city_id`'s own territory AND instantly completes a Mine on it (the
+  # rework for QA issue 3e6c124c "Copper availability wrong": access is
+  # now mine-based and PLAYER-wide, so this grants it to every city
+  # `city_id`'s owner has, not just `city_id` itself). `:ok`, or
+  # `{:error, :no_copper_on_map}` if this world's own placement rolled
+  # no Copper anywhere.
   defdelegate grant_copper_access(world, city_id),
     to: BrokenOaths.Game,
     as: :grant_copper_access_for_test

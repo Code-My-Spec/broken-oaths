@@ -515,12 +515,14 @@ defmodule BrokenOaths.Technology.Research do
   the read `BrokenOathsWeb.GameLive.Play` gates a pushed
   `"game:resources"`/`select_tile` read on before a player ever learns
   a tile carries Copper. Never gates `BrokenOaths.Cities.Production`'s
-  own `copper_access?` check — a city's ACCESS to Copper (needed to
-  train a Bronze Spearman) is a territory fact, independent of whether
-  the player has yet unlocked the tech that makes Copper VISIBLE on
-  the map; in practice a Bronze Spearman is only ever offered once
-  Bronze Working is already done (`age/1 == :bronze_age`), so by the
-  time access matters, Copper is already revealed anyway.
+  own `copper_access?` check — a player's ACCESS to Copper (needed to
+  train a Bronze Spearman) is a mine-based, player-wide fact (story 911
+  rework, QA issue 3e6c124c: a completed Mine on a Copper tile anywhere
+  across any of that player's own cities' territory), independent of
+  whether the player has yet unlocked the tech that makes Copper
+  VISIBLE on the map; in practice a Bronze Spearman is only ever
+  offered once Bronze Working is already done (`age/1 == :bronze_age`),
+  so by the time access matters, Copper is already revealed anyway.
   """
   @spec copper_revealed?(player_research()) :: boolean()
   def copper_revealed?(player_research), do: completed?(player_research, :bronze_working)

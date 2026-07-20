@@ -322,6 +322,10 @@ defmodule BrokenOaths.Game do
   @doc "All of `user`'s cities in `world`. See `Cities.player_cities/2`."
   defdelegate player_cities(world, user), to: Cities
 
+  @doc "Whether `user`'s player currently has Copper access, PLAYER-WIDE. See `Cities.copper_access?/2`."
+  @spec copper_access?(map(), map()) :: boolean()
+  defdelegate copper_access?(world, user), to: Cities
+
   @doc "A tile's completed improvement (`nil | :farm | :mine | :road`). See `Cities.tile_improvement/2`."
   defdelegate tile_improvement(world, tile_id), to: Cities
 
@@ -329,7 +333,7 @@ defmodule BrokenOaths.Game do
   @spec complete_improvement_for_test(map(), term(), atom()) :: map()
   defdelegate complete_improvement_for_test(world, tile_id, kind), to: Cities
 
-  @doc "Test-only: grant `city_id` Copper access (story 911). See `Cities.grant_copper_access_for_test/2`."
+  @doc "Test-only: grant `city_id`'s PLAYER Copper access (story 911, mine-based + player-wide). See `Cities.grant_copper_access_for_test/2`."
   @spec grant_copper_access_for_test(map(), term()) ::
           :ok | {:error, :no_copper_on_map | :not_found}
   defdelegate grant_copper_access_for_test(world, city_id), to: Cities

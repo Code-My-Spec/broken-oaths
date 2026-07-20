@@ -37,11 +37,17 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
       `Research.age/1 == :bronze_age` (story 903). `nil`/missing reads
       as "nothing unlocked yet", the same posture a fresh player's
       `Research.new/0` would produce.
-    * `:copper_access?` - story 911: whether `city` itself currently has
-      Copper access (a Copper tile anywhere in its own `territory`,
-      worked or not) — Play computes this from `world` + `city.
-      territory` (`BrokenOaths.Worlds.Resources.at/2`), since this
-      component has no world access of its own, the same reason
+    * `:copper_access?` - story 911, reworked for QA issue 3e6c124c
+      "Copper availability wrong": whether the SELECTED CITY'S OWNER
+      (not `city` itself) currently has Copper access — PLAYER-WIDE,
+      true once they have a completed Mine on a Copper tile anywhere
+      across ALL of their own cities' territory, so the SAME value
+      applies to every one of that player's cities regardless of which
+      one's territory holds the mine. Play computes this once per
+      refresh via `BrokenOaths.Game.copper_access?/2` (a real
+      `WorldServer` read — `BrokenOaths.Cities.Production.
+      player_copper_access?/2` is the actual rule), since this
+      component has no world/state access of its own, the same reason
       `assignable_tiles` arrives pre-computed. Defaults to `false` when
       omitted (no city selected yet), the same "missing reads as not
       unlocked" posture `player_research` already has.

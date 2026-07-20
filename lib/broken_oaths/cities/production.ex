@@ -59,22 +59,46 @@ defmodule BrokenOaths.Cities.Production do
   boundary; now it's this module's own orchestration doing it, one
   function up from the pure gate it feeds).
 
-  ## The Bronze Spearman's Copper gate (story 911)
+  ## The Bronze Spearman's Copper gate (story 911, reworked for QA
+  issue 3e6c124c "Copper availability wrong")
 
   `:bronze_spearman` needs TWO independent opts to queue, not one:
   `opts[:bronze_age?]` (story 903 — the owner has completed Bronze
-  Working) AND `opts[:copper_access?]` (story 911 — the CITY itself
-  has a Copper tile somewhere in its own `territory` — a pure ACCESS
-  GATE, no stockpile/consumption). Missing Bronze Working reports
-  `{:error, :locked}` (unchanged from story 903 — the option never even
-  appears in a Build UI until then, per `available_items/1` below);
-  missing Copper with Bronze Working already done reports the more
-  specific `{:error, :copper_required}`, so a caller can render
-  "Requires Copper" rather than a generic locked message. As with
-  `granary_available?/2` above, `can_queue?/3` stays opt-driven and
-  dependency-free; `bronze_age?/2`/`copper_access?/2` do the actual
-  `BrokenOaths.Technology.Research`/`BrokenOaths.Worlds.Resources` reads,
-  called from `queue_production/4`.
+  Working) AND `opts[:copper_access?]` (story 911 — see below). Missing
+  Bronze Working reports `{:error, :locked}` (unchanged from story
+  903 — the option never even appears in a Build UI until then, per
+  `available_items/1` below); missing Copper with Bronze Working
+  already done reports the more specific `{:error, :copper_required}`,
+  so a caller can render "Requires Copper" rather than a generic
+  locked message. As with `granary_available?/2` above, `can_queue?/3`
+  stays opt-driven and dependency-free; `bronze_age?/2`/`copper_access?/2`
+  do the actual `BrokenOaths.Technology.Research`/
+  `BrokenOaths.Worlds.Resources` reads, called from `queue_production/4`.
+
+  `opts[:copper_access?]` itself is no longer "does THIS city's own
+  territory happen to contain a bare Copper tile" (story 911's
+  original, MVP-narrow design) — QA issue 3e6c124c found that too
+  permissive (no mine required) and too stingy (didn't share across a
+  civilization's own cities) at once. The rule is now MINE-BASED and
+  PLAYER-WIDE: `player_copper_access?/2` scans every city a PLAYER
+  owns for a tile, anywhere in ANY of those cities' own `territory`,
+  that carries BOTH a Copper resource (`Resources.at/2`) AND a
+  COMPLETED (`status: :complete`) Mine improvement already built on
+  it (`BrokenOaths.Cities.Improvement`, unlocked onto a Copper tile by
+  `Improvement.mine_allowed?/2`'s own resource clause) — merely
+  having Copper somewhere in a city's borders no longer counts on its
+  own. Once true, the SAME single boolean unlocks `:bronze_spearman`
+  in EVERY city that player owns, not only the one whose territory
+  holds the mined tile — "build a mine, then build spearmen anywhere"
+  per the product owner's own stated intent, mirroring how a real
+  strategic resource is stockpiled and distributed across a
+  civilization rather than fenced to one city's own dirt.
+  `copper_access?/2` (per-CITY, singular) stays as a thin wrapper
+  around `player_copper_access?/2` for callers that only have a
+  `city()` map at hand (`queue_production/4` below,
+  `BrokenOaths.Feudal.Stewardship.steward_city_view/2`) — it reads
+  `city.player_id` and defers entirely to the player-wide rule; it
+  does NOT recheck that specific city's own territory.
 
   ## The Archer (QA issue da39e50b "No archer")
 
@@ -393,19 +417,44 @@ defmodule BrokenOaths.Cities.Production do
   def archery?(state, city),
     do: Research.archery_enabled?(player_research_for(state, city.player_id))
 
-  # Story 911 — whether `city` itself has Copper access: a Copper tile
-  # anywhere in its own `territory` (worked or not — a pure ACCESS
-  # GATE), the option `can_queue?/3` needs to gate `:bronze_spearman`
-  # on ALONGSIDE `bronze_age?/2` above. Unlike `granary_available?/2`/
-  # `bronze_age?/2` (both resolve `Research` over the city's OWNER),
-  # this reads `Resources.at/2` over the CITY's own territory — Copper
-  # access is a per-city fact, not a per-player one (two cities
-  # belonging to the same player can differ: one may sit on Copper
-  # hills, the other may not).
-  @doc "Whether `city` has a Copper tile in its own territory — the `:copper_access?` opt `can_queue?/3` needs."
+  # Story 911 rework (QA issue 3e6c124c "Copper availability wrong") —
+  # whether PLAYER `player_id` has Copper access anywhere: a completed
+  # Mine sitting on a Copper tile within territory ANY of their own
+  # cities controls. Player-wide by design — see this module's own
+  # moduledoc, "The Bronze Spearman's Copper gate" — so this is the one
+  # true source `copper_access?/2` below defers to.
+  @doc """
+  Whether `player_id` has Copper access: at least one COMPLETED Mine
+  improvement (`state.improvements`, `status: :complete`) sitting on a
+  Copper tile (`Resources.at/2`) within territory ANY city that player
+  owns controls — PLAYER-WIDE, not per-city (story 911 rework, QA
+  issue 3e6c124c). See this module's own moduledoc for the full
+  rationale.
+  """
+  @spec player_copper_access?(map(), term()) :: boolean()
+  def player_copper_access?(state, player_id) do
+    state.cities
+    |> Map.values()
+    |> Enum.filter(&(&1.player_id == player_id))
+    |> Enum.flat_map(& &1.territory)
+    |> Enum.uniq()
+    |> Enum.any?(&copper_mine_tile?(state, &1))
+  end
+
+  defp copper_mine_tile?(state, tile_id) do
+    match?(%{kind: :mine, status: :complete}, Map.get(state.improvements, tile_id)) and
+      Resources.at(state.world, tile_id) == :copper
+  end
+
+  @doc """
+  Whether `city`'s OWNER has Copper access — a thin per-city wrapper
+  around `player_copper_access?/2` (the `:copper_access?` opt
+  `can_queue?/3` needs). Defers entirely to the PLAYER-wide rule; does
+  NOT recheck `city`'s own territory in isolation (story 911 rework,
+  QA issue 3e6c124c — see this module's own moduledoc).
+  """
   @spec copper_access?(map(), city()) :: boolean()
-  def copper_access?(state, city),
-    do: Enum.any?(city.territory, &(Resources.at(state.world, &1) == :copper))
+  def copper_access?(state, city), do: player_copper_access?(state, city.player_id)
 
   @doc """
   Test-only helper for `WorldServer`'s own `:grant_copper_access_for_test`

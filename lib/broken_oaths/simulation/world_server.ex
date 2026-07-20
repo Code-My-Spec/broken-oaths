@@ -1240,62 +1240,31 @@ defmodule BrokenOaths.Simulation.WorldServer do
   # story is testing elsewhere, unrelated to what THIS criterion means
   # to exercise.
   def handle_call({:complete_improvement_for_test, tile_id, kind}, _from, state) do
-    duration = Improvement.duration(kind)
-
-    improvement =
-      case Repo.get_by(Improvement, world_id: state.world.id, tile_id: tile_id, kind: kind) do
-        nil ->
-          {:ok, improvement} =
-            %Improvement{}
-            |> Improvement.changeset(%{
-              world_id: state.world.id,
-              tile_id: tile_id,
-              kind: kind,
-              progress: duration,
-              status: :complete,
-              duration: duration,
-              builder_unit_id: nil
-            })
-            |> Repo.insert()
-
-          improvement
-
-        existing ->
-          {:ok, improvement} =
-            existing
-            |> Improvement.changeset(%{
-              kind: kind,
-              progress: duration,
-              status: :complete,
-              duration: duration,
-              builder_unit_id: nil
-            })
-            |> Repo.update()
-
-          improvement
-      end
-
-    improvement_data = improvement_map(improvement)
-    new_state = Improvement.put_improvement(state, kind, tile_id, improvement_data)
+    {improvement_data, new_state} = persist_complete_improvement_for_test(state, tile_id, kind)
     {:reply, improvement_data, new_state}
   end
 
-  # Test-only: grant `city_id` Copper access (story 911) by appending a
-  # REAL Copper tile's id (found anywhere on the map via
-  # `Resources.at/2`) onto that city's own `territory` — same narrow,
-  # documented-bridge status as `:complete_improvement_for_test` above.
-  # A city's Copper access is a genuine geometric fact (a Copper tile
-  # somewhere in ITS OWN territory), which most specs have no reason to
-  # steer deterministically — a scenario whose SUBJECT is something
-  # else entirely (e.g. story 903's "the Spearman outfights a
-  # barbarian" combat spec) still needs a real, spawned Bronze Spearman
-  # to exist, and story 911 makes that now depend on an access fact no
-  # earlier story had to arrange. This sidesteps hunting for (or
-  # engineering a founding spot near) a real Copper tile the way
-  # `:relocate_unit_for_test` sidesteps a real march. Refuses with
-  # `{:error, :no_copper_on_map}` if the world's own placement rolled
-  # no Copper anywhere (vanishingly rare at real gameplay scale, but a
-  # possible outcome of any seed-deterministic placement).
+  # Test-only: grant `city_id` Copper access (story 911, reworked for
+  # QA issue 3e6c124c "Copper availability wrong") by appending a REAL
+  # Copper tile's id (found anywhere on the map via `Resources.at/2`)
+  # onto that city's own `territory` AND instantly completing a Mine on
+  # it (`persist_complete_improvement_for_test/3`, the same bridge
+  # `:complete_improvement_for_test` above uses) — same narrow,
+  # documented-bridge status as that handler. Copper access is now a
+  # PLAYER-wide, MINE-based fact (`Production.player_copper_access?/2`
+  # — a bare Copper tile in territory is no longer enough on its own),
+  # which most specs have no reason to steer deterministically — a
+  # scenario whose SUBJECT is something else entirely (e.g. story 903's
+  # "the Spearman outfights a barbarian" combat spec) still needs a
+  # real, spawned Bronze Spearman to exist, and story 911 makes that
+  # now depend on an access fact no earlier story had to arrange. This
+  # sidesteps hunting for (or engineering a founding spot near) a real
+  # Copper tile AND standing a worker on it for a real Mine's own
+  # `Improvement.duration/1` turns, the way `:relocate_unit_for_test`
+  # sidesteps a real march. Refuses with `{:error, :no_copper_on_map}`
+  # if the world's own placement rolled no Copper anywhere
+  # (vanishingly rare at real gameplay scale, but a possible outcome of
+  # any seed-deterministic placement).
   def handle_call({:grant_copper_access_for_test, city_id}, _from, state) do
     case Map.get(state.cities, city_id) do
       nil ->
@@ -1309,9 +1278,31 @@ defmodule BrokenOaths.Simulation.WorldServer do
           tile_id ->
             new_territory = Enum.uniq([tile_id | city.territory])
             new_city = %{city | territory: new_territory}
-            {:reply, :ok, %{state | cities: Map.put(state.cities, city_id, new_city)}}
+            state_with_territory = %{state | cities: Map.put(state.cities, city_id, new_city)}
+
+            {_improvement_data, new_state} =
+              persist_complete_improvement_for_test(state_with_territory, tile_id, :mine)
+
+            {:reply, :ok, new_state}
         end
     end
+  end
+
+  # Story 911 rework (QA issue 3e6c124c) — Copper access is now
+  # PLAYER-wide: whether `user` currently has at least one completed
+  # Mine on a Copper tile anywhere across ALL of their own cities'
+  # territory (`Production.player_copper_access?/2`), independent of
+  # which city's panel happens to be open. `false` for a `user` with no
+  # player in this world yet, the same "absent reads as not unlocked"
+  # posture `:player_research` above already has.
+  def handle_call({:copper_access?, user}, _from, state) do
+    access? =
+      case find_player(state, user.id) do
+        nil -> false
+        player -> Production.player_copper_access?(state, player.id)
+      end
+
+    {:reply, access?, state}
   end
 
   # Test-only: move a barbarian warrior directly onto `tile_id`,
@@ -1478,6 +1469,56 @@ defmodule BrokenOaths.Simulation.WorldServer do
     new_state = do_abandon(state, user)
     broadcast(new_state.world.id, [:units_changed])
     {:reply, :ok, new_state}
+  end
+
+  # Shared by `:complete_improvement_for_test` and
+  # `:grant_copper_access_for_test` above: instantly place a COMPLETE
+  # improvement of `kind` on `tile_id`, bypassing the real build (a
+  # worker standing still for `Improvement.duration/1` real turns)
+  # entirely. A scenario whose SUBJECT is what happens to an
+  # ALREADY-FINISHED improvement (pillage, story 893 criterion 7556; or
+  # — story 911 rework — Copper access) has no structural need to
+  # expose a worker to a live, spawning camp for the several real turns
+  # a build would otherwise take just to get there.
+  defp persist_complete_improvement_for_test(state, tile_id, kind) do
+    duration = Improvement.duration(kind)
+
+    improvement =
+      case Repo.get_by(Improvement, world_id: state.world.id, tile_id: tile_id, kind: kind) do
+        nil ->
+          {:ok, improvement} =
+            %Improvement{}
+            |> Improvement.changeset(%{
+              world_id: state.world.id,
+              tile_id: tile_id,
+              kind: kind,
+              progress: duration,
+              status: :complete,
+              duration: duration,
+              builder_unit_id: nil
+            })
+            |> Repo.insert()
+
+          improvement
+
+        existing ->
+          {:ok, improvement} =
+            existing
+            |> Improvement.changeset(%{
+              kind: kind,
+              progress: duration,
+              status: :complete,
+              duration: duration,
+              builder_unit_id: nil
+            })
+            |> Repo.update()
+
+          improvement
+      end
+
+    improvement_data = improvement_map(improvement)
+    new_state = Improvement.put_improvement(state, kind, tile_id, improvement_data)
+    {improvement_data, new_state}
   end
 
   @impl true

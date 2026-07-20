@@ -1,19 +1,23 @@
 defmodule BrokenOathsSpex.Story911.Criterion7706Spex do
   @moduledoc """
   Story 911 — Strategic Resources: Bronze for Bronze Spearmen
-  Criterion 7706 — Copper access is a pure ACCESS GATE: a Copper tile
-  merely lying within a city's owned territory is enough, whether or
-  not a citizen is actually WORKING it (no stockpile, no consumption,
-  no improvement requirement — story 911's own locked design, "A city
-  has access when a Copper tile lies within that city's owned
-  territory (worked or not)").
+  Criterion 7706 — Copper access needs a completed MINE on the Copper
+  tile (QA issue 3e6c124c "Copper availability wrong" rework), but
+  NEVER needs that tile to also be WORKED: building the Mine and
+  assigning a citizen to actually harvest the tile's yield are two
+  independent facts (no stockpile, no consumption tied to worked-tile
+  assignment) — this scenario proves the "doesn't need to be worked"
+  half specifically, now that "doesn't need to be worked" is layered
+  on top of the new "does need a Mine" requirement rather than replacing
+  it.
 
   This scenario deliberately keeps the Copper tile UNWORKED throughout
   — it never appears in `city.worked_tiles`, is never the city center
   either (`city.tile_id`), and the city's single starting citizen is
-  confirmed working somewhere else — yet the Bronze Spearman is still
-  accepted into the queue, proving access never depended on the tile
-  being worked.
+  confirmed working somewhere else — yet, once a Mine is built on it
+  (`Fixtures.complete_improvement/3`), the Bronze Spearman is still
+  accepted into the queue, proving the "worked or not" half of the
+  access rule survives the mine-based rework unchanged.
   """
 
   use BrokenOathsSpex.Case
@@ -48,7 +52,8 @@ defmodule BrokenOathsSpex.Story911.Criterion7706Spex do
           |> Enum.reject(&(&1 == copper_tile))
           |> Enum.find(land?)
 
-        refute is_nil(founding_tile), "no land tile adjacent to Copper (other than itself) exists to found on"
+        refute is_nil(founding_tile),
+               "no land tile adjacent to Copper (other than itself) exists to found on"
 
         {:ok, join_live, _html} = live(context.conn, "/play")
 
@@ -61,10 +66,14 @@ defmodule BrokenOathsSpex.Story911.Criterion7706Spex do
         [settler | _] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :settler, do: u
 
-        render_hook(play_live, "queue_move", %{"unit_id" => settler.id, "to_tile" => founding_tile})
+        render_hook(play_live, "queue_move", %{
+          "unit_id" => settler.id,
+          "to_tile" => founding_tile
+        })
 
         Enum.reduce_while(1..30, :ok, fn _, :ok ->
-          [s] = for u <- Fixtures.player_units(context.world, context.user), u.id == settler.id, do: u
+          [s] =
+            for u <- Fixtures.player_units(context.world, context.user), u.id == settler.id, do: u
 
           if s.tile_id == founding_tile do
             {:halt, :ok}
@@ -80,14 +89,34 @@ defmodule BrokenOathsSpex.Story911.Criterion7706Spex do
         assert copper_tile in city.territory,
                "the founded city's own territory doesn't include the Copper tile it was founded next to"
 
-        assert copper_tile != city.tile_id, "Copper landed on the city center — this scenario needs it non-center"
-        refute copper_tile in city.worked_tiles, "Copper is already worked — this scenario needs it unworked"
+        assert copper_tile != city.tile_id,
+               "Copper landed on the city center — this scenario needs it non-center"
+
+        refute copper_tile in city.worked_tiles,
+               "Copper is already worked — this scenario needs it unworked"
 
         {:ok,
          context
          |> Map.put(:play_live, play_live)
          |> Map.put(:city, city)
          |> Map.put(:copper_tile, copper_tile)}
+      end
+
+      given_ "a Mine is built on the (still unworked) Copper tile", context do
+        improvement = Fixtures.complete_improvement(context.world, context.copper_tile, :mine)
+
+        assert improvement.status == :complete,
+               "the Mine on the Copper tile should be instantly completed by this test-only bridge"
+
+        [city] =
+          for c <- Fixtures.player_cities(context.world, context.user),
+              c.id == context.city.id,
+              do: c
+
+        refute context.copper_tile in city.worked_tiles,
+               "building the Mine should never itself assign the tile to a worker"
+
+        {:ok, context}
       end
 
       given_ "the player reaches the Bronze Age (Mining, then Bronze Working)", context do
@@ -112,9 +141,12 @@ defmodule BrokenOathsSpex.Story911.Criterion7706Spex do
         {:ok, context}
       end
 
-      when_ "the player queues a Bronze Spearman without ever working the Copper tile", context do
+      when_ "the player queues a Bronze Spearman without ever working the mined Copper tile",
+            context do
         [city] =
-          for c <- Fixtures.player_cities(context.world, context.user), c.id == context.city.id, do: c
+          for c <- Fixtures.player_cities(context.world, context.user),
+              c.id == context.city.id,
+              do: c
 
         refute context.copper_tile in city.worked_tiles,
                "Copper became worked on its own between founding and this check — the scenario has drifted"
@@ -131,10 +163,12 @@ defmodule BrokenOathsSpex.Story911.Criterion7706Spex do
 
       then_ "the Bronze Spearman is still accepted into the queue", context do
         [city] =
-          for c <- Fixtures.player_cities(context.world, context.user), c.id == context.city.id, do: c
+          for c <- Fixtures.player_cities(context.world, context.user),
+              c.id == context.city.id,
+              do: c
 
         assert Enum.any?(city.queue, &(&1.type == :bronze_spearman)),
-               "Bronze Spearman was refused despite the (unworked) Copper tile sitting in the city's own territory"
+               "Bronze Spearman was refused despite a completed Mine sitting on the (unworked) Copper tile"
 
         refute context.copper_tile in city.worked_tiles,
                "the assertion above should hold with Copper STILL unworked, not because it got auto-assigned"
