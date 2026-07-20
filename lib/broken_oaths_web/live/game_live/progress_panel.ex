@@ -53,8 +53,12 @@ defmodule BrokenOathsWeb.GameLive.ProgressPanel do
 
   @impl true
   def render(assigns) do
-    banked_bronze = Research.banked(assigns.player_research, :bronze_working)
     bronze_cost = Research.cost(:bronze_working)
+    # Cap the displayed banked science at the cost: an already-completed (or
+    # over-banked) Bronze Working reads "100 / 100", not "108 / 100" (issue
+    # cae519c3). turns_to_bronze already floors remaining at 0, so this is the
+    # same clamp applied to the raw banked/cost row.
+    banked_bronze = min(Research.banked(assigns.player_research, :bronze_working), bronze_cost)
 
     assigns =
       assigns

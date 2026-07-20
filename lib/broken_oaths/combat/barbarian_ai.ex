@@ -186,18 +186,32 @@ defmodule BrokenOaths.Combat.BarbarianAI do
   defp roam(world, barbarian, camp_tile, occupied, seed) do
     distances_from_camp = land_distances(world, camp_tile, @roam_radius)
 
-    candidates =
-      world
-      |> Regions.adjacent_tiles(barbarian.tile_id)
-      |> Enum.filter(&(Regions.tile_class(world, &1) == :land))
-      |> Enum.filter(&Map.has_key?(distances_from_camp, &1))
-      |> Enum.reject(&MapSet.member?(occupied, &1))
-      |> Enum.uniq()
-      |> Enum.sort()
+    if Map.has_key?(distances_from_camp, barbarian.tile_id) do
+      # Within the patrol radius: wander to a random adjacent in-radius tile.
+      candidates =
+        world
+        |> Regions.adjacent_tiles(barbarian.tile_id)
+        |> Enum.filter(&(Regions.tile_class(world, &1) == :land))
+        |> Enum.filter(&Map.has_key?(distances_from_camp, &1))
+        |> Enum.reject(&MapSet.member?(occupied, &1))
+        |> Enum.uniq()
+        |> Enum.sort()
 
-    case seeded_pick([barbarian.tile_id | candidates] |> Enum.uniq(), {seed, :roam}) do
-      tile when tile == barbarian.tile_id -> :hold
-      tile -> {:move, tile}
+      case seeded_pick([barbarian.tile_id | candidates] |> Enum.uniq(), {seed, :roam}) do
+        tile when tile == barbarian.tile_id -> :hold
+        tile -> {:move, tile}
+      end
+    else
+      # Stranded beyond the patrol radius — e.g. a hunt that ended out of range
+      # because the target died or fled (issue 54b778e6). None of its immediate
+      # neighbors are within radius either, so the old candidate list collapsed
+      # to :hold indefinitely. Instead, take one hex along the shortest land
+      # path back toward camp; once it re-enters the radius the branch above
+      # resumes normal patrol.
+      case step_toward(world, barbarian.tile_id, camp_tile, occupied) do
+        nil -> :hold
+        tile -> {:move, tile}
+      end
     end
   end
 

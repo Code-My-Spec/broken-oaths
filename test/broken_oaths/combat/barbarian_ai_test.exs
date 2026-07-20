@@ -221,6 +221,25 @@ defmodule BrokenOaths.Combat.BarbarianAITest do
       barb = barbarian(1, anchor_tile())
       assert decide(barb, nil, [barb]) == :hold
     end
+
+    test "homes back toward camp when stranded beyond the roam radius (issue 54b778e6)" do
+      camp = anchor_tile()
+      barb_tile = ring(camp, @roam_radius + 2) |> List.first()
+      refute is_nil(barb_tile)
+
+      distance_before = land_distance(camp, barb_tile, 20)
+      refute is_nil(distance_before)
+      assert distance_before > @roam_radius
+
+      barb = barbarian(1, barb_tile)
+
+      # Nothing in range: a barbarian marooned past its patrol radius (e.g.
+      # after a hunt ended out of range) steps one hex closer to camp instead
+      # of holding forever. The homing step is deterministic (shortest path),
+      # so no seed is needed.
+      assert {:move, next_tile} = decide(barb, camp, [barb])
+      assert land_distance(camp, next_tile, 20) == distance_before - 1
+    end
   end
 
   describe "decide/6 — leash (a warrior never chases far from its own camp)" do
