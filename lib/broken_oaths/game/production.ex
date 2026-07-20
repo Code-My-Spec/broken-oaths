@@ -28,6 +28,17 @@ defmodule BrokenOaths.Game.Production do
   `banked` intact — nothing is lost, it just keeps growing next turn
   until a tile frees up (story 879, criterion 7472).
 
+  ## Queue commands (pragdave decomposition, slice 3)
+
+  `queue_production/4`, `reorder_production_item/4`, and
+  `cancel_production_item/4` are the pure, process-unaware "domain
+  model" home for the command logic `BrokenOaths.Game.WorldServer` used
+  to bury inline as private `do_*` functions (see
+  `.code_my_spec/knowledge/genserver_decomposition.md`). Each takes the
+  WorldServer's own tick-`state` plus plain args and returns `{:ok,
+  new_state} | {:error, reason}` — `WorldServer`'s own `handle_call`
+  clauses are thin one-line delegations into this module.
+
   ## The Granary (story 902, criterion 7629)
 
   Unlike every other buildable, `:granary` is a BUILDING, not a unit:
@@ -38,28 +49,32 @@ defmodule BrokenOaths.Game.Production do
   food/turn bonus, the same "unlock flips a flag, read back on demand"
   pattern `BrokenOaths.Game.Research` already documents for its own
   unlocks). Gated on the city's OWNER having completed Pottery
-  (`can_queue?/3`'s `granary_available?` option — `Production` itself
-  never touches `BrokenOaths.Game.Research`, so the caller, `WorldServer`,
-  resolves that flag and passes it in) and on the city not already
-  having one (`:already_built` — a Granary is built once, ever).
+  (`can_queue?/3`'s `granary_available?` option) and on the city not
+  already having one (`:already_built` — a Granary is built once,
+  ever). `can_queue?/3` itself never touches `BrokenOaths.Game.Research`
+  directly — opts arrive pre-resolved. The resolution lives one level
+  up, in `granary_available?/2`, called from `queue_production/4`
+  (moved home from `WorldServer` in the pragdave decomposition, slice
+  3 — previously the CALLER resolved the flag across a process
+  boundary; now it's this module's own orchestration doing it, one
+  function up from the pure gate it feeds).
 
   ## The Bronze Spearman's Copper gate (story 911)
 
   `:bronze_spearman` needs TWO independent opts to queue, not one:
   `opts[:bronze_age?]` (story 903 — the owner has completed Bronze
   Working) AND `opts[:copper_access?]` (story 911 — the CITY itself
-  has a Copper tile somewhere in its own `territory`, worked or not —
-  a pure ACCESS GATE, no stockpile/consumption). Missing Bronze Working
-  reports `{:error, :locked}` (unchanged from story 903 — the option
-  never even appears in a Build UI until then, per `available_items/1`
-  below); missing Copper with Bronze Working already done reports the
-  more specific `{:error, :copper_required}`, so a caller can render
-  "Requires Copper" rather than a generic locked message. `Production`
-  itself never touches `BrokenOaths.Worlds.Resources` or a city's
-  territory geometry — the same "resolve the flag, pass it in" split
-  `granary_available?`/`bronze_age?` already establish; the caller
-  (`WorldServer`) computes `copper_access?` from the city's own
-  `territory` and the world's resource placement.
+  has a Copper tile somewhere in its own `territory` — a pure ACCESS
+  GATE, no stockpile/consumption). Missing Bronze Working reports
+  `{:error, :locked}` (unchanged from story 903 — the option never even
+  appears in a Build UI until then, per `available_items/1` below);
+  missing Copper with Bronze Working already done reports the more
+  specific `{:error, :copper_required}`, so a caller can render
+  "Requires Copper" rather than a generic locked message. As with
+  `granary_available?/2` above, `can_queue?/3` stays opt-driven and
+  dependency-free; `bronze_age?/2`/`copper_access?/2` do the actual
+  `BrokenOaths.Game.Research`/`BrokenOaths.Worlds.Resources` reads,
+  called from `queue_production/4`.
 
   ## The Archer (QA issue da39e50b "No archer")
 
@@ -90,8 +105,15 @@ defmodule BrokenOaths.Game.Production do
   flag; see the QA issue's resolution for the full writeup.
   """
 
+  import Ecto.Query
+
+  alias BrokenOaths.Game.ProductionItem
+  alias BrokenOaths.Game.Research
   alias BrokenOaths.Game.Yields
+  alias BrokenOaths.Repo
+  alias BrokenOaths.Worlds.Globe
   alias BrokenOaths.Worlds.Regions
+  alias BrokenOaths.Worlds.Resources
   alias BrokenOaths.Worlds.World
 
   @type tile_id :: non_neg_integer()
@@ -173,7 +195,7 @@ defmodule BrokenOaths.Game.Production do
   size-1 city has no population to spare; story 883, criterion 7487),
   and — for `:granary` only (story 902) — the city's owner having
   completed Pottery (`opts[:granary_available?]`, since this
-  dependency-free module never calls `BrokenOaths.Game.Research`
+  dependency-free function never calls `BrokenOaths.Game.Research`
   itself) and not already having one (`:already_built`). Story 903/911:
   `:bronze_spearman` needs BOTH `opts[:bronze_age?]` (Bronze Working
   completed) and `opts[:copper_access?]` (a Copper tile somewhere in
@@ -235,6 +257,203 @@ defmodule BrokenOaths.Game.Production do
 
   defp maybe_offer(types, type, true), do: types ++ [type]
   defp maybe_offer(types, _type, false), do: types
+
+  # -------------------------------------------------------------------
+  # Queue commands (moved from WorldServer, story 879)
+  # -------------------------------------------------------------------
+
+  @doc """
+  Queue a new `type` item at the tail of `city_id`'s own build queue —
+  resolves the Granary/Bronze Spearman/Archer gates itself
+  (`granary_available?/2`/`bronze_age?/2`/`copper_access?/2`/
+  `archery?/2`) before handing them to the pure `can_queue?/3`.
+  """
+  @spec queue_production(map(), map(), integer(), atom() | String.t()) ::
+          {:ok, map()} | {:error, atom()}
+  def queue_production(state, user, city_id, type) do
+    with {:ok, city} <- owned_city(state, user, city_id),
+         {:ok, type} <- parse_item_type(type),
+         :ok <-
+           can_queue?(city, type,
+             granary_available?: granary_available?(state, city),
+             bronze_age?: bronze_age?(state, city),
+             copper_access?: copper_access?(state, city),
+             archery?: archery?(state, city)
+           ) do
+      next_position =
+        city.queue |> Enum.map(&Map.get(&1, :position, 0)) |> Enum.max(fn -> 0 end) |> Kernel.+(1)
+
+      {:ok, item} =
+        %ProductionItem{}
+        |> ProductionItem.changeset(
+          new_item(type)
+          |> Map.put(:city_id, city_id)
+          |> Map.put(:position, next_position)
+        )
+        |> Repo.insert()
+
+      new_city = %{city | queue: city.queue ++ [queue_item_map(item)]}
+      {:ok, %{state | cities: Map.put(state.cities, city_id, new_city)}}
+    end
+  end
+
+  # Move a queued item one slot toward the head by swapping positions
+  # with its predecessor. The head (current) item can't move; item
+  # identity — and its banked progress — stays put, only order changes.
+  @doc "Move `item_id` one slot toward the head of `city_id`'s own build queue."
+  @spec reorder_production_item(map(), map(), integer(), integer()) ::
+          {:ok, map()} | {:error, atom()}
+  def reorder_production_item(state, user, city_id, item_id) do
+    with {:ok, city} <- owned_city(state, user, city_id) do
+      case Enum.find_index(city.queue, &(&1.id == item_id)) do
+        nil ->
+          {:error, :not_found}
+
+        0 ->
+          {:error, :invalid_item}
+
+        idx ->
+          above = Enum.at(city.queue, idx - 1)
+          item = Enum.at(city.queue, idx)
+
+          Repo.update_all(from(p in ProductionItem, where: p.id == ^item.id),
+            set: [position: above.position]
+          )
+
+          Repo.update_all(from(p in ProductionItem, where: p.id == ^above.id),
+            set: [position: item.position]
+          )
+
+          swapped = %{item | position: above.position}
+          swapped_above = %{above | position: item.position}
+
+          new_queue =
+            city.queue
+            |> List.replace_at(idx - 1, swapped)
+            |> List.replace_at(idx, swapped_above)
+
+          new_city = %{city | queue: new_queue}
+          {:ok, %{state | cities: Map.put(state.cities, city_id, new_city)}}
+      end
+    end
+  end
+
+  @doc "Cancel (delete) `item_id` from `city_id`'s own build queue."
+  @spec cancel_production_item(map(), map(), integer(), integer()) ::
+          {:ok, map()} | {:error, atom()}
+  def cancel_production_item(state, user, city_id, item_id) do
+    with {:ok, city} <- owned_city(state, user, city_id) do
+      if Enum.any?(city.queue, &(&1.id == item_id)) do
+        Repo.delete_all(from(p in ProductionItem, where: p.id == ^item_id))
+        new_city = %{city | queue: Enum.reject(city.queue, &(&1.id == item_id))}
+        {:ok, %{state | cities: Map.put(state.cities, city_id, new_city)}}
+      else
+        {:error, :not_found}
+      end
+    end
+  end
+
+  @doc "Parses a build-type param (atom or string) into a known `buildable()`."
+  @spec parse_item_type(term()) :: {:ok, buildable()} | {:error, :invalid_item}
+  def parse_item_type(type)
+      when type in [:settler, :worker, :warrior, :granary, :bronze_spearman, :archer],
+      do: {:ok, type}
+
+  def parse_item_type("settler"), do: {:ok, :settler}
+  def parse_item_type("worker"), do: {:ok, :worker}
+  def parse_item_type("warrior"), do: {:ok, :warrior}
+  def parse_item_type("granary"), do: {:ok, :granary}
+  def parse_item_type("bronze_spearman"), do: {:ok, :bronze_spearman}
+  # QA issue da39e50b — the Archery tech unlocked nothing; a first-pass
+  # Archer (melee-for-now — see this module's own moduledoc) buildable
+  # once the city's owner has completed Archery.
+  def parse_item_type("archer"), do: {:ok, :archer}
+  def parse_item_type(_other), do: {:error, :invalid_item}
+
+  # Story 902, criterion 7629 — whether `city`'s OWNER has completed
+  # Pottery, the option `can_queue?/3` needs to gate `:granary` on.
+  @doc "Whether `city`'s OWNER has completed Pottery — the `:granary_available?` opt `can_queue?/3` needs."
+  @spec granary_available?(map(), city()) :: boolean()
+  def granary_available?(state, city),
+    do: Research.granary_enabled?(player_research_for(state, city.player_id))
+
+  # Story 903 — whether `city`'s OWNER is in the Bronze Age
+  # (`Research.age/1`), the option `can_queue?/3` needs to gate
+  # `:bronze_spearman` on.
+  @doc "Whether `city`'s OWNER is in the Bronze Age — the `:bronze_age?` opt `can_queue?/3` needs."
+  @spec bronze_age?(map(), city()) :: boolean()
+  def bronze_age?(state, city),
+    do: Research.age(player_research_for(state, city.player_id)) == :bronze_age
+
+  # QA issue da39e50b — whether `city`'s OWNER has completed Archery,
+  # the option `can_queue?/3` needs to gate `:archer` on.
+  @doc "Whether `city`'s OWNER has completed Archery — the `:archery?` opt `can_queue?/3` needs."
+  @spec archery?(map(), city()) :: boolean()
+  def archery?(state, city),
+    do: Research.archery_enabled?(player_research_for(state, city.player_id))
+
+  # Story 911 — whether `city` itself has Copper access: a Copper tile
+  # anywhere in its own `territory` (worked or not — a pure ACCESS
+  # GATE), the option `can_queue?/3` needs to gate `:bronze_spearman`
+  # on ALONGSIDE `bronze_age?/2` above. Unlike `granary_available?/2`/
+  # `bronze_age?/2` (both resolve `Research` over the city's OWNER),
+  # this reads `Resources.at/2` over the CITY's own territory — Copper
+  # access is a per-city fact, not a per-player one (two cities
+  # belonging to the same player can differ: one may sit on Copper
+  # hills, the other may not).
+  @doc "Whether `city` has a Copper tile in its own territory — the `:copper_access?` opt `can_queue?/3` needs."
+  @spec copper_access?(map(), city()) :: boolean()
+  def copper_access?(state, city),
+    do: Enum.any?(city.territory, &(Resources.at(state.world, &1) == :copper))
+
+  @doc """
+  Test-only helper for `WorldServer`'s own `:grant_copper_access_for_test`
+  bridge: the first tile id (mesh order) anywhere on `world` carrying
+  Copper, or `nil` if this particular seed/density placed none at all.
+  """
+  @spec find_any_copper_tile(World.t()) :: tile_id() | nil
+  def find_any_copper_tile(world) do
+    mesh = Globe.get(world.frequency)
+
+    Enum.find_value(mesh.tiles, fn {tile_id, _tile} ->
+      if Resources.at(world, tile_id) == :copper, do: tile_id
+    end)
+  end
+
+  # -------------------------------------------------------------------
+  # Shared, trivial lookups — duplicated rather than reaching back into
+  # `WorldServer` (or reaching sideways into `City`), matching the
+  # sibling `Rebellion.War`'s own "pure, process-unaware, unit-testable
+  # with no GenServer running" contract (small private helper copies
+  # rather than expanding public APIs).
+  # -------------------------------------------------------------------
+
+  defp find_player(state, user_id) do
+    state.players |> Map.values() |> Enum.find(&(&1.user_id == user_id))
+  end
+
+  defp owned_city(state, user, city_id) do
+    player = find_player(state, user.id)
+    city = Map.get(state.cities, city_id)
+
+    if is_nil(player) or is_nil(city) or city.player_id != player.id do
+      {:error, :not_owner}
+    else
+      {:ok, city}
+    end
+  end
+
+  defp player_research_for(state, player_id),
+    do: Map.get(state.player_research, player_id, Research.new())
+
+  defp queue_item_map(%ProductionItem{} = item),
+    do: %{
+      id: item.id,
+      type: item.type,
+      banked: item.banked,
+      cost: item.cost,
+      position: item.position
+    }
 
   # -------------------------------------------------------------------
   # Accrual

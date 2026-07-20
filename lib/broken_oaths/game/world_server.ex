@@ -85,9 +85,7 @@ defmodule BrokenOaths.Game.WorldServer do
   alias BrokenOaths.Repo
   alias BrokenOaths.Users
   alias BrokenOaths.Worlds
-  alias BrokenOaths.Worlds.Globe
   alias BrokenOaths.Worlds.Regions
-  alias BrokenOaths.Worlds.Resources
   alias BrokenOaths.Worlds.World
 
   # Story 897: no more single process-wide cadence — every tick/catch-up/
@@ -322,7 +320,7 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   def handle_call({:found_city, user, unit_id}, _from, state) do
-    case do_found_city(state, user, unit_id) do
+    case City.found_city(state, user, unit_id) do
       {:ok, new_state} ->
         # A single event, not both — every `handle_info` clause below
         # (`:units_changed`/`:cities_changed`/`:improvements_changed`)
@@ -344,7 +342,7 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   def handle_call({:queue_production, user, city_id, type}, _from, state) do
-    case do_queue_production(state, user, city_id, type) do
+    case Production.queue_production(state, user, city_id, type) do
       {:ok, new_state} ->
         broadcast(new_state.world.id, [:cities_changed])
         {:reply, :ok, new_state}
@@ -355,7 +353,7 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   def handle_call({:reorder_production_item, user, city_id, item_id}, _from, state) do
-    case do_reorder_production_item(state, user, city_id, item_id) do
+    case Production.reorder_production_item(state, user, city_id, item_id) do
       {:ok, new_state} ->
         broadcast(new_state.world.id, [:cities_changed])
         {:reply, :ok, new_state}
@@ -366,7 +364,7 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   def handle_call({:cancel_production_item, user, city_id, item_id}, _from, state) do
-    case do_cancel_production_item(state, user, city_id, item_id) do
+    case Production.cancel_production_item(state, user, city_id, item_id) do
       {:ok, new_state} ->
         broadcast(new_state.world.id, [:cities_changed])
         {:reply, :ok, new_state}
@@ -377,7 +375,7 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   def handle_call({:assign_worked_tile, user, city_id, from_tile, to_tile}, _from, state) do
-    case do_assign_worked_tile(state, user, city_id, from_tile, to_tile) do
+    case City.assign_worked_tile(state, user, city_id, from_tile, to_tile) do
       {:ok, new_state} ->
         broadcast(new_state.world.id, [:cities_changed])
         {:reply, :ok, new_state}
@@ -388,7 +386,7 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   def handle_call({:rename_city, user, city_id, name}, _from, state) do
-    case do_rename_city(state, user, city_id, name) do
+    case City.rename_city(state, user, city_id, name) do
       {:ok, new_state} ->
         broadcast(new_state.world.id, [:cities_changed])
         {:reply, :ok, new_state}
@@ -399,7 +397,7 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   def handle_call({:start_improvement, user, unit_id, kind}, _from, state) do
-    case do_start_improvement(state, user, unit_id, kind) do
+    case Improvement.start_improvement(state, user, unit_id, kind) do
       {:ok, new_state} ->
         broadcast(new_state.world.id, [:improvements_changed])
         {:reply, :ok, new_state}
@@ -411,7 +409,7 @@ defmodule BrokenOaths.Game.WorldServer do
 
   # QA issue 8aa2c571 — see `BrokenOaths.Game.cancel_improvement/3`'s doc.
   def handle_call({:cancel_improvement, user, unit_id}, _from, state) do
-    case do_cancel_improvement(state, user, unit_id) do
+    case Improvement.cancel_improvement(state, user, unit_id) do
       {:ok, new_state} ->
         broadcast(new_state.world.id, [:improvements_changed])
         {:reply, :ok, new_state}
@@ -422,7 +420,7 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   def handle_call({:player_cities, user}, _from, state) do
-    {:reply, player_cities(state, user), state}
+    {:reply, City.player_cities(state, user), state}
   end
 
   # Story 899: every civilization `user` has discovered in this world —
@@ -939,7 +937,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # constructive-only catalog `queue_production` itself already builds
   # from (`Stewardship.constructive_item?/1`), scoped through
   # stewardship eligibility instead of ownership. Persisted immediately,
-  # same "not tick-state" status `do_queue_production/4` already has.
+  # same "not tick-state" status `Production.queue_production/4` already has.
   def handle_call(
         {:steward_queue_production, steward_user, owner_user_id, city_id, type},
         _from,
@@ -953,7 +951,7 @@ defmodule BrokenOaths.Game.WorldServer do
 
   # "No cancel-griefing" — a steward's cancel attempt is refused
   # structurally: no path anywhere in this module ever reaches the
-  # real `do_cancel_production_item/4`. Same discipline
+  # real `Production.cancel_production_item/4`. Same discipline
   # `:steward_disband_unit`/`:steward_queue_move`/`:steward_attack`
   # share below — each a permanent, unconditional refusal, not a
   # permission check that could someday pass.
@@ -1077,11 +1075,11 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   def handle_call({:tile_improvement, tile_id}, _from, state) do
-    {:reply, tile_improvement_at(state, tile_id), state}
+    {:reply, Improvement.tile_improvement_at(state, tile_id), state}
   end
 
   def handle_call({:improvements_visible_to, user}, _from, state) do
-    {:reply, visible_improvements(state, user), state}
+    {:reply, Improvement.visible_improvements(state, user), state}
   end
 
   def handle_call({:set_unit_hp_for_test, unit_id, hp}, _from, state) do
@@ -1307,7 +1305,7 @@ defmodule BrokenOaths.Game.WorldServer do
       end
 
     improvement_data = improvement_map(improvement)
-    new_state = put_improvement(state, kind, tile_id, improvement_data)
+    new_state = Improvement.put_improvement(state, kind, tile_id, improvement_data)
     {:reply, improvement_data, new_state}
   end
 
@@ -1333,7 +1331,7 @@ defmodule BrokenOaths.Game.WorldServer do
         {:reply, {:error, :not_found}, state}
 
       city ->
-        case find_any_copper_tile(state.world) do
+        case Production.find_any_copper_tile(state.world) do
           nil ->
             {:reply, {:error, :no_copper_on_map}, state}
 
@@ -2331,535 +2329,6 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   # -------------------------------------------------------------------
-  # Found city
-  # -------------------------------------------------------------------
-
-  defp do_found_city(state, user, unit_id) do
-    player = find_player(state, user.id)
-    unit = Map.get(state.units, unit_id)
-
-    cond do
-      is_nil(player) or is_nil(unit) or unit.player_id != player.id ->
-        {:error, :not_owner}
-
-      unit.type != :settler ->
-        {:error, :not_settler}
-
-      true ->
-        case Production.validate_founding(state.world, Map.values(state.cities), unit.tile_id) do
-          {:error, reason} ->
-            {:error, reason}
-
-          :ok ->
-            first_founding? =
-              not Enum.any?(state.cities, fn {_id, c} -> c.player_id == player.id end)
-
-            {:ok, city} = persist_found_city!(state, player, unit)
-
-            new_state = %{
-              state
-              | cities: Map.put(state.cities, city.id, city),
-                units: Map.delete(state.units, unit_id),
-                orders: Map.delete(state.orders, unit_id)
-            }
-
-            new_state =
-              if first_founding?,
-                do: spawn_wilderness_camps(new_state, player, unit.tile_id),
-                else: new_state
-
-            {:ok, new_state}
-        end
-    end
-  end
-
-  # Story 892: a player's FIRST city (never a second, third, ...) seeds
-  # the wilderness around it — see `Camps.place_wilderness/6`'s doc for
-  # the near/far split. Placement is pure and deterministic; this is
-  # just the imperative shell turning its tile picks into real,
-  # immediately persisted `Camp` rows (same "persist right away, tick
-  # only diffs later" pattern `persist_found_city!/3` already uses for
-  # the city itself).
-  defp spawn_wilderness_camps(state, player, city_tile_id) do
-    home_region = player_region_tiles(state.world, player.region_id)
-    explored = Map.get(state.explored, player.id, MapSet.new())
-    # Units, existing camps (any player's founding may already have
-    # placed some — game_camps carries a world+tile unique index), and
-    # cities all block placement.
-    occupied =
-      [
-        state.units |> Map.values() |> Enum.map(& &1.tile_id),
-        state |> Map.get(:camps, %{}) |> Map.values() |> Enum.map(& &1.tile_id),
-        state |> Map.get(:cities, %{}) |> Map.values() |> Enum.map(& &1.tile_id)
-      ]
-      |> List.flatten()
-      |> MapSet.new()
-
-    seed = {state.world.seed, city_tile_id}
-
-    tiles =
-      Camps.place_wilderness(state.world, city_tile_id, home_region, explored, occupied, seed)
-
-    camps = Enum.map(tiles, &persist_camp!(state.world.id, &1))
-
-    %{state | camps: Enum.reduce(camps, Map.get(state, :camps, %{}), &Map.put(&2, &1.id, &1))}
-  end
-
-  defp persist_camp!(world_id, tile_id) do
-    {:ok, camp} =
-      %Camp{}
-      |> Camp.changeset(%{
-        world_id: world_id,
-        tile_id: tile_id,
-        hp: Camp.max_hp(),
-        spawn_counter: 0
-      })
-      |> Repo.insert()
-
-    camp_map(camp)
-  end
-
-  # The settler is consumed and a working city stands in its place
-  # immediately (story 878, criterion 7463) — both writes happen in one
-  # transaction. The founding pop's worked-tile pick uses the exact
-  # same deterministic scoring growth uses later, computed in memory
-  # before insert since a size-1 city needs it from turn zero.
-  defp persist_found_city!(state, player, unit) do
-    territory =
-      state.world
-      |> Production.founding_territory(unit.tile_id)
-      |> MapSet.to_list()
-      |> Enum.sort()
-
-    worked =
-      case Yields.pick_worked_tile(
-             %{tile_id: unit.tile_id, territory: territory, worked_tiles: []},
-             state.world
-           ) do
-        nil -> []
-        tile -> [tile]
-      end
-
-    Repo.transaction(fn ->
-      {:ok, city} =
-        %City{}
-        |> City.changeset(%{
-          world_id: state.world.id,
-          player_id: player.id,
-          tile_id: unit.tile_id,
-          name: default_city_name(state, player),
-          size: 1,
-          food: 0,
-          territory: territory,
-          worked_tiles: worked
-        })
-        |> Repo.insert()
-
-      Unit |> Repo.get!(unit.id) |> Repo.delete!()
-
-      city_map(%{city | production_items: []})
-    end)
-  end
-
-  defp default_city_name(state, player) do
-    count = state.cities |> Map.values() |> Enum.count(&(&1.player_id == player.id))
-    "City #{count + 1}"
-  end
-
-  # -------------------------------------------------------------------
-  # Production queue
-  # -------------------------------------------------------------------
-
-  defp do_queue_production(state, user, city_id, type) do
-    with {:ok, city} <- owned_city(state, user, city_id),
-         {:ok, type} <- parse_item_type(type),
-         :ok <-
-           Production.can_queue?(city, type,
-             granary_available?: granary_available?(state, city),
-             bronze_age?: bronze_age?(state, city),
-             copper_access?: copper_access?(state, city),
-             archery?: archery?(state, city)
-           ) do
-      next_position =
-        city.queue |> Enum.map(&Map.get(&1, :position, 0)) |> Enum.max(fn -> 0 end) |> Kernel.+(1)
-
-      {:ok, item} =
-        %ProductionItem{}
-        |> ProductionItem.changeset(
-          Production.new_item(type)
-          |> Map.put(:city_id, city_id)
-          |> Map.put(:position, next_position)
-        )
-        |> Repo.insert()
-
-      new_city = %{city | queue: city.queue ++ [queue_item_map(item)]}
-      {:ok, %{state | cities: Map.put(state.cities, city_id, new_city)}}
-    end
-  end
-
-  # Move a queued item one slot toward the head by swapping positions
-  # with its predecessor. The head (current) item can't move; item
-  # identity — and its banked progress — stays put, only order changes.
-  defp do_reorder_production_item(state, user, city_id, item_id) do
-    with {:ok, city} <- owned_city(state, user, city_id) do
-      case Enum.find_index(city.queue, &(&1.id == item_id)) do
-        nil ->
-          {:error, :not_found}
-
-        0 ->
-          {:error, :invalid_item}
-
-        idx ->
-          above = Enum.at(city.queue, idx - 1)
-          item = Enum.at(city.queue, idx)
-
-          Repo.update_all(from(p in ProductionItem, where: p.id == ^item.id),
-            set: [position: above.position]
-          )
-
-          Repo.update_all(from(p in ProductionItem, where: p.id == ^above.id),
-            set: [position: item.position]
-          )
-
-          swapped = %{item | position: above.position}
-          swapped_above = %{above | position: item.position}
-
-          new_queue =
-            city.queue
-            |> List.replace_at(idx - 1, swapped)
-            |> List.replace_at(idx, swapped_above)
-
-          new_city = %{city | queue: new_queue}
-          {:ok, %{state | cities: Map.put(state.cities, city_id, new_city)}}
-      end
-    end
-  end
-
-  defp do_cancel_production_item(state, user, city_id, item_id) do
-    with {:ok, city} <- owned_city(state, user, city_id) do
-      if Enum.any?(city.queue, &(&1.id == item_id)) do
-        Repo.delete_all(from(p in ProductionItem, where: p.id == ^item_id))
-        new_city = %{city | queue: Enum.reject(city.queue, &(&1.id == item_id))}
-        {:ok, %{state | cities: Map.put(state.cities, city_id, new_city)}}
-      else
-        {:error, :not_found}
-      end
-    end
-  end
-
-  defp owned_city(state, user, city_id) do
-    player = find_player(state, user.id)
-    city = Map.get(state.cities, city_id)
-
-    if is_nil(player) or is_nil(city) or city.player_id != player.id do
-      {:error, :not_owner}
-    else
-      {:ok, city}
-    end
-  end
-
-  defp parse_item_type(type)
-       when type in [:settler, :worker, :warrior, :granary, :bronze_spearman, :archer],
-       do: {:ok, type}
-
-  defp parse_item_type("settler"), do: {:ok, :settler}
-  defp parse_item_type("worker"), do: {:ok, :worker}
-  defp parse_item_type("warrior"), do: {:ok, :warrior}
-  defp parse_item_type("granary"), do: {:ok, :granary}
-  defp parse_item_type("bronze_spearman"), do: {:ok, :bronze_spearman}
-  # QA issue da39e50b — the Archery tech unlocked nothing; a first-pass
-  # Archer (melee-for-now — see `Production`'s own moduledoc) buildable
-  # once the city's owner has completed Archery.
-  defp parse_item_type("archer"), do: {:ok, :archer}
-  defp parse_item_type(_other), do: {:error, :invalid_item}
-
-  # -------------------------------------------------------------------
-  # Worked tiles
-  # -------------------------------------------------------------------
-
-  # `from_tile`/`to_tile` are each optionally `nil`: unassigning alone
-  # drops a citizen to idle, assigning alone fills an open slot, and
-  # both together is the panel's ordinary reassignment.
-  defp do_assign_worked_tile(state, user, city_id, from_tile, to_tile) do
-    with {:ok, city} <- owned_city(state, user, city_id),
-         :ok <- validate_unassign(city, from_tile),
-         :ok <- validate_assign(state.world, city, from_tile, to_tile) do
-      worked = city.worked_tiles |> maybe_remove(from_tile) |> maybe_add(to_tile)
-      persist_worked_tiles!(city_id, worked)
-      {:ok, %{state | cities: Map.put(state.cities, city_id, %{city | worked_tiles: worked})}}
-    end
-  end
-
-  defp maybe_remove(tiles, nil), do: tiles
-  defp maybe_remove(tiles, tile), do: List.delete(tiles, tile)
-
-  defp maybe_add(tiles, nil), do: tiles
-  defp maybe_add(tiles, tile), do: tiles ++ [tile]
-
-  defp validate_unassign(_city, nil), do: :ok
-
-  defp validate_unassign(city, tile) do
-    if tile in city.worked_tiles, do: :ok, else: {:error, :not_worked}
-  end
-
-  defp validate_assign(_world, _city, _from_tile, nil), do: :ok
-
-  # A `to_tile` with no paired `from_tile` grows the worked-tile count
-  # by one — refused once the city is already at its population cap
-  # (`City.changeset/2`'s `validate_worked_tiles_within_size/1` encodes
-  # the same "cannot exceed size" invariant, but this write path
-  # persists via a raw `Repo.update_all` that never runs the
-  # changeset, so the cap has to be checked here too — issue
-  # 7509c453). A paired swap (`from_tile` supplied) never changes the
-  # count, so it stays allowed even at the cap.
-  defp validate_assign(world, city, from_tile, tile) do
-    cond do
-      tile == city.tile_id -> {:error, :invalid_tile}
-      tile not in city.territory -> {:error, :not_territory}
-      tile in city.worked_tiles -> {:error, :already_worked}
-      not Yields.workable?(Regions.terrain(world, tile)) -> {:error, :invalid_terrain}
-      is_nil(from_tile) and length(city.worked_tiles) >= city.size -> {:error, :size_exceeded}
-      true -> :ok
-    end
-  end
-
-  defp persist_worked_tiles!(city_id, worked_tiles) do
-    Repo.update_all(from(c in City, where: c.id == ^city_id), set: [worked_tiles: worked_tiles])
-  end
-
-  # -------------------------------------------------------------------
-  # Rename city
-  # -------------------------------------------------------------------
-
-  defp do_rename_city(state, user, city_id, name) do
-    with {:ok, city} <- owned_city(state, user, city_id),
-         :ok <- validate_name(name) do
-      trimmed = String.trim(name)
-      Repo.update_all(from(c in City, where: c.id == ^city_id), set: [name: trimmed])
-      {:ok, %{state | cities: Map.put(state.cities, city_id, %{city | name: trimmed})}}
-    end
-  end
-
-  defp validate_name(name) when is_binary(name) do
-    trimmed = String.trim(name)
-    if trimmed != "" and String.length(trimmed) <= 100, do: :ok, else: {:error, :invalid_name}
-  end
-
-  defp validate_name(_other), do: {:error, :invalid_name}
-
-  # -------------------------------------------------------------------
-  # Improvements
-  # -------------------------------------------------------------------
-
-  defp do_start_improvement(state, user, unit_id, kind) do
-    with {:ok, unit} <- owned_worker(state, user, unit_id),
-         {:ok, kind} <- parse_kind(kind),
-         :ok <- validate_improvement_terrain(state, unit.tile_id, kind, unit.player_id),
-         :ok <- validate_improvement_slot(state, unit.tile_id, kind) do
-      improvement = persist_start_improvement!(state, unit, kind)
-      {:ok, put_improvement(state, kind, unit.tile_id, improvement)}
-    end
-  end
-
-  # QA issue 5656770d — a Road (`state.roads`) and the tile's yield
-  # improvement (Farm/Mine/Pasture, `state.improvements`) are
-  # independent slots; see `Improvement`'s own moduledoc.
-  defp put_improvement(state, :road, tile_id, improvement),
-    do: %{state | roads: Map.put(state.roads, tile_id, improvement)}
-
-  defp put_improvement(state, _kind, tile_id, improvement),
-    do: %{state | improvements: Map.put(state.improvements, tile_id, improvement)}
-
-  # QA issue 8aa2c571 — see `BrokenOaths.Game.cancel_improvement/3`'s doc.
-  # Deletes the DB row outright (rather than merely clearing
-  # `builder_unit_id`, the way a worker simply walking away already
-  # does at a turn boundary — see `BrokenOaths.Game.Turn.advance_improvement/2`)
-  # so that SLOT comes back completely empty, free for any kind that
-  # shares it. QA issue 5656770d — a tile can now carry an active build
-  # in BOTH slots at once (a Road building alongside a Farm, say); this
-  # cancels whichever one `active_building/2` finds, preferring the
-  # yield slot (`state.improvements`) over the road slot (`state.roads`)
-  # when — the rare case — both are mid-build on the same tile, the same
-  # tie-break `visible_improvements/2`'s list order and the UI's own
-  # `worker_current_dig/2` (`Enum.find`, first match) already use.
-  defp do_cancel_improvement(state, user, unit_id) do
-    with {:ok, unit} <- owned_worker(state, user, unit_id),
-         {:ok, collection} <- active_building(state, unit.tile_id) do
-      kind = state |> Map.fetch!(collection) |> Map.fetch!(unit.tile_id) |> Map.fetch!(:kind)
-      persist_cancel_improvement!(state, unit.tile_id, kind)
-      new_collection = state |> Map.fetch!(collection) |> Map.delete(unit.tile_id)
-      {:ok, Map.put(state, collection, new_collection)}
-    end
-  end
-
-  # Only a `:building` improvement is cancelable — the same status
-  # `BrokenOathsWeb.GameLive.Play`'s `worker_current_dig/2` gates the
-  # dig-progress badge (and the Cancel button beside it) on, so the
-  # button never offers to cancel something that isn't there to cancel
-  # (a `:complete` improvement, or a `:pillaged` one nobody has resumed
-  # repairing yet). Returns which COLLECTION (`:improvements` or
-  # `:roads`) the active build lives in, since a tile can now have one
-  # building in each independently (QA issue 5656770d).
-  defp active_building(state, tile_id) do
-    cond do
-      match?(%{status: :building}, Map.get(state.improvements, tile_id)) -> {:ok, :improvements}
-      match?(%{status: :building}, Map.get(state.roads, tile_id)) -> {:ok, :roads}
-      true -> {:error, :no_active_build}
-    end
-  end
-
-  defp persist_cancel_improvement!(state, tile_id, kind) do
-    case Repo.get_by(Improvement, world_id: state.world.id, tile_id: tile_id, kind: kind) do
-      nil -> :ok
-      improvement -> do_delete_improvement(improvement)
-    end
-  end
-
-  defp do_delete_improvement(improvement) do
-    {:ok, _deleted} = Repo.delete(improvement)
-    :ok
-  end
-
-  defp owned_worker(state, user, unit_id) do
-    player = find_player(state, user.id)
-    unit = Map.get(state.units, unit_id)
-
-    cond do
-      is_nil(player) or is_nil(unit) or unit.player_id != player.id -> {:error, :not_owner}
-      unit.type != :worker -> {:error, :not_worker}
-      true -> {:ok, unit}
-    end
-  end
-
-  defp parse_kind(kind) when kind in [:farm, :mine, :road, :pasture], do: {:ok, kind}
-  defp parse_kind("farm"), do: {:ok, :farm}
-  defp parse_kind("mine"), do: {:ok, :mine}
-  defp parse_kind("road"), do: {:ok, :road}
-  defp parse_kind("pasture"), do: {:ok, :pasture}
-  defp parse_kind(_other), do: {:error, :invalid_improvement}
-
-  # Pasture (story 905) gates on the tile's RESOURCE
-  # (`Improvement.resource_allowed?/1` — Cattle/Sheep only) and the
-  # building worker's OWNER having researched Animal Husbandry
-  # (`Research.pasture_enabled?/1`), never on `Improvement.allowed?/2`'s
-  # terrain table — that table is Farm/Mine/Road's own gate only.
-  defp validate_improvement_terrain(state, tile_id, :pasture, player_id) do
-    cond do
-      Regions.tile_class(state.world, tile_id) != :land ->
-        {:error, :invalid_terrain}
-
-      not Improvement.resource_allowed?(Resources.at(state.world, tile_id)) ->
-        {:error, :invalid_terrain}
-
-      not Research.pasture_enabled?(player_research_for(state, player_id)) ->
-        {:error, :invalid_terrain}
-
-      true ->
-        :ok
-    end
-  end
-
-  # Mine (QA issue 5a30ad3f) gates on the resource-aware
-  # `Improvement.mine_allowed?/2` — Hills relief OR a Copper deposit that
-  # `Resources.ensure_reachable_copper/3` may have guaranteed onto a
-  # non-Hills tile — rather than the terrain-only `allowed?/2` below.
-  defp validate_improvement_terrain(state, tile_id, :mine, _player_id) do
-    cond do
-      Regions.tile_class(state.world, tile_id) != :land ->
-        {:error, :invalid_terrain}
-
-      not Improvement.mine_allowed?(
-        Regions.terrain(state.world, tile_id),
-        Resources.at(state.world, tile_id)
-      ) ->
-        {:error, :invalid_terrain}
-
-      true ->
-        :ok
-    end
-  end
-
-  defp validate_improvement_terrain(state, tile_id, kind, _player_id) do
-    cond do
-      Regions.tile_class(state.world, tile_id) != :land ->
-        {:error, :invalid_terrain}
-
-      not Improvement.allowed?(kind, Regions.terrain(state.world, tile_id)) ->
-        {:error, :invalid_terrain}
-
-      true ->
-        :ok
-    end
-  end
-
-  # QA issue 5656770d — Road and the tile's yield improvement
-  # (Farm/Mine/Pasture) occupy INDEPENDENT slots (see `Improvement`'s
-  # own moduledoc): a `:road` request only ever checks `state.roads`
-  # for this tile, and every other kind only ever checks
-  # `state.improvements` — neither slot's occupant blocks the other, so
-  # a worker can build a Road across a tile that already carries (or is
-  # still building) a Farm/Mine/Pasture, and vice versa.
-  #
-  # Within a single slot, a completed improvement refuses any second
-  # dig. An in-progress one of the SAME kind just reattaches (any
-  # worker may resume a frozen dig — improvements aren't owned); a
-  # DIFFERENT kind already mid-build in the SAME slot is refused rather
-  # than silently switched (this can only ever happen for the yield
-  # slot, since `state.roads` only ever holds `:road`). A pillaged one
-  # (story 893) is the same "resume the same kind" story, just entered
-  # from `:pillaged` instead of `:building`.
-  defp validate_improvement_slot(state, tile_id, :road),
-    do: slot_status(Map.get(state.roads, tile_id), :road)
-
-  defp validate_improvement_slot(state, tile_id, kind),
-    do: slot_status(Map.get(state.improvements, tile_id), kind)
-
-  defp slot_status(nil, _kind), do: :ok
-  defp slot_status(%{status: :complete}, _kind), do: {:error, :occupied_improvement}
-  defp slot_status(%{status: :building, kind: kind}, kind), do: :ok
-  defp slot_status(%{status: :building}, _kind), do: {:error, :invalid_improvement}
-  defp slot_status(%{status: :pillaged, kind: kind}, kind), do: :ok
-  defp slot_status(%{status: :pillaged}, _kind), do: {:error, :invalid_improvement}
-
-  # A truly NEW improvement (no row yet on this tile) resolves its
-  # `duration` once, here, from the BUILDING WORKER'S OWNER's research
-  # (story 902, criterion 7628 — see `Improvement`'s own moduledoc,
-  # "Mining's 3-turn unlock") — a worker resuming an EXISTING row
-  # (interrupted, or pillaged-and-repairing) never re-resolves it, so a
-  # dig's target pace is fixed at build-start regardless of who later
-  # finishes it.
-  defp persist_start_improvement!(state, unit, kind) do
-    case Repo.get_by(Improvement, world_id: state.world.id, tile_id: unit.tile_id, kind: kind) do
-      nil ->
-        {:ok, improvement} =
-          %Improvement{}
-          |> Improvement.changeset(%{
-            world_id: state.world.id,
-            tile_id: unit.tile_id,
-            kind: kind,
-            progress: 0,
-            status: :building,
-            duration: improvement_duration(state, unit, kind),
-            builder_unit_id: unit.id
-          })
-          |> Repo.insert()
-
-        improvement_map(improvement)
-
-      existing ->
-        {:ok, improvement} =
-          existing |> Improvement.changeset(%{builder_unit_id: unit.id}) |> Repo.update()
-
-        improvement_map(improvement)
-    end
-  end
-
-  defp improvement_duration(state, unit, :mine),
-    do: Research.mine_duration(player_research_for(state, unit.player_id))
-
-  defp improvement_duration(_state, _unit, kind), do: Improvement.duration(kind)
-
-  # -------------------------------------------------------------------
   # Reads
   # -------------------------------------------------------------------
 
@@ -2936,58 +2405,6 @@ defmodule BrokenOaths.Game.WorldServer do
   # keep it current as movement consumes steps (story 875 rule).
   defp format_order(%{path: path, status: status}),
     do: %{target_tile: List.last(path), status: status, path: path}
-
-  defp player_cities(state, user) do
-    case find_player(state, user.id) do
-      nil ->
-        []
-
-      player ->
-        for {_id, city} <- state.cities,
-            city.player_id == player.id,
-            do: format_city(state, city)
-    end
-  end
-
-  # `production` is an informational per-turn RATE (flat base + worked
-  # production), separate from `queue`'s own `banked`/`cost` progress —
-  # useful for a "5/turn" readout alongside the current build's bar.
-  defp format_city(state, city) do
-    worked_production =
-      city
-      |> Yields.worked_yields(state.world, state.improvements)
-      |> Enum.map(& &1.production)
-      |> Enum.sum()
-
-    age = Research.age(player_research_for(state, city.player_id))
-
-    %{
-      id: city.id,
-      name: city.name,
-      tile_id: city.tile_id,
-      size: city.size,
-      food: city.food,
-      food_threshold: Yields.threshold(city.size, age),
-      production: Production.flat_base() + worked_production,
-      queue: city.queue,
-      territory: city.territory,
-      worked_tiles: city.worked_tiles,
-      hp: city.hp,
-      defense: CityDefense.defensive_strength(city, Map.values(state.units)),
-      # QA issue 1c47edff "Granary confusion" — `has_granary` was
-      # tracked on the `City` schema and already fed `Yields.
-      # accrue_food/3`'s math, but never made it into THIS map, the one
-      # `Game.player_cities/2` actually hands to `GameLive.CityPanel` —
-      # so a built Granary had no way to ever show up in the UI at all.
-      has_granary: city.has_granary,
-      # Story 906 — `:free` (no badge), `:broken` (0 HP, not yet
-      # entered), or `:occupied` (captured) — `Siege.status/1`'s own
-      # single source of truth for `GameLive.CityPanel`'s `city-status`
-      # badge.
-      status: Siege.status(city),
-      occupied_by_player_id: Map.get(city, :occupied_by_player_id)
-    }
-  end
 
   # `%{user_id:, email:}` for every player `user` has discovered — the
   # future `KnownPlayersPanel`'s own read, exposed here (not built
@@ -3457,49 +2874,6 @@ defmodule BrokenOaths.Game.WorldServer do
   defp player_research_for(state, player_id),
     do: Map.get(state.player_research, player_id, Research.new())
 
-  # Story 902, criterion 7629 — whether `city`'s OWNER has completed
-  # Pottery, the option `Production.can_queue?/3` needs to gate
-  # `:granary` on (`Production` itself never touches `Research`).
-  defp granary_available?(state, city),
-    do: Research.granary_enabled?(player_research_for(state, city.player_id))
-
-  # Story 903 — whether `city`'s OWNER is in the Bronze Age
-  # (`Research.age/1`), the option `Production.can_queue?/3` needs to
-  # gate `:bronze_spearman` on, same "Production never touches
-  # Research" split `granary_available?/2` already establishes.
-  defp bronze_age?(state, city),
-    do: Research.age(player_research_for(state, city.player_id)) == :bronze_age
-
-  # QA issue da39e50b — whether `city`'s OWNER has completed Archery,
-  # the option `Production.can_queue?/3` needs to gate `:archer` on,
-  # same "Production never touches Research" split `bronze_age?/2`
-  # already establishes.
-  defp archery?(state, city),
-    do: Research.archery_enabled?(player_research_for(state, city.player_id))
-
-  # Story 911 — whether `city` itself has Copper access: a Copper tile
-  # anywhere in its own `territory` (worked or not — a pure ACCESS
-  # GATE), the option `Production.can_queue?/3` needs to gate
-  # `:bronze_spearman` on ALONGSIDE `bronze_age?/2` above. Unlike
-  # `granary_available?/2`/`bronze_age?/2` (both resolve `Research`
-  # over the city's OWNER), this reads `Resources.at/2` over the
-  # CITY's own territory — Copper access is a per-city fact, not a
-  # per-player one (two cities belonging to the same player can differ:
-  # one may sit on Copper hills, the other may not).
-  defp copper_access?(state, city),
-    do: Enum.any?(city.territory, &(Resources.at(state.world, &1) == :copper))
-
-  # Test-only helper for `:grant_copper_access_for_test` above: the
-  # first tile id (mesh order) anywhere on `world` carrying Copper, or
-  # `nil` if this particular seed/density placed none at all.
-  defp find_any_copper_tile(world) do
-    mesh = Globe.get(world.frequency)
-
-    Enum.find_value(mesh.tiles, fn {tile_id, _tile} ->
-      if Resources.at(world, tile_id) == :copper, do: tile_id
-    end)
-  end
-
   defp fetch_player(state, user_id) do
     case find_player(state, user_id) do
       nil -> {:error, :not_a_player}
@@ -3664,9 +3038,9 @@ defmodule BrokenOaths.Game.WorldServer do
   # the one gate this view is contractually bound to).
   defp steward_city_view(state, city) do
     opts = [
-      granary_available?: granary_available?(state, city),
-      bronze_age?: bronze_age?(state, city),
-      copper_access?: copper_access?(state, city)
+      granary_available?: Production.granary_available?(state, city),
+      bronze_age?: Production.bronze_age?(state, city),
+      copper_access?: Production.copper_access?(state, city)
     ]
 
     catalog =
@@ -3770,23 +3144,23 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
-  # Mirrors `do_queue_production/4` exactly — same catalog
-  # (`parse_item_type/1`), same `Production.can_queue?/3` gate — but
-  # scoped through stewardship eligibility instead of ownership, and
-  # additionally gated on `Stewardship.constructive_item?/1` (today
-  # always true for anything `parse_item_type/1` accepts at all; the
-  # whitelist hook future non-constructive items would need).
+  # Mirrors `Production.queue_production/4` exactly — same catalog
+  # (`Production.parse_item_type/1`), same `Production.can_queue?/3` gate
+  # — but scoped through stewardship eligibility instead of ownership,
+  # and additionally gated on `Stewardship.constructive_item?/1` (today
+  # always true for anything `Production.parse_item_type/1` accepts at
+  # all; the whitelist hook future non-constructive items would need).
   defp do_steward_queue_production(state, steward_user, owner_user_id, city_id, type) do
     with {:ok, steward_player, owner_player} <-
            fetch_steward_context(state, steward_user, owner_user_id),
          {:ok, city} <- fetch_owned_city(state, owner_player, city_id),
-         {:ok, type} <- parse_item_type(type),
+         {:ok, type} <- Production.parse_item_type(type),
          :ok <- constructive_item(type),
          :ok <-
            Production.can_queue?(city, type,
-             granary_available?: granary_available?(state, city),
-             bronze_age?: bronze_age?(state, city),
-             copper_access?: copper_access?(state, city)
+             granary_available?: Production.granary_available?(state, city),
+             bronze_age?: Production.bronze_age?(state, city),
+             copper_access?: Production.copper_access?(state, city)
            ) do
       next_position =
         city.queue |> Enum.map(&Map.get(&1, :position, 0)) |> Enum.max(fn -> 0 end) |> Kernel.+(1)
@@ -3925,65 +3299,6 @@ defmodule BrokenOaths.Game.WorldServer do
 
     :ok
   end
-
-  # QA issue 5656770d — a tile's yield improvement (`state.improvements`)
-  # is checked first, then its Road (`state.roads`), since the two now
-  # live independently; a tile with both a completed Farm and a
-  # completed Road reports the Farm here (this reader has always
-  # returned a single kind — same tie-break `visible_improvements/2`'s
-  # list order and cancel's `active_building/2` already use).
-  defp tile_improvement_at(state, tile_id) do
-    case Map.get(state.improvements, tile_id) do
-      %{status: :complete, kind: kind} -> kind
-      _other -> road_improvement_at(state, tile_id)
-    end
-  end
-
-  defp road_improvement_at(state, tile_id) do
-    case Map.get(state.roads, tile_id) do
-      %{status: :complete, kind: kind} -> kind
-      _other -> nil
-    end
-  end
-
-  # Improvements follow the same fog rule as camps below: a player sees
-  # a tile's improvement only in their home region or once the tile is
-  # explored — hidden tiles never leak their contents over the wire.
-  # QA issue 5656770d — a tile's yield improvement (`state.improvements`)
-  # and its Road (`state.roads`) are now independent, so both are
-  # emitted here when present; the board's own improvement billboard
-  # loop (`assets/js/globe_render.js`) draws every entry it's handed,
-  # offsetting a `:road` sprite so it never fully overlaps a
-  # Farm/Mine/Pasture sprite on the same tile.
-  defp visible_improvements(state, user) do
-    case find_player(state, user.id) do
-      nil ->
-        []
-
-      player ->
-        home = player_region_tiles(state.world, player.region_id)
-        explored = Map.get(state.explored, player.id, MapSet.new())
-
-        visible? = fn tile_id ->
-          MapSet.member?(home, tile_id) or MapSet.member?(explored, tile_id)
-        end
-
-        yield_improvements =
-          for {tile_id, imp} <- state.improvements,
-              visible?.(tile_id),
-              do: format_improvement(tile_id, imp)
-
-        roads =
-          for {tile_id, imp} <- state.roads,
-              visible?.(tile_id),
-              do: format_improvement(tile_id, imp)
-
-        yield_improvements ++ roads
-    end
-  end
-
-  defp format_improvement(tile_id, imp),
-    do: %{tile_id: tile_id, kind: imp.kind, status: imp.status, progress: imp.progress}
 
   # Fog filter for camps (story 892, criterion 7546 — HARD constraint):
   # a camp is known the moment it's inside the player's own claimed
@@ -4234,7 +3549,7 @@ defmodule BrokenOaths.Game.WorldServer do
     cities |> Map.values() |> Enum.flat_map(& &1.queue) |> Map.new(&{&1.id, &1})
   end
 
-  # New camps are persisted immediately at founding (see
+  # New camps are persisted immediately at founding (see `City`'s own
   # `spawn_wilderness_camps/3`) — this only reconciles what the tick
   # itself advances: `spawn_counter` (every camp, every tick), `hp`
   # (story 894's camp assault), and `destroyed_at` (also story 894 — a
