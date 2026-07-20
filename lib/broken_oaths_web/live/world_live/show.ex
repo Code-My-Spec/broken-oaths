@@ -1,8 +1,38 @@
 defmodule BrokenOathsWeb.WorldLive.Show do
+  @moduledoc """
+  The globe world-builder — `/worlds/:id`, the map editor's classic
+  (server-rendered tile DOM) and 3D (pushed-geometry canvas/matrix3d)
+  render modes, seed regeneration, and the collapsible info sidebar.
+
+  This LiveView stays an imperative shell: `mount/3`/`handle_params/3`/
+  `handle_event/3`/`handle_info/2` own the socket and every side effect
+  (`assign`/`push_event`/`push_patch` — there is no multiplayer state
+  here, just one editor's own view of a `BrokenOaths.Worlds.World`).
+  Pure derivation — angle/zoom parsing, projection math, 3D tile-window
+  payload building, formatting — lives in
+  `BrokenOathsWeb.WorldLive.ShowView`; render regions with no
+  `phx-hook` of their own (`ControlsBar`, `ViewportOverlay`, `Sidebar`)
+  are extracted `Phoenix.Component`s, the same "imperative shell,
+  functional core" split `GameLive.PlayView`/`GameLive.BoardOverlays`
+  already establish for the board LiveView one layer up from the
+  `.code_my_spec/knowledge/genserver_decomposition.md` pragdave
+  pattern.
+
+  The globe viewport's two mode divs (`phx-hook=".GlobeDrag"` and
+  `phx-hook=".Globe3D"`) and their colocated `<script>` hook bodies
+  stay here rather than moving into their own components: a colocated
+  hook's `phx-hook="."` name is rewritten to
+  `"\#{inspect(caller.module)}.Name"` at compile time, so a hook's
+  trigger element and its script tag can only ever live in the SAME
+  module — the same reasoning `GameLive.BoardOverlays`'s own moduledoc
+  documents for the game board's `.Board` hook.
+  """
+
   use BrokenOathsWeb, :live_view
 
   alias BrokenOaths.Worlds
-  alias BrokenOaths.Worlds.{Facets, Generator, Globe, Projection, Terrain, Texture, Weather}
+  alias BrokenOaths.Worlds.{Facets, Generator, Globe, Terrain, Texture, Weather}
+  alias BrokenOathsWeb.WorldLive.{ControlsBar, ShowView, Sidebar, ViewportOverlay}
 
   # Zoom levels as multiples of the "whole globe fits" scale (min(w,h)/2
   # pixels per sphere radius). Relative zoom keeps the on-screen TILE count
@@ -14,14 +44,6 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   # Viewport size before the client reports its real dimensions.
   @default_container_w 960
   @default_container_h 700
-
-  # 3D tile-window budgets: coarse-pointer (touch) devices composite far
-  # fewer preserve-3d quads before framerate collapses, so they get a
-  # smaller window, less drag margin, and a later canvas→hexes switchover.
-  @tile_budget_touch 1500
-  @tile_budget_desktop 7500
-  @window_margin_touch 0.2
-  @window_margin_desktop 0.35
 
   # Full day/night cycle length in seconds (purely visual for now; move
   # sun state server-side when gameplay starts caring about time of day).
@@ -112,43 +134,11 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   # scale in px per sphere radius. Absent or malformed params leave the
   # current view untouched.
   defp apply_view_params(socket, params) do
-    yaw = parse_degrees(params["yaw"])
-    pitch = parse_degrees(params["pitch"])
-    zoom = parse_zoom(params["zoom"])
+    %{container_w: w, container_h: h} = socket.assigns
 
-    changes =
-      Enum.reject(
-        [
-          yaw && {:yaw, wrap_yaw(yaw)},
-          pitch && {:pitch, clamp_pitch(pitch)},
-          zoom && {:scale, zoom},
-          zoom && {:zoom_index, nearest_zoom_index(socket, zoom)}
-        ],
-        &is_nil/1
-      )
-
-    if changes == [] do
-      {socket, false}
-    else
-      {assign(socket, changes), true}
-    end
-  end
-
-  defp parse_degrees(nil), do: nil
-
-  defp parse_degrees(value) do
-    case Float.parse(to_string(value)) do
-      {deg, _} -> deg * :math.pi() / 180.0
-      :error -> nil
-    end
-  end
-
-  defp parse_zoom(nil), do: nil
-
-  defp parse_zoom(value) do
-    case Float.parse(to_string(value)) do
-      {v, _} -> v |> round() |> max(50) |> min(10_000)
-      :error -> nil
+    case ShowView.view_param_changes(params, w, h, @zoom_factors, @max_pitch) do
+      [] -> {socket, false}
+      changes -> {assign(socket, changes), true}
     end
   end
 
@@ -183,7 +173,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   def handle_event("toggle_mode", _params, socket) do
     %{world: world, yaw: yaw, pitch: pitch, scale: scale} = socket.assigns
 
-    view = [yaw: deg(yaw), pitch: deg(pitch), zoom: scale]
+    view = [yaw: ShowView.deg(yaw), pitch: ShowView.deg(pitch), zoom: scale]
 
     to =
       if socket.assigns.render_mode == :classic,
@@ -205,11 +195,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         socket
       )
       when is_number(yaw) and is_number(pitch) and is_number(scale) do
-    two_pi = 2 * :math.pi()
-    yaw = yaw * 1.0
-    yaw = yaw - two_pi * Float.floor(yaw / two_pi)
-    pitch = min(max(pitch * 1.0, -@max_pitch), @max_pitch)
-    scale = scale |> max(50) |> min(10_000) |> round()
+    {yaw, pitch, scale} = ShowView.normalize_view_sync(yaw, pitch, scale, @max_pitch)
 
     socket = assign(socket, yaw: yaw, pitch: pitch, scale: scale)
 
@@ -235,7 +221,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
         container_w: w,
         container_h: h,
         device_coarse: coarse,
-        lod_k: lod_k(socket, coarse)
+        lod_k: ShowView.lod_k(socket.assigns.world.frequency, coarse)
       )
 
     socket =
@@ -357,9 +343,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   def handle_event("drag_rotate", %{"dx" => dx, "dy" => dy}, socket)
       when is_number(dx) and is_number(dy) do
     %{pitch: pitch, scale: scale} = socket.assigns
-
-    dyaw = -dx / scale / max(:math.cos(pitch), 0.25)
-    dpitch = dy / scale
+    {dyaw, dpitch} = ShowView.drag_delta(dx, dy, scale, pitch)
 
     {:noreply, apply_rotation(socket, dyaw, dpitch)}
   end
@@ -390,20 +374,8 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   # -------------------------------------------------------------------
 
   defp do_rotate(socket, dir) do
-    scale = socket.assigns.scale
-
-    step = @pan_px / scale
-    # East-west steps cover similar screen distance near the poles
-    yaw_step = step / max(:math.cos(socket.assigns.pitch), 0.25)
-
     {dyaw, dpitch} =
-      case dir do
-        "left" -> {-yaw_step, 0.0}
-        "right" -> {yaw_step, 0.0}
-        "up" -> {0.0, step}
-        "down" -> {0.0, -step}
-        _ -> {0.0, 0.0}
-      end
+      ShowView.rotate_delta(dir, socket.assigns.scale, socket.assigns.pitch, @pan_px)
 
     {:noreply, apply_rotation(socket, dyaw, dpitch)}
   end
@@ -411,40 +383,20 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   defp apply_rotation(socket, dyaw, dpitch) do
     socket
     |> assign(
-      yaw: wrap_yaw(socket.assigns.yaw + dyaw),
-      pitch: clamp_pitch(socket.assigns.pitch + dpitch)
+      yaw: ShowView.wrap_yaw(socket.assigns.yaw + dyaw),
+      pitch: ShowView.clamp_pitch(socket.assigns.pitch + dpitch, @max_pitch)
     )
     |> compute_view()
   end
 
-  defp wrap_yaw(yaw) do
-    two_pi = 2 * :math.pi()
-    yaw - two_pi * Float.floor(yaw / two_pi)
-  end
-
-  defp clamp_pitch(pitch), do: max(-@max_pitch, min(pitch, @max_pitch))
-
   # Selection as pushed geometry: both canvas render paths (texture far,
   # polygons near) draw the ring from it, so clicks are visible at any zoom.
   defp push_selection(%{assigns: %{render_mode: :three_d}} = socket) do
-    case socket.assigns.selected_tile do
-      %Globe.Tile{} = tile ->
-        {cx, cy, cz} = tile.center
-
-        corners =
-          Enum.flat_map(tile.corners, fn {x, y, z} ->
-            [Float.round(x, 4), Float.round(y, 4), Float.round(z, 4)]
-          end)
-
-        push_event(socket, "globe3d:selected", %{
-          id: tile.id,
-          center: [Float.round(cx, 4), Float.round(cy, 4), Float.round(cz, 4)],
-          corners: corners
-        })
-
-      nil ->
-        push_event(socket, "globe3d:selected", %{id: nil})
-    end
+    push_event(
+      socket,
+      "globe3d:selected",
+      ShowView.selection_payload(socket.assigns.selected_tile)
+    )
   end
 
   defp push_selection(socket), do: socket
@@ -454,44 +406,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   # the surface; the far renderer samples the baked airspace texture.
   defp push_airspace(socket) do
     %{world: world, mesh: mesh} = socket.assigns
-    levels = Weather.map(world.seed, mesh)
-
-    # Storm-cell centers for the far renderer, which has no tile
-    # geometry: [x, y, z] unit vectors for every level-3 tile.
-    storms =
-      for {id, 3} <- levels do
-        {x, y, z} = Globe.tile(mesh, id).center
-        [Float.round(x, 4), Float.round(y, 4), Float.round(z, 4)]
-      end
-
-    push_event(socket, "globe3d:airspace", %{
-      levels: levels,
-      storms: storms,
-      arc: Float.round(1.1071 / mesh.frequency, 5)
-    })
-  end
-
-  defp tile_budget(true), do: @tile_budget_touch
-  defp tile_budget(false), do: @tile_budget_desktop
-
-  defp window_margin(true), do: @window_margin_touch
-  defp window_margin(false), do: @window_margin_desktop
-
-  defp lod_k(socket, coarse) do
-    socket.assigns.world.frequency
-    |> Globe.tile_count()
-    |> Projection.lod_k(tile_budget(coarse), window_margin(coarse))
-    |> Float.round(2)
-  end
-
-  defp nearest_zoom_index(socket, scale) do
-    %{container_w: w, container_h: h} = socket.assigns
-    fit = min(w, h) / 2
-
-    @zoom_factors
-    |> Enum.with_index()
-    |> Enum.min_by(fn {factor, _} -> abs(factor * fit - scale) end)
-    |> elem(1)
+    push_event(socket, "globe3d:airspace", ShowView.airspace_payload(world, mesh))
   end
 
   defp set_mode(%{assigns: %{render_mode: mode}} = socket, mode), do: socket
@@ -516,13 +431,15 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   end
 
   defp set_mode(socket, :classic) do
+    %{container_w: w, container_h: h, scale: scale} = socket.assigns
+
     socket
     |> assign(
       render_mode: :classic,
       facets: [],
       view_bucket: nil,
       # Snap the continuous 3D scale back to the nearest zoom level
-      zoom_index: nearest_zoom_index(socket, socket.assigns.scale)
+      zoom_index: ShowView.nearest_zoom_index(w, h, scale, @zoom_factors)
     )
     |> compute_view()
   end
@@ -535,141 +452,39 @@ defmodule BrokenOathsWeb.WorldLive.Show do
   # swaps can't stall morphdom or race the hook mid-drag.
   defp rewindow(socket) do
     %{yaw: yaw, pitch: pitch, scale: scale} = socket.assigns
-    %{container_w: w, container_h: h, facets: facets} = socket.assigns
 
-    v = {:math.cos(pitch) * :math.cos(yaw), :math.cos(pitch) * :math.sin(yaw), :math.sin(pitch)}
-    bucket = view_bucket(v, scale, socket)
+    %{container_w: w, container_h: h, facets: facets, world: world, terrain_map: terrain_map} =
+      socket.assigns
+
+    %{device_coarse: coarse, renderer3d: renderer3d} = socket.assigns
+
+    v = ShowView.view_vector(yaw, pitch)
+    bucket = ShowView.view_bucket(v, scale, w, h, world.seed, coarse, renderer3d)
 
     if bucket == socket.assigns.view_bucket do
       socket
     else
-      coarse = socket.assigns.device_coarse
-      corner = :math.sqrt(w * w / 4 + h * h / 4)
-
-      # Angular radius of the viewport plus a drag margin, capped both
-      # generically (past ~1 rad the canvas impostor shows anyway) and by
-      # the device's tile budget.
-      theta_budget =
-        Projection.budget_theta(
-          Globe.tile_count(socket.assigns.world.frequency),
-          tile_budget(coarse)
-        )
-
-      theta =
-        (:math.asin(min(corner / scale, 1.0)) + window_margin(coarse))
-        |> min(1.0)
-        |> min(theta_budget)
-
-      min_dot = :math.cos(theta)
-      {vx, vy, vz} = v
-      terrain_map = socket.assigns.terrain_map
+      min_dot = ShowView.window_min_dot(world.frequency, scale, w, h, coarse)
 
       payload =
-        case socket.assigns.renderer3d do
+        case renderer3d do
           :canvas ->
-            elevation_map = socket.assigns.elevation_map
-
-            window =
-              socket.assigns.mesh.tiles
-              |> Map.values()
-              |> Enum.filter(fn %{center: {cx, cy, cz}} ->
-                cx * vx + cy * vy + cz * vz > min_dot
-              end)
-
-            # Palette is dynamic: distinct composed Terrain colors in this
-            # window, tiles referencing them by index
-            {rows, {rev_palette, _index}} =
-              Enum.map_reduce(window, {[], %{}}, fn tile, {plist, pmap} ->
-                terrain = Map.get(terrain_map, tile.id)
-                color = Terrain.color(terrain)
-
-                {idx, plist, pmap} =
-                  case pmap do
-                    %{^color => idx} -> {idx, plist, pmap}
-                    _ -> {map_size(pmap), [color | plist], Map.put(pmap, color, map_size(pmap))}
-                  end
-
-                {tile_row(tile, idx, terrain, elevation_map), {plist, pmap}}
-              end)
-
-            %{palette: Enum.reverse(rev_palette), tiles: rows}
+            ShowView.canvas_window_payload(
+              socket.assigns.mesh,
+              terrain_map,
+              socket.assigns.elevation_map,
+              min_dot,
+              v
+            )
 
           :css3d ->
-            html =
-              facets
-              |> Enum.filter(fn %{center: {cx, cy, cz}} ->
-                cx * vx + cy * vy + cz * vz > min_dot
-              end)
-              |> Enum.map(&facet_div(&1, terrain_map))
-              |> IO.iodata_to_binary()
-
-            %{html: html}
+            ShowView.css3d_window_payload(facets, terrain_map, min_dot, v)
         end
 
       socket
       |> assign(view_bucket: bucket)
       |> push_event("globe3d:window", payload)
     end
-  end
-
-  # Compact tile row for the vector-canvas renderer:
-  # [id, palette_index, decor, tex, cx, cy, cz, elevation, corner1x, ...]
-  # decor/tex mirror the game board's art keys (Terrain.decor/texture)
-  # so both canvas globes draw the same sprites and ground patterns.
-  defp tile_row(tile, palette_index, terrain, elevation_map) do
-    {cx, cy, cz} = tile.center
-
-    corners =
-      Enum.flat_map(tile.corners, fn {x, y, z} ->
-        [Float.round(x, 4), Float.round(y, 4), Float.round(z, 4)]
-      end)
-
-    [
-      tile.id,
-      palette_index,
-      Terrain.decor(terrain),
-      Terrain.texture(terrain),
-      Float.round(cx, 4),
-      Float.round(cy, 4),
-      Float.round(cz, 4),
-      Map.get(elevation_map, tile.id, 0.0) | corners
-    ]
-  end
-
-  # Seed, container dims and device class are part of the bucket so
-  # Regenerate, viewport changes and budget changes force a fresh push.
-  defp view_bucket({vx, vy, vz}, scale, socket) do
-    %{container_w: w, container_h: h, world: world, device_coarse: coarse} = socket.assigns
-
-    {round(vx * 8), round(vy * 8), round(vz * 8), round(:math.log2(scale / 50) * 2), world.seed,
-     div(w, 200), div(h, 200), coarse, socket.assigns.renderer3d}
-  end
-
-  # Server-built tile markup (no user data involved); phx-click works via
-  # LiveView's delegated event handling even inside ignored DOM.
-  defp facet_div(facet, terrain_map) do
-    terrain = Map.get(terrain_map, facet.id)
-    id = Integer.to_string(facet.id)
-
-    [
-      ~s(<div class="hex-cell3d" phx-click="select_tile" phx-value-id="),
-      id,
-      ~s(" style="width:),
-      Integer.to_string(facet.w),
-      "px;height:",
-      Integer.to_string(facet.h),
-      "px;clip-path:",
-      facet.clip,
-      ";transform:",
-      facet.matrix,
-      ";background-color:",
-      Terrain.color(terrain),
-      ~s(;" title="#),
-      id,
-      " ",
-      Terrain.label(terrain),
-      ~s("></div>)
-    ]
   end
 
   # 3D mode never re-projects server-side; the tile DOM is static.
@@ -680,32 +495,10 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     %{mesh: mesh, terrain_map: tm, yaw: yaw, pitch: pitch, zoom_index: zi} = socket.assigns
     %{container_w: w, container_h: h} = socket.assigns
 
-    fit_scale = min(w, h) / 2
-    scale = max(round(Enum.at(@zoom_factors, zi) * fit_scale), 1)
+    %{visible_tiles: visible_tiles, scale: scale} =
+      ShowView.compute_view(mesh, tm, yaw, pitch, zi, w, h, @zoom_factors)
 
-    view = %{
-      yaw: yaw,
-      pitch: pitch,
-      scale: scale,
-      cx: w / 2,
-      cy: h / 2,
-      w: w,
-      h: h
-    }
-
-    assign(socket,
-      visible_tiles: Projection.visible_tiles(mesh, tm, view),
-      scale: scale
-    )
-  end
-
-  defp deg(radians), do: Float.round(radians * 180.0 / :math.pi(), 1)
-
-  defp format_latlon(center) do
-    {lat, lon} = Globe.latlon(center)
-    ns = if lat >= 0, do: "N", else: "S"
-    ew = if lon >= 0, do: "E", else: "W"
-    "#{Float.round(abs(lat), 1)}°#{ns} #{Float.round(abs(lon), 1)}°#{ew}"
+    assign(socket, visible_tiles: visible_tiles, scale: scale)
   end
 
   # -------------------------------------------------------------------
@@ -716,46 +509,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
     ~H"""
     <div class="flex flex-col h-[calc(100vh-64px)]" phx-window-keydown="keydown">
       <%!-- Controls bar --%>
-      <div class="flex items-center gap-2 px-4 py-2 bg-base-200 border-b border-base-300 flex-wrap">
-        <form phx-change="update_name" phx-submit="update_name" class="flex-none">
-          <input
-            type="text"
-            name="name"
-            value={@world.name}
-            class="input input-sm input-bordered w-48 font-semibold"
-          />
-        </form>
-
-        <span class="badge badge-neutral font-mono text-xs">Seed: {@world.seed}</span>
-
-        <button phx-click="regenerate" class="btn btn-sm btn-primary">
-          <.icon name="hero-arrow-path" class="w-4 h-4" /> Regenerate
-        </button>
-
-        <div class="flex-1"></div>
-
-        <button phx-click="toggle_mode" class="btn btn-sm btn-ghost">
-          {if @render_mode == :classic, do: "3D β", else: "Classic"}
-        </button>
-
-        <div :if={@render_mode == :classic} class="flex items-center gap-1">
-          <button phx-click="zoom_out" class="btn btn-xs btn-square btn-ghost text-lg">−</button>
-          <span class="text-xs font-mono w-10 text-center">{@scale}</span>
-          <button phx-click="zoom_in" class="btn btn-xs btn-square btn-ghost text-lg">+</button>
-        </div>
-
-        <div class="divider divider-horizontal mx-0"></div>
-
-        <form phx-change="switch_world">
-          <select class="select select-sm select-bordered" name="world_id">
-            <option :for={w <- @worlds} value={w.id} selected={w.id == @world.id}>
-              {w.name}
-            </option>
-          </select>
-        </form>
-
-        <.link navigate={~p"/worlds"} class="btn btn-sm btn-ghost">All Worlds</.link>
-      </div>
+      <ControlsBar.bar world={@world} worlds={@worlds} render_mode={@render_mode} scale={@scale} />
 
       <%!-- Main content --%>
       <div class="flex flex-1 min-h-0 relative">
@@ -826,53 +580,7 @@ defmodule BrokenOathsWeb.WorldLive.Show do
               <div class="globe3d globe3d-fine"></div>
             </div>
           </div>
-
-          <%!-- Rotate controls overlay --%>
-          <div
-            :if={@render_mode == :classic}
-            class="absolute bottom-4 left-4 grid grid-cols-3 gap-0.5 opacity-60 hover:opacity-100 transition-opacity"
-          >
-            <div></div>
-            <button
-              phx-click="pan"
-              phx-value-dir="up"
-              class="btn btn-xs btn-circle btn-ghost bg-base-100/70"
-            >
-              <.icon name="hero-chevron-up" class="w-3 h-3" />
-            </button>
-            <div></div>
-            <button
-              phx-click="pan"
-              phx-value-dir="left"
-              class="btn btn-xs btn-circle btn-ghost bg-base-100/70"
-            >
-              <.icon name="hero-chevron-left" class="w-3 h-3" />
-            </button>
-            <div></div>
-            <button
-              phx-click="pan"
-              phx-value-dir="right"
-              class="btn btn-xs btn-circle btn-ghost bg-base-100/70"
-            >
-              <.icon name="hero-chevron-right" class="w-3 h-3" />
-            </button>
-            <div></div>
-            <button
-              phx-click="pan"
-              phx-value-dir="down"
-              class="btn btn-xs btn-circle btn-ghost bg-base-100/70"
-            >
-              <.icon name="hero-chevron-down" class="w-3 h-3" />
-            </button>
-            <div></div>
-          </div>
-
-          <%!-- Keyboard hint --%>
-          <div class="absolute bottom-4 right-4 text-xs opacity-40">
-            {if @render_mode == :classic,
-              do: "Drag or WASD / Arrows to rotate · Wheel or +/− to zoom",
-              else: "3D β — drag to spin · wheel to zoom · WASD to rotate"}
-          </div>
+          <ViewportOverlay.controls render_mode={@render_mode} />
         </div>
 
         <%!-- Input-only hook: converts pointer drags into throttled
@@ -1842,109 +1550,17 @@ defmodule BrokenOathsWeb.WorldLive.Show do
           }
         </script>
 
-        <%!-- Collapsed-sidebar opener --%>
-        <button
-          :if={!@sidebar_open}
-          phx-click="toggle_sidebar"
-          class="absolute top-1/2 right-0 -translate-y-1/2 btn btn-sm btn-ghost bg-base-200/80 rounded-r-none border border-base-300 z-10"
-          title="Show info panel"
-        >
-          <.icon name="hero-chevron-left" class="w-4 h-4" />
-        </button>
-
-        <%!-- Sidebar --%>
-        <div
-          :if={@sidebar_open}
-          class="w-72 bg-base-200 border-l border-base-300 overflow-y-auto p-4 space-y-6 flex-none"
-        >
-          <%!-- World info --%>
-          <div>
-            <div class="flex items-center justify-between mb-2">
-              <h3 class="font-bold text-sm uppercase tracking-wide opacity-60">World Info</h3>
-              <button
-                phx-click="toggle_sidebar"
-                class="btn btn-xs btn-square btn-ghost"
-                title="Hide info panel"
-              >
-                <.icon name="hero-chevron-right" class="w-4 h-4" />
-              </button>
-            </div>
-            <dl class="text-sm space-y-1">
-              <div class="flex justify-between">
-                <dt class="opacity-60">Seed</dt>
-                <dd class="font-mono text-xs">{@world.seed}</dd>
-              </div>
-              <div class="flex justify-between">
-                <dt class="opacity-60">Size</dt>
-                <dd>GP({@world.frequency}) · {Globe.tile_count(@world.frequency)} tiles</dd>
-              </div>
-              <div class="flex justify-between">
-                <dt class="opacity-60">View</dt>
-                <dd>{deg(@yaw)}° / {deg(@pitch)}°</dd>
-              </div>
-              <div class="flex justify-between">
-                <dt class="opacity-60">Zoom</dt>
-                <dd>{@scale}px</dd>
-              </div>
-            </dl>
-          </div>
-
-          <div class="divider my-0"></div>
-
-          <%!-- Selected tile --%>
-          <div>
-            <h3 class="font-bold text-sm uppercase tracking-wide opacity-60 mb-2">Selected Tile</h3>
-            <div :if={@selected_tile == nil} class="text-sm opacity-40">
-              Click a tile to inspect it
-            </div>
-            <dl :if={@selected_tile} class="text-sm space-y-1">
-              <div class="flex justify-between">
-                <dt class="opacity-60">Tile</dt>
-                <dd>#{@selected_tile.id}</dd>
-              </div>
-              <div class="flex justify-between">
-                <dt class="opacity-60">Position</dt>
-                <dd>{format_latlon(@selected_tile.center)}</dd>
-              </div>
-              <div class="flex items-center justify-between">
-                <dt class="opacity-60">Terrain</dt>
-                <dd class="flex items-center gap-1.5">
-                  <span
-                    class="inline-block w-3 h-3 rounded-sm"
-                    style={"background:#{Terrain.color(@selected_terrain)}"}
-                  >
-                  </span>
-                  {Terrain.label(@selected_terrain)}
-                </dd>
-              </div>
-              <div class="flex justify-between">
-                <dt class="opacity-60">Neighbors</dt>
-                <dd>{length(@selected_tile.neighbors)}</dd>
-              </div>
-              <div :if={@selected_tile.pentagon?} class="mt-1">
-                <span class="badge badge-warning badge-sm">Pentagon (impassable)</span>
-              </div>
-            </dl>
-          </div>
-
-          <div class="divider my-0"></div>
-
-          <%!-- Terrain statistics --%>
-          <div>
-            <h3 class="font-bold text-sm uppercase tracking-wide opacity-60 mb-2">Terrain Stats</h3>
-            <div class="space-y-1">
-              <div :for={{terrain, _count, pct} <- @stats} class="flex items-center gap-2 text-sm">
-                <span
-                  class="inline-block w-3 h-3 rounded-sm flex-none"
-                  style={"background:#{Terrain.color(terrain)}"}
-                >
-                </span>
-                <span class="flex-1">{Terrain.label(terrain)}</span>
-                <span class="opacity-60 font-mono text-xs">{pct}%</span>
-              </div>
-            </div>
-          </div>
-        </div>
+        <%!-- Collapsed-sidebar opener + info panel --%>
+        <Sidebar.panel
+          sidebar_open={@sidebar_open}
+          world={@world}
+          yaw={@yaw}
+          pitch={@pitch}
+          scale={@scale}
+          selected_tile={@selected_tile}
+          selected_terrain={@selected_terrain}
+          stats={@stats}
+        />
       </div>
     </div>
     """
