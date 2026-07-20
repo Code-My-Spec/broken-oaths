@@ -40,7 +40,6 @@ defmodule BrokenOaths.Game.WorldServer do
   import Ecto.Query
 
   alias BrokenOaths.Game.{
-    Alliance,
     Bank,
     Camp,
     Camps,
@@ -70,7 +69,6 @@ defmodule BrokenOaths.Game.WorldServer do
     Research,
     Siege,
     Spawner,
-    StewardLog,
     Stewardship,
     Tribute,
     Turn,
@@ -421,7 +419,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # needs to check alliance status — `Cooperation.split_bounty/3`
   # explicitly does NOT gate on one (criterion 7624).
   def handle_call({:alliances, user}, _from, state) do
-    {:reply, list_alliances(state, user), state}
+    {:reply, Stewardship.list_alliances(state, user), state}
   end
 
   # Builds (or updates, if a `:proposed` row already exists for this
@@ -537,7 +535,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # against a third player, persisted immediately (not tick-state, same
   # status every other Vassalage/Levy mutation in this section has).
   def handle_call({:issue_levy, user, vassal_user_id, target_user_id, share}, _from, state) do
-    case do_issue_levy(state, user, vassal_user_id, target_user_id, share) do
+    case Levy.issue(state, user, vassal_user_id, target_user_id, share) do
       {:ok, _levy} ->
         broadcast(state.world.id, [:vassals_changed])
         {:reply, :ok, state}
@@ -551,7 +549,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # they keep command of the pledged units; nothing about answering
   # moves a single one.
   def handle_call({:answer_levy, user, lord_user_id}, _from, state) do
-    case do_answer_levy(state, user, lord_user_id) do
+    case Levy.answer(state, user, lord_user_id) do
       {:ok, _levy} ->
         broadcast(state.world.id, [:vassals_changed])
         {:reply, :ok, state}
@@ -572,7 +570,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # sabotage-penalty write and `apply_garrison_fate_honor/2` already
   # establish for an in-place Honor-only state change.
   def handle_call({:refuse_levy, user, lord_user_id}, _from, state) do
-    case do_refuse_levy(state, user, lord_user_id) do
+    case Levy.refuse(state, user, lord_user_id) do
       {:ok, _levy, new_state} ->
         case persist_tick(state, new_state) do
           :ok ->
@@ -846,14 +844,14 @@ defmodule BrokenOaths.Game.WorldServer do
   # `%{gold:, cap:}` — `Bank.status/1` over `banked_gold`/`bank_cap`,
   # the pair `GameLive.Play` renders as `bank-gold`/`bank-cap`.
   def handle_call({:bank, user}, _from, state) do
-    {:reply, bank_status(state, user), state}
+    {:reply, Bank.status_for(state, user), state}
   end
 
   # The deliberate engagement tap: sweep the ENTIRE bank into the
   # treasury (`Bank.collect/1`) — a no-op (empties nothing, moves
   # nothing) against an already-empty bank, never refused outright.
   def handle_call({:collect_bank, user}, _from, state) do
-    case do_collect_bank(state, user) do
+    case Bank.collect_for(state, user) do
       {:ok, new_state} ->
         case persist_tick(state, new_state) do
           :ok -> {:reply, :ok, new_state}
@@ -868,7 +866,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # Raises the bank's own cap for `Bank.upgrade_cost/1`'s own gold
   # price — refused outright (no partial charge) when unaffordable.
   def handle_call({:upgrade_bank, user}, _from, state) do
-    case do_upgrade_bank(state, user) do
+    case Bank.upgrade_for(state, user) do
       {:ok, new_state} ->
         case persist_tick(state, new_state) do
           :ok -> {:reply, :ok, new_state}
@@ -895,7 +893,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # every `StewardLog` row where THIS player is the one being
   # stewarded, freshest first.
   def handle_call({:steward_log, user}, _from, state) do
-    {:reply, steward_log(state, user), state}
+    {:reply, Stewardship.steward_log(state, user), state}
   end
 
   # `Bank.steward_collect/1` — sweeps the offline owner's ENTIRE bank
@@ -904,7 +902,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # (`Stewardship.eligible?/1`) and `owner_user_id` is genuinely
   # offline (`Presence.online?/2`).
   def handle_call({:steward_collect_bank, steward_user, owner_user_id}, _from, state) do
-    case do_steward_collect_bank(state, steward_user, owner_user_id) do
+    case Stewardship.collect_bank(state, steward_user, owner_user_id) do
       {:ok, new_state} ->
         case persist_tick(state, new_state) do
           :ok -> {:reply, :ok, new_state}
@@ -926,7 +924,7 @@ defmodule BrokenOaths.Game.WorldServer do
         _from,
         state
       ) do
-    case do_steward_queue_production(state, steward_user, owner_user_id, city_id, type) do
+    case Stewardship.queue_production(state, steward_user, owner_user_id, city_id, type) do
       {:ok, new_state} -> {:reply, :ok, new_state}
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
@@ -984,7 +982,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # abuses the window (attacked, but the destination overreaches) is
   # provable sabotage — refused AND dinged on Honor, both persisted.
   def handle_call({:steward_defend, steward_user, owner_user_id, unit_id, to_tile}, _from, state) do
-    case do_steward_defend(state, steward_user, owner_user_id, unit_id, to_tile) do
+    case Stewardship.defend(state, steward_user, owner_user_id, unit_id, to_tile) do
       {:ok, new_state} ->
         case persist_tick(state, new_state) do
           :ok ->
@@ -1860,61 +1858,13 @@ defmodule BrokenOaths.Game.WorldServer do
   # Queue move (stories 875/899/919) — the "queue_move" `handle_call` is
   # a thin delegation into `BrokenOaths.Game.Unit.queue_move/4`
   # (`.code_my_spec/knowledge/genserver_decomposition.md`), which now
-  # owns `do_queue_move/4`, `occupied_by_own?/4`, and `field_stack_room?/2`.
-  # `persist_order!/2`, `bfs_path/3`, and `bfs_loop/5` stay here too
-  # (duplicated, not removed) — `resolve_steward_defend/4`'s own
-  # emergency-defense move below still calls them directly, and
-  # Stewardship/Feudal orchestration is out of this slice's scope.
+  # owns `do_queue_move/4`, `occupied_by_own?/4`, `field_stack_room?/2`,
+  # `persist_order!/2`, `bfs_path/3`, and `bfs_loop/5` — all public
+  # (pragdave decomposition, slice 6) since `BrokenOaths.Game.
+  # Stewardship`'s own emergency-defense move now calls
+  # `Unit.bfs_path/3`/`Unit.persist_order!/2` directly rather than
+  # WorldServer keeping a second, duplicate copy of either.
   # -------------------------------------------------------------------
-
-  defp persist_order!(unit_id, path) do
-    attrs = %{unit_id: unit_id, kind: :move, path: path, status: :pending}
-
-    case Repo.get_by(Order, unit_id: unit_id) do
-      nil -> %Order{} |> Order.changeset(attrs) |> Repo.insert!()
-      existing -> existing |> Order.changeset(attrs) |> Repo.update!()
-    end
-  end
-
-  # Shortest path over :land tiles, excluding `from`, including `to`.
-  # Plan around units that are on the board RIGHT NOW: occupied tiles
-  # are impassable as intermediate steps (an equally short free path
-  # must be preferred; a knowingly-blocked plan would interrupt on step
-  # one). The DESTINATION may be occupied — approaching another player's
-  # tile is legal; Turn's dynamic collision check is what stops the
-  # mover adjacent to it.
-  defp bfs_path(state, from, to) do
-    occupied =
-      for {_id, u} <- state.units, u.tile_id != from, into: MapSet.new(), do: u.tile_id
-
-    bfs_loop(state.world, occupied, :queue.from_list([{from, []}]), MapSet.new([from]), to)
-  end
-
-  defp bfs_loop(world, occupied, queue, visited, to) do
-    case :queue.out(queue) do
-      {:empty, _} ->
-        nil
-
-      {{:value, {^to, path}}, _rest} ->
-        Enum.reverse(path)
-
-      {{:value, {tile, path}}, rest} ->
-        neighbors =
-          world
-          |> Regions.adjacent_tiles(tile)
-          |> Enum.filter(
-            &(Regions.tile_class(world, &1) == :land and not MapSet.member?(visited, &1) and
-                (&1 == to or not MapSet.member?(occupied, &1)))
-          )
-
-        {queue, visited} =
-          Enum.reduce(neighbors, {rest, visited}, fn n, {q, v} ->
-            {:queue.in({n, [n | path]}, q), MapSet.put(v, n)}
-          end)
-
-        bfs_loop(world, occupied, queue, visited, to)
-    end
-  end
 
   # -------------------------------------------------------------------
   # Attack (story 891/893/896/899/914) — the "attack" `handle_call` is a
@@ -2064,35 +2014,22 @@ defmodule BrokenOaths.Game.WorldServer do
   # Runs every turn boundary, alongside `apply_tribute/1` — settles
   # EVERY player's own per-turn gold income (story 912: every REAL
   # city gold income, `gold_income_by_player/1`, the SAME figure
-  # `apply_tribute/1` taxes) via `Bank.settle_income/3`: straight to
-  # `:gold` while `Presence.online?/2` reads true, into the capped
-  # `:banked_gold` otherwise. A no-op while `Game.feudal_enabled?/0`
-  # reads `false` — same belt-and-suspenders status
-  # `Vassalization.apply_captures/1`/`apply_tribute/1` already carry, so prod's own
-  # gold economy (bounty kills, camp rewards — the only things that
-  # ever moved `gold` before this story) stays exactly as it was until
-  # the flag flips on for real (v0.3.0).
+  # `apply_tribute/1` taxes) via `Bank.apply_income/3` (pragdave
+  # decomposition, slice 6: the settle-and-write iteration itself moved
+  # home to `Bank`; `gold_income_by_player/1` stays here since
+  # `apply_tribute/1`'s own tribute phase reads the exact same figure).
+  # A no-op while `Game.feudal_enabled?/0` reads `false` — same
+  # belt-and-suspenders status `Vassalization.apply_captures/1`/
+  # `apply_tribute/1` already carry, so prod's own gold economy (bounty
+  # kills, camp rewards — the only things that ever moved `gold` before
+  # this story) stays exactly as it was until the flag flips on for
+  # real (v0.3.0).
   defp apply_bank(state) do
     if Game.feudal_enabled?() do
       income_by_player = gold_income_by_player(state)
-
-      new_players =
-        Enum.reduce(income_by_player, state.players, &settle_player_income(&1, &2, state.world))
-
-      %{state | players: new_players}
+      %{state | players: Bank.apply_income(state.players, income_by_player, state.world)}
     else
       state
-    end
-  end
-
-  defp settle_player_income({player_id, income}, players, world) do
-    case Map.get(players, player_id) do
-      nil ->
-        players
-
-      player ->
-        online? = Presence.online?(world, %{id: player.user_id})
-        Map.put(players, player_id, Bank.settle_income(player, income, online?))
     end
   end
 
@@ -2111,53 +2048,11 @@ defmodule BrokenOaths.Game.WorldServer do
   defp gold_of(player), do: player.gold
 
   # -------------------------------------------------------------------
-  # Alliances (story 901)
+  # Alliances (story 901) — `:alliances`'s own `handle_call` is a thin
+  # delegation into `BrokenOaths.Game.Stewardship.list_alliances/2`
+  # (pragdave decomposition, slice 6 — moved alongside `steward_view/2`,
+  # the payload `format_alliance/3` itself carries).
   # -------------------------------------------------------------------
-
-  defp list_alliances(state, user) do
-    case find_player(state, user.id) do
-      nil ->
-        []
-
-      player ->
-        Alliance
-        |> where(
-          [a],
-          a.world_id == ^state.world.id and
-            (a.player_a_id == ^player.id or a.player_b_id == ^player.id)
-        )
-        |> Repo.all()
-        |> Enum.map(&format_alliance(state, &1, player.id))
-    end
-  end
-
-  defp format_alliance(state, alliance, my_player_id) do
-    other_player_id =
-      if alliance.player_a_id == my_player_id,
-        do: alliance.player_b_id,
-        else: alliance.player_a_id
-
-    other_player = Map.fetch!(state.players, other_player_id)
-    other_user = Users.get_user!(other_player.user_id)
-    online? = Presence.online?(state.world, %{id: other_user.id})
-    # QA issue bd93cc0a: only an ACCEPTED, offline ally is stewardable
-    # at all (`Stewardship.steward_role/4`'s own `:ally` clause reads
-    # straight off an accepted `Alliance`) — a merely `:proposed` row,
-    # or an online ally, carries no `steward_view/2` payload.
-    stewardable? = alliance.status == :accepted and not online?
-
-    %{
-      id: alliance.id,
-      status: alliance.status,
-      proposed_by_me?: alliance.proposer_player_id == my_player_id,
-      other_user_id: other_user.id,
-      other_email: other_user.email,
-      # Story 910: same "offer Steward only while offline" status
-      # `format_vassal/2` already carries.
-      online?: online?,
-      steward: if(stewardable?, do: steward_view(state, other_player), else: nil)
-    }
-  end
 
   # -------------------------------------------------------------------
   # Vassalage / Tribute (stories 907/908)
@@ -2198,15 +2093,16 @@ defmodule BrokenOaths.Game.WorldServer do
       tribute_rate: vassalage.tribute_rate,
       oath_strain: vassalage.oath_strain,
       levy_status:
-        levy_status_for(state.world.id, vassalage.lord_player_id, vassalage.vassal_player_id),
+        Levy.status_for(state.world.id, vassalage.lord_player_id, vassalage.vassal_player_id),
       # Story 910: whether this vassal is currently reachable to steward
       # — `GameLive.VassalsPanel`'s own Steward affordance only offers
       # itself against an OFFLINE household member.
       online?: online?,
       # QA issue bd93cc0a: the production-stewardship + emergency-defend
       # click-through's own data source — `nil` while online (nothing to
-      # steward yet), `steward_view/2`'s real payload once offline.
-      steward: if(online?, do: nil, else: steward_view(state, vassal_player)),
+      # steward yet), `Stewardship.steward_view/2`'s real payload once
+      # offline.
+      steward: if(online?, do: nil, else: Stewardship.steward_view(state, vassal_player)),
       # Story 914: `nil` while no Protection Pact call is active for
       # this vassal, `%{window_remaining:}` otherwise.
       protection_call: protection_call_view(state, vassalage.vassal_player_id),
@@ -2243,7 +2139,7 @@ defmodule BrokenOaths.Game.WorldServer do
               tribute_rate: vassalage.tribute_rate,
               oath_strain: vassalage.oath_strain,
               agenda_pending?: Vassalization.agenda_pending?(vassalage),
-              levy_status: levy_status_for(state.world.id, vassalage.lord_player_id, player.id),
+              levy_status: Levy.status_for(state.world.id, vassalage.lord_player_id, player.id),
               # Story 914: this vassal's OWN read of their own active
               # Protection Pact call, same `nil | %{window_remaining:}`
               # shape `format_vassal/2` gives the lord.
@@ -2275,25 +2171,6 @@ defmodule BrokenOaths.Game.WorldServer do
     end)
   end
 
-  # The vassal has exactly one lord at a time, so at most one levy
-  # history between the two of them — the most recent (highest id) is
-  # "the" levy both the lord's own row and the vassal's own badge read.
-  defp levy_status_for(world_id, lord_player_id, vassal_player_id) do
-    Levy
-    |> where(
-      [l],
-      l.world_id == ^world_id and l.lord_player_id == ^lord_player_id and
-        l.vassal_player_id == ^vassal_player_id
-    )
-    |> order_by([l], desc: l.id)
-    |> limit(1)
-    |> Repo.one()
-    |> case do
-      nil -> nil
-      levy -> levy.status
-    end
-  end
-
   defp do_choose_hidden_agenda(state, user, agenda) do
     with {:ok, player} <- fetch_player(state, user.id),
          {:ok, vassalage} <- fetch_vassalage_as_vassal(state, player.id) do
@@ -2312,44 +2189,12 @@ defmodule BrokenOaths.Game.WorldServer do
   # `:resolve_garrison_fate`'s own `handle_call` is a thin delegation
   # into `BrokenOaths.Game.Siege.apply_garrison_fate/4`
   # (`.code_my_spec/knowledge/genserver_decomposition.md`).
-
-  defp do_issue_levy(state, user, vassal_user_id, target_user_id, share) do
-    with {:ok, lord_player} <- fetch_player(state, user.id),
-         {:ok, vassal_player} <- fetch_player(state, vassal_user_id),
-         {:ok, target_player} <- fetch_player(state, target_user_id),
-         {:ok, _vassalage} <- fetch_vassalage(state, lord_player.id, vassal_player.id) do
-      Tribute.issue_changeset(
-        state.world.id,
-        lord_player.id,
-        vassal_player.id,
-        target_player.id,
-        share
-      )
-      |> Repo.insert()
-    end
-  end
-
-  defp do_answer_levy(state, user, lord_user_id) do
-    with {:ok, vassal_player} <- fetch_player(state, user.id),
-         {:ok, lord_player} <- fetch_player(state, lord_user_id),
-         {:ok, levy} <- fetch_pending_levy(state.world.id, lord_player.id, vassal_player.id) do
-      Tribute.answer_changeset(levy) |> Repo.update()
-    end
-  end
-
-  defp do_refuse_levy(state, user, lord_user_id) do
-    with {:ok, vassal_player} <- fetch_player(state, user.id),
-         {:ok, lord_player} <- fetch_player(state, lord_user_id),
-         {:ok, levy} <- fetch_pending_levy(state.world.id, lord_player.id, vassal_player.id),
-         {:ok, refused} <- Tribute.refuse_changeset(levy) |> Repo.update(),
-         {:ok, vassalage} <- fetch_vassalage(state, lord_player.id, vassal_player.id),
-         {:ok, _vassalage} <- Tribute.spike_oath_strain(vassalage) |> Repo.update() do
-      new_state =
-        update_in(state.players[vassal_player.id].honor, &Tribute.apply_refusal_honor_penalty/1)
-
-      {:ok, refused, new_state}
-    end
-  end
+  #
+  # `:issue_levy`/`:answer_levy`/`:refuse_levy`'s own `handle_call`s are
+  # thin delegations into `BrokenOaths.Game.Levy.issue/5`/`answer/3`/
+  # `refuse/3` (pragdave decomposition, slice 6). `levy_status_for/3`
+  # moved home alongside them as `Levy.status_for/3` — `format_vassal/2`
+  # and `vassal_status/2` above call it directly.
 
   defp active_vassalage_for_vassal(state, vassal_player_id) do
     Repo.get_by(Vassalage,
@@ -2375,22 +2220,6 @@ defmodule BrokenOaths.Game.WorldServer do
     case active_vassalage_for_vassal(state, vassal_player_id) do
       nil -> {:error, :not_a_vassal}
       vassalage -> {:ok, vassalage}
-    end
-  end
-
-  defp fetch_pending_levy(world_id, lord_player_id, vassal_player_id) do
-    Levy
-    |> where(
-      [l],
-      l.world_id == ^world_id and l.lord_player_id == ^lord_player_id and
-        l.vassal_player_id == ^vassal_player_id and l.status == :pending
-    )
-    |> order_by([l], desc: l.id)
-    |> limit(1)
-    |> Repo.one()
-    |> case do
-      nil -> {:error, :not_found}
-      levy -> {:ok, levy}
     end
   end
 
@@ -2580,372 +2409,18 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   # -------------------------------------------------------------------
-  # Gold Bank (story 909)
+  # Gold Bank (story 909) / Feudal Stewardship (story 910)
   # -------------------------------------------------------------------
 
-  defp bank_status(state, user) do
-    case find_player(state, user.id) do
-      nil -> %{gold: 0, cap: Bank.starting_cap()}
-      player -> Bank.status(player)
-    end
-  end
+  # Pragdave decomposition, slice 6: `:bank`/`:collect_bank`/
+  # `:upgrade_bank` (`BrokenOaths.Game.Bank`) and every
+  # `:steward_*`/`:alliances`/`:steward_log` `handle_call`
+  # (`BrokenOaths.Game.Stewardship`) are thin delegations into their
+  # owning domain model
+  # (`.code_my_spec/knowledge/genserver_decomposition.md`).
 
   defp honor_of(nil), do: 0
   defp honor_of(player), do: player.honor
-
-  defp do_collect_bank(state, user) do
-    with :ok <- ensure_feudal_enabled(),
-         {:ok, player} <- fetch_player(state, user.id) do
-      {new_player, _swept} = Bank.collect(player)
-      {:ok, %{state | players: Map.put(state.players, player.id, new_player)}}
-    end
-  end
-
-  defp do_upgrade_bank(state, user) do
-    with :ok <- ensure_feudal_enabled(),
-         {:ok, player} <- fetch_player(state, user.id),
-         {:ok, upgraded} <- Bank.upgrade(player) do
-      {:ok, %{state | players: Map.put(state.players, player.id, upgraded)}}
-    end
-  end
-
-  # Shared gate every direct Bank/Stewardship command checks first — a
-  # no-op (`{:error, :feudal_disabled}`) while `Game.feudal_enabled?/0`
-  # reads `false` (prod's own default), same belt-and-suspenders status
-  # `Vassalization.apply_captures/1`/`apply_tribute/1`/`apply_bank/1` already carry
-  # for the turn-tick side of this same batch.
-  defp ensure_feudal_enabled do
-    if Game.feudal_enabled?(), do: :ok, else: {:error, :feudal_disabled}
-  end
-
-  # -------------------------------------------------------------------
-  # Feudal Stewardship (story 910)
-  # -------------------------------------------------------------------
-
-  defp steward_log(state, user) do
-    case find_player(state, user.id) do
-      nil ->
-        []
-
-      player ->
-        StewardLog
-        |> where([s], s.world_id == ^state.world.id and s.owner_player_id == ^player.id)
-        |> order_by([s], desc: s.id)
-        |> Repo.all()
-        |> Enum.map(&format_steward_log(state, &1))
-    end
-  end
-
-  defp format_steward_log(state, log) do
-    steward_player = Map.fetch!(state.players, log.steward_player_id)
-    steward_user = Users.get_user!(steward_player.user_id)
-
-    %{
-      id: log.id,
-      steward_email: steward_user.email,
-      action: log.action,
-      turn: log.turn,
-      sabotage: log.sabotage
-    }
-  end
-
-  # QA issue bd93cc0a: the click-through steward view carried on every
-  # OFFLINE household member's own `format_vassal/2`/`format_alliance/3`
-  # row — everything `GameLive.Play`'s own production-stewardship +
-  # emergency-defend controls need to render REAL options, not a blank
-  # check. `nil` (never computed at all) whenever the owner is online or
-  # not currently stewardable, the same "absent means nothing to offer"
-  # posture `vassal_status/2` already gives a free player's own `nil`.
-  defp steward_view(state, owner_player) do
-    units = owner_units(state, owner_player.id)
-    cities = for {_id, c} <- state.cities, c.player_id == owner_player.id, do: c
-
-    %{
-      cities: Enum.map(cities, &steward_city_view(state, &1)),
-      under_attack?: Stewardship.under_attack?(units),
-      # Only units genuinely worth defending (`Stewardship.
-      # under_attack?/1`'s own literal "hp < max_hp" signal) — each
-      # carrying its own CURRENT `adjacent_tile_ids` so the rendered
-      # defend buttons can never go stale against a unit that's already
-      # moved (a stale button would make `Stewardship.
-      # defend_target_allowed?/3` refuse as provable sabotage, dinging
-      # an innocent steward's own Honor for nothing).
-      threatened_units:
-        units
-        |> Enum.filter(&(&1.hp < &1.max_hp))
-        |> Enum.map(&steward_unit_view(state, &1))
-    }
-  end
-
-  # `catalog` reuses `Production.available_items/1` — the SAME
-  # research/copper-gated Build list `GameLive.CityPanel` already reads
-  # for the owning player themselves — filtered through `Stewardship.
-  # constructive_item?/1` (today a no-op: every buildable type IS
-  # already constructive, see that module's own moduledoc, but still
-  # the one gate this view is contractually bound to).
-  defp steward_city_view(state, city) do
-    opts = [
-      granary_available?: Production.granary_available?(state, city),
-      bronze_age?: Production.bronze_age?(state, city),
-      copper_access?: Production.copper_access?(state, city)
-    ]
-
-    catalog =
-      opts
-      |> Production.available_items()
-      |> Enum.filter(&Stewardship.constructive_item?/1)
-
-    %{id: city.id, name: city.name, catalog: catalog}
-  end
-
-  defp steward_unit_view(state, unit) do
-    %{
-      id: unit.id,
-      type: unit.type,
-      tile_id: unit.tile_id,
-      hp: unit.hp,
-      max_hp: unit.max_hp,
-      adjacent_tile_ids: Regions.adjacent_tiles(state.world, unit.tile_id)
-    }
-  end
-
-  # Every real steward mutation shares this same eligibility gate:
-  # feudal batch reachable, steward_user/owner_user_id both real
-  # players, `Stewardship.eligible?/1` over the resolved `steward_role/3`,
-  # and the owner genuinely offline (`Presence.online?/2`) —
-  # `{:ok, steward_player, owner_player}` once every check clears.
-  defp fetch_steward_context(state, steward_user, owner_user_id) do
-    with {:ok, steward_player} <- fetch_player(state, steward_user.id),
-         {:ok, owner_player} <- fetch_player(state, owner_user_id) do
-      role = steward_role(state, steward_player.id, owner_player.id)
-      owner_online? = Presence.online?(state.world, %{id: owner_player.user_id})
-
-      cond do
-        not Game.feudal_enabled?() -> {:error, :feudal_disabled}
-        not Stewardship.eligible?(role) -> {:error, :not_eligible}
-        owner_online? -> {:error, :owner_online}
-        true -> {:ok, steward_player, owner_player}
-      end
-
-      # NOTE: kept as its own literal `Game.feudal_enabled?()` check
-      # (rather than delegating to `ensure_feudal_enabled/0`) since this
-      # branch sits inside a `cond`, not a `with`, and needs to run
-      # AFTER both players are already resolved (`:not_a_player` must
-      # still win over `:feudal_disabled` for an invalid user_id).
-    end
-  end
-
-  # Resolves the (steward, owner) relationship into `Stewardship.role/0`
-  # — the owner's own lord (if any), the steward's own lord (if any),
-  # and whether an ACCEPTED alliance exists between the two, each read
-  # fresh off `Repo` (world-membership-scoped coordination state, same
-  # non-tick-state status `list_alliances/2`/`vassals/2` already have).
-  defp steward_role(state, steward_player_id, owner_player_id) do
-    owner_lord_id = state |> active_vassalage_for_vassal(owner_player_id) |> lord_id_of()
-    steward_lord_id = state |> active_vassalage_for_vassal(steward_player_id) |> lord_id_of()
-    allied? = accepted_ally?(state.world.id, steward_player_id, owner_player_id)
-
-    Stewardship.steward_role(owner_lord_id, steward_player_id, steward_lord_id, allied?)
-  end
-
-  defp lord_id_of(nil), do: nil
-  defp lord_id_of(%Vassalage{lord_player_id: lord_player_id}), do: lord_player_id
-
-  defp accepted_ally?(world_id, player_a_id, player_b_id) do
-    case Cooperation.find_alliance(world_id, player_a_id, player_b_id) do
-      %Alliance{status: :accepted} -> true
-      _other -> false
-    end
-  end
-
-  defp owner_units(state, owner_player_id) do
-    for {_id, u} <- state.units, u.player_id == owner_player_id, do: u
-  end
-
-  defp fetch_owned_unit(state, owner_player, unit_id) do
-    case Map.get(state.units, unit_id) do
-      %{player_id: player_id} = unit when player_id == owner_player.id -> {:ok, unit}
-      _other -> {:error, :not_owner}
-    end
-  end
-
-  # `Bank.steward_collect/1` — pure stewardship, every gold lands with
-  # the owner, the steward's own treasury never moves. Logged
-  # immediately (not tick-state, same "persisted immediately" status
-  # `do_propose_alliance/3`'s own write already has) regardless of the
-  # swept amount (even a 0-gold sweep is a real, logged action).
-  defp do_steward_collect_bank(state, steward_user, owner_user_id) do
-    with {:ok, steward_player, owner_player} <-
-           fetch_steward_context(state, steward_user, owner_user_id) do
-      {new_owner, swept} = Bank.steward_collect(owner_player)
-
-      log_steward_action!(
-        state,
-        steward_player.id,
-        owner_player.id,
-        :bank_collect,
-        %{amount: swept}
-      )
-
-      {:ok, %{state | players: Map.put(state.players, owner_player.id, new_owner)}}
-    end
-  end
-
-  # Mirrors `Production.queue_production/4` exactly — same catalog
-  # (`Production.parse_item_type/1`), same `Production.can_queue?/3` gate
-  # — but scoped through stewardship eligibility instead of ownership,
-  # and additionally gated on `Stewardship.constructive_item?/1` (today
-  # always true for anything `Production.parse_item_type/1` accepts at
-  # all; the whitelist hook future non-constructive items would need).
-  defp do_steward_queue_production(state, steward_user, owner_user_id, city_id, type) do
-    with {:ok, steward_player, owner_player} <-
-           fetch_steward_context(state, steward_user, owner_user_id),
-         {:ok, city} <- fetch_owned_city(state, owner_player, city_id),
-         {:ok, type} <- Production.parse_item_type(type),
-         :ok <- constructive_item(type),
-         :ok <-
-           Production.can_queue?(city, type,
-             granary_available?: Production.granary_available?(state, city),
-             bronze_age?: Production.bronze_age?(state, city),
-             copper_access?: Production.copper_access?(state, city)
-           ) do
-      next_position =
-        city.queue |> Enum.map(&Map.get(&1, :position, 0)) |> Enum.max(fn -> 0 end) |> Kernel.+(1)
-
-      {:ok, item} =
-        %ProductionItem{}
-        |> ProductionItem.changeset(
-          Production.new_item(type)
-          |> Map.put(:city_id, city_id)
-          |> Map.put(:position, next_position)
-        )
-        |> Repo.insert()
-
-      new_city = %{city | queue: city.queue ++ [queue_item_map(item)]}
-
-      log_steward_action!(
-        state,
-        steward_player.id,
-        owner_player.id,
-        :production_set,
-        %{city_id: city_id, item: type}
-      )
-
-      {:ok, %{state | cities: Map.put(state.cities, city_id, new_city)}}
-    end
-  end
-
-  defp fetch_owned_city(state, owner_player, city_id) do
-    case Map.get(state.cities, city_id) do
-      %{player_id: player_id} = city when player_id == owner_player.id -> {:ok, city}
-      _other -> {:error, :not_found}
-    end
-  end
-
-  defp constructive_item(type) do
-    if Stewardship.constructive_item?(type), do: :ok, else: {:error, :not_constructive}
-  end
-
-  # EMERGENCY DEFENSE: three gates, in order — eligible + offline
-  # (`fetch_steward_context/3`), genuinely `Stewardship.under_attack?/1`,
-  # and a `Stewardship.defend_target_allowed?/3` destination (strictly
-  # adjacent, never the unit's own tile). The third gate has two
-  # failure shapes: NOT under attack at all is a quiet, unlogged refusal
-  # (no legitimate emergency window ever existed to abuse); under
-  # attack but overreaching the destination IS provable sabotage —
-  # logged AND dinged on the steward's own Honor, even though the move
-  # itself is still refused. Only every gate clearing actually queues
-  # and immediately resolves the move (`bfs_path/3` + `Turn.move_now/2`,
-  # the same "orders execute immediately" pattern `BrokenOaths.Game.Unit.
-  # queue_move/4` already establishes).
-  defp do_steward_defend(state, steward_user, owner_user_id, unit_id, to_tile) do
-    with {:ok, steward_player, owner_player} <-
-           fetch_steward_context(state, steward_user, owner_user_id),
-         {:ok, unit} <- fetch_owned_unit(state, owner_player, unit_id) do
-      resolve_steward_defend(state, steward_player, owner_player, unit, to_tile)
-    end
-  end
-
-  defp resolve_steward_defend(state, steward_player, owner_player, unit, to_tile) do
-    cond do
-      not Stewardship.under_attack?(owner_units(state, owner_player.id)) ->
-        {:error, :not_under_attack}
-
-      not Stewardship.defend_target_allowed?(
-        unit.tile_id,
-        to_tile,
-        Regions.adjacent_tiles(state.world, unit.tile_id)
-      ) ->
-        log_steward_action!(
-          state,
-          steward_player.id,
-          owner_player.id,
-          :emergency_defense,
-          %{unit_id: unit.id, to_tile: to_tile},
-          true
-        )
-
-        new_state =
-          update_in(
-            state.players[steward_player.id].honor,
-            &Stewardship.apply_sabotage_penalty/1
-          )
-
-        {:ok, new_state}
-
-      true ->
-        case bfs_path(state, unit.tile_id, to_tile) do
-          path when path in [nil, []] ->
-            {:error, :unreachable}
-
-          path ->
-            persist_order!(unit.id, path)
-
-            queued = %{
-              state
-              | orders:
-                  Map.put(state.orders, unit.id, %{kind: :move, path: path, status: :pending})
-            }
-
-            moved = Turn.move_now(queued, unit.id)
-
-            log_steward_action!(
-              state,
-              steward_player.id,
-              owner_player.id,
-              :emergency_defense,
-              %{unit_id: unit.id, to_tile: to_tile}
-            )
-
-            {:ok, moved}
-        end
-    end
-  end
-
-  defp log_steward_action!(
-         state,
-         steward_player_id,
-         owner_player_id,
-         action,
-         details,
-         sabotage? \\ false
-       ) do
-    %StewardLog{}
-    |> StewardLog.changeset(
-      Stewardship.log_attrs(
-        state.world.id,
-        steward_player_id,
-        owner_player_id,
-        action,
-        details,
-        state.turn,
-        sabotage?
-      )
-    )
-    |> Repo.insert!()
-
-    :ok
-  end
 
   # -------------------------------------------------------------------
   # Persistence — tick delta

@@ -315,7 +315,15 @@ defmodule BrokenOaths.Game.Unit do
 
   defp field_stack_room?(_mover, _units), do: false
 
-  defp persist_order!(unit_id, path) do
+  @doc """
+  Upserts `unit_id`'s own `Order` row to the given `path` — public
+  (pragdave decomposition, slice 6) so `BrokenOaths.Game.Stewardship`'s
+  own emergency-defense move can persist an order the exact same way a
+  normal `queue_move/4` does, without WorldServer keeping a second,
+  duplicate copy of this write.
+  """
+  @spec persist_order!(term(), [tile_id()]) :: Order.t()
+  def persist_order!(unit_id, path) do
     attrs = %{unit_id: unit_id, kind: :move, path: path, status: :pending}
 
     case Repo.get_by(Order, unit_id: unit_id) do
@@ -324,14 +332,20 @@ defmodule BrokenOaths.Game.Unit do
     end
   end
 
-  # Shortest path over :land tiles, excluding `from`, including `to`.
-  # Plan around units that are on the board RIGHT NOW: occupied tiles
-  # are impassable as intermediate steps (an equally short free path
-  # must be preferred; a knowingly-blocked plan would interrupt on step
-  # one). The DESTINATION may be occupied — approaching another player's
-  # tile is legal; Turn's dynamic collision check is what stops the
-  # mover adjacent to it.
-  defp bfs_path(state, from, to) do
+  @doc """
+  Shortest path over `:land` tiles, excluding `from`, including `to`.
+  Plan around units that are on the board RIGHT NOW: occupied tiles are
+  impassable as intermediate steps (an equally short free path must be
+  preferred; a knowingly-blocked plan would interrupt on step one). The
+  DESTINATION may be occupied — approaching another player's tile is
+  legal; `BrokenOaths.Game.Turn`'s dynamic collision check is what stops
+  the mover adjacent to it. Public (pragdave decomposition, slice 6) —
+  the same "shared, real" reason `persist_order!/2` above is public: 
+  `BrokenOaths.Game.Stewardship`'s own emergency-defense move calls this
+  directly rather than WorldServer keeping a duplicate copy.
+  """
+  @spec bfs_path(map(), tile_id(), tile_id()) :: [tile_id()] | nil
+  def bfs_path(state, from, to) do
     occupied =
       for {_id, u} <- state.units, u.tile_id != from, into: MapSet.new(), do: u.tile_id
 
