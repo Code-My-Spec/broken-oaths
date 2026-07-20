@@ -2366,6 +2366,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
             this.path = null
             this.anims = new Map()
             this.raf = null
+            this.drawScheduled = false
+            this.lowDetail = false
+            this.settleTimer = null
             this.arc = 0.02
 
             // Billboard sprites + ground textures via the shared render
@@ -2545,7 +2548,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
                 const mid = pinchMid()
                 if (this.midLast) panBy(mid.x - this.midLast.x, mid.y - this.midLast.y)
                 this.midLast = mid
-                this.draw()
+                this.interact()
                 return
               }
 
@@ -2556,7 +2559,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
               clearTimeout(this.lpTimer)
               this.last = {x: e.clientX, y: e.clientY}
               panBy(dx, dy)
-              this.draw()
+              this.interact()
             })
 
             const removePointer = (e) => {
@@ -2587,7 +2590,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
             this.el.addEventListener("wheel", (e) => {
               e.preventDefault()
               this.scale = Math.max(200, Math.min(this.scale * (e.deltaY < 0 ? 1.1 : 0.9), 4000))
-              this.draw()
+              this.interact()
             }, {passive: false})
           },
 
@@ -2744,7 +2747,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
               for (const [id, a] of this.anims) {
                 if (now - a.start > 450) this.anims.delete(id)
               }
-              this.draw()
+              this.render()
               const pulsing = this.units.some((u) => u.order && u.order.status === "pending")
               const flashing = this.combatFlash && now < this.combatFlash.until
               if (this.anims.size || pulsing || flashing) this.raf = requestAnimationFrame(step)
@@ -2752,7 +2755,34 @@ defmodule BrokenOathsWeb.GameLive.Play do
             this.raf = requestAnimationFrame(step)
           },
 
+          // Coalesce redraws to one per animation frame. Many LiveView
+          // pushes (a turn tick fans out window+units+cities+visibility+…)
+          // and every pointermove used to each force a full synchronous
+          // render(); on mobile that stacked several whole-board renders
+          // into a single frame. They now collapse into one rAF-driven
+          // render() (issue 6f5e665b — bad mobile performance).
           draw() {
+            if (this.drawScheduled) return
+            this.drawScheduled = true
+            requestAnimationFrame(() => { this.drawScheduled = false; this.render() })
+          },
+
+          // While the camera is actively moving (pan / pinch / wheel),
+          // render a cheaper frame — flat terrain fills instead of a
+          // per-tile pattern setTransform, no hairline grid stroke, no
+          // cloud shells — then settle to a full-detail frame ~140ms
+          // after the gesture stops. The textured look at rest is
+          // unchanged; motion just stops paying for the thousands of
+          // pattern fills + strokes that made mobile crawl (issue
+          // 6f5e665b).
+          interact() {
+            this.lowDetail = true
+            clearTimeout(this.settleTimer)
+            this.settleTimer = setTimeout(() => { this.lowDetail = false; this.render() }, 140)
+            this.draw()
+          },
+
+          render() {
             const ctx = this.ctx
             if (!ctx) return
             const GR = window.GlobeRender
@@ -2790,7 +2820,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
               const [id, color] = row
               ctx.beginPath()
               GR.tracePolygon(ctx, R, row, 7)
-              ctx.fillStyle = this.patterns.for(ctx, row[3], this.scale, cx, cy) || color
+              // Motion frames skip the zoom-anchored pattern setTransform
+              // + fill (the single hottest per-tile cost) for a flat
+              // palette color; the settle frame restores the texture.
+              ctx.fillStyle = this.lowDetail ? color : (this.patterns.for(ctx, row[3], this.scale, cx, cy) || color)
               ctx.fill()
 
               // Explored-but-out-of-vision: remembered terrain under a
@@ -2811,9 +2844,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
               // Reuses the SAME open path `ctx.fill()` already traced
               // above — free to stroke. Kept subtle (low alpha, hairline
               // width): legible grid, not a busy overlay.
-              ctx.strokeStyle = "rgba(10, 12, 18, 0.16)"
-              ctx.lineWidth = 1
-              ctx.stroke()
+              if (!this.lowDetail) {
+                ctx.strokeStyle = "rgba(10, 12, 18, 0.16)"
+                ctx.lineWidth = 1
+                ctx.stroke()
+              }
             }
 
             // Terrain decor billboards (mountains, hills, tree cover) at
@@ -3004,13 +3039,15 @@ defmodule BrokenOathsWeb.GameLive.Play do
             // terrain (levels from the airspace push; palette from the
             // shared render core). Deliberately translucent + tinted so
             // it never reads as the flat opaque fog shroud.
-            for (const {row} of order) {
-              const lvl = this.airspace[row[0]]
-              if (!lvl) continue
-              ctx.beginPath()
-              GR.tracePolygon(ctx, R, row, 7, GR.CLOUD_ALT)
-              ctx.fillStyle = this.CLOUD[lvl]
-              ctx.fill()
+            if (!this.lowDetail) {
+              for (const {row} of order) {
+                const lvl = this.airspace[row[0]]
+                if (!lvl) continue
+                ctx.beginPath()
+                GR.tracePolygon(ctx, R, row, 7, GR.CLOUD_ALT)
+                ctx.fillStyle = this.CLOUD[lvl]
+                ctx.fill()
+              }
             }
 
             const now = performance.now()
