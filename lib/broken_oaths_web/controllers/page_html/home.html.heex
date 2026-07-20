@@ -34,7 +34,7 @@
   </div>
 </div>
 
-<main class="relative z-[1] mx-auto flex min-h-[calc(100vh-3.5rem)] max-w-4xl flex-col items-center justify-center gap-10 px-6 pb-24 text-center">
+<main class="relative z-[1] mx-auto flex min-h-[calc(100vh-3.5rem)] max-w-5xl flex-col items-center gap-16 px-6 pb-24 pt-16 text-center sm:pt-24">
   <div>
     <p class="mb-3 text-sm font-semibold uppercase tracking-[0.3em] text-amber-400/90">
       A massively multiplayer 4X
@@ -43,10 +43,12 @@
       Broken Oaths
     </h1>
     <p class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-slate-300">
-      Settle a living hex globe that keeps turning while you sleep.
-      And when you lose, you don't die: your conqueror makes you a
+      Settle a living hex globe that keeps turning while you sleep. When you
+      lose, you don't die. Your conqueror makes you a
       <span class="font-semibold text-amber-300">vassal</span>.
-      Pay tribute, fight their wars, and plot your rebellion.
+      Pay tribute, fight their wars, and plot your rebellion. Then climb the
+      whole arc of history with everyone else on the planet, from Stone Age
+      raiders to intergalactic powers.
     </p>
   </div>
 
@@ -60,34 +62,75 @@
     <p class="text-sm text-slate-500">Runs in your browser. No download.</p>
   </div>
 
-  <div class="grid w-full gap-4 text-left sm:grid-cols-2">
-    <div class="rounded-xl border border-slate-700/60 bg-slate-900/60 p-5 backdrop-blur">
-      <h2 class="font-bold text-slate-100">A real globe</h2>
-      <p class="mt-1 text-sm leading-relaxed text-slate-400">
-        29,162 hexes wrapped seamlessly around a sphere, plus the 12
-        pentagons geometry demands, cursed into impassable mountains.
+  <%!-- What you play today --%>
+  <section class="w-full">
+    <h2 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+      What you play today
+    </h2>
+    <div class="mt-6 grid w-full gap-4 text-left sm:grid-cols-2">
+      <div class="rounded-xl border border-slate-700/60 bg-slate-900/60 p-5 backdrop-blur">
+        <h3 class="font-bold text-slate-100">A real globe</h3>
+        <p class="mt-1 text-sm leading-relaxed text-slate-400">
+          29,162 hexes wrap seamlessly around a sphere, plus the 12 pentagons
+          geometry demands, cursed into impassable mountains. You found cities,
+          research a tech tree, and fight for the terrain that matters.
+        </p>
+      </div>
+      <div class="rounded-xl border border-slate-700/60 bg-slate-900/60 p-5 backdrop-blur">
+        <h3 class="font-bold text-slate-100">Time never stops</h3>
+        <p class="mt-1 text-sm leading-relaxed text-slate-400">
+          Every world ticks once a minute, forever. Your cities grow, your
+          units march, and your rivals scheme while you are away. One planet
+          holds thousands of players at once.
+        </p>
+      </div>
+      <div class="rounded-xl border border-slate-700/60 bg-slate-900/60 p-5 backdrop-blur">
+        <h3 class="font-bold text-slate-100">Lose without dying</h3>
+        <p class="mt-1 text-sm leading-relaxed text-slate-400">
+          Defeat means vassalage, not deletion. Serve your new lord, watch your
+          oath strain build, then coordinate with the other vassals and break
+          your oaths together in a war of independence.
+        </p>
+      </div>
+      <div class="rounded-xl border border-slate-700/60 bg-slate-900/60 p-5 backdrop-blur">
+        <h3 class="font-bold text-slate-100">Fog you can't cheat</h3>
+        <p class="mt-1 text-sm leading-relaxed text-slate-400">
+          Hidden tiles never leave the server, so no client mod can reveal the
+          map. Every player sees a genuinely different planet.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <%!-- Where it's going --%>
+  <section class="w-full">
+    <h2 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+      Where it's going
+    </h2>
+    <p class="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-slate-300">
+      Broken Oaths grows into the full span of history and then past it. Your
+      political toolkit evolves as you advance: raiders take spoils, empires
+      hold cities by force, feudal lords bind vassals by oath, and the great
+      powers pool their strength into federations and hegemonies. The tech tree
+      runs all the way to the space age and beyond, opening into a Master of
+      Orion style intergalactic 4X.
+    </p>
+    <p class="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-slate-300">
+      Older civilizations reach for the stars while fresh players spawn on new
+      worlds behind them, so the strong colonize the young and lift them toward
+      parity. Gods join above the whole board, trading wonders and miracles to
+      rulers for worship, until the ambition scales to intergalactic gods.
+    </p>
+    <div class="mt-6 flex flex-col items-center gap-2">
+      <.link
+        href={~p"/roadmap"}
+        class="rounded-lg border border-amber-400/50 px-8 py-3 text-base font-bold text-amber-300 transition hover:bg-amber-400/10"
+      >
+        Read the full roadmap
+      </.link>
+      <p class="text-sm text-slate-500">
+        The march from Stone Age tribes to intergalactic gods, tier by tier.
       </p>
     </div>
-    <div class="rounded-xl border border-slate-700/60 bg-slate-900/60 p-5 backdrop-blur">
-      <h2 class="font-bold text-slate-100">Time never stops</h2>
-      <p class="mt-1 text-sm leading-relaxed text-slate-400">
-        Every world ticks once a minute, forever. Your cities grow, your
-        units march, and your rivals scheme while you're away.
-      </p>
-    </div>
-    <div class="rounded-xl border border-slate-700/60 bg-slate-900/60 p-5 backdrop-blur">
-      <h2 class="font-bold text-slate-100">Lose without dying</h2>
-      <p class="mt-1 text-sm leading-relaxed text-slate-400">
-        Defeat means vassalage, not deletion. Serve your new lord, or
-        coordinate with the other vassals and break your oaths together.
-      </p>
-    </div>
-    <div class="rounded-xl border border-slate-700/60 bg-slate-900/60 p-5 backdrop-blur">
-      <h2 class="font-bold text-slate-100">Fog you can't cheat</h2>
-      <p class="mt-1 text-sm leading-relaxed text-slate-400">
-        Hidden tiles never leave the server, so no client mod can reveal
-        the map. Every player sees a genuinely different planet.
-      </p>
-    </div>
-  </div>
+  </section>
 </main>

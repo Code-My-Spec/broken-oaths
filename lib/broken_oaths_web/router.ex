@@ -21,6 +21,7 @@ defmodule BrokenOathsWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+    get "/roadmap", PageController, :roadmap
     get "/worlds/:id/texture.png", WorldTextureController, :show
     get "/worlds/:id/airspace.png", WorldTextureController, :airspace
 

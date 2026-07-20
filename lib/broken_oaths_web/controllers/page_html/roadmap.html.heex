@@ -1,0 +1,325 @@
+<Layouts.flash_group flash={@flash} />
+<%!-- Roadmap shares the landing page's dark space theme, fixed regardless of
+      the visitor's daisyUI preference. Built from the product backlog:
+      .code_my_spec/stories/political_systems_progression_backlog.md --%>
+<style>
+  body { background: #05070f; }
+  body > ul.menu a, body > ul.menu li { color: #cbd5e1; }
+</style>
+
+<div class="fixed inset-0 -z-10 overflow-hidden" aria-hidden="true">
+  <div
+    class="absolute inset-0"
+    style="background:
+      radial-gradient(1px 1px at 12% 22%, #e2e8f0 50%, transparent 51%),
+      radial-gradient(1px 1px at 78% 12%, #cbd5e1 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 55% 38%, #f1f5f9 50%, transparent 51%),
+      radial-gradient(1px 1px at 33% 68%, #cbd5e1 50%, transparent 51%),
+      radial-gradient(1px 1px at 88% 55%, #e2e8f0 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 8% 85%, #f1f5f9 50%, transparent 51%),
+      radial-gradient(1px 1px at 65% 82%, #cbd5e1 50%, transparent 51%),
+      radial-gradient(1px 1px at 45% 8%, #e2e8f0 50%, transparent 51%),
+      linear-gradient(180deg, #05070f 0%, #0a1020 55%, #0b1526 100%);"
+  >
+  </div>
+</div>
+
+<div class="relative z-[1] mx-auto max-w-4xl px-6 pb-24 pt-8">
+  <%!-- Top bar --%>
+  <nav class="flex items-center justify-between">
+    <.link href={~p"/"} class="text-sm font-black tracking-tight text-slate-200 hover:text-white">
+      Broken Oaths
+    </.link>
+    <.link
+      href={~p"/play"}
+      class="rounded-lg bg-amber-500 px-5 py-2 text-sm font-bold text-slate-950 transition hover:bg-amber-400"
+    >
+      Play free
+    </.link>
+  </nav>
+
+  <%!-- Hero --%>
+  <header class="mt-16 text-center">
+    <p class="text-sm font-semibold uppercase tracking-[0.3em] text-amber-400/90">
+      Roadmap
+    </p>
+    <h1 class="mt-3 text-4xl font-black tracking-tight text-slate-100 sm:text-6xl">
+      From Stone Age tribes to intergalactic gods
+    </h1>
+    <p class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-slate-300">
+      Broken Oaths marches through the whole span of history and then past it.
+      Every age hands you a new way to relate to the players you beat and the
+      players you befriend. The through line runs from brutal extraction toward
+      voluntary cooperation, and each cooperative tier unlocks something bigger
+      that no single power can build alone.
+    </p>
+    <p class="mx-auto mt-4 max-w-2xl text-sm leading-relaxed text-slate-400">
+      An autonomous development harness builds this in public, tier by tier.
+      What ships stays free to play.
+    </p>
+  </header>
+
+  <%!-- Legend --%>
+  <div class="mt-12 flex flex-wrap items-center justify-center gap-4 text-xs text-slate-400">
+    <span class="flex items-center gap-2">
+      <span class="inline-block h-2.5 w-2.5 rounded-full bg-emerald-400"></span> Playable now
+    </span>
+    <span class="flex items-center gap-2">
+      <span class="inline-block h-2.5 w-2.5 rounded-full bg-amber-400"></span> Building next
+    </span>
+    <span class="flex items-center gap-2">
+      <span class="inline-block h-2.5 w-2.5 rounded-full bg-sky-400"></span> Planned
+    </span>
+    <span class="flex items-center gap-2">
+      <span class="inline-block h-2.5 w-2.5 rounded-full bg-fuchsia-400"></span> Vision
+    </span>
+  </div>
+
+  <%!-- Playable now --%>
+  <section class="mt-16">
+    <h2 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+      Playable now
+    </h2>
+    <div class="mt-6 grid gap-4 sm:grid-cols-2">
+      <div class="rounded-xl border border-emerald-500/30 bg-slate-900/60 p-5 backdrop-blur">
+        <h3 class="font-bold text-slate-100">The living planet</h3>
+        <p class="mt-1 text-sm leading-relaxed text-slate-400">
+          A seamless hex globe of nearly thirty thousand tiles ticks once a
+          minute, forever. You explore under real fog of war, found cities,
+          research the early tech tree, and fight barbarians and rivals for the
+          ground worth holding.
+        </p>
+      </div>
+      <div class="rounded-xl border border-emerald-500/30 bg-slate-900/60 p-5 backdrop-blur">
+        <h3 class="font-bold text-slate-100">Conquer into vassalage</h3>
+        <p class="mt-1 text-sm leading-relaxed text-slate-400">
+          Take a rival's last city and they swear fealty instead of leaving the
+          game. They keep playing as your vassal, pay tribute, answer your
+          call to arms, and hand you their honor and their grudge.
+        </p>
+      </div>
+      <div class="rounded-xl border border-emerald-500/30 bg-slate-900/60 p-5 backdrop-blur">
+        <h3 class="font-bold text-slate-100">Oaths that strain</h3>
+        <p class="mt-1 text-sm leading-relaxed text-slate-400">
+          Heavy tribute and a dishonorable lord raise a vassal's oath strain in
+          plain sight. Treat your vassals well and they hold. Squeeze them and
+          the pressure builds toward a break.
+        </p>
+      </div>
+      <div class="rounded-xl border border-emerald-500/30 bg-slate-900/60 p-5 backdrop-blur">
+        <h3 class="font-bold text-slate-100">Rebellion and independence</h3>
+        <p class="mt-1 text-sm leading-relaxed text-slate-400">
+          Vassals conspire in secret through a shared pact, rise together, and
+          fight a real war of independence. Hold your freed cities long enough
+          and the oath breaks for good.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <%!-- The political ladder --%>
+  <section class="mt-20">
+    <h2 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+      The political ladder
+    </h2>
+    <p class="mt-4 max-w-2xl text-base leading-relaxed text-slate-300">
+      As you advance through the ages, your options for ruling the players you
+      defeat change with you. Each tier trades away raw extraction for stability
+      and scale, so players migrate toward the newer systems the way real
+      societies did. The tool that applies depends on your age and the gap
+      between you and the other player.
+    </p>
+
+    <ol class="mt-8 space-y-3">
+      <li class="flex gap-4 rounded-xl border border-sky-500/25 bg-slate-900/50 p-5 backdrop-blur">
+        <span class="mt-1 text-lg font-black text-slate-600">01</span>
+        <div>
+          <div class="flex items-center gap-3">
+            <h3 class="font-bold text-slate-100">Raiding</h3>
+            <span class="rounded-full bg-sky-400/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-300">Stone Age · Planned</span>
+          </div>
+          <p class="mt-1 text-sm leading-relaxed text-slate-400">
+            The tribal phase. Break a city's defenses, take spoils of gold and
+            production, and leave. The owner keeps the city and no bond forms.
+            Peers raid peers, and nobody rules anybody yet.
+          </p>
+        </div>
+      </li>
+
+      <li class="flex gap-4 rounded-xl border border-sky-500/25 bg-slate-900/50 p-5 backdrop-blur">
+        <span class="mt-1 text-lg font-black text-slate-600">02</span>
+        <div>
+          <div class="flex items-center gap-3">
+            <h3 class="font-bold text-slate-100">Conquest</h3>
+            <span class="rounded-full bg-sky-400/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-300">Bronze Age · Planned</span>
+          </div>
+          <p class="mt-1 text-sm leading-relaxed text-slate-400">
+            Hold individual cities by force and squeeze heavy tribute from them.
+            Keep a garrison moving through each hold or watch it slip away.
+            Conquest works, but it scales badly on purpose.
+          </p>
+        </div>
+      </li>
+
+      <li class="flex gap-4 rounded-xl border border-sky-500/25 bg-slate-900/50 p-5 backdrop-blur">
+        <span class="mt-1 text-lg font-black text-slate-600">03</span>
+        <div>
+          <div class="flex items-center gap-3">
+            <h3 class="font-bold text-slate-100">Administration</h3>
+            <span class="rounded-full bg-sky-400/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-300">Iron Age · Planned</span>
+          </div>
+          <p class="mt-1 text-sm leading-relaxed text-slate-400">
+            Appoint a governor who lightens the burden on the conquered in
+            exchange for less extraction, and settle wars through negotiation
+            instead of endless garrisoning. The bureaucratic answer to an empire
+            that grew too wide to hold by hand.
+          </p>
+        </div>
+      </li>
+
+      <li class="flex gap-4 rounded-xl border border-emerald-500/40 bg-slate-900/60 p-5 backdrop-blur">
+        <span class="mt-1 text-lg font-black text-emerald-500/70">04</span>
+        <div>
+          <div class="flex items-center gap-3">
+            <h3 class="font-bold text-slate-100">Vassalage</h3>
+            <span class="rounded-full bg-emerald-400/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">Feudal Age · Playable now</span>
+          </div>
+          <p class="mt-1 text-sm leading-relaxed text-slate-400">
+            A contract, not a cage. Vassals keep full control of their lands,
+            pay moderate tribute, and answer commands they can refuse at a cost.
+            Treat them well and hold many. Mistreat them and they rebel, or a
+            rival lord poaches them with a better deal.
+          </p>
+        </div>
+      </li>
+
+      <li class="flex gap-4 rounded-xl border border-fuchsia-500/25 bg-slate-900/50 p-5 backdrop-blur">
+        <span class="mt-1 text-lg font-black text-slate-600">05</span>
+        <div>
+          <div class="flex items-center gap-3">
+            <h3 class="font-bold text-slate-100">Colonialism</h3>
+            <span class="rounded-full bg-fuchsia-400/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fuchsia-300">Vision</span>
+          </div>
+          <p class="mt-1 text-sm leading-relaxed text-slate-400">
+            When you defeat a player two or more ages behind, you cannot simply
+            crush them. You appoint a viceroy, collect moderate tribute, and send
+            technology down the ladder. The colony keeps full autonomy and grows
+            toward parity, then matures into a vassal as the gap closes.
+          </p>
+        </div>
+      </li>
+
+      <li class="flex gap-4 rounded-xl border border-fuchsia-500/25 bg-slate-900/50 p-5 backdrop-blur">
+        <span class="mt-1 text-lg font-black text-slate-600">06</span>
+        <div>
+          <div class="flex items-center gap-3">
+            <h3 class="font-bold text-slate-100">Federalism</h3>
+            <span class="rounded-full bg-fuchsia-400/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fuchsia-300">Vision</span>
+          </div>
+          <p class="mt-1 text-sm leading-relaxed text-slate-400">
+            Near equals pool their strength into a voluntary union with no
+            tribute between members. Federations wage unified war and take on
+            mega projects that no single power can afford, up to space programs.
+          </p>
+        </div>
+      </li>
+
+      <li class="flex gap-4 rounded-xl border border-fuchsia-500/25 bg-slate-900/50 p-5 backdrop-blur">
+        <span class="mt-1 text-lg font-black text-slate-600">07</span>
+        <div>
+          <div class="flex items-center gap-3">
+            <h3 class="font-bold text-slate-100">Hegemony</h3>
+            <span class="rounded-full bg-fuchsia-400/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fuchsia-300">Vision</span>
+          </div>
+          <p class="mt-1 text-sm leading-relaxed text-slate-400">
+            The top of the cooperation ladder. A hegemon leads by consent rather
+            than rule, with no tribute and no direct control, and rallies allied
+            powers into the largest undertakings the game can produce.
+          </p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <%!-- The long arc --%>
+  <section class="mt-20">
+    <h2 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+      The long arc, to the stars
+    </h2>
+    <div class="mt-6 space-y-4">
+      <div class="rounded-xl border border-fuchsia-500/25 bg-slate-900/50 p-5 backdrop-blur">
+        <div class="flex items-center gap-3">
+          <h3 class="font-bold text-slate-100">A tech tree that reaches the space age</h3>
+          <span class="rounded-full bg-fuchsia-400/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fuchsia-300">Vision</span>
+        </div>
+        <p class="mt-1 text-sm leading-relaxed text-slate-400">
+          The tree runs the full length of history and keeps going. Past the
+          modern era it opens into a Master of Orion style intergalactic 4X, so
+          the same civilization you founded on a grassland hex eventually leaves
+          its home world and settles the stars.
+        </p>
+      </div>
+      <div class="rounded-xl border border-fuchsia-500/25 bg-slate-900/50 p-5 backdrop-blur">
+        <div class="flex items-center gap-3">
+          <h3 class="font-bold text-slate-100">Colonize the newcomers</h3>
+          <span class="rounded-full bg-fuchsia-400/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fuchsia-300">Vision</span>
+        </div>
+        <p class="mt-1 text-sm leading-relaxed text-slate-400">
+          The world never ends, so fresh players keep arriving on younger worlds
+          far behind the old powers. The age gap turns those first contacts into
+          colonial relationships, where the advanced lift the young toward
+          parity while drawing tribute from the frontier.
+        </p>
+      </div>
+      <div class="rounded-xl border border-fuchsia-500/25 bg-slate-900/50 p-5 backdrop-blur">
+        <div class="flex items-center gap-3">
+          <h3 class="font-bold text-slate-100">Build the impossible together</h3>
+          <span class="rounded-full bg-fuchsia-400/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fuchsia-300">Vision</span>
+        </div>
+        <p class="mt-1 text-sm leading-relaxed text-slate-400">
+          At the far end, cooperation beats domination. Federations and hegemonies
+          pool whole civilizations into intergalactic mega projects that no lone
+          empire could ever complete.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <%!-- The god layer --%>
+  <section class="mt-20">
+    <h2 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+      The god layer
+    </h2>
+    <div class="mt-6 rounded-xl border border-fuchsia-500/25 bg-slate-900/50 p-6 backdrop-blur">
+      <div class="flex items-center gap-3">
+        <h3 class="font-bold text-slate-100">Gods above the board</h3>
+        <span class="rounded-full bg-fuchsia-400/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fuchsia-300">Vision</span>
+      </div>
+      <p class="mt-2 text-sm leading-relaxed text-slate-400">
+        Some players join not as rulers but as gods. A god strikes bargains with
+        the rulers below, granting a miracle or a won war in exchange for a temple
+        and worship. As the game reaches the stars, so do the gods, and the deals
+        they broker scale to intergalactic stakes.
+      </p>
+    </div>
+  </section>
+
+  <%!-- Close --%>
+  <section class="mt-20 text-center">
+    <p class="mx-auto max-w-2xl text-base leading-relaxed text-slate-300">
+      The Stone Age loop is playable today. Everything above ships in order, in
+      public, and stays free.
+    </p>
+    <div class="mt-6 flex flex-col items-center gap-2">
+      <.link
+        href={~p"/play"}
+        class="rounded-lg bg-amber-500 px-10 py-4 text-lg font-bold text-slate-950 shadow-lg shadow-amber-500/25 transition hover:bg-amber-400"
+      >
+        Play free
+      </.link>
+      <.link href={~p"/"} class="text-sm text-slate-400 underline-offset-4 hover:text-slate-200 hover:underline">
+        Back to home
+      </.link>
+    </div>
+  </section>
+</div>
