@@ -85,7 +85,7 @@ defmodule BrokenOaths.Combat.Camps do
   star's "cross-cutting operations are orchestrated by their OWNING
   domain model calling its siblings" rule: `BrokenOaths.Combat.Resolver` for
   the flat camp-damage math and adjacency/target-legality validation,
-  `BrokenOaths.Game.Cooperation` for the per-player damage ledger and
+  `BrokenOaths.Diplomacy.Cooperation` for the per-player damage ledger and
   proportional bounty split once a camp falls.
 
   ## Determinism
@@ -98,7 +98,7 @@ defmodule BrokenOaths.Combat.Camps do
   """
 
   alias BrokenOaths.Combat.Resolver
-  alias BrokenOaths.Game.Cooperation
+  alias BrokenOaths.Diplomacy.Cooperation
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
 

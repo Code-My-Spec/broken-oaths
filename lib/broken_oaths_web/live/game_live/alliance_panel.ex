@@ -9,8 +9,8 @@ defmodule BrokenOathsWeb.GameLive.AlliancePanel do
   actual alliance mutation goes through `BrokenOaths.Game`
   (`alliances/2`, `propose_alliance/3`, `accept_alliance/3` — the
   command surface this component exists to give a UI to; see
-  `BrokenOaths.Game.Cooperation`'s propose/accept business rules and
-  `BrokenOaths.Game.Alliance`'s schema doc for why an alliance is
+  `BrokenOaths.Diplomacy.Cooperation`'s propose/accept business rules and
+  `BrokenOaths.Diplomacy.Alliance`'s schema doc for why an alliance is
   PLAYER-FACING coordination signal, not a precondition for anything
   — cooperative bounty splitting on a shared barbarian kill never
   checks for one, criterion 7624).

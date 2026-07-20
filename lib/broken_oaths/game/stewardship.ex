@@ -2,7 +2,7 @@ defmodule BrokenOaths.Game.Stewardship do
   @moduledoc """
   Feudal + alliance stewardship core (story 910): pure business rules
   on top of `BrokenOaths.Game.Vassalage` (907) and `BrokenOaths.Game.
-  Alliance` (899/901) — mirrors `BrokenOaths.Game.Cooperation`/
+  Alliance` (899/901) — mirrors `BrokenOaths.Diplomacy.Cooperation`/
   `BrokenOaths.Game.Vassalization`'s own "pure changeset/decision
   logic, no `Repo`" role, plus (pragdave decomposition, slice 6 —
   `.code_my_spec/knowledge/genserver_decomposition.md`) the state-taking
@@ -124,9 +124,9 @@ defmodule BrokenOaths.Game.Stewardship do
   import Ecto.Query
 
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.Alliance
+  alias BrokenOaths.Diplomacy.Alliance
   alias BrokenOaths.Game.Bank
-  alias BrokenOaths.Game.Cooperation
+  alias BrokenOaths.Diplomacy.Cooperation
   alias BrokenOaths.Players.Presence
   alias BrokenOaths.Cities.Production
   alias BrokenOaths.Cities.ProductionItem
@@ -669,7 +669,7 @@ defmodule BrokenOaths.Game.Stewardship do
   # -------------------------------------------------------------------
   # Shared, trivial lookups — duplicated rather than reaching back into
   # `WorldServer`, matching the sibling `BrokenOaths.Units.Unit`/
-  # `BrokenOaths.Game.Cooperation`'s own "pure, process-unaware,
+  # `BrokenOaths.Diplomacy.Cooperation`'s own "pure, process-unaware,
   # unit-testable with no GenServer running" contract (small private
   # helper copies rather than expanding public APIs).
   # -------------------------------------------------------------------

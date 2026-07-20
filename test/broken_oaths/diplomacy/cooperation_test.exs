@@ -1,8 +1,8 @@
-defmodule BrokenOaths.Game.CooperationTest do
+defmodule BrokenOaths.Diplomacy.CooperationTest do
   use ExUnit.Case, async: true
 
-  alias BrokenOaths.Game.Alliance
-  alias BrokenOaths.Game.Cooperation
+  alias BrokenOaths.Diplomacy.Alliance
+  alias BrokenOaths.Diplomacy.Cooperation
 
   describe "record_damage/4 and split_bounty/3" do
     test "a sole attacker's own damage still splits into their full share of the bounty" do

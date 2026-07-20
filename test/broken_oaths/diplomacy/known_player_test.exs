@@ -1,7 +1,7 @@
-defmodule BrokenOaths.Game.KnownPlayerTest do
+defmodule BrokenOaths.Diplomacy.KnownPlayerTest do
   use BrokenOathsTest.DataCase, async: true
 
-  alias BrokenOaths.Game.KnownPlayer
+  alias BrokenOaths.Diplomacy.KnownPlayer
   alias BrokenOaths.Players.Player
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.WorldsFixtures

@@ -71,7 +71,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
                            same shape as `game:lineage` below
     * `game:discovery`  — `%{message: string}` (story 899), fired once per
                            side the turn-boundary first-contact detection
-                           (`Game.Discovery`) finds a new pair — player-scoped,
+                           (`Diplomacy.Discovery`) finds a new pair — player-scoped,
                            same shape as `game:alert`/`game:lineage`
     * `game:age`        — `%{message: string}` (story 903), fired once when
                            `{:tech_completed, user_id, :bronze_working}`
@@ -1471,7 +1471,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   end
 
   # Story 899: `WorldServer`'s turn-boundary first-contact detection
-  # (`Game.Discovery`) broadcasts this world-wide, once per side of a
+  # (`Diplomacy.Discovery`) broadcasts this world-wide, once per side of a
   # newly-discovered pair — same player-scoped shape as
   # `:lineage_continued`/`:city_alert` above, just a `"game:discovery"`
   # push instead.

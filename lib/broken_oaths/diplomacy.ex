@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.API.Diplomacy do
+defmodule BrokenOaths.Diplomacy do
   @moduledoc """
   Discovery/known-players and alliance/cooperation. Thin
   `GenServer.call` wrappers onto each world's `BrokenOaths.Game.WorldServer`;
@@ -18,8 +18,8 @@ defmodule BrokenOaths.Game.API.Diplomacy do
   @doc """
   Every civilization `user` has discovered in `world` (story 899):
   `[%{user_id:, email:}]`. Permanent once recorded — unrelated to
-  current fog of war, see `BrokenOaths.Game.Discovery` and
-  `BrokenOaths.Game.KnownPlayer`.
+  current fog of war, see `BrokenOaths.Diplomacy.Discovery` and
+  `BrokenOaths.Diplomacy.KnownPlayer`.
   """
   def known_players(world, user), do: WorldServer.call(world, {:known_players, user})
 
@@ -28,8 +28,8 @@ defmodule BrokenOaths.Game.API.Diplomacy do
   `world` (story 901) — `[%{id:, status:, proposed_by_me?:,
   other_user_id:, other_email:}]`, the OTHER party's identity resolved
   for each row so `GameLive.AlliancePanel` never has to cross-reference
-  a raw `player_id` itself. See `BrokenOaths.Game.Alliance` and
-  `BrokenOaths.Game.Cooperation`'s propose/accept business rules —
+  a raw `player_id` itself. See `BrokenOaths.Diplomacy.Alliance` and
+  `BrokenOaths.Diplomacy.Cooperation`'s propose/accept business rules —
   cooperative bounty splitting on a shared barbarian kill never
   requires one of these rows to exist (criterion 7624); an alliance is
   purely the player-facing coordination signal this panel surfaces.
@@ -40,7 +40,7 @@ defmodule BrokenOaths.Game.API.Diplomacy do
   @doc """
   Propose an alliance between `user` and `other_user` in `world` —
   refused if either isn't a member, or a proposal/alliance between the
-  two already exists (`BrokenOaths.Game.Cooperation.propose/4`).
+  two already exists (`BrokenOaths.Diplomacy.Cooperation.propose/4`).
   """
   @spec propose_alliance(map(), map(), map()) ::
           :ok
@@ -50,7 +50,7 @@ defmodule BrokenOaths.Game.API.Diplomacy do
 
   @doc """
   Accept `alliance_id`, a pending alliance `user` is the (non-proposing)
-  other party to (`BrokenOaths.Game.Cooperation.accept/2`).
+  other party to (`BrokenOaths.Diplomacy.Cooperation.accept/2`).
   """
   @spec accept_alliance(map(), map(), term()) ::
           :ok

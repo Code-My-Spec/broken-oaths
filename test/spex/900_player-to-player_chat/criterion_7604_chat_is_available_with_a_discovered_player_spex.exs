@@ -24,7 +24,7 @@ defmodule BrokenOathsSpex.Story900.Criterion7604Spex do
       support-chat widget's composer at
       `BrokenOathsWeb.SupportWidgetLive`)
 
-  Discovery itself (story 899, `BrokenOaths.Game.Discovery`) isn't
+  Discovery itself (story 899, `BrokenOaths.Diplomacy.Discovery`) isn't
   implemented yet — `given_(:two_players_discovered_each_other)`
   drives the real trigger for it (a lord scouting into the other
   player's vision) rather than seeding a "known player" record, so

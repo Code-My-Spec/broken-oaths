@@ -92,7 +92,7 @@ defmodule BrokenOathsSpex.SharedGivens do
   # vice versa — discovery is mutual, story 899). Both join the world,
   # then this player's lord scouts toward the other player's unit until
   # it enters vision — the exact first-contact trigger
-  # `BrokenOaths.Game.Discovery` (story 899) watches for, and the
+  # `BrokenOaths.Diplomacy.Discovery` (story 899) watches for, and the
   # precondition every chat criterion (story 900) unlocks on. Mirrors
   # the scout-until-visible idiom already used by story 876's
   # fog-of-war specs (see `criterion_7434_a_stranger_in_remembered_

@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.Alliance do
+defmodule BrokenOaths.Diplomacy.Alliance do
   @moduledoc """
   An explicit alliance between two players in a world (story 901):
   proposed by one of them, accepted by the other, for coordinating
@@ -9,10 +9,10 @@ defmodule BrokenOaths.Game.Alliance do
   caller supplies, so at most one alliance row ever exists per pair per
   world regardless of who proposed. `proposer_player_id` is always one
   of the two and records who initiated the proposal; the OTHER player
-  is the one who must accept it (see `BrokenOaths.Game.Cooperation` for
+  is the one who must accept it (see `BrokenOaths.Diplomacy.Cooperation` for
   the propose/accept business rules built on top of this schema).
 
-  Note: `BrokenOaths.Game.Cooperation`'s proportional bounty split on a
+  Note: `BrokenOaths.Diplomacy.Cooperation`'s proportional bounty split on a
   shared barbarian kill/camp destruction does NOT require an accepted
   (or even proposed) alliance between the participants — cooperation is
   emergent from shared targeting, not gated behind this record. An

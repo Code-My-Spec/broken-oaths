@@ -1,7 +1,7 @@
-defmodule BrokenOaths.Game.DiscoveryTest do
+defmodule BrokenOaths.Diplomacy.DiscoveryTest do
   use ExUnit.Case, async: true
 
-  alias BrokenOaths.Game.Discovery
+  alias BrokenOaths.Diplomacy.Discovery
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
 

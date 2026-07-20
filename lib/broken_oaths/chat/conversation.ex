@@ -7,7 +7,7 @@ defmodule BrokenOaths.Chat.Conversation do
   (lowest id first) order — `changeset/2` normalizes whatever order the
   caller supplies, so at most one conversation row ever exists per
   {world, pair} regardless of who opened it first. Mirrors
-  `BrokenOaths.Game.Alliance`'s canonicalization pattern.
+  `BrokenOaths.Diplomacy.Alliance`'s canonicalization pattern.
   """
 
   use Ecto.Schema

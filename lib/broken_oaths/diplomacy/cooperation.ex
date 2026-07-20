@@ -1,9 +1,9 @@
-defmodule BrokenOaths.Game.Cooperation do
+defmodule BrokenOaths.Diplomacy.Cooperation do
   @moduledoc """
   Cooperative-combat core (story 901): per-player damage attribution on
   a shared barbarian target, the proportional bounty split once that
   target falls, and the alliance propose/accept business rules built on
-  top of `BrokenOaths.Game.Alliance`. Mirrors `BrokenOaths.Game.
+  top of `BrokenOaths.Diplomacy.Alliance`. Mirrors `BrokenOaths.Game.
   Combat`'s role: `BrokenOaths.Game.WorldServer` holds the damage
   ledger (in memory, keyed by target id) alongside its canonical
   tick-state, calls into this module on every camp-assault swing, and
@@ -32,7 +32,7 @@ defmodule BrokenOaths.Game.Cooperation do
   ## Alliance propose/accept
 
   `propose/4` and `accept/2` are the PURE state-transition rules for
-  `BrokenOaths.Game.Alliance` — build (and validate) the changeset for
+  `BrokenOaths.Diplomacy.Alliance` — build (and validate) the changeset for
   proposing a new alliance or accepting an existing one, without ever
   touching `Repo`.
 
@@ -52,7 +52,7 @@ defmodule BrokenOaths.Game.Cooperation do
   canonical-pair lookup.
   """
 
-  alias BrokenOaths.Game.Alliance
+  alias BrokenOaths.Diplomacy.Alliance
   alias BrokenOaths.Repo
 
   @type player_id :: term()

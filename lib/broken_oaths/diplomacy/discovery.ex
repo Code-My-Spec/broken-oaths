@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.Discovery do
+defmodule BrokenOaths.Diplomacy.Discovery do
   @moduledoc """
   Pure first-contact detection (story 899): the moment a player's own
   CURRENT vision reveals another player's unit or city. No `Repo`, no
@@ -7,7 +7,7 @@ defmodule BrokenOaths.Game.Discovery do
   canonical tick-state (see `BrokenOaths.Game.Turn`'s moduledoc for that
   shape) plus the set of already-known player pairs, calls into this
   module at every turn boundary, and persists whatever comes back as
-  `BrokenOaths.Game.KnownPlayer` rows.
+  `BrokenOaths.Diplomacy.KnownPlayer` rows.
 
   ## Detection
 
@@ -70,7 +70,7 @@ defmodule BrokenOaths.Game.Discovery do
   one entry per pair of players not already present (in either
   direction) in `known` — the set of directional `{viewer_player_id,
   discovered_player_id}` pairs already recorded (see
-  `BrokenOaths.Game.KnownPlayer`).
+  `BrokenOaths.Diplomacy.KnownPlayer`).
   """
   @spec new_contacts(state(), MapSet.t({player_id(), player_id()})) :: [
           {player_id(), player_id()}

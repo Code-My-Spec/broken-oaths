@@ -5,7 +5,7 @@ defmodule BrokenOaths.Chat.Moderation do
   the same length, so the recipient never sees the raw profanity but
   the rest of the sentence is untouched. No `Repo`, no process state —
   a plain string transformation, matched the same way
-  `BrokenOaths.Game.Discovery` keeps first-contact detection pure.
+  `BrokenOaths.Diplomacy.Discovery` keeps first-contact detection pure.
 
   The word list is intentionally small and self-contained (no external
   dependency, no config) — good enough to prove the delivery-time

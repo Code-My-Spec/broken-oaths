@@ -7,7 +7,7 @@ defmodule BrokenOaths.ChatTest do
   alias BrokenOaths.Chat
   alias BrokenOaths.Chat.Message
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.KnownPlayer
+  alias BrokenOaths.Diplomacy.KnownPlayer
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.WorldsFixtures
 
@@ -16,7 +16,7 @@ defmodule BrokenOaths.ChatTest do
   # trigger requires — that's exercised end-to-end by story 900's own
   # spex under `test/spex/900_player-to-player_chat/`), then restarts
   # the `WorldServer` so it reloads `known_players` from the rows just
-  # written — mirrors `BrokenOaths.Game.KnownPlayerTest`'s direct
+  # written — mirrors `BrokenOaths.Diplomacy.KnownPlayerTest`'s direct
   # schema-level setup.
   defp discovered_pair_fixture(world_attrs \\ %{seed: 424_242, frequency: 8}) do
     world = WorldsFixtures.world_fixture(world_attrs)

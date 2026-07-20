@@ -10,7 +10,7 @@ defmodule BrokenOaths.Technology.PlayerResearch do
   schema's fields feed).
 
   One row per (world, player) — same convention as `BrokenOaths.Players.Player`
-  itself (world + user) and `BrokenOaths.Game.KnownPlayer` (world +
+  itself (world + user) and `BrokenOaths.Diplomacy.KnownPlayer` (world +
   viewer + discovered): `unique_constraint/3` on `[:world_id, :player_id]`
   is the changeset-level backstop for the DB's own unique index.
 

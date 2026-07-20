@@ -2,7 +2,7 @@ defmodule BrokenOaths.Game.Tribute do
   @moduledoc """
   Per-turn gold tribute and call-to-arms levy business rules (story
   908), built on top of `BrokenOaths.Game.Vassalage` and
-  `BrokenOaths.Game.Levy` — mirrors `BrokenOaths.Game.Cooperation`'s own
+  `BrokenOaths.Game.Levy` — mirrors `BrokenOaths.Diplomacy.Cooperation`'s own
   "pure math/changesets, no `Repo`" role: `BrokenOaths.Game.WorldServer`
   is the imperative shell that reads every active vassalage out of the
   DB once per turn boundary, calls `collect_all/5`, and persists the

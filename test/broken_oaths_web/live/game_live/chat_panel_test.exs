@@ -16,6 +16,7 @@ defmodule BrokenOathsWeb.GameLive.ChatPanelTest do
   import Phoenix.LiveViewTest
 
   alias BrokenOaths.Chat
+  alias BrokenOaths.Diplomacy.KnownPlayer
   alias BrokenOaths.Game
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.WorldsFixtures
@@ -30,7 +31,7 @@ defmodule BrokenOathsWeb.GameLive.ChatPanelTest do
     {:ok, other_player} = Game.join_world(world, other_user)
 
     Repo.insert!(
-      Game.KnownPlayer.changeset(%Game.KnownPlayer{}, %{
+      KnownPlayer.changeset(%KnownPlayer{}, %{
         world_id: world.id,
         viewer_player_id: player.id,
         discovered_player_id: other_player.id
@@ -38,7 +39,7 @@ defmodule BrokenOathsWeb.GameLive.ChatPanelTest do
     )
 
     Repo.insert!(
-      Game.KnownPlayer.changeset(%Game.KnownPlayer{}, %{
+      KnownPlayer.changeset(%KnownPlayer{}, %{
         world_id: world.id,
         viewer_player_id: other_player.id,
         discovered_player_id: player.id

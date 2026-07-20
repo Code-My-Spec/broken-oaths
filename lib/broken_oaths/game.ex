@@ -18,10 +18,10 @@ defmodule BrokenOaths.Game do
   `.code_my_spec/knowledge/genserver_decomposition.md`'s "Game API
   (973) → split by domain" target, the wrapper bodies (and their full
   narrative docs) now live in per-domain sub-facades —
-  `BrokenOaths.Game.API.Feudal`, `.Diplomacy` — plus the top-level
-  `BrokenOaths.Cities`, `BrokenOaths.Combat`, `BrokenOaths.Players`,
-  `BrokenOaths.Technology`, `BrokenOaths.Units`, and `BrokenOaths.
-  Vision` contexts (see
+  `BrokenOaths.Game.API.Feudal` — plus the top-level
+  `BrokenOaths.Cities`, `BrokenOaths.Combat`, `BrokenOaths.Diplomacy`,
+  `BrokenOaths.Players`, `BrokenOaths.Technology`, `BrokenOaths.Units`,
+  and `BrokenOaths.Vision` contexts (see
   `.code_my_spec/knowledge/genserver_decomposition.md`'s "Target bounded
   contexts" table) — and every one of those functions is
   `defdelegate`d back here unchanged, so no caller needs to know the
@@ -35,7 +35,8 @@ defmodule BrokenOaths.Game do
 
   alias BrokenOaths.Cities
   alias BrokenOaths.Combat
-  alias BrokenOaths.Game.API.{Diplomacy, Feudal}
+  alias BrokenOaths.Diplomacy
+  alias BrokenOaths.Game.API.Feudal
   alias BrokenOaths.Game.WorldServer
   alias BrokenOaths.Players
   alias BrokenOaths.Technology
@@ -336,7 +337,7 @@ defmodule BrokenOaths.Game do
   # -------------------------------------------------------------------
   # Diplomacy — discovery/known-players, alliance/cooperation
   # (chat is its own separate context — see `BrokenOaths.Chat`) —
-  # delegated to BrokenOaths.Game.API.Diplomacy
+  # delegated to BrokenOaths.Diplomacy
   # -------------------------------------------------------------------
 
   @doc "Every civilization `user` has discovered in `world` (story 899). See `Diplomacy.known_players/2`."

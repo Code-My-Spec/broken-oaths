@@ -1,11 +1,11 @@
-defmodule BrokenOaths.Game.KnownPlayer do
+defmodule BrokenOaths.Diplomacy.KnownPlayer do
   @moduledoc """
   A discovery record: `viewer_player` has discovered `discovered_player`
   in a world — permanent once set (story 899).
 
   Discovery is mutual but stored directionally: first contact between
   two players writes ONE row per direction (see
-  `BrokenOaths.Game.Discovery`), so a player's own "Known Players" list
+  `BrokenOaths.Diplomacy.Discovery`), so a player's own "Known Players" list
   is a plain `where viewer_player_id == ^my_player.id` query, with no
   need to reason about which side of the pair is "me" at read time.
   Once a row exists it is never removed — losing sight of the other

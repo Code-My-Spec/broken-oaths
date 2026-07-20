@@ -3,7 +3,7 @@ defmodule BrokenOathsWeb.GameLive.KnownPlayersPanel do
   Standalone panel listing every civilization the player has discovered
   (story 899): a durable roster, unrelated to current fog of war —
   once a player enters this list they stay on it, even after leaving
-  sight or logging off (`BrokenOaths.Game.KnownPlayer`, permanent once
+  sight or logging off (`BrokenOaths.Diplomacy.KnownPlayer`, permanent once
   recorded).
 
   A presentational component mounted by `BrokenOathsWeb.GameLive.Play`,
@@ -20,7 +20,7 @@ defmodule BrokenOathsWeb.GameLive.KnownPlayersPanel do
   criterion 7617 — "flashed and logged") is already handled by `Play`
   itself: `Play.handle_info({:discovery, user_id, message}, socket)`
   pushes `"game:discovery"` straight to the client the instant
-  `BrokenOaths.Game.Discovery` fires, independent of whether this panel
+  `BrokenOaths.Diplomacy.Discovery` fires, independent of whether this panel
   is even mounted. This component owns only the durable, "logged" half
   — the roster.
 

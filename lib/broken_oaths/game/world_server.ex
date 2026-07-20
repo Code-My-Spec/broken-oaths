@@ -44,12 +44,11 @@ defmodule BrokenOaths.Game.WorldServer do
   alias BrokenOaths.Combat.{Camp, Camps, CityDefense, Siege}
   alias BrokenOaths.Combat.Resolver
 
+  alias BrokenOaths.Diplomacy.{Cooperation, Discovery, KnownPlayer}
+
   alias BrokenOaths.Game.{
     Bank,
-    Cooperation,
-    Discovery,
     GoldLog,
-    KnownPlayer,
     Levy,
     OathStrain.Ledger,
     ProtectionPact,

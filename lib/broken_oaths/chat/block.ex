@@ -5,7 +5,7 @@ defmodule BrokenOaths.Chat.Block do
   the player who clicked "block" — but a block mutes messages in BOTH
   directions: `BrokenOaths.Chat` checks for a row in either direction
   before allowing delivery, the blocked player can't reach the blocker
-  either. Mirrors `BrokenOaths.Game.KnownPlayer`'s directional storage
+  either. Mirrors `BrokenOaths.Diplomacy.KnownPlayer`'s directional storage
   pattern.
   """
 

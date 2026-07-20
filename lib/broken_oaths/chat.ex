@@ -18,7 +18,7 @@ defmodule BrokenOaths.Chat do
 
   A conversation only exists between mutually-discovered players:
   `BrokenOaths.Game.known_players/2` (backed by
-  `BrokenOaths.Game.KnownPlayer`, story 899) is the single source of
+  `BrokenOaths.Diplomacy.KnownPlayer`, story 899) is the single source of
   truth for who a player may reach here.
   """
 
