@@ -30,6 +30,18 @@ defmodule BrokenOaths.Units.Unit do
   buildable catalog, not here — this schema only shapes and validates
   whatever stats it's given.
 
+  `fortified` (story 920) flags the Fortify defensive stance: any
+  `:defend`-capable type (`BrokenOaths.Units.Actions.available/1`) may
+  set it via `fortify/3` below for an immediate defensive combat bonus
+  (`BrokenOaths.Combat.Resolver.effective_strength/2`) that holds until
+  the unit itself moves (`BrokenOaths.Simulation.Turn.Movement.
+  apply_positions/3`) or attacks (`BrokenOaths.Combat.Resolver.
+  resolve_attack/4`, `BrokenOaths.Combat.Camps.resolve_camp_attack/3`,
+  `BrokenOaths.Combat.Siege`'s own `resolve_city_attack/4`) — being
+  attacked never clears it. Generic on the schema like `charges`/
+  `temporary` above; a barbarian or civilian-only type simply carries
+  the `false` default and is never read for it.
+
   `charges` (story 882 playtest update, issue 1caa87e9 — Civ 6 Builder
   convention) defaults to 3 and is generic on the schema, but only a
   `:worker` ever spends it: `BrokenOaths.Simulation.Turn` decrements it by
@@ -69,6 +81,7 @@ defmodule BrokenOaths.Units.Unit do
 
   alias BrokenOaths.Combat.Camp
   alias BrokenOaths.Combat.CityDefense
+  alias BrokenOaths.Units.Actions
   alias BrokenOaths.Units.Order
   alias BrokenOaths.Players.Player
   alias BrokenOaths.Feudal.Rebellion.War
@@ -95,6 +108,7 @@ defmodule BrokenOaths.Units.Unit do
           player_id: integer() | nil,
           camp_id: integer() | nil,
           temporary: boolean(),
+          fortified: boolean(),
           rebellion_id: integer() | nil,
           world: World.t() | Ecto.Association.NotLoaded.t(),
           player: Player.t() | Ecto.Association.NotLoaded.t() | nil,
@@ -120,6 +134,9 @@ defmodule BrokenOaths.Units.Unit do
     # at declare-independence time) — see this schema's own moduledoc.
     field :temporary, :boolean, default: false
 
+    # Story 920 — see this schema's own moduledoc "fortified" paragraph.
+    field :fortified, :boolean, default: false
+
     belongs_to :world, World
     belongs_to :player, Player
     belongs_to :camp, Camp
@@ -143,6 +160,7 @@ defmodule BrokenOaths.Units.Unit do
       :max_movement,
       :charges,
       :temporary,
+      :fortified,
       :rebellion_id
     ])
     |> validate_required([
@@ -375,6 +393,44 @@ defmodule BrokenOaths.Units.Unit do
           end)
 
         bfs_loop(world, occupied, queue, visited, to)
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Fortify (story 920) — mirrors `Combat.Resolver.shoot/4`'s own shape
+  # (QA issue 12bed1e4): the domain model home for the Fortify stance
+  # command, `WorldServer`'s own `:fortify` `handle_call` is a thin
+  # delegation into this function, same as `queue_move/4` above.
+  # -------------------------------------------------------------------
+
+  @doc """
+  Fortify `unit_id`: grants `user`'s own unit the defensive stance
+  (story 920) immediately — no dig-in turn, no movement spent. Legal
+  for any `:defend`-capable type (`Units.Actions.available/1` — every
+  player-commandable type except a barbarian) and idempotent (fortifying
+  an already-fortified unit is a harmless no-op). The bonus itself lives
+  in `Combat.Resolver.effective_strength/2`; this function only flips
+  the flag that bonus reads. Holds until the unit next moves
+  (`Simulation.Turn.Movement.apply_positions/3`) or attacks
+  (`Combat.Resolver.resolve_attack/4`, `Combat.Camps.
+  resolve_camp_attack/3`, `Combat.Siege`'s own `resolve_city_attack/4`)
+  — being attacked while fortified never clears it.
+  """
+  @spec fortify(map(), map(), term()) :: {:ok, map()} | {:error, :not_owner | :not_fortifiable}
+  def fortify(state, user, unit_id) do
+    player = find_player(state, user.id)
+    unit = Map.get(state.units, unit_id)
+
+    cond do
+      is_nil(player) or is_nil(unit) or unit.player_id != player.id ->
+        {:error, :not_owner}
+
+      :defend not in Actions.available(unit) ->
+        {:error, :not_fortifiable}
+
+      true ->
+        new_unit = Map.put(unit, :fortified, true)
+        {:ok, %{state | units: Map.put(state.units, unit_id, new_unit)}}
     end
   end
 

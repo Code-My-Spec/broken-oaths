@@ -46,6 +46,25 @@ defmodule BrokenOaths.Combat.Resolver do
   from the same tick-state always agree, which lockstep resolution
   requires.
 
+  ## Fortify (story 920)
+
+  `fortify/3`-driven (see `BrokenOaths.Units.Unit.fortify/3`) — a
+  `:defend`-capable unit's own defensive stance, applied the instant
+  it's chosen, no dig-in turn: +50% of the unit's BASE strength,
+  DEFENSE ONLY (the attacker never gets it, even if the attacker itself
+  happens to be fortified — see `combat_strength/3`'s own `side` check
+  below), folded into strength BEFORE the wounded penalty scales it,
+  same ordering as the lord's aura above — `(base + aura + round(base *
+  0.5)) * wounded`. Composes with the garrison bonus (story 895) the
+  same way the aura does: `garrisoned_strength/3` multiplies the WHOLE
+  fortified-and-wounded figure by 1.5, never the other way around.
+  Clears the instant the unit itself moves (`Simulation.Turn.Movement.
+  apply_positions/3`) or attacks (`resolve_attack/4` below, `Combat.
+  Camps.resolve_camp_attack/3`, `Combat.Siege`'s own
+  `resolve_city_attack/4`) — being attacked while fortified never
+  clears it, so a defender that survives an exchange keeps the bonus
+  for the next one.
+
   ## Garrison bonus (story 895)
 
   A unit standing on its own city's tile fights at +50% strength,
@@ -132,7 +151,8 @@ defmodule BrokenOaths.Combat.Resolver do
           hp: non_neg_integer(),
           max_hp: pos_integer(),
           movement: non_neg_integer(),
-          max_movement: non_neg_integer()
+          max_movement: non_neg_integer(),
+          fortified: boolean()
         }
 
   @type attack_result :: %{
@@ -174,6 +194,10 @@ defmodule BrokenOaths.Combat.Resolver do
     archer: 14
   }
   @lord_aura_bonus 2
+  # Story 920 — the Fortify stance's own defensive bonus: half the
+  # unit's BASE strength (see `fortify_bonus/2` and this module's own
+  # "Fortify" doc above).
+  @fortify_bonus_ratio 0.5
   @garrison_bonus 1.5
   @base_damage 30
   @damage_scale 0.04
@@ -194,31 +218,41 @@ defmodule BrokenOaths.Combat.Resolver do
 
   @doc """
   `unit`'s effective strength right now: base strength plus the lord's
-  aura (when `aura?` is true), scaled by the linear wounded penalty
-  (100% at full HP, 50% at 0 HP). Callers determine `aura?` by checking
-  whether a living, same-player lord stands adjacent to `unit` — this
-  module has no notion of "adjacent" or "same player," only the two
-  numbers that decision produces.
+  aura (when `aura?` is true) plus the Fortify stance's own bonus (when
+  `fortified?` is true — story 920, see this module's own "Fortify"
+  doc), scaled by the linear wounded penalty (100% at full HP, 50% at 0
+  HP). Callers determine `aura?` by checking whether a living,
+  same-player lord stands adjacent to `unit`; `fortified?` is DEFENSE
+  ONLY (`combat_strength/3` below is the one caller that ever passes
+  `true`, and only for the defending side of an exchange) — this module
+  has no notion of "adjacent," "same player," or "which side of the
+  fight," only the numbers those decisions produce.
   """
-  @spec effective_strength(unit(), boolean()) :: float()
-  def effective_strength(unit, aura? \\ false) do
-    (base_strength(unit.type) + aura_bonus(aura?)) * wounded_multiplier(unit)
+  @spec effective_strength(unit(), boolean(), boolean()) :: float()
+  def effective_strength(unit, aura? \\ false, fortified? \\ false) do
+    (base_strength(unit.type) + aura_bonus(aura?) + fortify_bonus(unit, fortified?)) *
+      wounded_multiplier(unit)
   end
 
   defp aura_bonus(true), do: @lord_aura_bonus
   defp aura_bonus(false), do: 0
 
+  defp fortify_bonus(unit, true), do: round(base_strength(unit.type) * @fortify_bonus_ratio)
+  defp fortify_bonus(_unit, false), do: 0
+
   defp wounded_multiplier(%{hp: hp, max_hp: max_hp}), do: 0.5 + 0.5 * (hp / max_hp)
 
   @doc """
   `unit`'s combat strength while garrisoned on its own city's tile
-  (story 895): `effective_strength/2`, boosted 50% for fighting from
-  the walls. Callers (`BrokenOaths.Combat.CityDefense`) determine whether
-  a unit qualifies; this module only applies the multiplier.
+  (story 895): `effective_strength/3`, boosted 50% for fighting from
+  the walls — the fortify bonus (story 920), if any, is folded in
+  BEFORE this multiplier, same "whole figure times 1.5" ordering the
+  aura already gets. Callers (`BrokenOaths.Combat.CityDefense`) determine
+  whether a unit qualifies; this module only applies the multiplier.
   """
-  @spec garrisoned_strength(unit(), boolean()) :: float()
-  def garrisoned_strength(unit, aura? \\ false),
-    do: effective_strength(unit, aura?) * @garrison_bonus
+  @spec garrisoned_strength(unit(), boolean(), boolean()) :: float()
+  def garrisoned_strength(unit, aura? \\ false, fortified? \\ false),
+    do: effective_strength(unit, aura?, fortified?) * @garrison_bonus
 
   @doc """
   Resolve a single simultaneous exchange: damage `attacker` deals to
@@ -247,11 +281,16 @@ defmodule BrokenOaths.Combat.Resolver do
 
   defp combat_strength(unit, opts, side) do
     aura? = Keyword.get(opts, :"#{side}_aura?", false)
+    # Story 920 — defense only: `unit.fortified` never inflates the
+    # ATTACKING side's own strength, even for a unit that happens to
+    # still carry the flag mid-exchange (see this module's own
+    # "Fortify" doc for why that can briefly be true).
+    fortified? = side == :defender and Map.get(unit, :fortified, false)
 
     if Keyword.get(opts, :"#{side}_garrisoned?", false) do
-      garrisoned_strength(unit, aura?)
+      garrisoned_strength(unit, aura?, fortified?)
     else
-      effective_strength(unit, aura?)
+      effective_strength(unit, aura?, fortified?)
     end
   end
 
@@ -504,7 +543,15 @@ defmodule BrokenOaths.Combat.Resolver do
 
     taken = if ranged?, do: 0, else: countered
 
-    new_attacker = %{attacker | hp: max(attacker.hp - taken, 0), movement: 0}
+    # Story 920 — attacking (melee or a ranged shot) drops the
+    # attacker's own Fortify stance, if any; the defender's own stance
+    # (if it has one) is untouched by simply being attacked — see this
+    # module's "Fortify" doc. `Map.put/3` (not the strict `%{... | ...}`
+    # update syntax) so this never raises on a hand-built test unit map
+    # that predates the `fortified` field.
+    new_attacker =
+      %{attacker | hp: max(attacker.hp - taken, 0), movement: 0} |> Map.put(:fortified, false)
+
     new_defender = %{defender | hp: max(defender.hp - dealt, 0)}
 
     units =

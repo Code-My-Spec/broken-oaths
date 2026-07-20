@@ -58,6 +58,29 @@ defmodule BrokenOaths.Worlds.Regions do
   end
 
   @doc """
+  The region a tile belongs to, or `nil` if the tile is deep ocean / outside
+  every region. Backed by a cached tile -> region index inverted from the
+  partition, so callers can ask "which region is this city sitting in" without
+  scanning the partition per lookup.
+  """
+  @spec region_of(World.t(), tile_id) :: region_id | nil
+  def region_of(world, tile_id), do: Map.get(tile_region_index(world), tile_id)
+
+  defp tile_region_index(world) do
+    cached(tile_region_key(world), fn ->
+      world
+      |> partition()
+      |> Map.fetch!(:regions)
+      |> Enum.reduce(%{}, fn {rid, tiles}, acc ->
+        Enum.reduce(tiles, acc, &Map.put(&2, &1, rid))
+      end)
+    end)
+  end
+
+  defp tile_region_key(world),
+    do: {__MODULE__, :tile_region, @cache_version, world.seed, world.frequency}
+
+  @doc """
   `region_id`'s own `:land` tiles, ordered by centrality — the tile
   deepest inside the region's own boundary first (ties broken by lowest
   tile id). Land tiles fully enclosed by same-region mountains (never

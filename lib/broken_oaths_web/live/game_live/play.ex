@@ -851,6 +851,26 @@ defmodule BrokenOathsWeb.GameLive.Play do
     end
   end
 
+  # Story 920 — the Fortify stance's own single-target LiveView surface
+  # (`Units.Unit.fortify/3`): same `combat_error`-flash shape
+  # `"attack"`/`"shoot"` above already use (fortifying is itself a
+  # combat-domain command), just no `"game:combat"` push — nothing was
+  # struck. `:units_changed` (broadcast by `WorldServer`'s own
+  # `:fortify` handler) is what actually flips `@selected_unit.fortified`
+  # and reveals the badge, the same refresh path every other unit
+  # command already relies on.
+  def handle_event("fortify", %{"unit_id" => unit_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.fortify(world, user, PlayView.parse_id(unit_id)) do
+      :ok ->
+        {:noreply, assign(socket, combat_error: nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, combat_error: PlayView.combat_error_message(reason))}
+    end
+  end
+
   # Story 906: the conqueror's own execute-or-release choice for a
   # captured city's fallen garrison — sent once the conqueror has
   # already walked onto the broken city's own tile. Matched on the

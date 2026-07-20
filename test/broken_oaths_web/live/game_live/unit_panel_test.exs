@@ -193,4 +193,46 @@ defmodule BrokenOathsWeb.GameLive.UnitPanelTest do
       refute html =~ ~s(data-test="attack-city-7")
     end
   end
+
+  # Story 920 — the discoverable Fortify affordance: a `:defend`-capable
+  # unit not yet braced gets the button; once braced, a "Fortified"
+  # badge stands in for it instead — never both at once.
+  describe "Fortify (story 920)" do
+    test "shows the Fortify button for a defend-capable unit that isn't fortified" do
+      html = render_component(UnitPanel, id: "unit-panel", unit: @lord, order: nil)
+
+      assert html =~ ~s(data-test="fortify")
+      assert html =~ ~s(phx-click="fortify")
+      assert html =~ "Fortify"
+      refute html =~ ~s(data-test="unit-fortified")
+    end
+
+    test "swaps the button for a Fortified badge once the unit carries the flag" do
+      fortified_lord = Map.put(@lord, :fortified, true)
+
+      html = render_component(UnitPanel, id: "unit-panel", unit: fortified_lord, order: nil)
+
+      assert html =~ ~s(data-test="unit-fortified")
+      assert html =~ "Fortified"
+      refute html =~ ~s(data-test="fortify")
+    end
+
+    # Barbarians never carry `:defend` (`Units.Actions.available/1`) —
+    # never offer the button, even though this panel doubles as the
+    # threat readout for enemy units.
+    test "never offers Fortify for a barbarian" do
+      barbarian = %{type: :barbarian_warrior, hp: 15, max_hp: 15, movement: 1, max_movement: 1}
+
+      html = render_component(UnitPanel, id: "unit-panel", unit: barbarian, order: nil)
+
+      refute html =~ ~s(data-test="fortify")
+      refute html =~ ~s(data-test="unit-fortified")
+    end
+
+    test "defaults to not fortified when the unit map carries no :fortified key" do
+      html = render_component(UnitPanel, id: "unit-panel", unit: @lord, order: nil)
+
+      refute html =~ ~s(data-test="unit-fortified")
+    end
+  end
 end

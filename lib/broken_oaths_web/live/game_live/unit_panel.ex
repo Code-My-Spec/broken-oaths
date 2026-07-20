@@ -18,7 +18,10 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
       `:archer`), `:hp`, `:max_hp`, `:movement`, `:max_movement`,
       `:charges` (story 882 playtest update, issue 1caa87e9 — a
       worker's remaining build charges; every other unit type carries
-      the same field but this panel only ever renders it for `:worker`)
+      the same field but this panel only ever renders it for `:worker`),
+      `:fortified` (story 920 — the Fortify defensive stance; every
+      unit type carries the field, only a `:defend`-capable one is ever
+      offered the button that sets it)
     * `:order` - the unit's queued order, or `nil`. Expected to carry
       `:target_tile` and `:status` (`:pending` | `:interrupted`)
     * `:allowed_improvements` - improvement kinds (`:farm` | `:mine` |
@@ -77,6 +80,10 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
       |> assign_new(:shoot_targets, fn -> [] end)
       |> assign_new(:unit_id, fn -> Map.get(assigns.unit, :id) end)
       |> assign(:actions, Actions.available(assigns.unit))
+      # Story 920 — same `Map.get/3` default the `:charges` readout
+      # already uses: a hand-built unit map (a test fixture, an older
+      # cached assign) may predate the `fortified` field.
+      |> assign(:fortified, Map.get(assigns.unit, :fortified, false))
 
     ~H"""
     <div id={@id} data-test="unit-panel" class="card bg-base-200 shadow-sm w-64 relative">
@@ -106,6 +113,13 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
         <p :if={@unit.type == :worker} data-test="unit-charges" class="text-sm">
           {Map.get(@unit, :charges, 3)} charges
         </p>
+        <%!-- Story 920 — the Fortify stance's own status readout: a
+             fortified unit always shows this badge, whoever's looking
+             (the flag is public, see `Visibility.format_unit/3`), same
+             "always visible, never a secret" status `unit-crown` has. --%>
+        <div :if={@fortified} data-test="unit-fortified" class="badge badge-info gap-1 w-fit">
+          <.icon name="hero-shield-check" class="size-3" /> Fortified
+        </div>
         <.order_summary order={@order} />
 
         <button
@@ -117,6 +131,22 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
           class="btn btn-sm btn-primary"
         >
           Found City
+        </button>
+
+        <%!-- Story 920 — the discoverable Fortify affordance: any
+             `:defend`-capable unit not already braced gets the button;
+             once it IS braced, the badge above stands in for it (never
+             both at once). Applies immediately — no confirmation, no
+             movement spent. --%>
+        <button
+          :if={:defend in @actions and not @fortified}
+          type="button"
+          data-test="fortify"
+          phx-click="fortify"
+          phx-value-unit_id={@unit_id}
+          class="btn btn-sm btn-outline"
+        >
+          Fortify
         </button>
 
         <div :if={:build_improvement in @actions} class="flex flex-col gap-1">

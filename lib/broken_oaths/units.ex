@@ -27,6 +27,17 @@ defmodule BrokenOaths.Units do
     do: WorldServer.call(world, {:queue_move, user, unit_id, to_tile})
 
   @doc """
+  Fortify `unit_id` (story 920): grants the caller's own unit the
+  defensive stance immediately, no dig-in turn. Legal for any
+  `:defend`-capable type; idempotent. See `BrokenOaths.Units.Unit.
+  fortify/3` for the full contract and `BrokenOaths.Combat.Resolver`'s
+  own "Fortify" doc for the bonus the flag drives.
+  """
+  @spec fortify(map(), map(), term()) :: :ok | {:error, :not_owner | :not_fortifiable}
+  def fortify(world, user, unit_id),
+    do: WorldServer.call(world, {:fortify, user, unit_id})
+
+  @doc """
   Test-only: set a unit's HP directly. Story 881's healing rules need a
   damaged unit to observe, and combat (the epic's only real damage
   source) is future work — see `BrokenOathsSpex.Fixtures.set_unit_hp/3`.

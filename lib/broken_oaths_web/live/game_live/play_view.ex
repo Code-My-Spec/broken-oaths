@@ -190,6 +190,11 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
   def combat_error_message(:not_archer), do: "Only an Archer can shoot."
   def combat_error_message(:out_of_range), do: "That target is out of shooting range."
 
+  # Story 920 — the Fortify stance's own refusal reason: only a
+  # `:defend`-capable unit (every player-commandable type — never a
+  # barbarian) can brace.
+  def combat_error_message(:not_fortifiable), do: "That unit can't fortify."
+
   def combat_error_message(_other), do: "That attack can't be ordered."
 
   def parse_agenda("restore"), do: :restore

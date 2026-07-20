@@ -12,7 +12,19 @@ defmodule BrokenOaths.Players do
   needs to know this module exists.
   """
 
+  import Ecto.Query
+  alias BrokenOaths.Repo
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.Simulation.WorldServer
+
+  @doc """
+  The ids of every world `user` already has a civilization in — a direct DB
+  read (no WorldServer boot), used by onboarding to resume an existing
+  membership before placing the user anywhere new.
+  """
+  @spec member_world_ids(map()) :: [integer()]
+  def member_world_ids(user),
+    do: Repo.all(from p in Player, where: p.user_id == ^user.id, select: p.world_id)
 
   @doc "`user`'s current gold in `world`."
   def gold(world, user), do: WorldServer.call(world, {:gold, user})

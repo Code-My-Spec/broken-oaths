@@ -346,6 +346,28 @@ defmodule BrokenOaths.Simulation.WorldServer do
     end
   end
 
+  # Story 920 — the Fortify stance's own single-target, no-result
+  # command: same immediate-resolution, persist+broadcast shape as
+  # `:attack` above (a bare flag flip is still a unit-only diff
+  # `persist_tick` picks up now that `persist_unit_changes/2` writes
+  # back `Units.Unit`'s own `fortified` field).
+  def handle_call({:fortify, user, unit_id}, _from, state) do
+    case Unit.fortify(state, user, unit_id) do
+      {:ok, new_state} ->
+        case persist_tick(state, new_state) do
+          :ok ->
+            broadcast(new_state.world.id, [:units_changed])
+            {:reply, :ok, new_state}
+
+          :stale ->
+            {:reply, {:error, :stale}, resync(state)}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   def handle_call({:found_city, user, unit_id}, _from, state) do
     case City.found_city(state, user, unit_id) do
       {:ok, new_state} ->
@@ -1826,7 +1848,23 @@ defmodule BrokenOaths.Simulation.WorldServer do
     if count >= 3, do: {:error, :membership_limit}, else: :ok
   end
 
-  defp taken_region_ids(state), do: state.players |> Map.values() |> Enum.map(& &1.region_id)
+  # A region counts as taken if a player HOMES there (their spawn region) OR
+  # has spilled a city into it. Folding in city regions means a new player is
+  # never dropped into settled territory just because that region wasn't
+  # someone's original spawn, and a carved-up world reports full on real
+  # occupancy rather than a raw home-region count. Used by both the live spawn
+  # placement and `world_full?`.
+  defp taken_region_ids(state) do
+    home_regions = state.players |> Map.values() |> Enum.map(& &1.region_id)
+
+    city_regions =
+      for {_id, city} <- state.cities,
+          rid = Regions.region_of(state.world, city.tile_id),
+          not is_nil(rid),
+          do: rid
+
+    Enum.uniq(home_regions ++ city_regions)
+  end
 
   defp persist_join!(state, user, spawn) do
     {:ok, result} =
@@ -2587,7 +2625,11 @@ defmodule BrokenOaths.Simulation.WorldServer do
           tile_id: unit.tile_id,
           movement: unit.movement,
           hp: unit.hp,
-          charges: Map.get(unit, :charges, 3)
+          charges: Map.get(unit, :charges, 3),
+          # Story 920 — the Fortify stance's own flag; `Map.get/3`
+          # default matches the schema's own `false` (see `Units.Unit`'s
+          # own "fortified" moduledoc paragraph).
+          fortified: Map.get(unit, :fortified, false)
         ]
       )
     end
@@ -3028,6 +3070,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
       max_movement: u.max_movement,
       charges: u.charges,
       temporary: u.temporary,
+      fortified: u.fortified,
       rebellion_id: u.rebellion_id
     }
   end

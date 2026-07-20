@@ -40,6 +40,24 @@ defmodule BrokenOaths.WorldsTest do
     end
   end
 
+  describe "create_open_world/0" do
+    test "creates an active, full-size world with a name and a seed" do
+      {:ok, world} = Worlds.create_open_world()
+
+      assert world.status == "active"
+      assert world.frequency == 54
+      assert is_integer(world.seed)
+      assert is_binary(world.name) and world.name != ""
+    end
+
+    test "successive worlds get distinct seeds" do
+      {:ok, a} = Worlds.create_open_world()
+      {:ok, b} = Worlds.create_open_world()
+
+      refute a.seed == b.seed
+    end
+  end
+
   describe "create_world/1" do
     test "creates a world with valid attrs" do
       attrs = %{name: "My World", seed: 12345}

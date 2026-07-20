@@ -13,6 +13,28 @@ defmodule BrokenOaths.Worlds.RegionsTest do
     %World{seed: seed, frequency: frequency}
   end
 
+  describe "region_of/2" do
+    test "maps a region's own tiles back to its region id" do
+      w = world()
+      %{regions: regions} = Regions.partition(w)
+
+      for {rid, tiles} <- regions, tile <- Enum.take(tiles, 3) do
+        assert Regions.region_of(w, tile) == rid
+      end
+    end
+
+    test "returns nil for a tile in no region (deep ocean or out of range)" do
+      w = world()
+      %{deep_ocean: deep_ocean} = Regions.partition(w)
+
+      for tile <- Enum.take(deep_ocean, 3) do
+        assert Regions.region_of(w, tile) == nil
+      end
+
+      assert Regions.region_of(w, -1) == nil
+    end
+  end
+
   describe "partition/1" do
     test "is deterministic for a given seed and frequency" do
       first = Regions.partition(world())

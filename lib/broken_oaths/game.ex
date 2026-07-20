@@ -42,6 +42,7 @@ defmodule BrokenOaths.Game do
   alias BrokenOaths.Technology
   alias BrokenOaths.Units
   alias BrokenOaths.Vision
+  alias BrokenOaths.Worlds
 
   # -------------------------------------------------------------------
   # World lifecycle / runtime
@@ -67,11 +68,44 @@ defmodule BrokenOaths.Game do
   @spec claimed_region(map(), map()) :: term() | nil
   def claimed_region(world, user), do: WorldServer.call(world, {:claimed_region, user})
 
+  @doc """
+  Onboarding placement — put `user` into a world with room to play so recruiting
+  scales without a picker. Resumes an existing membership if they have one;
+  otherwise joins the oldest active world that still has an open region (so new
+  players cluster and actually meet); and when every active world is full,
+  creates a fresh full-size world and drops the user in. "Full" here is real
+  occupancy (home regions plus cities that have spilled over), not a fixed
+  headcount — see `world_full?/1`.
+  """
+  @spec quick_join(map()) :: {:ok, map()} | {:error, :world_full | :membership_limit}
+  def quick_join(user) do
+    member_ids = MapSet.new(Players.member_world_ids(user))
+
+    active =
+      Worlds.list_worlds()
+      |> Enum.filter(&(&1.status == "active"))
+      |> Enum.sort_by(& &1.id)
+
+    cond do
+      world = Enum.find(active, &MapSet.member?(member_ids, &1.id)) ->
+        {:ok, world}
+
+      world = Enum.find(active, &(not MapSet.member?(member_ids, &1.id) and not world_full?(&1))) ->
+        join_world(world, user)
+
+      true ->
+        with {:ok, world} <- Worlds.create_open_world(), do: join_world(world, user)
+    end
+  end
+
   @doc "The current turn number."
   def turn_number(world), do: WorldServer.call(world, :turn_number)
 
   @doc "`DateTime` the next turn boundary fires."
   def turn_ends_at(world), do: WorldServer.call(world, :turn_ends_at)
+
+  @doc "The ids of every world `user` already plays in. See `Players.member_world_ids/1`."
+  defdelegate member_world_ids(user), to: Players
 
   @doc "`user`'s current gold in `world`. See `Players.gold/2`."
   defdelegate gold(world, user), to: Players
@@ -171,6 +205,10 @@ defmodule BrokenOaths.Game do
   @doc "Queue a move order for `unit_id` to `to_tile`. See `Units.queue_move/4`."
   @spec queue_move(map(), map(), term(), term()) :: {:ok, %{path: [term()]}} | {:error, atom()}
   defdelegate queue_move(world, user, unit_id, to_tile), to: Units
+
+  @doc "Fortify `unit_id` (story 920): the defensive stance. See `Units.fortify/3`."
+  @spec fortify(map(), map(), term()) :: :ok | {:error, :not_owner | :not_fortifiable}
+  defdelegate fortify(world, user, unit_id), to: Units
 
   @doc "Test-only: set a unit's HP directly. See `Units.set_unit_hp_for_test/3`."
   @spec set_unit_hp_for_test(map(), term(), non_neg_integer()) :: :ok

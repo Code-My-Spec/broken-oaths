@@ -31,6 +31,22 @@ defmodule BrokenOathsWeb.GameLive.Join do
      |> assign(:worlds, active_worlds())}
   end
 
+  # Quick Play — the frictionless entry that makes recruiting scale: drop the
+  # player into a world with room (Game.quick_join resumes an existing one,
+  # joins the oldest open world so players cluster, or creates a fresh world
+  # when they're all full). One click from the picker; no need to read the
+  # list or understand capacity.
+  @impl true
+  def handle_event("quick_play", _params, socket) do
+    case Game.quick_join(socket.assigns.current_scope.user) do
+      {:ok, world} ->
+        {:noreply, push_navigate(socket, to: ~p"/play/#{world.id}")}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :join_error, error_message(reason))}
+    end
+  end
+
   @impl true
   def handle_event("join", %{"world-id" => world_id}, socket) do
     world = Worlds.get_world!(world_id)
@@ -58,12 +74,23 @@ defmodule BrokenOathsWeb.GameLive.Join do
         {@join_error}
       </p>
 
-      <div :if={@worlds == []} class="text-center py-20 opacity-50">
-        <.icon name="hero-globe-americas" class="w-16 h-16 mx-auto mb-4 opacity-30" />
-        <p class="text-lg">No worlds are open right now. Check back soon.</p>
+      <%!-- Quick Play: one click into a world with room, creating a fresh one
+           when every world is full. Always available, so a new player never
+           hits a dead end even when the list below is empty. --%>
+      <div class="mt-6 flex flex-col items-center gap-2">
+        <.button
+          data-test="quick-play"
+          phx-click="quick_play"
+          class="btn-primary btn-lg w-full sm:w-auto sm:px-12"
+        >
+          Quick Play
+        </.button>
+        <p class="text-sm opacity-60">Jump straight into a world with room to play.</p>
       </div>
 
-      <ul :if={@worlds != []} class="menu bg-base-200 rounded-box w-full mt-4">
+      <div :if={@worlds != []} class="divider mt-8 text-sm opacity-50">or pick a world</div>
+
+      <ul :if={@worlds != []} class="menu bg-base-200 rounded-box w-full">
         <.world_row :for={world <- @worlds} world={world} current_user={@current_scope.user} />
       </ul>
     </div>

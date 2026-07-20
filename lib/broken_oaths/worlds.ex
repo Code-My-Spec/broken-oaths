@@ -45,4 +45,26 @@ defmodule BrokenOaths.Worlds do
     noun = Enum.random(@nouns)
     "#{adj} #{noun}"
   end
+
+  @doc """
+  Create a fresh, empty, active full-size world ready for onboarding — a
+  unique random seed, a generated name, the default frequency-54 globe (~110
+  spawnable regions), and the standard 60s tick. Used to auto-scale when every
+  existing world has filled up, so a new player always has somewhere to spawn.
+  """
+  def create_open_world do
+    seed = unique_seed()
+    create_world(%{name: random_world_name(seed), seed: seed, frequency: 54})
+  end
+
+  # A seed not already claimed by an existing world (worlds.seed is unique).
+  # Any frequency-54 seed yields a habitable globe, so no spawn-region probing
+  # is needed — only collision-avoidance against the unique index.
+  defp unique_seed do
+    candidate = :rand.uniform(2_000_000_000)
+
+    if Repo.exists?(from w in World, where: w.seed == ^candidate),
+      do: unique_seed(),
+      else: candidate
+  end
 end

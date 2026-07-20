@@ -36,7 +36,9 @@ defmodule BrokenOaths.Combat.ResolverTest do
       hp: Keyword.get(opts, :hp, max_hp),
       max_hp: max_hp,
       movement: Keyword.get(opts, :movement, max_movement),
-      max_movement: max_movement
+      max_movement: max_movement,
+      # Story 920 — the Fortify stance's own flag.
+      fortified: Keyword.get(opts, :fortified, false)
     }
   end
 
@@ -142,6 +144,23 @@ defmodule BrokenOaths.Combat.ResolverTest do
       lord = unit(1, type: :lord, hp: 150, max_hp: 150)
       assert Resolver.effective_strength(lord) == 12.0
     end
+
+    test "story 920: the Fortify bonus adds +50% of BASE strength before the wounded penalty scales it" do
+      full = unit(1, type: :warrior, hp: 100, max_hp: 100)
+      assert Resolver.effective_strength(full, false, true) == 15.0
+
+      # At 20/100 HP (0.6x): (10 + 5) * 0.6 = 9.0 — the fortify bonus is
+      # folded in BEFORE wounding scales it, same ordering the aura
+      # already gets (see the test above).
+      wounded = unit(1, type: :warrior, hp: 20, max_hp: 100)
+      assert_in_delta Resolver.effective_strength(wounded, false, true), 9.0, 1.0e-9
+    end
+
+    test "story 920: the aura and the fortify bonus stack — (base + aura + fortify) * wounded" do
+      full = unit(1, type: :warrior, hp: 100, max_hp: 100)
+      # (10 + 2 + 5) * 1.0 = 17.0
+      assert Resolver.effective_strength(full, true, true) == 17.0
+    end
   end
 
   describe "resolve/3 — the Civ VI damage curve" do
@@ -223,6 +242,34 @@ defmodule BrokenOaths.Combat.ResolverTest do
       # less), never zero — the counter-blow always lands.
       assert dying_result.damage_to_attacker > 0
       assert dying_result.damage_to_attacker < full_hp_result.damage_to_attacker
+    end
+  end
+
+  describe "resolve/3 — Fortify (story 920)" do
+    test "a fortified defender takes less damage than an unfortified one, same attacker/roll" do
+      a = unit(1, type: :warrior, hp: 100, max_hp: 100)
+      d = unit(2, type: :warrior, hp: 100, max_hp: 100)
+      fortified_d = %{d | fortified: true}
+
+      for seed <- 1..20 do
+        plain = Resolver.resolve(a, d, seed: {:fortify, seed}).damage_to_defender
+        braced = Resolver.resolve(a, fortified_d, seed: {:fortify, seed}).damage_to_defender
+
+        assert braced < plain
+      end
+    end
+
+    test "fortify never boosts the ATTACKING side's own strength, even if the attacker itself is fortified" do
+      fortified_attacker = unit(1, type: :warrior, hp: 100, max_hp: 100, fortified: true)
+      plain_attacker = %{fortified_attacker | fortified: false}
+      d = unit(2, type: :warrior, hp: 100, max_hp: 100)
+
+      for seed <- 1..20 do
+        dealt = Resolver.resolve(fortified_attacker, d, seed: {:atk, seed}).damage_to_defender
+        baseline = Resolver.resolve(plain_attacker, d, seed: {:atk, seed}).damage_to_defender
+
+        assert dealt == baseline
+      end
     end
   end
 
@@ -479,6 +526,36 @@ defmodule BrokenOaths.Combat.ResolverTest do
       st = state(%{1 => archer})
 
       assert Resolver.shoot(st, %{id: 1}, 1, 999) == {:error, :invalid_target}
+    end
+  end
+
+  describe "attack/4 and shoot/4 clear the attacker's own Fortify stance (story 920)" do
+    test "a melee attack drops the attacker's own fortify — the defender's is untouched" do
+      attacker = unit(1, type: :warrior, tile_id: 0, player_id: 1, fortified: true)
+      target_tile = tile_at_distance(0, 1)
+
+      defender =
+        unit(2, type: :warrior, tile_id: target_tile, player_id: nil, fortified: true)
+
+      st = state(%{1 => attacker, 2 => defender})
+
+      assert {:ok, _result, new_state} = Resolver.attack(st, %{id: 1}, 1, 2)
+
+      refute new_state.units[1].fortified
+      # Being attacked is not "acting" — a surviving defender keeps its
+      # own stance (see this module's own "Fortify" doc).
+      assert new_state.units[2].fortified
+    end
+
+    test "a ranged shot drops the Archer's own fortify the same way" do
+      archer = unit(1, type: :archer, tile_id: 0, player_id: 1, fortified: true)
+      target_tile = tile_at_distance(0, 1)
+      barbarian = unit(2, type: :barbarian_warrior, tile_id: target_tile, player_id: nil)
+      st = state(%{1 => archer, 2 => barbarian})
+
+      assert {:ok, _result, new_state} = Resolver.shoot(st, %{id: 1}, 1, 2)
+
+      refute new_state.units[1].fortified
     end
   end
 end

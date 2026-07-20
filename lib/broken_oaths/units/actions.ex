@@ -20,15 +20,14 @@ defmodule BrokenOaths.Units.Actions do
 
   ## Vocabulary
 
-  `:defend` (every player-commandable type carries it) isn't wired to
-  a `BrokenOaths.Game` command of its own — "defending" is simply
-  choosing not to move (or not to spend every point of movement) this
-  turn, which every unit can already do with no explicit order; it's
-  listed here only so this catalog answers the QA issue's own
+  `:defend` (every player-commandable type carries it) is the type-gate
+  for the Fortify stance (story 920, `BrokenOaths.Units.Unit.fortify/3`
+  — `:defend in available(unit)` is exactly the check `fortify/3` runs
+  before setting the flag) but isn't itself a `Game` command: merely
+  standing still costs nothing and needs no order, same as it always
+  did. It's listed here so this catalog answers the QA issue's own
   "build farm, shoot arrows, defend, etc." vocabulary completely, not
-  because there's a `"defend"` LiveView event or a `Game.defend/2` to
-  gate. A future story that DOES give "defend" real teeth (a
-  fortify-style combat bonus, say) has a name to key off of already.
+  because there's a `"defend"` LiveView event of its own.
 
   `:barbarian_warrior` carries `:move`/`:attack` only — no `:defend`
   (barbarians are never player-commanded, so "choosing" a stance is

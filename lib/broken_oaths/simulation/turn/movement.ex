@@ -247,11 +247,26 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
     end
   end
 
+  # Story 920: a unit whose queued step was blocked before it ever left
+  # its own tile (`attempt_step/5`'s degenerate/blocked branches — the
+  # SAME tile before and after) hasn't actually "moved" in the sense
+  # Fortify's own "clears when the unit acts" rule cares about, so its
+  # own stance (if any) survives; a unit that DID displace loses it, the
+  # same way attacking does (`Combat.Resolver.resolve_attack/4`).
+  # `Map.get/3` (not straight `unit.fortified`) so this never raises on
+  # a hand-built test unit map that predates the field.
   defp apply_positions(units, movers, positions) do
     Map.new(units, fn {id, unit} ->
       case Map.fetch(movers, id) do
         {:ok, mover} ->
-          {id, %{unit | tile_id: Map.fetch!(positions, id), movement: mover.movement_left}}
+          new_tile_id = Map.fetch!(positions, id)
+          fortified? = Map.get(unit, :fortified, false) and new_tile_id == unit.tile_id
+
+          {id,
+           unit
+           |> Map.put(:tile_id, new_tile_id)
+           |> Map.put(:movement, mover.movement_left)
+           |> Map.put(:fortified, fortified?)}
 
         :error ->
           {id, unit}

@@ -439,7 +439,12 @@ defmodule BrokenOaths.Combat.Camps do
   def resolve_camp_attack(state, attacker, camp) do
     dealt = Resolver.camp_damage(attacker, lord_adjacent?(state, attacker))
     new_camp = %{camp | hp: max(camp.hp - dealt, 0)}
-    new_attacker = %{attacker | movement: 0}
+    # Story 920 — attacking a camp (melee or a ranged shot) drops the
+    # attacker's own Fortify stance too, same as unit-vs-unit
+    # `Resolver.resolve_attack/4`. `Map.put/3`, not the strict `%{... |
+    # ...}` syntax, so this never raises on a hand-built test unit map
+    # that predates the `fortified` field.
+    new_attacker = %{attacker | movement: 0} |> Map.put(:fortified, false)
 
     state =
       %{state | units: Map.put(state.units, attacker.id, new_attacker)}
