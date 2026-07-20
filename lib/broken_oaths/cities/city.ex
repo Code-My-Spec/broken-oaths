@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.City do
+defmodule BrokenOaths.Cities.City do
   @moduledoc """
   A founded city — world/player/tile, a renameable name, accumulated
   food and size, claimed territory, and which territory tiles are
@@ -9,7 +9,7 @@ defmodule BrokenOaths.Game.City do
 
   `territory` is every tile this city has ever claimed — permanent,
   monotonically growing (founding ring, then one tile per growth; see
-  `BrokenOaths.Game.Yields`). `worked_tiles` is the subset of
+  `BrokenOaths.Cities.Yields`). `worked_tiles` is the subset of
   `territory`, excluding the always-free `tile_id` center, that
   currently has a citizen assigned; it can be shorter than `size` when
   a citizen has been manually unassigned or lost its post (a settler's
@@ -52,12 +52,12 @@ defmodule BrokenOaths.Game.City do
   alias BrokenOaths.Game.Camps
   alias BrokenOaths.Game.CityDefense
   alias BrokenOaths.Players.Player
-  alias BrokenOaths.Game.Production
+  alias BrokenOaths.Cities.Production
   alias BrokenOaths.Game.ProductionItem
   alias BrokenOaths.Technology.Research
   alias BrokenOaths.Game.Siege
-  alias BrokenOaths.Game.Unit
-  alias BrokenOaths.Game.Yields
+  alias BrokenOaths.Units.Unit
+  alias BrokenOaths.Cities.Yields
   alias BrokenOaths.Repo
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
@@ -100,8 +100,8 @@ defmodule BrokenOaths.Game.City do
     field :hp, :integer, default: @max_hp
     field :production_halted_until, :integer
     # Story 902, criterion 7629 — flips once the Pottery-gated Granary
-    # buildable completes (`BrokenOaths.Game.Production`'s `:granary`
-    # catalog entry); read back by `BrokenOaths.Game.Yields.accrue_food/3`
+    # buildable completes (`BrokenOaths.Cities.Production`'s `:granary`
+    # catalog entry); read back by `BrokenOaths.Cities.Yields.accrue_food/3`
     # for its +2 food/turn bonus.
     field :has_granary, :boolean, default: false
     # Story 906 — the siege capture flow (`BrokenOaths.Game.Siege`):

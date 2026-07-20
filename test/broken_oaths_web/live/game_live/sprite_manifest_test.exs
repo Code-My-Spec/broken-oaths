@@ -20,8 +20,8 @@ defmodule BrokenOathsWeb.GameLive.SpriteManifestTest do
       (story 882) never rendered on the board at all.
 
   This test parses the manifest, confirms every unit type and
-  improvement kind the server can emit (`BrokenOaths.Game.Unit.unit_type/0`,
-  `BrokenOaths.Game.Improvement.kind/0`) has an entry, and that every
+  improvement kind the server can emit (`BrokenOaths.Units.Unit.unit_type/0`,
+  `BrokenOaths.Cities.Improvement.kind/0`) has an entry, and that every
   entry's referenced file actually exists under `priv/static` — so a
   future removed/renamed sprite or a newly-added type with no matching
   entry fails loudly here instead of silently degrading to a dot (or

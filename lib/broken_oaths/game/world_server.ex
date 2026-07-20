@@ -39,24 +39,22 @@ defmodule BrokenOaths.Game.WorldServer do
 
   import Ecto.Query
 
+  alias BrokenOaths.Cities.{City, Improvement, Production, Yields}
+
   alias BrokenOaths.Game.{
     Bank,
     Camp,
     Camps,
-    City,
     CityDefense,
     Combat,
     Cooperation,
     Discovery,
     GoldLog,
-    Improvement,
     KnownPlayer,
     Levy,
     OathStrain.Ledger,
-    Order,
-    ProtectionPact,
-    Production,
     ProductionItem,
+    ProtectionPact,
     Rebellion,
     Rebellion.Resolution,
     Rebellion.War,
@@ -67,16 +65,15 @@ defmodule BrokenOaths.Game.WorldServer do
     Stewardship,
     Tribute,
     Turn,
-    Unit,
     Vassalage,
-    Vassalization,
-    Yields
+    Vassalization
   }
 
   alias BrokenOaths.Game
   alias BrokenOaths.Players.{Player, Presence}
   alias BrokenOaths.Repo
   alias BrokenOaths.Technology.{PlayerResearch, Research}
+  alias BrokenOaths.Units.{Order, Unit}
   alias BrokenOaths.Users
   alias BrokenOaths.Vision.{Exploration, Visibility}
   alias BrokenOaths.Worlds
@@ -1070,7 +1067,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # Test-only: instantly sets `user`'s own treasury to `gold`, same
   # narrow, documented-bridge status as `:set_unit_hp_for_test` above.
   # Stand-in for a per-turn city GOLD YIELD this codebase doesn't have
-  # yet at all (`BrokenOaths.Game.Yields` only ever produces food/
+  # yet at all (`BrokenOaths.Cities.Yields` only ever produces food/
   # production; a player's `gold` column only ever moves via
   # `BarbarianAI.bounty_gold/0` and `Camps.destroy_reward/0`, both
   # one-off rewards, never a recurring per-turn income) — the exact
@@ -1853,7 +1850,7 @@ defmodule BrokenOaths.Game.WorldServer do
 
   # -------------------------------------------------------------------
   # Queue move (stories 875/899/919) — the "queue_move" `handle_call` is
-  # a thin delegation into `BrokenOaths.Game.Unit.queue_move/4`
+  # a thin delegation into `BrokenOaths.Units.Unit.queue_move/4`
   # (`.code_my_spec/knowledge/genserver_decomposition.md`), which now
   # owns `do_queue_move/4`, `occupied_by_own?/4`, `field_stack_room?/2`,
   # `persist_order!/2`, `bfs_path/3`, and `bfs_loop/5` — all public

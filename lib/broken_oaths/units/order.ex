@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.Order do
+defmodule BrokenOaths.Units.Order do
   @moduledoc """
   A queued order for the next turn boundary — unit, kind (move), path,
   validation state.
@@ -11,7 +11,7 @@ defmodule BrokenOaths.Game.Order do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias BrokenOaths.Game.Unit
+  alias BrokenOaths.Units.Unit
 
   @type kind :: :move
   @type status :: :pending | :interrupted

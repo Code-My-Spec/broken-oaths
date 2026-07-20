@@ -5,16 +5,16 @@ defmodule BrokenOaths.Game.WorldServerTest do
   import Ecto.Query
 
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.Improvement
+  alias BrokenOaths.Cities.Improvement
   alias BrokenOaths.Technology.PlayerResearch
-  alias BrokenOaths.Game.Unit
+  alias BrokenOaths.Units.Unit
   alias BrokenOaths.Game.WorldServer
   alias BrokenOaths.Repo
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
   alias BrokenOaths.WorldsFixtures
-  alias BrokenOaths.Game.Yields
+  alias BrokenOaths.Cities.Yields
 
   # Regression for issue 07ee50d1: a second WorldServer instance for the
   # same world (a second BEAM node running a mix script) used to clobber
@@ -912,7 +912,7 @@ defmodule BrokenOaths.Game.WorldServerTest do
   # QA issue da39e50b "No archer" — the Archery tech unlocked nothing;
   # this is the end-to-end version of `ProductionTest`'s own
   # `can_queue?/3` unit tests, driven through `queue_production/4` for
-  # real. See `BrokenOaths.Game.Production`'s own moduledoc, "The
+  # real. See `BrokenOaths.Cities.Production`'s own moduledoc, "The
   # Archer", for the melee-for-now stats rationale and the ranged-attack
   # follow-up flag — `CombatTest`'s own "resolve/3 — Archer vs
   # Barbarian Warrior" describe block covers the Archer actually

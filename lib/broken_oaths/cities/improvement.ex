@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.Improvement do
+defmodule BrokenOaths.Cities.Improvement do
   @moduledoc """
   A tile improvement — farm, mine, road, or pasture — built by a
   worker over several turns. Progress sticks to the TILE, not the worker (story
@@ -28,9 +28,9 @@ defmodule BrokenOaths.Game.Improvement do
   `state.roads` for the road slot) for exactly this reason. Farm, Mine,
   and Pasture remain mutually exclusive with EACH OTHER on a given tile
   — that yield slot is still only one improvement wide (see
-  `BrokenOaths.Game.Production` for the terrain-eligibility and
+  `BrokenOaths.Cities.Production` for the terrain-eligibility and
   duration rules — `allowed?/2` and `duration/1` below — and
-  `BrokenOaths.Game.Yields` for the yield bonus a finished improvement
+  `BrokenOaths.Cities.Yields` for the yield bonus a finished improvement
   contributes; a Road's own yield bonus is `%{food: 0, production: 0}`
   — see `Yields.improvement_bonus/1` — its movement effect is still
   deferred, as before this fix).
@@ -102,7 +102,7 @@ defmodule BrokenOaths.Game.Improvement do
   import Ecto.Changeset
 
   alias BrokenOaths.Technology.Research
-  alias BrokenOaths.Game.Unit
+  alias BrokenOaths.Units.Unit
   alias BrokenOaths.Repo
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.Resources

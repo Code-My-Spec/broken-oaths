@@ -7,7 +7,7 @@ defmodule BrokenOathsSpex.Story902.Criterion7629Spex do
   read back via `Research.granary_enabled?/1`).
 
   The Granary BUILDING itself has no production-catalog entry yet
-  (`BrokenOaths.Game.Production.catalog/0` is `settler`/`worker`/
+  (`BrokenOaths.Cities.Production.catalog/0` is `settler`/`worker`/
   `warrior` only) and no story has been imported for it — exactly the
   same "unlock flips a flag, the consuming feature ships separately"
   status `Research`'s own moduledoc documents for Animal Husbandry's

@@ -5,7 +5,7 @@ defmodule BrokenOathsWeb.DevQaControllerTest do
   use BrokenOathsTest.ConnCase, async: false
 
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.Unit
+  alias BrokenOaths.Units.Unit
   alias BrokenOaths.Game.WorldServer
   alias BrokenOaths.Repo
   alias BrokenOaths.UsersFixtures

@@ -4,7 +4,7 @@ defmodule BrokenOathsSpex.Story902.Criterion7628Spex do
   Criterion 7628 — Mining speeds up worker mines: once Mining is
   researched, a worker completes a Mine in 3 turns instead of the base
   5 (`BrokenOaths.Technology.Research.mine_duration/1` — Mining's own
-  moduledoc names `BrokenOaths.Game.Improvement.duration/1` as the
+  moduledoc names `BrokenOaths.Cities.Improvement.duration/1` as the
   hardcoded-5 counterpart this unlock must override). This spec drives
   the improvement all the way to completion and checks the tile's
   finished state after exactly 3 turns — not by reading

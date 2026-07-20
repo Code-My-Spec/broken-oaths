@@ -18,9 +18,10 @@ defmodule BrokenOaths.Game do
   `.code_my_spec/knowledge/genserver_decomposition.md`'s "Game API
   (973) → split by domain" target, the wrapper bodies (and their full
   narrative docs) now live in per-domain sub-facades —
-  `BrokenOaths.Game.API.Feudal`, `.Cities`, `.Combat`, `.Units`,
-  `.Diplomacy` — plus the top-level `BrokenOaths.Vision`, `BrokenOaths.
-  Players`, and `BrokenOaths.Technology` contexts (see
+  `BrokenOaths.Game.API.Feudal`, `.Combat`, `.Diplomacy` — plus the
+  top-level `BrokenOaths.Cities`, `BrokenOaths.Players`,
+  `BrokenOaths.Technology`, `BrokenOaths.Units`, and `BrokenOaths.
+  Vision` contexts (see
   `.code_my_spec/knowledge/genserver_decomposition.md`'s "Target bounded
   contexts" table) — and every one of those functions is
   `defdelegate`d back here unchanged, so no caller needs to know the
@@ -32,10 +33,12 @@ defmodule BrokenOaths.Game do
   directly on `Game` itself.
   """
 
-  alias BrokenOaths.Game.API.{Cities, Combat, Diplomacy, Feudal, Units}
+  alias BrokenOaths.Cities
+  alias BrokenOaths.Game.API.{Combat, Diplomacy, Feudal}
   alias BrokenOaths.Game.WorldServer
   alias BrokenOaths.Players
   alias BrokenOaths.Technology
+  alias BrokenOaths.Units
   alias BrokenOaths.Vision
 
   # -------------------------------------------------------------------
@@ -157,7 +160,7 @@ defmodule BrokenOaths.Game do
   defdelegate player_stats(world, user), to: Players
 
   # -------------------------------------------------------------------
-  # Units (queue_move / orders) — delegated to BrokenOaths.Game.API.Units
+  # Units (queue_move / orders) — delegated to BrokenOaths.Units
   # -------------------------------------------------------------------
 
   @doc "All of `user`'s units in `world`, each carrying its queued order (if any). See `Units.player_units/2`."
@@ -257,7 +260,7 @@ defmodule BrokenOaths.Game do
   defdelegate set_camp_hp_for_test(world, camp_id, hp), to: Combat
 
   # -------------------------------------------------------------------
-  # City loop (stories 878-883) — delegated to BrokenOaths.Game.API.Cities
+  # City loop (stories 878-883) — delegated to BrokenOaths.Cities
   # -------------------------------------------------------------------
 
   @doc "Found a city on `unit_id`'s tile, consuming the settler. See `Cities.found_city/3`."

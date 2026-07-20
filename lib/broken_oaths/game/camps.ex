@@ -307,9 +307,9 @@ defmodule BrokenOaths.Game.Camps do
   @doc """
   Advance every camp's spawn cadence for one tick and place a warrior
   for any camp that comes ready with a free landing tile (its own tile,
-  else an adjacent land tile, mirroring `BrokenOaths.Game.Production`'s
+  else an adjacent land tile, mirroring `BrokenOaths.Cities.Production`'s
   own city landing-tile pick). Reuses `occupied` — the SAME occupied-
-  tile thread `BrokenOaths.Game.Production.resolve_completions/1`
+  tile thread `BrokenOaths.Cities.Production.resolve_completions/1`
   builds — so a camp spawn can't land on a tile a city completion
   claimed this same tick, and vice versa. The updated set is returned
   too, for the barbarian-AI phase that follows: a warrior placed THIS
@@ -370,7 +370,7 @@ defmodule BrokenOaths.Game.Camps do
   end
 
   # A camp's own tile first, then its adjacent land tiles (sorted for
-  # determinism) — mirrors `BrokenOaths.Game.Production`'s own city
+  # determinism) — mirrors `BrokenOaths.Cities.Production`'s own city
   # landing-tile pick, so a second warrior lands beside the first
   # rather than failing to spawn.
   defp camp_landing_tile(world, camp, occupied) do

@@ -8,7 +8,7 @@ defmodule BrokenOaths.Technology.Research do
   completing a tech once its cost is banked. No `Repo`: every function
   here takes and returns a plain `player_research()` map — the same
   "pure functional core, `WorldServer` is the imperative shell" split
-  `BrokenOaths.Game.Production`/`BrokenOaths.Game.Yields` already use.
+  `BrokenOaths.Cities.Production`/`BrokenOaths.Cities.Yields` already use.
   `BrokenOaths.Technology.PlayerResearch` is the Ecto-backed persistence
   shape this module's maps round-trip through.
 
@@ -17,7 +17,7 @@ defmodule BrokenOaths.Technology.Research do
   Every city generates `2 * size` science per turn (`science_per_turn/1`)
   — population is the only science lever in this MVP (see
   `.code_my_spec/knowledge/civ6_tech_tree.md`), so `size` (a city's
-  population, same field `BrokenOaths.Game.Yields.threshold/1` grows
+  population, same field `BrokenOaths.Cities.Yields.threshold/1` grows
   against) stands in for Civ's Palace + Campus + Library stack.
 
   ## One tech at a time, banked per tech
@@ -291,7 +291,7 @@ defmodule BrokenOaths.Technology.Research do
   @doc """
   Bank `income` science toward `current_research`. A no-op with nothing
   selected — science generated with no active research is simply not
-  banked anywhere (mirrors `BrokenOaths.Game.Production.accrue/3`'s
+  banked anywhere (mirrors `BrokenOaths.Cities.Production.accrue/3`'s
   own no-op on an empty queue).
   """
   @spec accrue(player_research(), non_neg_integer()) :: player_research()
@@ -340,7 +340,7 @@ defmodule BrokenOaths.Technology.Research do
   `BrokenOaths.Game.Turn`'s own tick phases return (an optional event
   alongside the new state), ready to drive a `{:tech_completed, ...}`
   event the same way `{:unit_spawned, ...}` is built from
-  `BrokenOaths.Game.Production.complete/3`.
+  `BrokenOaths.Cities.Production.complete/3`.
   """
   @spec accrue_and_complete(player_research(), non_neg_integer()) ::
           {player_research(), tech() | nil}
@@ -467,7 +467,7 @@ defmodule BrokenOaths.Technology.Research do
   map unconditionally (it has no concept of a viewing player); THIS is
   the read `BrokenOathsWeb.GameLive.Play` gates a pushed
   `"game:resources"`/`select_tile` read on before a player ever learns
-  a tile carries Copper. Never gates `BrokenOaths.Game.Production`'s
+  a tile carries Copper. Never gates `BrokenOaths.Cities.Production`'s
   own `copper_access?` check — a city's ACCESS to Copper (needed to
   train a Bronze Spearman) is a territory fact, independent of whether
   the player has yet unlocked the tech that makes Copper VISIBLE on

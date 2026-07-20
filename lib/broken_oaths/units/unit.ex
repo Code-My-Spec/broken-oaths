@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.Unit do
+defmodule BrokenOaths.Units.Unit do
   @moduledoc """
   A unit on the board — type (lord/settler/warrior/worker/barbarian
   warrior/bronze spearman, story 903), owner, tile id, hp, movement
@@ -26,7 +26,7 @@ defmodule BrokenOaths.Game.Unit do
   this rule.
 
   Per-type stats (starting hp/movement) live in
-  `BrokenOaths.Game.Production.unit_stats/1` alongside the rest of the
+  `BrokenOaths.Cities.Production.unit_stats/1` alongside the rest of the
   buildable catalog, not here — this schema only shapes and validates
   whatever stats it's given.
 
@@ -69,7 +69,7 @@ defmodule BrokenOaths.Game.Unit do
 
   alias BrokenOaths.Game.Camp
   alias BrokenOaths.Game.CityDefense
-  alias BrokenOaths.Game.Order
+  alias BrokenOaths.Units.Order
   alias BrokenOaths.Players.Player
   alias BrokenOaths.Game.Rebellion.War
   alias BrokenOaths.Game.Turn
@@ -423,7 +423,7 @@ defmodule BrokenOaths.Game.Unit do
 
   # -------------------------------------------------------------------
   # Shared, trivial lookups — duplicated rather than reaching back into
-  # `WorldServer`, matching the sibling `BrokenOaths.Game.City`/
+  # `WorldServer`, matching the sibling `BrokenOaths.Cities.City`/
   # `BrokenOaths.Game.Combat`'s own "pure, process-unaware,
   # unit-testable with no GenServer running" contract (small private
   # helper copies rather than expanding public APIs).

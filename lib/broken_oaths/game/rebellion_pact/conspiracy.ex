@@ -25,13 +25,13 @@ defmodule BrokenOaths.Game.RebellionPact.Conspiracy do
   import Ecto.Query
 
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.City
+  alias BrokenOaths.Cities.City
   alias BrokenOaths.Game.CityDefense
   alias BrokenOaths.Game.OathStrain
   alias BrokenOaths.Game.Rebellion.War
   alias BrokenOaths.Game.RebellionPact
   alias BrokenOaths.Game.RebellionPactMember
-  alias BrokenOaths.Game.Unit
+  alias BrokenOaths.Units.Unit
   alias BrokenOaths.Game.Vassalage
   alias BrokenOaths.Repo
   alias BrokenOaths.Users

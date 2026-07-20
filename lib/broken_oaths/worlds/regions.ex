@@ -110,7 +110,7 @@ defmodule BrokenOaths.Worlds.Regions do
   @doc """
   A single tile's full terrain descriptor (base/relief/feature) — the
   finer-grained sibling of `tile_class/2`, needed anywhere yields are
-  computed (see `BrokenOaths.Game.Yields`). Same seed/frequency-derived,
+  computed (see `BrokenOaths.Cities.Yields`). Same seed/frequency-derived,
   cached status as `tile_class/2`.
   """
   @spec terrain(World.t(), tile_id) :: Terrain.t()

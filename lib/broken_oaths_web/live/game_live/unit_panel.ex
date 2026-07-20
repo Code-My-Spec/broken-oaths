@@ -108,7 +108,7 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
             class="badge badge-info gap-1 whitespace-nowrap"
             data-test="dig-progress"
           >
-            Digging {improvement_label(@current_dig.kind)} — {@current_dig.progress}/{BrokenOaths.Game.Improvement.duration(
+            Digging {improvement_label(@current_dig.kind)} — {@current_dig.progress}/{BrokenOaths.Cities.Improvement.duration(
               @current_dig.kind
             )} turns
           </div>
@@ -244,7 +244,7 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
   # bronze_spearman also blocked left-clicking the city under it).
   defp unit_type_label(:bronze_spearman), do: "Bronze Spearman"
   # QA issue da39e50b — the Archery-gated melee unit; see
-  # `BrokenOaths.Game.Production`'s own moduledoc, "The Archer".
+  # `BrokenOaths.Cities.Production`'s own moduledoc, "The Archer".
   defp unit_type_label(:archer), do: "Archer"
   # Enemy units are selectable too — the panel doubles as the threat
   # readout (stats, HP), with every action already type/owner-gated.

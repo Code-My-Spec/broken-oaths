@@ -1,7 +1,7 @@
-defmodule BrokenOaths.Game.YieldsTest do
+defmodule BrokenOaths.Cities.YieldsTest do
   use ExUnit.Case, async: true
 
-  alias BrokenOaths.Game.Yields
+  alias BrokenOaths.Cities.Yields
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.Terrain
   alias BrokenOaths.Worlds.World

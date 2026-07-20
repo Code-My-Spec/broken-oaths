@@ -2,7 +2,7 @@ defmodule BrokenOathsSpex.Story912.Criterion7714Spex do
   @moduledoc """
   Story 912 — City Gold Income
   Criterion 7714 — a freshly founded size-1 city earns exactly its own
-  base gold (`BrokenOaths.Game.Yields.base_gold/1` — `1 + floor(1/2) =
+  base gold (`BrokenOaths.Cities.Yields.base_gold/1` — `1 + floor(1/2) =
   1`), nothing more. `found_city` (story 878) already auto-assigns a
   size-1 city's one citizen to its best-scoring adjacent tile
   (`Yields.pick_worked_tile/2`), so this unassigns it first — the same

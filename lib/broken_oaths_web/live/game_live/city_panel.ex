@@ -57,7 +57,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
   offered type's cost and its remaining `disabled?` state (the size-1
   Settler guard, an already-built Granary, or — story 911 — a Bronze
   Age city with no Copper access) are still read straight from
-  `BrokenOaths.Game.Production` (a pure, dependency-free core module)
+  `BrokenOaths.Cities.Production` (a pure, dependency-free core module)
   rather than duplicated here — one source of truth for what's
   buildable and what it costs. `Research` is likewise read directly
   (also pure/dependency-free) to resolve `player_research` into those
@@ -87,9 +87,9 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
   use BrokenOathsWeb, :live_component
 
   alias BrokenOaths.Game.CityDefense
-  alias BrokenOaths.Game.Production
+  alias BrokenOaths.Cities.Production
   alias BrokenOaths.Technology.Research
-  alias BrokenOaths.Game.Yields
+  alias BrokenOaths.Cities.Yields
 
   def render(%{city: nil} = assigns) do
     ~H"""
@@ -432,7 +432,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
   defp catalog_label(:warrior), do: "Warrior"
   defp catalog_label(:granary), do: "Granary"
   defp catalog_label(:bronze_spearman), do: "Bronze Spearman"
-  # QA issue da39e50b — see `BrokenOaths.Game.Production`'s own
+  # QA issue da39e50b — see `BrokenOaths.Cities.Production`'s own
   # moduledoc, "The Archer".
   defp catalog_label(:archer), do: "Archer"
 end

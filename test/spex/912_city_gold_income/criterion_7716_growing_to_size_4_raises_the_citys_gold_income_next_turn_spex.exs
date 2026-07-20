@@ -3,7 +3,7 @@ defmodule BrokenOathsSpex.Story912.Criterion7716Spex do
   Story 912 — City Gold Income
   Criterion 7716 — a city's per-turn gold income is recomputed fresh
   every boundary from its CURRENT size/worked tiles
-  (`BrokenOaths.Game.Yields.city_gold_income/2`'s own doc: "recomputed
+  (`BrokenOaths.Cities.Yields.city_gold_income/2`'s own doc: "recomputed
   fresh every turn boundary [...] never cached on the city itself") —
   so growing raises next turn's income, not merely some later one.
 

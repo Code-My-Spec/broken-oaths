@@ -334,8 +334,8 @@ defmodule BrokenOaths.Vision.Visibility do
 
   # -------------------------------------------------------------------
   # Shared, trivial lookup — duplicated rather than reaching back into
-  # `WorldServer`, matching the sibling `BrokenOaths.Game.Unit`/
-  # `BrokenOaths.Game.City`'s own "pure, process-unaware, unit-testable
+  # `WorldServer`, matching the sibling `BrokenOaths.Units.Unit`/
+  # `BrokenOaths.Cities.City`'s own "pure, process-unaware, unit-testable
   # with no GenServer running" contract (small private helper copies
   # rather than expanding public APIs).
   # -------------------------------------------------------------------

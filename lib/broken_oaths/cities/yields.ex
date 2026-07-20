@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.Yields do
+defmodule BrokenOaths.Cities.Yields do
   @moduledoc """
   Pure yields core (see `.code_my_spec/knowledge/stone_age_yields.md` for
   the canonical numbers this module implements): worked-hex food/
@@ -22,7 +22,7 @@ defmodule BrokenOaths.Game.Yields do
   The city center tile is always worked for free at a guaranteed
   minimum of 2 food / 1 production (`city_center_yield/1`), upgraded
   if the terrain beats it. Its production side is deliberately NOT
-  added again on top of `BrokenOaths.Game.Production`'s flat-5 base —
+  added again on top of `BrokenOaths.Cities.Production`'s flat-5 base —
   the flat base already stands in for it (a real terrain floor would
   double-count); only its food counts toward growth.
 
@@ -37,7 +37,7 @@ defmodule BrokenOaths.Game.Yields do
 
   ## The Granary bonus (story 902, criterion 7629)
 
-  A city with `has_granary: true` (`BrokenOaths.Game.Production`'s
+  A city with `has_granary: true` (`BrokenOaths.Cities.Production`'s
   `:granary` buildable, gated on the owner having completed Pottery)
   banks a flat +2 food every turn on top of the center's floor and
   every worked tile's food — `accrue_food/3`'s own read of `Map.get(
@@ -71,7 +71,7 @@ defmodule BrokenOaths.Game.Yields do
   below would crash without a matching clause the instant Copper
   starts appearing on the map), but its own additive term is `0F 0P`
   — Copper is a pure ACCESS GATE for the Bronze Spearman
-  (`BrokenOaths.Game.Production.can_queue?/3`'s `copper_access?`
+  (`BrokenOaths.Cities.Production.can_queue?/3`'s `copper_access?`
   option), never a tile-yield bonus a citizen benefits from by working
   it.
 
@@ -256,7 +256,7 @@ defmodule BrokenOaths.Game.Yields do
   Bank this turn's food income: the center's floor, every worked
   tile's food, plus the Granary's flat +2 (story 902) if `city` has
   one. Production income is a separate concern —
-  `BrokenOaths.Game.Production.accrue/3`.
+  `BrokenOaths.Cities.Production.accrue/3`.
   """
   @spec accrue_food(city(), World.t(), %{tile_id() => improvement()}) :: city()
   def accrue_food(city, world, improvements) do
@@ -447,7 +447,7 @@ defmodule BrokenOaths.Game.Yields do
   earlier in the tick pipeline, so a Bronze Working completion lifts
   the cap the instant it lands, same turn), never the city's own state.
 
-  `settled_this_tick` (issue 63300098) is `BrokenOaths.Game.Production.
+  `settled_this_tick` (issue 63300098) is `BrokenOaths.Cities.Production.
   resolve_completions/1`'s own set of city ids that completed a
   `:settler` THIS tick -- a city in that set never grows this same
   tick, even if its banked food already clears the (now one-lower,

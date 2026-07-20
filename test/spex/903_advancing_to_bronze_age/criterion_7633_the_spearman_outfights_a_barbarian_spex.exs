@@ -16,7 +16,7 @@ defmodule BrokenOathsSpex.Story903.Criterion7633Spex do
   `BrokenOathsSpex.SharedGivens`'s `:player_reached_bronze_age`
   moduledoc for the real `"select_research"` / `"bronze_working_
   confirm"` event flow this given drives. `bronze_spearman` is story
-  903's own build target for `BrokenOaths.Game.Production`'s buildable
+  903's own build target for `BrokenOaths.Cities.Production`'s buildable
   catalog.
 
   Assumed production-catalog key: `"bronze_spearman"`, the same

@@ -40,13 +40,13 @@ defmodule BrokenOaths.Game.Rebellion.War do
   import Ecto.Query
 
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.City
+  alias BrokenOaths.Cities.City
   alias BrokenOaths.Game.CityDefense
   alias BrokenOaths.Players.Player
-  alias BrokenOaths.Game.Production
+  alias BrokenOaths.Cities.Production
   alias BrokenOaths.Game.Rebellion
   alias BrokenOaths.Game.Rebellion.Resolution
-  alias BrokenOaths.Game.Unit
+  alias BrokenOaths.Units.Unit
   alias BrokenOaths.Game.Vassalage
   alias BrokenOaths.Game.Vassalization
   alias BrokenOaths.Game.WorldServer

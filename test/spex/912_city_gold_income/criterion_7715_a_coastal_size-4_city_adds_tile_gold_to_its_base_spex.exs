@@ -2,7 +2,7 @@ defmodule BrokenOathsSpex.Story912.Criterion7715Spex do
   @moduledoc """
   Story 912 — City Gold Income
   Criterion 7715 — a coastal size-4 city's worked Coast tiles add their
-  own gold on TOP of the size-4 base — `BrokenOaths.Game.Yields.
+  own gold on TOP of the size-4 base — `BrokenOaths.Cities.Yields.
   tile_gold/1`'s own +1-per-worked-Coast-tile rule stacking additively
   with `base_gold/1`, the same "base + bonus" shape every other yield
   in that module already follows.

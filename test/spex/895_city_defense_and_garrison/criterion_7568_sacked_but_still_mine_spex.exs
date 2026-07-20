@@ -34,7 +34,7 @@ defmodule BrokenOathsSpex.Story895.Criterion7568Spex do
   barbarian against IT.
 
   Grows the second city to size 2 first (the `City` changeset floors
-  `size` at 1 — `lib/broken_oaths/game/city.ex` — so "-1 population"
+  `size` at 1 — `lib/broken_oaths/cities/city.ex` — so "-1 population"
   needs a size-2 starting point to land on an unambiguous, schema-legal
   size 1 afterward). No garrison: an undefended city means every attack
   damages the city and NONE bounces back onto the barbarian

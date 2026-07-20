@@ -224,7 +224,7 @@ defmodule BrokenOaths.Game.Cooperation do
 
   # -------------------------------------------------------------------
   # Shared, trivial lookups — duplicated rather than reaching back into
-  # `WorldServer`, matching the sibling `BrokenOaths.Game.Unit`/
+  # `WorldServer`, matching the sibling `BrokenOaths.Units.Unit`/
   # `BrokenOaths.Vision.Visibility`'s own "pure, process-unaware,
   # unit-testable with no GenServer running" contract (small private
   # helper copies rather than expanding public APIs).

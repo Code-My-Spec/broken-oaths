@@ -25,7 +25,7 @@ defmodule BrokenOaths.Game.Tribute do
   goes unpaid," never a debit that could somehow overshoot.
 
   Story 912 shipped the real per-turn city gold YIELD this module's
-  own gap used to document: `BrokenOaths.Game.Yields.city_gold_income/2`
+  own gap used to document: `BrokenOaths.Cities.Yields.city_gold_income/2`
   (a per-size base plus worked-Coast-tile gold, recomputed fresh every
   boundary) — `collect_all/5`'s own `income_by_player` argument is now
   supplied by `BrokenOaths.Game.WorldServer`'s `apply_tribute/1`,

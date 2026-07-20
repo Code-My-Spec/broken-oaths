@@ -87,7 +87,7 @@ defmodule BrokenOaths.Game.Turn do
 
   `charges` (story 882 playtest update, issue 1caa87e9) is read
   defensively via `Map.get(unit, :charges, 3)` everywhere it's read
-  (now `BrokenOaths.Game.Improvement`'s own advance phase) — most of
+  (now `BrokenOaths.Cities.Improvement`'s own advance phase) — most of
   this module's own pre-existing unit tests build a hand-written unit
   map with no `:charges` key at all, and a unit that predates the
   charges migration would likewise have none in a raw hand-built map,
@@ -126,12 +126,12 @@ defmodule BrokenOaths.Game.Turn do
   Road is a movement/connectivity improvement, orthogonal to whatever
   yield improvement (Farm/Mine/Pasture) already occupies `improvements`
   at the same `tile_id` — the two are independent slots, each advanced
-  by `BrokenOaths.Game.Improvement`'s own advance phase exactly the
+  by `BrokenOaths.Cities.Improvement`'s own advance phase exactly the
   same way (that module's own advance/pillage/charge logic is agnostic
   to which of the two maps an improvement happens to live in; only
   `BrokenOaths.Game.WorldServer` — the imperative shell — cares, since
   it's the one enforcing which slot a given `kind` belongs to and
-  persisting each slot to its own DB row). See `BrokenOaths.Game.Improvement`'s
+  persisting each slot to its own DB row). See `BrokenOaths.Cities.Improvement`'s
   own moduledoc for the full rationale.
 
   `unit_id`, `player_id`, and `city_id` are opaque keys (Ecto primary
@@ -153,11 +153,11 @@ defmodule BrokenOaths.Game.Turn do
   fixed order, each delegating to the domain model that owns it (or, if
   genuinely cross-cutting with no single owner, a `Turn.*` submodule):
 
-    1. improvement progress -- `BrokenOaths.Game.Improvement.advance/1`.
-    2. production accrual -- `BrokenOaths.Game.Production.accrue_cities/1`,
+    1. improvement progress -- `BrokenOaths.Cities.Improvement.advance/1`.
+    2. production accrual -- `BrokenOaths.Cities.Production.accrue_cities/1`,
        EXCEPT a pillaged city still serving its own production halt
        (story 895).
-    3. completions/spawn placement -- `BrokenOaths.Game.Production.
+    3. completions/spawn placement -- `BrokenOaths.Cities.Production.
        resolve_completions/1`; a completed item with nowhere to land
        simply waits. Successful spawns come back as `{:unit_spawned,
        spawn_event}` events -- this module never allocates a real unit
@@ -172,12 +172,12 @@ defmodule BrokenOaths.Game.Turn do
     3d. city regeneration (story 895) -- `BrokenOaths.Game.CityDefense.
        regen_cities/2`, skipping every city phase 3c's own barbarian-AI
        assault struck THIS tick.
-    4. food accrual -- `BrokenOaths.Game.Yields.accrue_food_all/1`.
-    5. growth -- `BrokenOaths.Game.Yields.grow_cities/2`, at most once
+    4. food accrual -- `BrokenOaths.Cities.Yields.accrue_food_all/1`.
+    5. growth -- `BrokenOaths.Cities.Yields.grow_cities/2`, at most once
        per city per tick, and never for a city that already paid a
        settler's population cost in phase 3 THIS SAME tick (issue
        63300098).
-    6. healing -- `BrokenOaths.Game.Unit.heal_all/1`: a unit that spent
+    6. healing -- `BrokenOaths.Units.Unit.heal_all/1`: a unit that spent
        no movement this tick heals 15 HP garrisoned on its own city's
        tile, 10 HP anywhere else in its owner's territory, 0 outside it.
     7. heir succession -- `BrokenOaths.Game.Turn.HeirSuccession.resolve/2`
@@ -196,15 +196,15 @@ defmodule BrokenOaths.Game.Turn do
 
   alias BrokenOaths.Game.Camps
   alias BrokenOaths.Game.CityDefense
-  alias BrokenOaths.Game.Improvement
-  alias BrokenOaths.Game.Production
+  alias BrokenOaths.Cities.Improvement
+  alias BrokenOaths.Cities.Production
   alias BrokenOaths.Technology.Research
   alias BrokenOaths.Game.Turn.BarbarianPhase
   alias BrokenOaths.Game.Turn.HeirSuccession
   alias BrokenOaths.Game.Turn.Movement
-  alias BrokenOaths.Game.Unit
+  alias BrokenOaths.Units.Unit
   alias BrokenOaths.Vision.Visibility
-  alias BrokenOaths.Game.Yields
+  alias BrokenOaths.Cities.Yields
 
   @type unit_id :: term()
   @type player_id :: term()

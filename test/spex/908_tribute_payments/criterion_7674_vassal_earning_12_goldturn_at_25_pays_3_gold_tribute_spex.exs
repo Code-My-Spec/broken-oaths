@@ -14,7 +14,7 @@ defmodule BrokenOathsSpex.Story908.Criterion7674Spex do
   (`Fixtures.set_player_gold_income/3`, story 908's own documented
   stand-in for "no per-turn city gold YIELD mechanic exists ANYWHERE in
   this codebase yet"). Story 912 closed that gap for real
-  (`BrokenOaths.Game.Yields.city_gold_income/2`), and `WorldServer.
+  (`BrokenOaths.Cities.Yields.city_gold_income/2`), and `WorldServer.
   apply_tribute/1` now computes its own `income_by_player` straight
   from it every turn boundary — `set_player_gold_income_for_test` is no
   longer read by that phase at all (see `BrokenOaths.Game.Tribute`'s

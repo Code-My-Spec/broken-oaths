@@ -27,7 +27,7 @@ defmodule BrokenOathsSpex.Story905.Criterion7647Spex do
   The remaining assumed contract — unique to story 905, since story 902
   explicitly defers it — is `"start_improvement"` accepting
   `"kind" => "pasture"`; the improvement itself doesn't exist yet
-  (`BrokenOaths.Game.Improvement` only knows `:farm | :mine | :road`
+  (`BrokenOaths.Cities.Improvement` only knows `:farm | :mine | :road`
   today). No duration is specified anywhere yet; 6 turns is a generous,
   documented upper bound (matching the existing 2-5 turn improvement
   range) rather than a guessed exact number.

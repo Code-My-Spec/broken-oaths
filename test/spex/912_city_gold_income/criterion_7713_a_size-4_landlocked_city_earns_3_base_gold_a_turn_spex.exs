@@ -2,7 +2,7 @@ defmodule BrokenOathsSpex.Story912.Criterion7713Spex do
   @moduledoc """
   Story 912 — City Gold Income
   Criterion 7713 — a landlocked size-4 city earns exactly its own BASE
-  gold (`BrokenOaths.Game.Yields.base_gold/1`, `1 + floor(size/2)` — 3
+  gold (`BrokenOaths.Cities.Yields.base_gold/1`, `1 + floor(size/2)` — 3
   at size 4), nothing more: no worked tile contributes any tile gold
   when none of them is Coast.
 

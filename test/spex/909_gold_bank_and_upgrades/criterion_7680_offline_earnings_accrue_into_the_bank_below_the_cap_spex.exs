@@ -13,7 +13,7 @@ defmodule BrokenOathsSpex.Story909.Criterion7680Spex do
   This spec used to declare a flat 5 gold/turn income
   (`Fixtures.set_player_gold_income/3`) — `apply_bank/1` no longer
   reads that seam at all now that story 912 shipped a real per-turn
-  city gold income mechanic (`BrokenOaths.Game.Yields.
+  city gold income mechanic (`BrokenOaths.Cities.Yields.
   city_gold_income/2`, summed by `WorldServer.
   gold_income_by_player/1`). A freshly founded, size-1 city's own real
   income (`SharedGivens.real_gold_income/2`) is `base_gold(1) = 1` at

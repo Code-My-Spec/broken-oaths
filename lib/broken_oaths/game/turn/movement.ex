@@ -18,8 +18,8 @@ defmodule BrokenOaths.Game.Turn.Movement do
   CityDefense`'s own garrison rule and `BrokenOaths.Game.Siege`'s own
   broken-city walk-in exception to decide what counts as "blocked") and
   has no single owning domain model — it belongs to the turn pipeline
-  itself, not to `BrokenOaths.Game.Unit`. `move_now/2` is the one seam
-  `BrokenOaths.Game.Unit.queue_move/4` and `BrokenOaths.Game.
+  itself, not to `BrokenOaths.Units.Unit`. `move_now/2` is the one seam
+  `BrokenOaths.Units.Unit.queue_move/4` and `BrokenOaths.Game.
   Stewardship` call directly (via `BrokenOaths.Game.Turn.move_now/2`,
   which delegates here) to resolve a freshly-queued order's first steps
   immediately rather than waiting for the next tick boundary — same

@@ -139,7 +139,7 @@ defmodule BrokenOaths.Game.Combat do
     bronze_spearman: 16,
     # QA issue da39e50b "No archer" — a first-pass MELEE Archer (this
     # engine has no ranged-attack model at all; see
-    # `BrokenOaths.Game.Production`'s own moduledoc, "The Archer", for
+    # `BrokenOaths.Cities.Production`'s own moduledoc, "The Archer", for
     # the full rationale and the ranged-attack follow-up flag), single
     # strength like every other unit here, between the Warrior (10) and
     # the Bronze Spearman (16).

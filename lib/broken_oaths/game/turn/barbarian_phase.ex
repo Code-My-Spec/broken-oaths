@@ -38,7 +38,7 @@ defmodule BrokenOaths.Game.Turn.BarbarianPhase do
   alias BrokenOaths.Game.BarbarianAI
   alias BrokenOaths.Game.CityDefense
   alias BrokenOaths.Game.Combat
-  alias BrokenOaths.Game.Improvement
+  alias BrokenOaths.Cities.Improvement
   alias BrokenOaths.Worlds.Regions
 
   @doc """

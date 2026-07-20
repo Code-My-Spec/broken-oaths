@@ -70,7 +70,7 @@ defmodule BrokenOaths.Game.Stewardship do
       cancel-griefing" is enforced structurally, by absence, not by a
       runtime check). `queue_production/5` is the state-taking command
       behind `WorldServer`'s own `:steward_queue_production` — it
-      mirrors `BrokenOaths.Game.Production.queue_production/4` exactly
+      mirrors `BrokenOaths.Cities.Production.queue_production/4` exactly
       (same catalog, same `can_queue?/3` gate) but scoped through
       stewardship eligibility instead of ownership.
     * **Emergency defense** — `under_attack?/1` is the gate: normally a
@@ -86,8 +86,8 @@ defmodule BrokenOaths.Game.Stewardship do
       absence" discipline production cancel/disband has above).
       `defend/5` is the state-taking command behind `WorldServer`'s own
       `:steward_defend` — on the genuinely-defensive path it calls
-      `BrokenOaths.Game.Unit.bfs_path/3` +
-      `BrokenOaths.Game.Unit.persist_order!/2` +
+      `BrokenOaths.Units.Unit.bfs_path/3` +
+      `BrokenOaths.Units.Unit.persist_order!/2` +
       `BrokenOaths.Game.Turn.move_now/2`, the exact same "orders
       execute immediately" sequence `Unit.queue_move/4` already
       establishes for an ordinary move.
@@ -128,11 +128,11 @@ defmodule BrokenOaths.Game.Stewardship do
   alias BrokenOaths.Game.Bank
   alias BrokenOaths.Game.Cooperation
   alias BrokenOaths.Players.Presence
-  alias BrokenOaths.Game.Production
+  alias BrokenOaths.Cities.Production
   alias BrokenOaths.Game.ProductionItem
   alias BrokenOaths.Game.StewardLog
   alias BrokenOaths.Game.Turn
-  alias BrokenOaths.Game.Unit
+  alias BrokenOaths.Units.Unit
   alias BrokenOaths.Game.Vassalage
   alias BrokenOaths.Repo
   alias BrokenOaths.Users
@@ -668,7 +668,7 @@ defmodule BrokenOaths.Game.Stewardship do
 
   # -------------------------------------------------------------------
   # Shared, trivial lookups — duplicated rather than reaching back into
-  # `WorldServer`, matching the sibling `BrokenOaths.Game.Unit`/
+  # `WorldServer`, matching the sibling `BrokenOaths.Units.Unit`/
   # `BrokenOaths.Game.Cooperation`'s own "pure, process-unaware,
   # unit-testable with no GenServer running" contract (small private
   # helper copies rather than expanding public APIs).

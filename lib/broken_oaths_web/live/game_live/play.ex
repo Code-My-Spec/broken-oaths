@@ -168,8 +168,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
   use BrokenOathsWeb, :live_view
 
   alias BrokenOaths.Chat
+  alias BrokenOaths.Cities.{Improvement, Yields}
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.{Camp, CityDefense, Improvement, Yields}
+  alias BrokenOaths.Game.{Camp, CityDefense}
   alias BrokenOaths.Players.Presence
   alias BrokenOaths.Technology.Research
   alias BrokenOaths.Worlds
@@ -345,7 +346,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # A left click on a tile is always resolved to "the unit standing
   # there" client-side (the board hook's `click/1`), but since v0.2.1's
   # field stacking (a non-combat unit sharing a tile with an escort of
-  # the SAME owner — see `BrokenOaths.Game.Unit`'s own moduledoc) a
+  # the SAME owner — see `BrokenOaths.Units.Unit`'s own moduledoc) a
   # single tile can now hold two of the player's own units — QA issue
   # d403faa6, "can't pick stacked unit". The hook sends the CLICKED
   # tile's id alongside its own best-guess `unit_id`; when that tile

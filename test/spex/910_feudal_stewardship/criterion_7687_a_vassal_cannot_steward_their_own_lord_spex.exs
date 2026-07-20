@@ -16,7 +16,7 @@ defmodule BrokenOathsSpex.Story910.Criterion7687Spex do
   since this criterion only asserts nothing moved). `subjugate/5`
   itself never founds a city for the LORD (only the vassal's captured
   one, which stays owned — `player_id` — by the vassal even while
-  occupied, per `BrokenOaths.Game.City`'s own doc), so this founds one
+  occupied, per `BrokenOaths.Cities.City`'s own doc), so this founds one
   explicitly with the lord's own starting settler — otherwise the lord
   would own zero cities and earn zero real income, leaving nothing for
   this criterion's own "with real banked gold" premise to bank.

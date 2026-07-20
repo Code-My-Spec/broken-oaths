@@ -86,7 +86,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanelTest do
 
       assert html =~ ~s(data-test="city-granary")
       assert html =~ "Granary"
-      assert html =~ "+#{BrokenOaths.Game.Yields.granary_food_bonus()} food"
+      assert html =~ "+#{BrokenOaths.Cities.Yields.granary_food_bonus()} food"
     end
 
     test "is absent when the city has no granary" do

@@ -6,7 +6,7 @@ defmodule BrokenOathsSpex.Story905.Criterion7650Spex do
   `.code_my_spec/knowledge/civ6_resources.md` §4 — "the citizen
   auto-assign scorer (2*food + 1*production, story 880) needs no
   change: resource tiles simply score higher and get worked first,
-  which is the intended pull" (`BrokenOaths.Game.Yields.
+  which is the intended pull" (`BrokenOaths.Cities.Yields.
   assignment_score/1`, `pick_worked_tile/2`).
 
   Rather than relying on chance to land on a spot where a resource

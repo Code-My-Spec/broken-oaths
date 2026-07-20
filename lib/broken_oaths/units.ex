@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.API.Units do
+defmodule BrokenOaths.Units do
   @moduledoc """
   Unit reads and movement orders. Thin `GenServer.call` wrappers onto
   each world's `BrokenOaths.Game.WorldServer`; see `BrokenOaths.Game`'s
@@ -58,7 +58,7 @@ defmodule BrokenOaths.Game.API.Units do
   @doc """
   Dev-only QA control surface: place a REAL player-owned unit
   (`:warrior | :worker | :settler | :lord`) at `tile_id` with that
-  type's starting stats (`BrokenOaths.Game.Production.unit_stats/1`) —
+  type's starting stats (`BrokenOaths.Cities.Production.unit_stats/1`) —
   see `BrokenOaths.Game.WorldServer`'s `:spawn_unit_for_test` handler
   for the same documented, narrow-exception status
   `spawn_barbarian_for_test/2` has. Returns the spawned unit's map

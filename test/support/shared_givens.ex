@@ -808,10 +808,10 @@ defmodule BrokenOathsSpex.SharedGivens do
   end
 
   @doc """
-  Story 912's own locked gold formula (`BrokenOaths.Game.Yields.
+  Story 912's own locked gold formula (`BrokenOaths.Cities.Yields.
   base_gold/1`/`tile_gold/1`), recomputed here from sanctioned reads
   only (`Fixtures.player_cities/2`/`Fixtures.tile_terrain/2`) — never a
-  direct call into `BrokenOaths.Game.Yields` itself, which the spex
+  direct call into `BrokenOaths.Cities.Yields` itself, which the spex
   Boundary forbids (`BrokenOathsSpex.Fixtures` is the only module
   allowed to dep on `BrokenOaths`). `1 + floor(size/2)` per city, plus
   1 more per currently WORKED Coast tile, summed across every city

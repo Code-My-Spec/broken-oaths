@@ -62,7 +62,7 @@ defmodule BrokenOaths.Game.BarbarianAI do
 
   This module has no opinion on WHAT happens when a barbarian enters a
   tile with a completed improvement, or WHAT happens when a barbarian
-  dies in combat — those are `BrokenOaths.Game.Improvement.pillage/1`
+  dies in combat — those are `BrokenOaths.Cities.Improvement.pillage/1`
   and this module's own `bounty_gold/0` constant, applied by the
   caller (`Turn`) once it knows the decision actually resolved that
   way.

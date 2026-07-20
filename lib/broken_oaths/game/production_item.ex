@@ -2,7 +2,7 @@ defmodule BrokenOaths.Game.ProductionItem do
   @moduledoc """
   One entry in a city's production queue — what's being built, how much
   production is banked toward it, and its total cost. The lowest-id
-  item for a city is the current (head) item; `BrokenOaths.Game.Production`
+  item for a city is the current (head) item; `BrokenOaths.Cities.Production`
   accrues into it each turn and, once `banked >= cost`, resolves it —
   into a spawned unit for `:settler`/`:worker`/`:warrior`, or (story
   902) into the city's own `has_granary` flag flipping for `:granary`,
@@ -17,7 +17,7 @@ defmodule BrokenOaths.Game.ProductionItem do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias BrokenOaths.Game.City
+  alias BrokenOaths.Cities.City
 
   @type item_type :: :settler | :worker | :warrior | :granary | :bronze_spearman | :archer
 

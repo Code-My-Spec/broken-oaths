@@ -21,9 +21,9 @@ defmodule BrokenOaths.Worlds.Resources do
       expansions, but Hills alone is the simplest MVP slice and keeps
       this module's terrain surface unchanged. Unlike the four bonus
       resources, Copper carries no yield of its own
-      (`BrokenOaths.Game.Yields.resource_bonus/1`'s `:copper` clause
+      (`BrokenOaths.Cities.Yields.resource_bonus/1`'s `:copper` clause
       is `0F 0P`) — it is a pure ACCESS GATE for the Bronze Spearman
-      (`BrokenOaths.Game.Production.can_queue?/3`'s `copper_access?`
+      (`BrokenOaths.Cities.Production.can_queue?/3`'s `copper_access?`
       option), never a stockpile a city consumes. Copper is placed
       here UNCONDITIONALLY, exactly like every other resource — this
       module has no concept of a viewing player. The reveal rule

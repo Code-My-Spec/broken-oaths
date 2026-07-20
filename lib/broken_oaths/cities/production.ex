@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.Production do
+defmodule BrokenOaths.Cities.Production do
   @moduledoc """
   Pure production core: the Stone Age buildable catalog (Settler 100,
   Worker 60, Warrior 40, Granary 60 — Monument is still out of scope,
@@ -16,9 +16,9 @@ defmodule BrokenOaths.Game.Production do
   terrain (story 879), on top of its worked tiles' production —
   deliberately NOT the city center's own terrain-based production
   (that stays folded into the flat base; see
-  `BrokenOaths.Game.Yields`'s moduledoc). Food has no such override:
+  `BrokenOaths.Cities.Yields`'s moduledoc). Food has no such override:
   the center's food floor accrues separately via
-  `BrokenOaths.Game.Yields.accrue_food/3`.
+  `BrokenOaths.Cities.Yields.accrue_food/3`.
 
   ## Queue completion
 
@@ -45,7 +45,7 @@ defmodule BrokenOaths.Game.Production do
   it needs no landing tile (`spawnable?/2`'s free-tile gate never
   applies to it) and its completion never produces a `spawn_event` —
   instead it flips `has_granary: true` directly on the completing city
-  (read back by `BrokenOaths.Game.Yields.accrue_food/3` for its +2
+  (read back by `BrokenOaths.Cities.Yields.accrue_food/3` for its +2
   food/turn bonus, the same "unlock flips a flag, read back on demand"
   pattern `BrokenOaths.Technology.Research` already documents for its own
   unlocks). Gated on the city's OWNER having completed Pottery
@@ -110,7 +110,7 @@ defmodule BrokenOaths.Game.Production do
   alias BrokenOaths.Game.CityDefense
   alias BrokenOaths.Game.ProductionItem
   alias BrokenOaths.Technology.Research
-  alias BrokenOaths.Game.Yields
+  alias BrokenOaths.Cities.Yields
   alias BrokenOaths.Repo
   alias BrokenOaths.Worlds.Globe
   alias BrokenOaths.Worlds.Regions
@@ -638,7 +638,7 @@ defmodule BrokenOaths.Game.Production do
   real unit id itself). Also threads a `MapSet` of city ids whose queue
   completed a `:settler` THIS tick (`apply_pop_cost/3` already docked
   their population the instant the spawn event was built) --
-  `BrokenOaths.Game.Yields.grow_cities/2` reads this to skip those
+  `BrokenOaths.Cities.Yields.grow_cities/2` reads this to skip those
   cities' own growth this same tick (issue 63300098: growth resolving
   in the same tick otherwise silently refunds the settler's population
   cost the instant a well-fed city crosses its next growth threshold).

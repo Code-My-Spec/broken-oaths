@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.API.Cities do
+defmodule BrokenOaths.Cities do
   @moduledoc """
   City founding/renaming, worked tiles, the production queue, and
   improvements (worker digs). Thin `GenServer.call` wrappers onto each
