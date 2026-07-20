@@ -1,14 +1,13 @@
 defmodule BrokenOaths.Game.Cooperation do
   @moduledoc """
-  Pure cooperative-combat core (story 901): per-player damage
-  attribution on a shared barbarian target, the proportional bounty
-  split once that target falls, and the alliance propose/accept
-  business rules built on top of `BrokenOaths.Game.Alliance`. No
-  `Repo`, no process state — mirrors `BrokenOaths.Game.Combat`'s role:
-  `BrokenOaths.Game.WorldServer` holds the damage ledger (in memory,
-  keyed by target id) alongside its canonical tick-state, calls into
-  this module on every camp-assault swing, and persists whatever gold
-  `split_bounty/3` computes.
+  Cooperative-combat core (story 901): per-player damage attribution on
+  a shared barbarian target, the proportional bounty split once that
+  target falls, and the alliance propose/accept business rules built on
+  top of `BrokenOaths.Game.Alliance`. Mirrors `BrokenOaths.Game.
+  Combat`'s role: `BrokenOaths.Game.WorldServer` holds the damage
+  ledger (in memory, keyed by target id) alongside its canonical
+  tick-state, calls into this module on every camp-assault swing, and
+  persists whatever gold `split_bounty/3` computes.
 
   ## Damage attribution and bounty splitting
 
@@ -32,14 +31,29 @@ defmodule BrokenOaths.Game.Cooperation do
 
   ## Alliance propose/accept
 
-  `propose/4` and `accept/2` are the state-transition rules for
+  `propose/4` and `accept/2` are the PURE state-transition rules for
   `BrokenOaths.Game.Alliance` — build (and validate) the changeset for
   proposing a new alliance or accepting an existing one, without ever
-  touching `Repo`. The caller (a future `Game.propose_alliance/3`-style
-  wrapper) is responsible for the actual read/write.
+  touching `Repo`.
+
+  `propose_alliance/3` and `accept_alliance/3` are the imperative
+  wrappers around them (pragdave decomposition, slice 5 — moved home
+  from `BrokenOaths.Game.WorldServer`'s own former private
+  `do_propose_alliance/3`/`do_accept_alliance/3`): resolve `state`'s
+  own players, look up whatever `Alliance` row already exists for the
+  pair, build the changeset via `propose/4`/`accept/2` above, and
+  actually perform the `Repo.insert_or_update/1`/`Repo.update/1` — an
+  alliance is world-membership-scoped coordination state, not
+  tick-state, so unlike a move/attack/build order these never touch
+  `WorldServer`'s own `persist_tick/2` or the optimistic turn-guard
+  those use. `find_alliance/3` is exposed publicly (rather than kept
+  private) because `WorldServer`'s own Feudal Stewardship eligibility
+  check (`accepted_ally?/3`) also needs to resolve the same
+  canonical-pair lookup.
   """
 
   alias BrokenOaths.Game.Alliance
+  alias BrokenOaths.Repo
 
   @type player_id :: term()
   @type target_id :: term()
@@ -108,7 +122,7 @@ defmodule BrokenOaths.Game.Cooperation do
   end
 
   # -------------------------------------------------------------------
-  # Alliance propose/accept
+  # Alliance propose/accept — pure rules
   # -------------------------------------------------------------------
 
   @doc """
@@ -156,4 +170,74 @@ defmodule BrokenOaths.Game.Cooperation do
   end
 
   def accept(_alliance, _accepting_player_id), do: {:error, :not_a_party}
+
+  # -------------------------------------------------------------------
+  # Alliance propose/accept — imperative wrappers (see this module's
+  # own "Alliance propose/accept" moduledoc section above).
+  # -------------------------------------------------------------------
+
+  @doc "Resolve `user`/`other_user` against `state`, then `propose/4` + persist."
+  @spec propose_alliance(map(), map(), map()) :: {:ok, Alliance.t()} | {:error, atom()}
+  def propose_alliance(state, user, other_user) do
+    with {:ok, player} <- fetch_player(state, user.id),
+         {:ok, other_player} <- fetch_player(state, other_user.id),
+         existing = find_alliance(state.world.id, player.id, other_player.id),
+         {:ok, changeset} <-
+           propose(existing, state.world.id, player.id, other_player.id) do
+      Repo.insert_or_update(changeset)
+    end
+  end
+
+  @doc "Resolve `user` and the target `alliance_id`, then `accept/2` + persist."
+  @spec accept_alliance(map(), map(), term()) :: {:ok, Alliance.t()} | {:error, atom()}
+  def accept_alliance(state, user, alliance_id) do
+    with {:ok, player} <- fetch_player(state, user.id),
+         {:ok, alliance} <- fetch_alliance(alliance_id),
+         {:ok, changeset} <- accept(alliance, player.id) do
+      Repo.update(changeset)
+    end
+  end
+
+  @doc """
+  The `Alliance` row for the unordered `(player_a_id, player_b_id)` pair
+  in `world_id`, or `nil` — reads back the same canonical (lowest id,
+  highest id) order `Alliance.changeset/2` itself normalizes to, so the
+  caller never has to reason about which of the two is "me". Public: also
+  read by `WorldServer`'s own Feudal Stewardship `:ally` eligibility check.
+  """
+  @spec find_alliance(term(), player_id(), player_id()) :: Alliance.t() | nil
+  def find_alliance(world_id, player_a_id, player_b_id) do
+    {lo, hi} =
+      if player_a_id <= player_b_id,
+        do: {player_a_id, player_b_id},
+        else: {player_b_id, player_a_id}
+
+    Repo.get_by(Alliance, world_id: world_id, player_a_id: lo, player_b_id: hi)
+  end
+
+  defp fetch_alliance(alliance_id) do
+    case Repo.get(Alliance, alliance_id) do
+      nil -> {:error, :not_found}
+      alliance -> {:ok, alliance}
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Shared, trivial lookups — duplicated rather than reaching back into
+  # `WorldServer`, matching the sibling `BrokenOaths.Game.Unit`/
+  # `BrokenOaths.Game.Visibility`'s own "pure, process-unaware,
+  # unit-testable with no GenServer running" contract (small private
+  # helper copies rather than expanding public APIs).
+  # -------------------------------------------------------------------
+
+  defp find_player(state, user_id) do
+    state.players |> Map.values() |> Enum.find(&(&1.user_id == user_id))
+  end
+
+  defp fetch_player(state, user_id) do
+    case find_player(state, user_id) do
+      nil -> {:error, :not_a_player}
+      player -> {:ok, player}
+    end
+  end
 end

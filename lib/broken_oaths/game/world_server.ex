@@ -190,15 +190,15 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   def handle_call({:player_units, user}, _from, state) do
-    {:reply, player_units(state, user), state}
+    {:reply, Visibility.player_units(state, user), state}
   end
 
   def handle_call({:units_visible_to, user}, _from, state) do
-    {:reply, visible_units(state, user), state}
+    {:reply, Visibility.visible_units(state, user), state}
   end
 
   def handle_call({:visibility, user}, _from, state) do
-    {:reply, visibility(state, user), state}
+    {:reply, Visibility.visibility(state, user), state}
   end
 
   def handle_call(:turn_number, _from, state), do: {:reply, state.turn, state}
@@ -412,7 +412,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # own directional `KnownPlayer` rows, not fog-filtered current
   # visibility.
   def handle_call({:known_players, user}, _from, state) do
-    {:reply, known_players(state, user), state}
+    {:reply, Discovery.known_players(state, user), state}
   end
 
   # Story 901: every alliance `user` is a party to — reads straight from
@@ -431,7 +431,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # order this never touches `persist_tick/2` or the optimistic
   # turn-guard those use.
   def handle_call({:propose_alliance, user, other_user}, _from, state) do
-    case do_propose_alliance(state, user, other_user) do
+    case Cooperation.propose_alliance(state, user, other_user) do
       {:ok, _alliance} ->
         broadcast(state.world.id, [:alliances_changed])
         {:reply, :ok, state}
@@ -443,7 +443,7 @@ defmodule BrokenOaths.Game.WorldServer do
 
   # Same non-tick-state status as `:propose_alliance` above.
   def handle_call({:accept_alliance, user, alliance_id}, _from, state) do
-    case do_accept_alliance(state, user, alliance_id) do
+    case Cooperation.accept_alliance(state, user, alliance_id) do
       {:ok, _alliance} ->
         broadcast(state.world.id, [:alliances_changed])
         {:reply, :ok, state}
@@ -1027,11 +1027,11 @@ defmodule BrokenOaths.Game.WorldServer do
   # doc for why this is a sanctioned exception to the fog-filtered board
   # surface (region math has the same status).
   def handle_call(:list_camps, _from, state) do
-    {:reply, Enum.map(Map.values(state.camps), &format_camp(&1, state)), state}
+    {:reply, Visibility.list_camps(state), state}
   end
 
   def handle_call({:camps_visible_to, user}, _from, state) do
-    {:reply, visible_camps(state, user), state}
+    {:reply, Visibility.visible_camps(state, user), state}
   end
 
   # QA issue 56ee521a: fog-filtered ENEMY (another player's own) cities
@@ -1043,7 +1043,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # suspenders alongside `Siege.attack_city/4`'s own gate, matching
   # `Vassalization.apply_captures/1`'s own posture.
   def handle_call({:enemy_cities_visible_to, user}, _from, state) do
-    {:reply, visible_enemy_cities(state, user), state}
+    {:reply, Visibility.visible_enemy_cities(state, user), state}
   end
 
   # QA issue ffa66192: cities the VIEWER has personally captured
@@ -1054,7 +1054,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # feudal_enabled?/0`, same belt-and-suspenders status as
   # `visible_enemy_cities/2` above.
   def handle_call({:captured_cities_visible_to, user}, _from, state) do
-    {:reply, captured_cities(state, user), state}
+    {:reply, Visibility.captured_cities(state, user), state}
   end
 
   def handle_call({:tile_improvement, tile_id}, _from, state) do
@@ -1558,7 +1558,7 @@ defmodule BrokenOaths.Game.WorldServer do
     ticked = War.process_rebellion_endings(ticked)
     ticked = reconcile_heir_vassals(ticked, events)
     ticked = Conspiracy.apply_rebellion_pact_strikes(ticked)
-    {new_state, discovery_events} = apply_discoveries(state, ticked)
+    {new_state, discovery_events} = Discovery.apply_discoveries(state, ticked)
 
     case persist_tick(state, new_state) do
       :ok ->
@@ -1637,41 +1637,6 @@ defmodule BrokenOaths.Game.WorldServer do
       r.world_id == ^state.world.id and r.former_lord_player_id == ^former_lord_player_id
     )
     |> Repo.all()
-  end
-
-  # Story 899: first-contact detection is evaluated once per turn
-  # boundary — the same place every other cross-player/AI decision in
-  # this codebase resolves (heir succession, city alerts, barbarian AI).
-  # `Discovery.new_contacts/2` reports each NEW pair against the
-  # PRE-tick known set (`state.known_players`) using the POST-tick
-  # (`ticked`) unit/city positions — a unit that moved into sight THIS
-  # tick is what triggers it. Each contact folds both directions into
-  # `known_players` (discovery is mutual — see `KnownPlayer`'s doc) and
-  # produces one `{:discovery, user_id, message}` event per side,
-  # mirroring `:city_alert`'s player-scoped push shape.
-  defp apply_discoveries(state, ticked) do
-    known = Map.get(state, :known_players, MapSet.new())
-    contacts = Discovery.new_contacts(ticked, known)
-
-    Enum.reduce(contacts, {ticked, []}, fn {a, b}, {acc_state, acc_events} ->
-      updated_known =
-        acc_state |> Map.get(:known_players, known) |> MapSet.put({a, b}) |> MapSet.put({b, a})
-
-      new_acc_state = Map.put(acc_state, :known_players, updated_known)
-      {new_acc_state, acc_events ++ discovery_events(acc_state, a, b)}
-    end)
-  end
-
-  defp discovery_events(state, player_a_id, player_b_id) do
-    user_a_id = Map.fetch!(state.players, player_a_id).user_id
-    user_b_id = Map.fetch!(state.players, player_b_id).user_id
-    email_a = Users.get_user!(user_a_id).email
-    email_b = Users.get_user!(user_b_id).email
-
-    [
-      {:discovery, user_a_id, "You have discovered #{email_b}'s civilization!"},
-      {:discovery, user_b_id, "#{email_a} has discovered your civilization!"}
-    ]
   end
 
   # Story 895: any foreign unit (barbarian, or per this story's own
@@ -2145,90 +2110,6 @@ defmodule BrokenOaths.Game.WorldServer do
   defp gold_of(nil), do: 0
   defp gold_of(player), do: player.gold
 
-  defp player_units(state, user) do
-    case find_player(state, user.id) do
-      nil ->
-        []
-
-      player ->
-        for {_id, unit} <- state.units,
-            unit.player_id == player.id,
-            do: format_unit(state, unit, player.id)
-    end
-  end
-
-  defp visible_units(state, user) do
-    case find_player(state, user.id) do
-      nil ->
-        []
-
-      player ->
-        %{units: units} = Visibility.filter(state, player.id)
-        for unit <- units, do: format_unit(state, unit, player.id)
-    end
-  end
-
-  defp visibility(state, user) do
-    case find_player(state, user.id) do
-      nil -> %{visible: [], explored: []}
-      player -> state |> Visibility.filter(player.id) |> Map.take([:visible, :explored])
-    end
-  end
-
-  # Orders are private intent — only a unit's own player ever sees it.
-  defp format_unit(state, unit, viewer_player_id) do
-    order =
-      if unit.player_id == viewer_player_id do
-        format_order(Map.get(state.orders, unit.id))
-      end
-
-    %{
-      id: unit.id,
-      type: unit.type,
-      tile_id: unit.tile_id,
-      hp: unit.hp,
-      max_hp: unit.max_hp,
-      movement: unit.movement,
-      max_movement: unit.max_movement,
-      charges: Map.get(unit, :charges, 3),
-      # Story 915 — see `BrokenOathsSpex.Story915.Criterion7734Spex`'s
-      # own "flagged temporary" read: the sanctioned board-state bridge
-      # (`Fixtures.player_units/2`) needs this on every unit map, not
-      # just the owner's own view, since a temporary rebellion unit's
-      # own flag is public knowledge (it's on the board).
-      temporary: Map.get(unit, :temporary, false),
-      order: order
-    }
-  end
-
-  defp format_order(nil), do: nil
-
-  # The remaining path travels with the order (owner-only, see above) so
-  # the board can render the route from the unit to its destination and
-  # keep it current as movement consumes steps (story 875 rule).
-  defp format_order(%{path: path, status: status}),
-    do: %{target_tile: List.last(path), status: status, path: path}
-
-  # `%{user_id:, email:}` for every player `user` has discovered — the
-  # future `KnownPlayersPanel`'s own read, exposed here (not built
-  # there yet, story 899 scope) the same way `player_cities/2` was
-  # exposed well before `GameLive.CityPanel` consumed it.
-  defp known_players(state, user) do
-    case find_player(state, user.id) do
-      nil ->
-        []
-
-      player ->
-        known = Map.get(state, :known_players, MapSet.new())
-
-        for {viewer_id, discovered_id} <- known, viewer_id == player.id do
-          discovered_player = Map.fetch!(state.players, discovered_id)
-          discovered_user = Users.get_user!(discovered_player.user_id)
-          %{user_id: discovered_user.id, email: discovered_user.email}
-        end
-    end
-  end
-
   # -------------------------------------------------------------------
   # Alliances (story 901)
   # -------------------------------------------------------------------
@@ -2276,24 +2157,6 @@ defmodule BrokenOaths.Game.WorldServer do
       online?: online?,
       steward: if(stewardable?, do: steward_view(state, other_player), else: nil)
     }
-  end
-
-  defp do_propose_alliance(state, user, other_user) do
-    with {:ok, player} <- fetch_player(state, user.id),
-         {:ok, other_player} <- fetch_player(state, other_user.id),
-         existing = find_alliance(state.world.id, player.id, other_player.id),
-         {:ok, changeset} <-
-           Cooperation.propose(existing, state.world.id, player.id, other_player.id) do
-      Repo.insert_or_update(changeset)
-    end
-  end
-
-  defp do_accept_alliance(state, user, alliance_id) do
-    with {:ok, player} <- fetch_player(state, user.id),
-         {:ok, alliance} <- fetch_alliance(alliance_id),
-         {:ok, changeset} <- Cooperation.accept(alliance, player.id) do
-      Repo.update(changeset)
-    end
   end
 
   # -------------------------------------------------------------------
@@ -2684,25 +2547,6 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
-  defp fetch_alliance(alliance_id) do
-    case Repo.get(Alliance, alliance_id) do
-      nil -> {:error, :not_found}
-      alliance -> {:ok, alliance}
-    end
-  end
-
-  # Same canonical (lowest id, highest id) pair `Alliance.changeset/2`
-  # itself normalizes to — reading it back requires the query to match
-  # that same order regardless of which of the two is "me" here.
-  defp find_alliance(world_id, player_a_id, player_b_id) do
-    {lo, hi} =
-      if player_a_id <= player_b_id,
-        do: {player_a_id, player_b_id},
-        else: {player_b_id, player_a_id}
-
-    Repo.get_by(Alliance, world_id: world_id, player_a_id: lo, player_b_id: hi)
-  end
-
   # -------------------------------------------------------------------
   # Coordinated Rebellion — Pact of Broken Oaths (story 916)
   # -------------------------------------------------------------------
@@ -2908,7 +2752,7 @@ defmodule BrokenOaths.Game.WorldServer do
   defp lord_id_of(%Vassalage{lord_player_id: lord_player_id}), do: lord_player_id
 
   defp accepted_ally?(world_id, player_a_id, player_b_id) do
-    case find_alliance(world_id, player_a_id, player_b_id) do
+    case Cooperation.find_alliance(world_id, player_a_id, player_b_id) do
       %Alliance{status: :accepted} -> true
       _other -> false
     end
@@ -3101,120 +2945,6 @@ defmodule BrokenOaths.Game.WorldServer do
     |> Repo.insert!()
 
     :ok
-  end
-
-  # Fog filter for camps (story 892, criterion 7546 — HARD constraint):
-  # a camp is known the moment it's inside the player's own claimed
-  # region (immediately, no scouting needed — the region-boundary bias
-  # criterion 7543 relies on) OR once its tile enters the player's
-  # ordinary explored set (the ONLY way a far camp is ever revealed —
-  # criterion 7545). Never the raw `state.camps` — that's
-  # `Fixtures.list_camps/1`'s sanctioned, ground-truth-only status.
-  defp visible_camps(state, user) do
-    case find_player(state, user.id) do
-      nil ->
-        []
-
-      player ->
-        home = player_region_tiles(state.world, player.region_id)
-        explored = Map.get(state.explored, player.id, MapSet.new())
-
-        state.camps
-        |> Map.values()
-        |> Enum.reject(&(!is_nil(&1.destroyed_at)))
-        |> Enum.filter(
-          &(MapSet.member?(home, &1.tile_id) or MapSet.member?(explored, &1.tile_id))
-        )
-        |> Enum.map(&format_camp(&1, state))
-    end
-  end
-
-  # QA issue 56ee521a — see `handle_call({:enemy_cities_visible_to, ...`
-  # above for the full rationale. `city.player_id` is the ORIGINAL
-  # (possibly since-defeated) owner — it never changes on capture, only
-  # `occupied_by_player_id` does (see `Siege`'s own moduledoc) — so a
-  # city already captured by a THIRD player still reads as hostile here
-  # (attacking it again isn't specially blocked today), only the
-  # VIEWER's own captured holdings are excluded.
-  defp visible_enemy_cities(state, user) do
-    if Game.feudal_enabled?(), do: do_visible_enemy_cities(state, user), else: []
-  end
-
-  defp do_visible_enemy_cities(state, user) do
-    case find_player(state, user.id) do
-      nil ->
-        []
-
-      player ->
-        home = player_region_tiles(state.world, player.region_id)
-        explored = Map.get(state.explored, player.id, MapSet.new())
-
-        state.cities
-        |> Map.values()
-        |> Enum.filter(&enemy_city_visible?(&1, player, home, explored))
-        |> Enum.map(&enemy_city_summary/1)
-    end
-  end
-
-  # QA issue 7f91cff2 — `broken` (computed off the FULL city, which
-  # still carries `occupied_by_player_id`, before `Map.take/2` drops it)
-  # is what `GameLive.Play`'s `.Board` hook needs to route a right-click
-  # (or the UnitPanel button) to `queue_move`/occupy instead of another
-  # `attack` once the city is at 0 HP — `Siege.broken?/1` is the single
-  # source of truth every other broken-city check already reads.
-  defp enemy_city_summary(city) do
-    city
-    |> Map.take([:id, :name, :tile_id, :size, :hp])
-    |> Map.put(:broken, Siege.broken?(city))
-  end
-
-  defp enemy_city_visible?(city, player, home, explored) do
-    city.player_id != player.id and city.occupied_by_player_id != player.id and
-      (MapSet.member?(home, city.tile_id) or MapSet.member?(explored, city.tile_id))
-  end
-
-  # QA issue ffa66192 — see `handle_call({:captured_cities_visible_to,
-  # ...` above for the full rationale.
-  defp captured_cities(state, user) do
-    if Game.feudal_enabled?() do
-      case find_player(state, user.id) do
-        nil ->
-          []
-
-        player ->
-          state.cities
-          |> Map.values()
-          |> Enum.filter(&(&1.occupied_by_player_id == player.id))
-          |> Enum.map(&format_captured_city(state, &1))
-      end
-    else
-      []
-    end
-  end
-
-  defp format_captured_city(state, city) do
-    fallen_garrison? = city |> Siege.fallen_garrison(Map.values(state.units)) |> Enum.any?()
-    %{id: city.id, name: city.name, tile_id: city.tile_id, fallen_garrison?: fallen_garrison?}
-  end
-
-  defp player_region_tiles(world, region_id) do
-    world |> Regions.partition() |> Map.fetch!(:regions) |> Map.fetch!(region_id) |> MapSet.new()
-  end
-
-  # `warriors` nests the camp's own spawned units (matched by
-  # `camp_id`, never by tile — a second warrior can land on an
-  # adjacent tile, not the camp's own) — attack/defense both read off
-  # `Combat.base_strength/1` rather than a second hardcoded 15, so the
-  # combat curve and this display can never drift apart.
-  defp format_camp(camp, state) do
-    strength = Combat.base_strength(:barbarian_warrior)
-
-    warriors =
-      for {_id, unit} <- state.units, Map.get(unit, :camp_id) == camp.id do
-        %{id: unit.id, tile_id: unit.tile_id, hp: unit.hp, attack: strength, defense: strength}
-      end
-
-    %{id: camp.id, tile_id: camp.tile_id, hp: camp.hp, warriors: warriors}
   end
 
   # -------------------------------------------------------------------
