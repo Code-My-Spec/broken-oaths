@@ -3,13 +3,12 @@ defmodule BrokenOaths.Game.Improvement do
   A tile improvement — farm, mine, road, or pasture — built by a
   worker over several turns. Progress sticks to the TILE, not the worker (story
   882): `builder_unit_id` names whichever unit is currently advancing
-  it, or `nil` while paused. `BrokenOaths.Game.Turn` clears
-  `builder_unit_id` whenever that unit is no longer standing on
-  `tile_id` at a turn boundary, and only advances `progress` for
-  improvements that still have a builder present — so walking away
-  freezes the dig exactly where it stood, and any worker (any player's
-  — improvements aren't owned) that later starts the same kind on that
-  tile resumes it.
+  it, or `nil` while paused. `advance/1` clears `builder_unit_id`
+  whenever that unit is no longer standing on `tile_id` at a turn
+  boundary, and only advances `progress` for improvements that still
+  have a builder present — so walking away freezes the dig exactly
+  where it stood, and any worker (any player's — improvements aren't
+  owned) that later starts the same kind on that tile resumes it.
 
   One improvement PER KIND per tile, enforced by the unique index on
   `(world_id, tile_id, kind)`: once a given kind's `status` is
@@ -58,6 +57,18 @@ defmodule BrokenOaths.Game.Improvement do
   value directly) — `WorldServer`'s own `handle_call` clauses are thin
   one-line delegations into this module.
 
+  ## Advance / orphaned-builder cleanup (tick-decomposition pass)
+
+  `advance/1` and `clear_orphaned_builders/1` are the pure "tick phase"
+  home for the improvement-progress logic `BrokenOaths.Game.Turn`
+  used to bury inline as private functions (see
+  `.code_my_spec/knowledge/genserver_decomposition.md`'s "Turn (1,318)
+  -> a pure pipeline that SEQUENCES each domain's own tick phase" —
+  improvement advancement is squarely this module's own concept, so it
+  moved home). `BrokenOaths.Game.Turn.tick/1` calls both, at the same
+  two points in the pipeline the inline code used to run at, over the
+  SAME canonical tick-`state` every other functional-core module reads.
+
   ## Pasture (story 905)
 
   Unlike Farm/Mine/Road, which gate purely on TERRAIN
@@ -81,10 +92,10 @@ defmodule BrokenOaths.Game.Improvement do
   `duration(kind)` for Farm/Road) — improvements themselves stay
   ownerless (see above: any player's worker may resume one), so it is
   specifically "whoever's worker broke ground here first" that decided
-  the pace, not whoever eventually finishes it. `BrokenOaths.Game.Turn`
-  reads this field back (falling to `duration/1` when absent, e.g. a
-  hand-built tick-state map in a unit test) instead of recomputing
-  `duration(kind)` itself.
+  the pace, not whoever eventually finishes it. `advance/1` reads this
+  field back (falling to `duration/1` when absent, e.g. a hand-built
+  tick-state map in a unit test) instead of recomputing `duration(kind)`
+  itself.
   """
 
   use Ecto.Schema
@@ -210,6 +221,153 @@ defmodule BrokenOaths.Game.Improvement do
   def pillage(improvement), do: improvement
 
   # -------------------------------------------------------------------
+  # Advance / orphaned-builder cleanup (moved from `BrokenOaths.Game.
+  # Turn`'s own private `advance_improvements/1`/`clear_orphaned_builders/1`,
+  # the tick-decomposition pass — see this module's own moduledoc and
+  # `.code_my_spec/knowledge/genserver_decomposition.md`)
+  # -------------------------------------------------------------------
+
+  # `state` throughout this section is the canonical tick-state
+  # described in `BrokenOaths.Game.Turn`.
+
+  @doc """
+  Advance every improvement (both `state.improvements`, the yield slot,
+  and `state.roads`, the road slot — QA issue 5656770d) one tick: ticks
+  `duration/1` forward for any improvement whose declared builder is
+  still standing on its tile. A completion of a Farm or Mine spends the
+  builder's build charge (story 882 playtest update, issue 1caa87e9); a
+  worker that spends its last charge is expended and removed from
+  `state.units` in this same phase. Roads (and Pasture) are
+  charge-exempt.
+  """
+  @spec advance(map()) :: map()
+  def advance(state) do
+    {improvements, units} = advance_map(state.improvements, state.units)
+    {roads, units} = advance_map(Map.get(state, :roads, %{}), units)
+
+    %{state | improvements: improvements, units: units} |> Map.put(:roads, roads)
+  end
+
+  # Only an improvement whose declared builder is STILL standing on its
+  # tile advances — "one unit per hex" means at most one candidate
+  # builder can ever be present, so there's no concurrent-builder case
+  # to arbitrate. Anyone else (owner or not — improvements aren't
+  # owned) who later starts the same kind on this tile reattaches and
+  # resumes from whatever `progress` was frozen at.
+  #
+  # QA issue 5656770d — the SAME advance logic, applied independently to
+  # `state.improvements` (the yield slot) and `state.roads` (the Road
+  # slot); this function is agnostic to which collection it's handed.
+  defp advance_map(improvements, units) do
+    {new_improvements, new_units} =
+      Enum.map_reduce(improvements, units, fn {tile_id, improvement}, units ->
+        {new_improvement, new_units} = advance_one(improvement, units)
+        {{tile_id, new_improvement}, new_units}
+      end)
+
+    {Map.new(new_improvements), new_units}
+  end
+
+  defp advance_one(%{status: :complete} = improvement, units), do: {improvement, units}
+  defp advance_one(%{builder_unit_id: nil} = improvement, units), do: {improvement, units}
+
+  defp advance_one(improvement, units) do
+    case Map.get(units, improvement.builder_unit_id) do
+      %{tile_id: tile_id} when tile_id == improvement.tile_id ->
+        finish_or_progress(improvement, units)
+
+      _still_present ->
+        {%{improvement | builder_unit_id: nil}, units}
+    end
+  end
+
+  # Story 902, criterion 7628 — `improvement.duration` (set once, at
+  # build-start, by `persist_start_improvement!/3` below) overrides the
+  # kind's hardcoded base when present; a hand-built tick-state map
+  # with no `:duration` key at all (most `BrokenOaths.Game.Turn` unit
+  # tests, and any improvement kind that never gets a research-gated
+  # override) falls back to `duration/1` exactly as before this story.
+  defp finish_or_progress(improvement, units) do
+    progress = improvement.progress + 1
+    duration = Map.get(improvement, :duration) || duration(improvement.kind)
+
+    if progress >= duration do
+      completed = %{improvement | progress: duration, status: :complete, builder_unit_id: nil}
+      {completed, spend_charge(units, improvement.builder_unit_id, improvement.kind)}
+    else
+      {%{improvement | progress: progress}, units}
+    end
+  end
+
+  # Story 882 playtest update (issue 1caa87e9 — worker build charges,
+  # Civ 6 Builder convention): a worker spends exactly one build charge
+  # per COMPLETED Farm or Mine (charges are only ever consumed on
+  # COMPLETION, never on starting or abandoning a build — an abandoned
+  # dig never reaches `finish_or_progress/2`'s completion branch at
+  # all, so it costs nothing by construction). Roads are charge-exempt
+  # (matching Civ 6, where Builders never spend a charge on a road) and
+  # so is Pasture here — story 905 postdates this charges shaping and
+  # names only Farm/Mine in its rule text, so Pasture is left
+  # charge-exempt pending an explicit PM call. A worker with no charges
+  # left after this decrement is expended: removed from `state.units`
+  # outright, in the SAME tick its last charge is spent — the same
+  # removal path `BrokenOaths.Game.WorldServer.persist_unit_changes/2`
+  # already sweeps a combat death through (diffs `state.units`, deletes
+  # whatever's missing).
+  defp spend_charge(units, unit_id, kind) when kind in [:farm, :mine] do
+    case Map.get(units, unit_id) do
+      nil ->
+        units
+
+      unit ->
+        case Map.get(unit, :charges, 3) - 1 do
+          remaining when remaining <= 0 -> Map.delete(units, unit_id)
+          remaining -> Map.put(units, unit_id, Map.put(unit, :charges, remaining))
+        end
+    end
+  end
+
+  defp spend_charge(units, _unit_id, _kind), do: units
+
+  # `advance/1` (above) already clears a builder that's gone or walked
+  # away — but only as of the START of this tick. Combat
+  # (`BrokenOaths.Game.Turn.BarbarianPhase`'s barbarian AI loop, or a
+  # player's own "attack") can kill a unit LATER in this SAME tick,
+  # after `advance/1` already ran; if that unit was mid-build, its
+  # improvement still carries a `builder_unit_id` pointing at a row
+  # `persist_unit_changes` is about to delete, and the FIRST subsequent
+  # write to that improvement (progress banked this same tick, say)
+  # would violate the `game_improvements` table's own foreign key. A
+  # final sweep right before persistence — cheap, only ever a no-op
+  # unless combat just happened — keeps this consistent regardless of
+  # which combat path did the killing.
+  @doc """
+  Clear any `builder_unit_id` whose unit no longer exists in
+  `state.units` (combat may have killed a mid-build unit later in this
+  SAME tick, after `advance/1` already ran) — a final sweep right
+  before persistence.
+  """
+  @spec clear_orphaned_builders(map()) :: map()
+  def clear_orphaned_builders(state) do
+    %{state | improvements: clear_orphaned_builders_map(state.improvements, state.units)}
+    |> Map.put(:roads, clear_orphaned_builders_map(Map.get(state, :roads, %{}), state.units))
+  end
+
+  defp clear_orphaned_builders_map(improvements, units) do
+    Map.new(improvements, fn
+      {tile_id, %{builder_unit_id: id} = improvement} when not is_nil(id) ->
+        if Map.has_key?(units, id) do
+          {tile_id, improvement}
+        else
+          {tile_id, %{improvement | builder_unit_id: nil}}
+        end
+
+      {tile_id, improvement} ->
+        {tile_id, improvement}
+    end)
+  end
+
+  # -------------------------------------------------------------------
   # Start / cancel (moved from WorldServer's `do_start_improvement/4`/
   # `do_cancel_improvement/3`, stories 882/893, QA issue 8aa2c571)
   # -------------------------------------------------------------------
@@ -241,13 +399,13 @@ defmodule BrokenOaths.Game.Improvement do
   # QA issue 8aa2c571 — see `BrokenOaths.Game.cancel_improvement/3`'s doc.
   # Deletes the DB row outright (rather than merely clearing
   # `builder_unit_id`, the way a worker simply walking away already
-  # does at a turn boundary — see `BrokenOaths.Game.Turn.advance_improvement/2`)
-  # so that SLOT comes back completely empty, free for any kind that
-  # shares it. QA issue 5656770d — a tile can now carry an active build
-  # in BOTH slots at once (a Road building alongside a Farm, say); this
-  # cancels whichever one `active_building/2` finds, preferring the
-  # yield slot (`state.improvements`) over the road slot (`state.roads`)
-  # when — the rare case — both are mid-build on the same tile, the same
+  # does at a turn boundary — see `advance_one/2` above) so that SLOT
+  # comes back completely empty, free for any kind that shares it. QA
+  # issue 5656770d — a tile can now carry an active build in BOTH slots
+  # at once (a Road building alongside a Farm, say); this cancels
+  # whichever one `active_building/2` finds, preferring the yield slot
+  # (`state.improvements`) over the road slot (`state.roads`) when —
+  # the rare case — both are mid-build on the same tile, the same
   # tie-break `visible_improvements/2`'s list order and the UI's own
   # `worker_current_dig/2` (`Enum.find`, first match) already use.
   @doc "Cancel whichever improvement `unit_id` (a worker) is actively building on its own tile."

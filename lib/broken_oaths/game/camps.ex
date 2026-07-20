@@ -270,9 +270,8 @@ defmodule BrokenOaths.Game.Camps do
   @doc """
   Advance a camp's spawn counter by one tick. Returns `{camp, ready?}` —
   `ready?` is true once the 3-turn cadence is reached AND `alive_count`
-  is below the 2-warrior cap. The caller (`BrokenOaths.Game.Turn`) finds
-  a landing tile and calls `spawned/1` once a warrior is actually
-  placed; a camp that stays `ready?` without a free tile, or above cap,
+  is below the 2-warrior cap. `resolve_spawns/2` below finds a landing tile and calls
+  `spawned/1` once a warrior is actually placed; a camp that stays `ready?` without a free tile, or above cap,
   simply keeps counting. A destroyed camp is never ready.
   """
   @spec advance(camp(), non_neg_integer()) :: {camp(), boolean()}
@@ -298,6 +297,96 @@ defmodule BrokenOaths.Game.Camps do
   @doc "Reset a camp's spawn counter after a warrior has actually been placed."
   @spec spawned(camp()) :: camp()
   def spawned(camp), do: %{camp | spawn_counter: 0}
+
+  # -------------------------------------------------------------------
+  # Tick-loop spawn resolution (story 892 — moved from `BrokenOaths.Game.
+  # Turn`'s own private `resolve_camp_spawns/2`, the tick-decomposition
+  # pass, see `.code_my_spec/knowledge/genserver_decomposition.md`)
+  # -------------------------------------------------------------------
+
+  @doc """
+  Advance every camp's spawn cadence for one tick and place a warrior
+  for any camp that comes ready with a free landing tile (its own tile,
+  else an adjacent land tile, mirroring `BrokenOaths.Game.Production`'s
+  own city landing-tile pick). Reuses `occupied` — the SAME occupied-
+  tile thread `BrokenOaths.Game.Production.resolve_completions/1`
+  builds — so a camp spawn can't land on a tile a city completion
+  claimed this same tick, and vice versa. The updated set is returned
+  too, for the barbarian-AI phase that follows: a warrior placed THIS
+  tick by either loop (not yet in `state.units`) still reserves its
+  tile against an already-existing barbarian roaming or hunting onto
+  it. `state` is the canonical tick-state described in
+  `BrokenOaths.Game.Turn`.
+
+  Returns `{new_state, spawn_events, occupied}`.
+  """
+  @spec resolve_spawns(map(), map()) :: {map(), [map()], map()}
+  def resolve_spawns(state, occupied) do
+    state = Map.put_new(state, :camps, %{})
+    ids = state.camps |> Map.keys() |> Enum.sort()
+    alive = camp_alive_counts(state.units)
+
+    {camps, events, occupied} =
+      Enum.reduce(ids, {state.camps, [], occupied}, fn id, acc ->
+        resolve_camp_spawn(state.world, id, Map.get(alive, id, 0), acc)
+      end)
+
+    {%{state | camps: camps}, events, occupied}
+  end
+
+  # Ordinary units never set :camp_id — read defensively, the same way
+  # `BrokenOaths.Game.Turn`'s own `pending_heirs` reads unfamiliar keys
+  # elsewhere in the canonical tick-state.
+  defp camp_alive_counts(units) do
+    Enum.reduce(units, %{}, fn {_id, unit}, counts ->
+      case Map.get(unit, :camp_id) do
+        nil -> counts
+        camp_id -> Map.update(counts, camp_id, 1, &(&1 + 1))
+      end
+    end)
+  end
+
+  defp resolve_camp_spawn(world, id, alive_count, {camps, events, occupied}) do
+    camp = Map.fetch!(camps, id)
+    {advanced, ready?} = advance(camp, alive_count)
+
+    if ready? do
+      place_camp_warrior(world, advanced, camps, events, occupied)
+    else
+      {Map.put(camps, id, advanced), events, occupied}
+    end
+  end
+
+  defp place_camp_warrior(world, camp, camps, events, occupied) do
+    case camp_landing_tile(world, camp, occupied) do
+      nil ->
+        {Map.put(camps, camp.id, camp), events, occupied}
+
+      tile ->
+        event = %{player_id: nil, type: :barbarian_warrior, tile_id: tile, camp_id: camp.id}
+        spawned_camp = spawned(camp)
+        {Map.put(camps, camp.id, spawned_camp), [event | events], Map.put(occupied, tile, true)}
+    end
+  end
+
+  # A camp's own tile first, then its adjacent land tiles (sorted for
+  # determinism) — mirrors `BrokenOaths.Game.Production`'s own city
+  # landing-tile pick, so a second warrior lands beside the first
+  # rather than failing to spawn.
+  defp camp_landing_tile(world, camp, occupied) do
+    candidates =
+      [
+        camp.tile_id
+        | world
+          |> Regions.adjacent_tiles(camp.tile_id)
+          |> Enum.filter(&land?(world, &1))
+          |> Enum.sort()
+      ]
+
+    Enum.find(candidates, &(not Map.has_key?(occupied, &1)))
+  end
+
+  defp land?(world, tile_id), do: Regions.tile_class(world, tile_id) == :land
 
   # -------------------------------------------------------------------
   # Camp assault (story 894) — moved home from `BrokenOaths.Game.

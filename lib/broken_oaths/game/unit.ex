@@ -379,6 +379,49 @@ defmodule BrokenOaths.Game.Unit do
   end
 
   # -------------------------------------------------------------------
+  # Healing (moved from `BrokenOaths.Game.Turn`'s own private
+  # `heal_units/1`, the tick-decomposition pass, see
+  # `.code_my_spec/knowledge/genserver_decomposition.md`)
+  # -------------------------------------------------------------------
+
+  @doc """
+  Heal every unit in `state.units` that spent no movement this tick.
+  "Unmoved" is read straight off this tick's own movement ledger: a
+  unit that spent zero movement points still holds `movement ==
+  max_movement` after `BrokenOaths.Game.Turn.Movement.resolve_orders/1`
+  ran, whether that's because it had no order or because its order was
+  blocked before its first step. Heals 15 HP garrisoned on its own
+  city's own tile, 10 HP anywhere else in its owner's territory, 0
+  outside it. `state` is the canonical tick-state described in
+  `BrokenOaths.Game.Turn`.
+  """
+  @spec heal_all(map()) :: map()
+  def heal_all(state) do
+    units = Map.new(state.units, fn {id, unit} -> {id, heal(unit, state.cities)} end)
+    %{state | units: units}
+  end
+
+  defp heal(%{hp: hp, max_hp: max_hp} = unit, _cities) when hp >= max_hp, do: unit
+
+  defp heal(unit, cities) do
+    if unit.movement == unit.max_movement do
+      %{unit | hp: min(unit.max_hp, unit.hp + heal_rate(unit, cities))}
+    else
+      unit
+    end
+  end
+
+  defp heal_rate(unit, cities) do
+    owned = for {_id, city} <- cities, city.player_id == unit.player_id, do: city
+
+    cond do
+      Enum.any?(owned, &(&1.tile_id == unit.tile_id)) -> 15
+      Enum.any?(owned, &(unit.tile_id in &1.territory)) -> 10
+      true -> 0
+    end
+  end
+
+  # -------------------------------------------------------------------
   # Shared, trivial lookups — duplicated rather than reaching back into
   # `WorldServer`, matching the sibling `BrokenOaths.Game.City`/
   # `BrokenOaths.Game.Combat`'s own "pure, process-unaware,

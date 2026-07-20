@@ -353,6 +353,54 @@ defmodule BrokenOaths.Game.Research do
     end
   end
 
+  # -------------------------------------------------------------------
+  # Tick-loop science accrual (story 902 — moved from `BrokenOaths.Game.
+  # Turn`'s own private `accrue_science/1`/`accrue_one_player/4`, the
+  # tick-decomposition pass, see
+  # `.code_my_spec/knowledge/genserver_decomposition.md`)
+  # -------------------------------------------------------------------
+
+  @doc """
+  Every player banks `science_per_turn/1` (their OWN cities' `2 * size`)
+  toward their `current_research`, auto-completing it via
+  `accrue_and_complete/2` the instant it reaches cost. A player missing
+  from `state.player_research` (most hand-built tick-state test maps,
+  and any player row created before this state key existed) is treated
+  as `new/0` for this tick only — a player with `current_research: nil`
+  simply banks nothing, same no-op `accrue/2` documents. `state` is the
+  canonical tick-state described in `BrokenOaths.Game.Turn`.
+
+  Returns `{new_state, tech_completed_events}`.
+  """
+  @spec accrue_science(map()) :: {map(), [tuple()]}
+  def accrue_science(state) do
+    player_research = Map.get(state, :player_research, %{})
+    cities_by_player = Enum.group_by(Map.values(state.cities), & &1.player_id)
+
+    {new_player_research, events} =
+      Enum.reduce(state.players, {player_research, []}, fn {player_id, _player}, {acc, events} ->
+        accrue_one_player(state, player_id, cities_by_player, acc, events)
+      end)
+
+    {Map.put(state, :player_research, new_player_research), Enum.reverse(events)}
+  end
+
+  defp accrue_one_player(state, player_id, cities_by_player, acc, events) do
+    pr = Map.get(acc, player_id, new())
+    income = science_per_turn(Map.get(cities_by_player, player_id, []))
+    {new_pr, completed_tech} = accrue_and_complete(pr, income)
+    acc = Map.put(acc, player_id, new_pr)
+
+    case completed_tech do
+      nil ->
+        {acc, events}
+
+      tech ->
+        user_id = Map.fetch!(state.players, player_id).user_id
+        {acc, [{:tech_completed, user_id, tech} | events]}
+    end
+  end
+
   @doc "`%{tech:, banked:, cost:}` for `current_research`, or `nil` if nothing is selected."
   @spec progress(player_research()) ::
           %{tech: tech(), banked: non_neg_integer(), cost: pos_integer()} | nil

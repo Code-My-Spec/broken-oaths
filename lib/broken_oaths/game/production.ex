@@ -107,6 +107,7 @@ defmodule BrokenOaths.Game.Production do
 
   import Ecto.Query
 
+  alias BrokenOaths.Game.CityDefense
   alias BrokenOaths.Game.ProductionItem
   alias BrokenOaths.Game.Research
   alias BrokenOaths.Game.Yields
@@ -480,6 +481,40 @@ defmodule BrokenOaths.Game.Production do
   end
 
   # -------------------------------------------------------------------
+  # Tick-loop accrual (moved from `BrokenOaths.Game.Turn`'s own private
+  # `accrue_production/1`/`accrue_or_skip/2`, the tick-decomposition
+  # pass — see `.code_my_spec/knowledge/genserver_decomposition.md`)
+  # -------------------------------------------------------------------
+
+  @doc """
+  Bank this turn's production for every city in `state.cities`, skipping
+  any city still serving `BrokenOaths.Game.CityDefense.production_halted?/2`'s
+  pillage freeze (story 895) -- that city's queue simply doesn't move
+  this boundary; its banked progress is untouched, not lost. `state` is
+  the canonical tick-state described in `BrokenOaths.Game.Turn`.
+  """
+  @spec accrue_cities(map()) :: map()
+  def accrue_cities(state) do
+    cities =
+      Map.new(state.cities, fn {id, city} ->
+        {id, accrue_or_skip(city, state)}
+      end)
+
+    %{state | cities: cities}
+  end
+
+  # A pillaged city's queue simply doesn't move while
+  # `CityDefense.production_halted?/2` holds -- see that function's doc
+  # for exactly which boundaries that covers.
+  defp accrue_or_skip(city, state) do
+    if CityDefense.production_halted?(city, state.turn) do
+      city
+    else
+      accrue(city, state.world, state.improvements)
+    end
+  end
+
+  # -------------------------------------------------------------------
   # Completion + spawn placement
   # -------------------------------------------------------------------
 
@@ -585,6 +620,66 @@ defmodule BrokenOaths.Game.Production do
       end)
 
     %{city | worked_tiles: List.delete(city.worked_tiles, weakest)}
+  end
+
+  # -------------------------------------------------------------------
+  # Tick-loop completion resolution (moved from `BrokenOaths.Game.Turn`'s
+  # own private `resolve_completions/1`/`resolve_city_completion/2`, the
+  # tick-decomposition pass)
+  # -------------------------------------------------------------------
+
+  @doc """
+  Resolve every city's queue completions for one tick, in ascending
+  city id order, threading a running "occupied tiles" set through so a
+  spawn from one city in this same tick correctly blocks a landing tile
+  for the next city's completion -- before either lands in `state.units`,
+  which only the caller can update (`{:unit_spawned, _}` events are
+  placement intents, not real units -- this module never allocates a
+  real unit id itself). Also threads a `MapSet` of city ids whose queue
+  completed a `:settler` THIS tick (`apply_pop_cost/3` already docked
+  their population the instant the spawn event was built) --
+  `BrokenOaths.Game.Yields.grow_cities/2` reads this to skip those
+  cities' own growth this same tick (issue 63300098: growth resolving
+  in the same tick otherwise silently refunds the settler's population
+  cost the instant a well-fed city crosses its next growth threshold).
+  `state` is the canonical tick-state described in
+  `BrokenOaths.Game.Turn`.
+
+  Returns `{new_state, spawn_events, occupied, settled_this_tick}`.
+  """
+  @spec resolve_completions(map()) :: {map(), [spawn_event()], map(), MapSet.t()}
+  def resolve_completions(state) do
+    occupied = Map.new(state.units, fn {_id, unit} -> {unit.tile_id, true} end)
+    ids = state.cities |> Map.keys() |> Enum.sort()
+
+    {cities, events, occupied, settled_this_tick} =
+      Enum.reduce(
+        ids,
+        {state.cities, [], occupied, MapSet.new()},
+        &resolve_city_completion(state.world, &1, &2)
+      )
+
+    {%{state | cities: cities}, events, occupied, settled_this_tick}
+  end
+
+  defp resolve_city_completion(world, id, {cities, events, occupied, settled_this_tick}) do
+    city = Map.fetch!(cities, id)
+    {new_city, city_events} = complete(city, occupied, world)
+    newly_occupied = Map.new(city_events, fn event -> {event.tile_id, true} end)
+
+    settled_this_tick =
+      if Enum.any?(city_events, &(&1.type == :settler)) do
+        MapSet.put(settled_this_tick, id)
+      else
+        settled_this_tick
+      end
+
+    {
+      Map.put(cities, id, new_city),
+      events ++ city_events,
+      Map.merge(occupied, newly_occupied),
+      settled_this_tick
+    }
   end
 
   # -------------------------------------------------------------------

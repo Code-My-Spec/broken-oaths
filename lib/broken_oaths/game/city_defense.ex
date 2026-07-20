@@ -354,6 +354,36 @@ defmodule BrokenOaths.Game.CityDefense do
   def regen(city), do: %{city | hp: min(@max_hp, city.hp + @regen_per_boundary)}
 
   # -------------------------------------------------------------------
+  # Tick-loop regen (story 895 -- moved from `BrokenOaths.Game.Turn`'s
+  # own private `regen_cities/2`, the tick-decomposition pass, see
+  # `.code_my_spec/knowledge/genserver_decomposition.md`)
+  # -------------------------------------------------------------------
+
+  @doc """
+  Regen every city in `state.cities` via `regen/1`, EXCEPT any city id
+  in `attacked_cities` -- this tick's own `BrokenOaths.Game.Turn.
+  BarbarianPhase` assaults -- which is left exactly as the assault left
+  it this boundary. A city hit through `BrokenOaths.Game.WorldServer`'s
+  immediate, out-of-tick "attack" surface never suppresses this -- only
+  an attack that's part of THIS tick's own AI phase does, so the very
+  next boundary after an out-of-band hit still regens. `state` is the
+  canonical tick-state described in `BrokenOaths.Game.Turn`.
+  """
+  @spec regen_cities(map(), MapSet.t()) :: map()
+  def regen_cities(state, attacked_cities) do
+    cities =
+      Map.new(state.cities, fn {id, city} ->
+        if MapSet.member?(attacked_cities, id) do
+          {id, city}
+        else
+          {id, regen(city)}
+        end
+      end)
+
+    %{state | cities: cities}
+  end
+
+  # -------------------------------------------------------------------
   # Alerts
   # -------------------------------------------------------------------
 

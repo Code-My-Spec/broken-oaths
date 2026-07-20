@@ -93,6 +93,7 @@ defmodule BrokenOaths.Game.Yields do
   bank-while-offline split this feeds.
   """
 
+  alias BrokenOaths.Game.Research
   alias BrokenOaths.Worlds.Globe
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.Resources
@@ -281,6 +282,27 @@ defmodule BrokenOaths.Game.Yields do
   end
 
   # -------------------------------------------------------------------
+  # Tick-loop food accrual (moved from `BrokenOaths.Game.Turn`'s own
+  # private `accrue_food/1`, the tick-decomposition pass, see
+  # `.code_my_spec/knowledge/genserver_decomposition.md`)
+  # -------------------------------------------------------------------
+
+  @doc """
+  Bank this turn's food income (`accrue_food/3`) for every city in
+  `state.cities`. `state` is the canonical tick-state described in
+  `BrokenOaths.Game.Turn`.
+  """
+  @spec accrue_food_all(map()) :: map()
+  def accrue_food_all(state) do
+    cities =
+      Map.new(state.cities, fn {id, city} ->
+        {id, accrue_food(city, state.world, state.improvements)}
+      end)
+
+    %{state | cities: cities}
+  end
+
+  # -------------------------------------------------------------------
   # Gold (story 912)
   # -------------------------------------------------------------------
 
@@ -411,6 +433,52 @@ defmodule BrokenOaths.Game.Yields do
         |> settle_growth(thresh)
         |> assign_new_citizen(world)
     end
+  end
+
+  @doc """
+  Apply at most one growth (`grow/4`) to every city in `state.cities`,
+  in ascending city id order -- each city grows against the CURRENT
+  territory of every city (including siblings already grown earlier in
+  this same reduce), so two cities eligible for the same tile in one
+  tick resolve by ascending city id, the same determinism rule `grow/4`
+  itself promises. The size cap (story 903) is the city OWNER's own age
+  (`BrokenOaths.Game.Research.age/1`, read off `state.player_research`
+  -- already advanced by `BrokenOaths.Game.Research.accrue_science/1`
+  earlier in the tick pipeline, so a Bronze Working completion lifts
+  the cap the instant it lands, same turn), never the city's own state.
+
+  `settled_this_tick` (issue 63300098) is `BrokenOaths.Game.Production.
+  resolve_completions/1`'s own set of city ids that completed a
+  `:settler` THIS tick -- a city in that set never grows this same
+  tick, even if its banked food already clears the (now one-lower,
+  post-pop-cost) next threshold. Without this, a well-fed city's
+  settler pop cost and growth cancel out invisibly in the same
+  boundary, defeating story 883's "a settler costs the city one
+  population" intent. The city's CURRENT (already pop-cost-adjusted)
+  state still threads through to its siblings' own territory checks
+  below -- only ITS OWN growth is skipped, nothing else about this
+  tick's bookkeeping changes. `state` is the canonical tick-state
+  described in `BrokenOaths.Game.Turn`.
+  """
+  @spec grow_cities(map(), MapSet.t()) :: map()
+  def grow_cities(state, settled_this_tick) do
+    ids = state.cities |> Map.keys() |> Enum.sort()
+    player_research = Map.get(state, :player_research, %{})
+
+    cities =
+      Enum.reduce(ids, state.cities, fn id, cities ->
+        city = Map.fetch!(cities, id)
+
+        if MapSet.member?(settled_this_tick, id) do
+          cities
+        else
+          pr = Map.get(player_research, city.player_id, Research.new())
+          grown = grow(city, Map.values(cities), state.world, Research.age(pr))
+          Map.put(cities, id, grown)
+        end
+      end)
+
+    %{state | cities: cities}
   end
 
   @doc "The next deterministic territory claim, or `nil` if nothing adjacent is left to claim."
