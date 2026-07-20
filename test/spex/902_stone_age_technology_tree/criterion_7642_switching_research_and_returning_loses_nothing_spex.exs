@@ -19,7 +19,10 @@ defmodule BrokenOathsSpex.Story902.Criterion7642Spex do
   world, 7 turns of continuous Animal Husbandry research banks exactly
   20 science (2, 4, 6, 8, 12, 16, 20) — this scenario's own empirically
   chosen checkpoint against that curve, landing on the same "20"
-  banked figure this criterion's story text illustrates.
+  banked figure this criterion's story text illustrates. Animal
+  Husbandry's cost is 80 (rebalanced per QA issue d95ea179 "Research
+  rebalance" — see `BrokenOaths.Technology.Research`'s own moduledoc),
+  so 20 banked reads as "20/80" once switched back to.
   """
 
   use BrokenOathsSpex.Case
@@ -47,9 +50,9 @@ defmodule BrokenOathsSpex.Story902.Criterion7642Spex do
         {:ok, context}
       end
 
-      then_ "switching back to Animal Husbandry shows its progress untouched at 20/50", context do
+      then_ "switching back to Animal Husbandry shows its progress untouched at 20/80", context do
         render_hook(context.play_live, "select_research", %{"tech" => "animal_husbandry"})
-        assert has_element?(context.play_live, "[data-test='research-progress']", "20/50")
+        assert has_element?(context.play_live, "[data-test='research-progress']", "20/80")
         {:ok, context}
       end
     end

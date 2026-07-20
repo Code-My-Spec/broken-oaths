@@ -1,7 +1,6 @@
 defmodule BrokenOaths.Integrations do
   require Logger
 
-  alias BrokenOaths.Integrations.Integration
   alias BrokenOaths.Integrations.IntegrationRepository
   alias BrokenOaths.Users.Scope
 

@@ -18,25 +18,25 @@ defmodule BrokenOaths.Technology.ResearchTest do
   ]
 
   describe "techs/0 and catalog/0" do
-    test "the eleven Ancient-era techs, at their locked PM costs" do
+    test "the eleven Ancient-era techs, at their rebalanced PM costs (QA issue d95ea179)" do
       assert Enum.sort(Research.techs()) == Enum.sort(@all_techs)
 
-      assert Research.cost(:pottery) == 50
-      assert Research.cost(:animal_husbandry) == 50
-      assert Research.cost(:mining) == 75
-      assert Research.cost(:sailing) == 90
-      assert Research.cost(:astrology) == 90
-      assert Research.cost(:writing) == 90
-      assert Research.cost(:irrigation) == 90
-      assert Research.cost(:archery) == 90
-      assert Research.cost(:masonry) == 100
-      assert Research.cost(:the_wheel) == 100
-      assert Research.cost(:bronze_working) == 100
+      assert Research.cost(:pottery) == 80
+      assert Research.cost(:animal_husbandry) == 80
+      assert Research.cost(:mining) == 110
+      assert Research.cost(:sailing) == 150
+      assert Research.cost(:astrology) == 150
+      assert Research.cost(:writing) == 150
+      assert Research.cost(:irrigation) == 150
+      assert Research.cost(:archery) == 150
+      assert Research.cost(:masonry) == 240
+      assert Research.cost(:the_wheel) == 240
+      assert Research.cost(:bronze_working) == 240
     end
 
     test "catalog/0 carries every tech's cost, unlock description, and prerequisites" do
       catalog = Research.catalog()
-      assert catalog[:mining].cost == 75
+      assert catalog[:mining].cost == 110
       assert catalog[:mining].unlock =~ "mines"
       assert catalog[:mining].prereqs == []
       assert catalog[:bronze_working].prereqs == [:mining]
@@ -200,13 +200,13 @@ defmodule BrokenOaths.Technology.ResearchTest do
 
   describe "ready?/1 and complete/1" do
     test "not ready below cost" do
-      pr = %{Research.new() | current_research: :pottery} |> Research.accrue(49)
+      pr = %{Research.new() | current_research: :pottery} |> Research.accrue(79)
       refute Research.ready?(pr)
       assert Research.complete(pr) == {:error, :not_ready}
     end
 
     test "ready and completes exactly at cost" do
-      pr = %{Research.new() | current_research: :pottery} |> Research.accrue(50)
+      pr = %{Research.new() | current_research: :pottery} |> Research.accrue(80)
       assert Research.ready?(pr)
 
       assert {:ok, completed} = Research.complete(pr)
@@ -215,7 +215,7 @@ defmodule BrokenOaths.Technology.ResearchTest do
     end
 
     test "completes with overflow banked past cost" do
-      pr = %{Research.new() | current_research: :mining} |> Research.accrue(90)
+      pr = %{Research.new() | current_research: :mining} |> Research.accrue(130)
       assert {:ok, completed} = Research.complete(pr)
       assert :mining in completed.completed_techs
     end
@@ -227,7 +227,7 @@ defmodule BrokenOaths.Technology.ResearchTest do
 
   describe "accrue_and_complete/2 — the per-turn entry point" do
     test "banks and auto-completes when the cost is reached, reporting the completed tech" do
-      pr = %{Research.new() | current_research: :pottery} |> Research.accrue(48)
+      pr = %{Research.new() | current_research: :pottery} |> Research.accrue(78)
 
       assert {new_pr, :pottery} = Research.accrue_and_complete(pr, 2)
       assert new_pr.current_research == nil
@@ -253,7 +253,7 @@ defmodule BrokenOaths.Technology.ResearchTest do
 
     test "tech/banked/cost for the current research" do
       pr = %{Research.new() | current_research: :bronze_working} |> Research.accrue(40)
-      assert Research.progress(pr) == %{tech: :bronze_working, banked: 40, cost: 100}
+      assert Research.progress(pr) == %{tech: :bronze_working, banked: 40, cost: 240}
     end
   end
 
@@ -297,29 +297,29 @@ defmodule BrokenOaths.Technology.ResearchTest do
       pr = Research.new()
 
       {:ok, pr} = Research.set_research(pr, :animal_husbandry)
-      {pr, completed} = Research.accrue_and_complete(pr, 50)
+      {pr, completed} = Research.accrue_and_complete(pr, 80)
       assert completed == :animal_husbandry
 
       {:ok, pr} = Research.set_research(pr, :pottery)
-      {pr, nil} = Research.accrue_and_complete(pr, 30)
-      {pr, completed} = Research.accrue_and_complete(pr, 20)
+      {pr, nil} = Research.accrue_and_complete(pr, 50)
+      {pr, completed} = Research.accrue_and_complete(pr, 30)
       assert completed == :pottery
 
       {:ok, pr} = Research.set_research(pr, :mining)
-      {pr, completed} = Research.accrue_and_complete(pr, 75)
+      {pr, completed} = Research.accrue_and_complete(pr, 110)
       assert completed == :mining
 
       # Only reachable now that Pottery/Animal Husbandry/Mining are done.
       {:ok, pr} = Research.set_research(pr, :archery)
-      {pr, completed} = Research.accrue_and_complete(pr, 90)
+      {pr, completed} = Research.accrue_and_complete(pr, 150)
       assert completed == :archery
 
       {:ok, pr} = Research.set_research(pr, :writing)
-      {pr, completed} = Research.accrue_and_complete(pr, 90)
+      {pr, completed} = Research.accrue_and_complete(pr, 150)
       assert completed == :writing
 
       {:ok, pr} = Research.set_research(pr, :bronze_working)
-      {pr, completed} = Research.accrue_and_complete(pr, 100)
+      {pr, completed} = Research.accrue_and_complete(pr, 240)
       assert completed == :bronze_working
 
       assert Enum.sort(pr.completed_techs) ==

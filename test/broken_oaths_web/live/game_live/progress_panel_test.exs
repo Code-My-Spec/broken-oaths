@@ -49,7 +49,8 @@ defmodule BrokenOathsWeb.GameLive.ProgressPanelTest do
       assert html =~ ~s(data-test="progress-panel")
       assert span(html, "progress-age") == "Stone Age"
       assert span(html, "progress-science-per-turn") == "0"
-      assert span(html, "progress-bronze-working") == "0 / 100"
+      # Bronze Working costs 240 (QA issue d95ea179 rebalance).
+      assert span(html, "progress-bronze-working") == "0 / 240"
     end
 
     test "shows the projected turns to Bronze Working at the current rate" do
@@ -57,16 +58,16 @@ defmodule BrokenOathsWeb.GameLive.ProgressPanelTest do
       html = render_panel(%{player_research: player_research})
 
       assert span(html, "progress-science-per-turn") == "4"
-      # 100 science cost / 4 per turn == 25 turns, no rounding needed.
-      assert span(html, "progress-turns-to-bronze") == "25"
+      # 240 science cost / 4 per turn == 60, no rounding needed.
+      assert span(html, "progress-turns-to-bronze") == "60"
     end
 
     test "rounds the turns-to-Bronze projection UP to a whole turn" do
-      player_research = %{@no_research | science_per_turn: 3}
+      player_research = %{@no_research | science_per_turn: 7}
       html = render_panel(%{player_research: player_research})
 
-      # ceil(100 / 3) == 34, not the truncated 33.
-      assert span(html, "progress-turns-to-bronze") == "34"
+      # ceil(240 / 7) == 35, not the truncated 34.
+      assert span(html, "progress-turns-to-bronze") == "35"
     end
 
     test "reflects science already banked toward Bronze Working" do
@@ -78,9 +79,9 @@ defmodule BrokenOathsWeb.GameLive.ProgressPanelTest do
 
       html = render_panel(%{player_research: player_research})
 
-      assert span(html, "progress-bronze-working") == "40 / 100"
-      # (100 - 40) / 5 == 12
-      assert span(html, "progress-turns-to-bronze") == "12"
+      assert span(html, "progress-bronze-working") == "40 / 240"
+      # (240 - 40) / 5 == 40
+      assert span(html, "progress-turns-to-bronze") == "40"
     end
 
     test "never crashes with zero science income — renders a placeholder instead" do
@@ -93,7 +94,7 @@ defmodule BrokenOathsWeb.GameLive.ProgressPanelTest do
         @no_research
         | completed_techs: [:bronze_working],
           science_per_turn: 6,
-          banked_science: %{bronze_working: 100}
+          banked_science: %{bronze_working: 240}
       }
 
       html = render_panel(%{player_research: player_research})

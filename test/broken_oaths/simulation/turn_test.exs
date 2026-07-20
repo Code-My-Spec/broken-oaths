@@ -772,7 +772,9 @@ defmodule BrokenOaths.Simulation.TurnTest do
 
     test "auto-completes a tech the instant its cost is banked, and clears current_research" do
       c = city(1, tile: 1, size: 4)
-      pr = %{Research.new() | current_research: :pottery} |> Research.accrue(42)
+      # Pottery costs 80 (QA issue d95ea179 rebalance); 72 banked + 8
+      # income (size 4 * 2/pop) lands exactly on cost.
+      pr = %{Research.new() | current_research: :pottery} |> Research.accrue(72)
       state = research_state(c, pr)
 
       {new_state, events} = Turn.tick(state)

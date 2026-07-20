@@ -179,7 +179,7 @@ defmodule BrokenOathsSpex.Story895.Criterion7567Spex do
   defp city_hp(play_live) do
     html = render(play_live)
 
-    case Regex.run(~r/data-test="city-hp"[^>]*>(\d+)/, html) do
+    case Regex.run(~r/data-test="city-hp"[^>]*>\s*(\d+)/s, html) do
       [_, hp] -> String.to_integer(hp)
       nil -> nil
     end

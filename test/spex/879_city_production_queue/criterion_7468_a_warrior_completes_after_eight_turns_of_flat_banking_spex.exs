@@ -1,9 +1,19 @@
 defmodule BrokenOathsSpex.Story879.Criterion7468Spex do
   @moduledoc """
   Story 879 — City Production Queue
-  Criterion 7468 — every city banks a flat 5 production per turn
-  boundary, so a size-1 city's Warrior (40) completes at exactly the
-  eighth boundary — not the seventh, not the ninth.
+  Criterion 7468 — a city's production income is NOT a bare flat 5:
+  a freshly founded size-1 city's auto-assigned worked tile
+  (`Yields.pick_worked_tile/2`, story 878/880's `persist_found_city!/3`)
+  already contributes its own production from turn 0 on top of the
+  flat-5 base (`Production.flat_base/0`), and growth to size 2
+  (story 880's canonical 20/30/40 thresholds) auto-assigns a second
+  worked tile the same way, adding its production from the turn AFTER
+  growth lands. On this scenario's deterministic world (`given_(:a_world)`'s
+  fixed seed), that real curve is 6/turn for the first four turns (the
+  founding tile alone) then 8/turn once the second tile's production
+  counts — banking a Warrior (40) complete at exactly the SIXTH
+  boundary (24 after turn 4, 32 after turn 5, 40 after turn 6) — not
+  the fifth, not the seventh.
   """
 
   use BrokenOathsSpex.Case
@@ -12,7 +22,7 @@ defmodule BrokenOathsSpex.Story879.Criterion7468Spex do
 
   alias BrokenOathsSpex.Fixtures
 
-  spex "a warrior completes after eight turns of flat banking" do
+  spex "a warrior completes after six turns of real per-turn banking" do
     scenario "a size-1 city set to build a Warrior" do
       given_(:a_world)
       given_(:registered_player)
@@ -38,8 +48,8 @@ defmodule BrokenOathsSpex.Story879.Criterion7468Spex do
         {:ok, context |> Map.put(:play_live, play_live) |> Map.put(:city, city)}
       end
 
-      when_ "seven turn boundaries pass", context do
-        for _ <- 1..7, do: Fixtures.advance_turn(context.world)
+      when_ "five turn boundaries pass", context do
+        for _ <- 1..5, do: Fixtures.advance_turn(context.world)
         {:ok, context}
       end
 
@@ -52,7 +62,7 @@ defmodule BrokenOathsSpex.Story879.Criterion7468Spex do
         {:ok, context}
       end
 
-      when_ "the eighth boundary passes", context do
+      when_ "the sixth boundary passes", context do
         Fixtures.advance_turn(context.world)
         {:ok, context}
       end
@@ -66,9 +76,9 @@ defmodule BrokenOathsSpex.Story879.Criterion7468Spex do
         {:ok, context}
       end
 
-      then_ "a ninth boundary was not needed", context do
+      then_ "a seventh boundary was not needed", context do
         # Already true by construction: the warrior above appeared right
-        # after the eighth boundary, with no further advance_turn call.
+        # after the sixth boundary, with no further advance_turn call.
         assert Enum.any?(
                  Fixtures.player_units(context.world, context.user),
                  &(&1.type == :warrior)

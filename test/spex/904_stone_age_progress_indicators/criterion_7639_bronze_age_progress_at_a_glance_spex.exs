@@ -29,7 +29,10 @@ defmodule BrokenOathsSpex.Story904.Criterion7639Spex do
       player's current science income, a plain integer
     * `[data-test='progress-bronze-working']` — text includes
       "`<banked>` / `<cost>`" for the Bronze Working tech specifically
-      (`"0 / 100"` before any science has ever been banked toward it)
+      (`"0 / 240"` before any science has ever been banked toward it —
+      cost rebalanced from 100 to 240 per QA issue d95ea179 "Research
+      rebalance", see `BrokenOaths.Technology.Research`'s own
+      moduledoc for the full new cost curve)
     * `[data-test='progress-turns-to-bronze']` — text includes a plain
       integer: the estimated number of turns to reach Bronze Working
 
@@ -55,8 +58,9 @@ defmodule BrokenOathsSpex.Story904.Criterion7639Spex do
   player has any science income at all, independent of whether Bronze
   Working happens to be the tech currently selected. With
   `banked_toward_bronze_working` at 0 (nothing has ever been
-  researched), the numerator collapses to the tech's flat 100-science
-  cost (story 902, stone_age.md §6.1: "Bronze Working (100 science)").
+  researched), the numerator collapses to the tech's flat 240-science
+  cost (rebalanced per QA issue d95ea179 from the original 100 — see
+  `BrokenOaths.Technology.Research`'s own moduledoc).
 
   ## Science constant
 
@@ -78,7 +82,8 @@ defmodule BrokenOathsSpex.Story904.Criterion7639Spex do
 
   # story 902, stone_age.md §6.1
   @science_per_pop 2
-  @bronze_working_cost 100
+  # rebalanced per QA issue d95ea179 "Research rebalance" (was 100)
+  @bronze_working_cost 240
 
   spex "Bronze Age progress at a glance" do
     scenario "founding a city gives the progress panel real age, science, and Bronze Working numbers to show" do

@@ -1,6 +1,6 @@
 defmodule BrokenOaths.Accounts do
   alias BrokenOaths.Accounts.{Account, AccountsRepository, MembersRepository}
-  alias BrokenOaths.Accounts.{Invitation, InvitationRepository, InvitationNotifier}
+  alias BrokenOaths.Accounts.{InvitationRepository, InvitationNotifier}
   alias BrokenOaths.Authorization
   alias BrokenOaths.Users
   alias BrokenOaths.Users.Scope

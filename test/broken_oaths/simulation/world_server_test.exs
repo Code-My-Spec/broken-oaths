@@ -346,7 +346,7 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
       :ok = Game.set_research(world, user, :pottery)
 
       assert Game.player_research(world, user).current_research == :pottery
-      assert Game.player_research(world, user).progress == %{tech: :pottery, banked: 0, cost: 50}
+      assert Game.player_research(world, user).progress == %{tech: :pottery, banked: 0, cost: 80}
 
       WorldServer.restart(world)
     end

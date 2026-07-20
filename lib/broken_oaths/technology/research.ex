@@ -20,6 +20,51 @@ defmodule BrokenOaths.Technology.Research do
   population, same field `BrokenOaths.Cities.Yields.threshold/1` grows
   against) stands in for Civ's Palace + Campus + Library stack.
 
+  ## Tech costs — the Civ-6-proportional curve (rebalanced, QA issue
+  d95ea179 "Research rebalance")
+
+  Playtest reported the tree blitzing past at a clip that made the
+  Ancient era feel weightless: with the ORIGINAL costs (Pottery/Animal
+  Husbandry 50, Mining 75, the five tier-2-ish techs 90, the
+  Mining-gated trio 100 — sum 925 across the whole tree) the ratio
+  between a tech's cost and a city's science OUTPUT was too low, so
+  even a single modest city banked a "meaningful" tech in a handful of
+  turns, and a two-or-three-city empire cleared the entire tree before
+  the Ancient era had time to feel like an era.
+
+  Civ 6's own Ancient-era techs (standard speed, `.code_my_spec/
+  knowledge/civ6_tech_tree.md` §2) cost **25** for the free tier-1
+  techs, **50** for the next tier, and **80** for the Mining-gated
+  capstone tier (Masonry / The Wheel / Bronze Working) — roughly a
+  **1 : 2 : 3.2** spread from cheapest to priciest. This tree keeps
+  that same three-band shape but scaled up so the ratio of cost to our
+  `2 * size` science formula produces a Civ-6-like PACE (several turns
+  for an early tech from a small city, longer for a capstone one),
+  rather than matching Civ's raw numbers (which assume Civ's much
+  smaller ~0.5/pop + flat Palace science, not our single `2/pop`
+  lever):
+
+    * **Tier 1, cheapest** — Pottery (80), Animal Husbandry (80),
+      Mining (110, kept pricier than its tier-1 siblings, same
+      relative gap the original curve had).
+    * **Tier "mid"** — Sailing (150), Astrology (150), Writing (150),
+      Irrigation (150), Archery (150). Civ 6 prices every one of
+      these techs identically too (50 apiece) — mirrored here.
+    * **Tier "capstone"** — Masonry (240), The Wheel (240), Bronze
+      Working (240): the trio gated behind Mining, deliberately the
+      most expensive band (a ~1 : 1.9 : 3 spread from the cheapest
+      tier to this one, close to Civ's own 1 : 3.2).
+
+  Whole-tree total: **1,740** (was 925, ~1.9x). `@science_per_pop`
+  (below) is UNCHANGED at 2 — the fix is entirely on the cost side, so
+  a growing single city still climbs the same familiar science-per-turn
+  ramp (`science_per_turn/1`); it just now takes noticeably longer per
+  tech, and proportionally longer still for the Mining-gated capstone
+  trio, to reach the top of the tree. A multi-city empire still
+  researches faster than a lone city (exactly as intended — more
+  population is the whole point of the science lever), just no longer
+  fast enough to trivialize the tree in a handful of turns.
+
   ## One tech at a time, banked per tech
 
   `current_research` names at most one tech; `banked_science` tracks
@@ -31,15 +76,17 @@ defmodule BrokenOaths.Technology.Research do
 
   ## The tech tree: eleven Ancient-era techs, with prerequisites
 
-  Five techs have NO prerequisite (tier 1): Pottery (50), Animal
-  Husbandry (50), Mining (75), Sailing (90), Astrology (90). Six more
-  each require exactly one tier-1 tech first: Writing (90) and
-  Irrigation (90) need Pottery; Archery (90) needs Animal Husbandry;
-  Masonry (100), The Wheel (100), and Bronze Working (100) need
+  Five techs have NO prerequisite (tier 1): Pottery (80), Animal
+  Husbandry (80), Mining (110), Sailing (150), Astrology (150). Six
+  more each require exactly one tier-1 tech first: Writing (150) and
+  Irrigation (150) need Pottery; Archery (150) needs Animal Husbandry;
+  Masonry (240), The Wheel (240), and Bronze Working (240) need
   Mining. These edges mirror Civ 6's own Ancient-era shape (see
   `.code_my_spec/knowledge/civ6_tech_tree.md`) — reaching the Bronze
   Age now requires researching Mining BEFORE Bronze Working, where
-  previously Bronze Working had no prerequisite at all.
+  previously Bronze Working had no prerequisite at all. (Costs
+  themselves were rebalanced per QA issue d95ea179 — see "Tech costs"
+  above; the prerequisite SHAPE is unchanged.)
 
   `set_research/2` REFUSES to select a tech whose prerequisites
   aren't all in `completed_techs` yet (`{:error, :prereqs_not_met}`),
@@ -107,34 +154,34 @@ defmodule BrokenOaths.Technology.Research do
   @science_per_pop 2
 
   @catalog %{
-    # Tier 1 — no prerequisite.
+    # Tier 1 — no prerequisite, cheapest band.
     pottery: %{
-      cost: 50,
+      cost: 80,
       prereqs: [],
       unlock: "Enables the Granary building (+2 food storage)"
     },
     animal_husbandry: %{
-      cost: 50,
+      cost: 80,
       prereqs: [],
       unlock: "Enables the Pasture improvement (+2 food on animal resources)"
     },
-    mining: %{cost: 75, prereqs: [], unlock: "Workers build mines in 3 turns instead of 5"},
-    sailing: %{cost: 90, prereqs: [], unlock: "Enables Galleys and coastal exploration"},
-    astrology: %{cost: 90, prereqs: [], unlock: "Enables the Holy Site district"},
+    mining: %{cost: 110, prereqs: [], unlock: "Workers build mines in 3 turns instead of 5"},
+    sailing: %{cost: 150, prereqs: [], unlock: "Enables Galleys and coastal exploration"},
+    astrology: %{cost: 150, prereqs: [], unlock: "Enables the Holy Site district"},
     # After Pottery.
-    writing: %{cost: 90, prereqs: [:pottery], unlock: "Enables the Library building"},
-    irrigation: %{cost: 90, prereqs: [:pottery], unlock: "Enables farming irrigated resources"},
+    writing: %{cost: 150, prereqs: [:pottery], unlock: "Enables the Library building"},
+    irrigation: %{cost: 150, prereqs: [:pottery], unlock: "Enables farming irrigated resources"},
     # After Animal Husbandry.
-    archery: %{cost: 90, prereqs: [:animal_husbandry], unlock: "Enables the Archer unit"},
-    # After Mining.
+    archery: %{cost: 150, prereqs: [:animal_husbandry], unlock: "Enables the Archer unit"},
+    # After Mining — the capstone band.
     masonry: %{
-      cost: 100,
+      cost: 240,
       prereqs: [:mining],
       unlock: "Enables Walls and the Quarry improvement"
     },
-    the_wheel: %{cost: 100, prereqs: [:mining], unlock: "Enables roads and the Heavy Chariot"},
+    the_wheel: %{cost: 240, prereqs: [:mining], unlock: "Enables roads and the Heavy Chariot"},
     bronze_working: %{
-      cost: 100,
+      cost: 240,
       prereqs: [:mining],
       unlock: "Advances your civilization to the Bronze Age"
     }

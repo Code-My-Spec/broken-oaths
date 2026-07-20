@@ -7,7 +7,10 @@ defmodule BrokenOathsSpex.Story902.Criterion7631Spex do
   CityPanel` already ships for production (story 879).
 
   See `Criterion7625Spex`'s moduledoc for the assumed `TechPanel`
-  surface contract this spec (and its siblings) drives.
+  surface contract this spec (and its siblings) drives. Animal
+  Husbandry's cost (80, rebalanced per QA issue d95ea179 "Research
+  rebalance" — see `BrokenOaths.Technology.Research`'s own moduledoc)
+  is the denominator this scenario's progress bar reads against.
   """
 
   use BrokenOathsSpex.Case
@@ -28,13 +31,13 @@ defmodule BrokenOathsSpex.Story902.Criterion7631Spex do
         {:ok, context}
       end
 
-      when_ "three turns pass — 6 of the needed 50 science", context do
+      when_ "three turns pass — 6 of the needed 80 science", context do
         for _ <- 1..3, do: Fixtures.advance_turn(context.world)
         {:ok, context}
       end
 
-      then_ "the panel shows 6/50 progress with a progress bar", context do
-        assert has_element?(context.play_live, "[data-test='research-progress']", "6/50")
+      then_ "the panel shows 6/80 progress with a progress bar", context do
+        assert has_element?(context.play_live, "[data-test='research-progress']", "6/80")
         assert has_element?(context.play_live, "[data-test='research-progress-bar']")
         {:ok, context}
       end

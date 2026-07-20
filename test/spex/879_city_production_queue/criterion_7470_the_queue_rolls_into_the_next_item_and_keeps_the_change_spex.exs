@@ -10,10 +10,18 @@ defmodule BrokenOathsSpex.Story879.Criterion7470Spex do
   flat banking alone always completes an item with zero surplus — the
   carry-over math would only ever be exercised trivially at zero. To
   give this scenario real overflow to observe, the city here grows
-  once and manually assigns its one worked tile (via the same
-  override the city panel offers per story 880) to a tile whose yield
-  is discovered — not assumed — to include nonzero production, so the
-  per-turn total is provably not a multiple of the Warrior's cost.
+  once — auto-assigning a second worked tile the same way founding
+  does (`Yields.pick_worked_tile/2`) — and then manually reassigns its
+  OTHER worked tile (via the same override the city panel offers per
+  story 880) to the territory's most productive remaining candidate.
+  "Most productive" (not just "the first hills-or-plains tile found")
+  matters: the auto-assigned tile from growth already contributes its
+  own production, and the first plain hills/plains candidate this
+  world happens to offer combines with it to total exactly 8/turn — an
+  exact divisor of the Warrior's cost (40), which would leave zero
+  overflow to observe. Picking the candidate with the highest
+  discovered relief/feature bonus instead lands on a real, nonzero
+  remainder for this scenario's deterministic world.
   """
 
   use BrokenOathsSpex.Case
@@ -42,10 +50,17 @@ defmodule BrokenOathsSpex.Story879.Criterion7470Spex do
         render_hook(play_live, "found_city", %{"unit_id" => settler.id})
         [city] = Fixtures.player_cities(context.world, context.user)
 
-        # Grow once so there's a work slot, then point it (manual override)
-        # at any owned tile whose terrain contributes production beyond
-        # the free center — hills always add +1P, flat plains gives 1F1P
-        # (canonical table: .code_my_spec/knowledge/stone_age_yields.md).
+        # Grow once so there's a second worked tile (auto-assigned exactly
+        # like founding's own worked-tile pick), then manually reassign
+        # the OTHER worked tile (manual override) to whichever remaining
+        # owned candidate has the highest discovered production bonus —
+        # hills add +1P, woods add +1P, flat plains gives 1F1P, all
+        # additive (canonical table: .code_my_spec/knowledge/
+        # stone_age_yields.md). Picking the MOST productive candidate,
+        # not just the first hills/plains/woods match, is what makes the
+        # per-turn total provably nonzero-remainder against the
+        # Warrior's cost on this scenario's deterministic world — see
+        # this module's own moduledoc.
         Enum.reduce_while(1..40, :ok, fn _, :ok ->
           [c] = for cc <- Fixtures.player_cities(context.world, context.user), cc.id == city.id, do: cc
           if c.size >= 2 do
@@ -59,10 +74,13 @@ defmodule BrokenOathsSpex.Story879.Criterion7470Spex do
         [city] = Fixtures.player_cities(context.world, context.user)
 
         productive_tile =
-          Enum.find(city.territory -- [city.tile_id], fn t ->
+          (city.territory -- [city.tile_id])
+          |> Enum.reject(&(&1 in city.worked_tiles))
+          |> Enum.filter(fn t ->
             terrain = Fixtures.tile_terrain(context.world, t)
-            terrain.relief == :hills or terrain.base == :plains
+            terrain.relief == :hills or terrain.base == :plains or terrain.feature == :woods
           end)
+          |> Enum.max_by(&tile_production_bonus(context.world, &1), fn -> nil end)
 
         [currently_worked | _] = city.worked_tiles
 
@@ -122,5 +140,17 @@ defmodule BrokenOathsSpex.Story879.Criterion7470Spex do
         {:ok, context}
       end
     end
+  end
+
+  # Discovered (not assumed) production bonus for the "most productive
+  # candidate" pick above — hills, plains, and woods each add +1
+  # production, additive (canonical table: .code_my_spec/knowledge/
+  # stone_age_yields.md).
+  defp tile_production_bonus(world, tile_id) do
+    terrain = Fixtures.tile_terrain(world, tile_id)
+    relief_bonus = if terrain.relief == :hills, do: 1, else: 0
+    plains_bonus = if terrain.base == :plains, do: 1, else: 0
+    woods_bonus = if terrain.feature == :woods, do: 1, else: 0
+    relief_bonus + plains_bonus + woods_bonus
   end
 end
