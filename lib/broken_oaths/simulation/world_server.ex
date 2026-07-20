@@ -290,6 +290,62 @@ defmodule BrokenOaths.Simulation.WorldServer do
     end
   end
 
+  # QA issue 12bed1e4 — the Archer's own ranged "shoot" surface: same
+  # immediate-resolution, persist+broadcast shape as `:attack` above,
+  # just routed through `Resolver.shoot/4` instead of `Resolver.attack/4`.
+  def handle_call({:shoot, user, unit_id, target_unit_id}, _from, state) do
+    case Resolver.shoot(state, user, unit_id, target_unit_id) do
+      {:ok, result, new_state} ->
+        case persist_tick(state, new_state) do
+          :ok ->
+            broadcast(new_state.world.id, [:units_changed])
+            {:reply, {:ok, result}, new_state}
+
+          :stale ->
+            {:reply, {:error, :stale}, resync(state)}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # QA issue 12bed1e4 — the ranged sibling of `:attack_camp` above.
+  def handle_call({:shoot_camp, user, unit_id, camp_id}, _from, state) do
+    case Camps.shoot_camp(state, user, unit_id, camp_id) do
+      {:ok, result, new_state} ->
+        case persist_tick(state, new_state) do
+          :ok ->
+            broadcast(new_state.world.id, [:units_changed])
+            {:reply, {:ok, result}, new_state}
+
+          :stale ->
+            {:reply, {:error, :stale}, resync(state)}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # QA issue 12bed1e4 — the ranged sibling of `:attack_city` above.
+  def handle_call({:shoot_city, user, unit_id, city_id}, _from, state) do
+    case Siege.shoot_city(state, user, unit_id, city_id) do
+      {:ok, result, new_state, alert} ->
+        case persist_tick(state, new_state) do
+          :ok ->
+            broadcast(new_state.world.id, [:units_changed, :cities_changed, alert])
+            {:reply, {:ok, result}, new_state}
+
+          :stale ->
+            {:reply, {:error, :stale}, resync(state)}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   def handle_call({:found_city, user, unit_id}, _from, state) do
     case City.found_city(state, user, unit_id) do
       {:ok, new_state} ->

@@ -2,6 +2,7 @@ defmodule BrokenOaths.Combat.CampsTest do
   use ExUnit.Case, async: true
 
   alias BrokenOaths.Combat.Camps
+  alias BrokenOaths.Combat.Resolver
   alias BrokenOaths.Simulation.Spawner
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
@@ -183,5 +184,113 @@ defmodule BrokenOaths.Combat.CampsTest do
       {next, MapSet.union(seen, MapSet.new(next))}
     end)
     |> elem(1)
+  end
+
+  # -------------------------------------------------------------------
+  # Ranged camp assault (QA issue 12bed1e4 "Archers don't have a shoot
+  # action") — the Archer's own `shoot_camp/4`.
+  # -------------------------------------------------------------------
+
+  defp unit(id, opts) do
+    max_movement = Keyword.get(opts, :max_movement, 1)
+
+    %{
+      id: id,
+      player_id: Keyword.get(opts, :player_id, 1),
+      type: Keyword.get(opts, :type, :warrior),
+      tile_id: Keyword.fetch!(opts, :tile),
+      hp: Keyword.get(opts, :hp, 100),
+      max_hp: Keyword.get(opts, :max_hp, 100),
+      movement: Keyword.get(opts, :movement, max_movement),
+      max_movement: max_movement
+    }
+  end
+
+  # `shoot_camp/4`'s own orchestration state — `resolve_camp_attack/3`
+  # (reused unchanged from `attack_camp/4`) reads `state.players` for
+  # the destroy-reward payout and `state.camp_contributions` for the
+  # per-player damage ledger; neither ever touches `Repo` (`Diplomacy.
+  # Cooperation`'s own split/forget are pure map operations), so this
+  # stays a plain `ExUnit.Case` fixture, no DataCase/sandbox needed.
+  defp state(units, camps) do
+    %{
+      world: world(),
+      turn: 0,
+      units: units,
+      camps: camps,
+      players: %{1 => %{id: 1, user_id: 1, gold: 0, camps_destroyed: 0}}
+    }
+  end
+
+  # A tile at EXACTLY `distance` raw mesh-adjacency hops from `from` —
+  # `ring/2` above reports the whole disk; this reports one
+  # representative tile from just the outermost shell.
+  defp tile_at_distance(from, 0), do: from
+
+  defp tile_at_distance(from, distance) do
+    {frontier, _seen} =
+      Enum.reduce(1..distance, {[from], MapSet.new([from])}, fn _, {frontier, seen} ->
+        next =
+          frontier
+          |> Enum.flat_map(&Regions.adjacent_tiles(world(), &1))
+          |> Enum.uniq()
+          |> Enum.reject(&MapSet.member?(seen, &1))
+
+        {next, MapSet.union(seen, MapSet.new(next))}
+      end)
+
+    List.first(frontier)
+  end
+
+  describe "shoot_camp/4" do
+    test "an in-range Archer hits a camp with flat, no-counter damage — same as attack_camp/4" do
+      target_tile = tile_at_distance(0, 2)
+      archer = unit(1, tile: 0, type: :archer, player_id: 1)
+      target_camp = camp(%{id: 10, tile_id: target_tile, hp: 100})
+      st = state(%{1 => archer}, %{10 => target_camp})
+
+      assert {:ok, %{damage_dealt: dealt, damage_taken: 0}, new_state} =
+               Camps.shoot_camp(st, %{id: 1}, 1, 10)
+
+      assert dealt > 0
+      assert new_state.camps[10].hp == 100 - dealt
+      assert new_state.units[1].movement == 0
+    end
+
+    test "refuses a camp beyond Resolver.shoot_range/0 — out of range" do
+      target_tile = tile_at_distance(0, Resolver.shoot_range() + 1)
+      archer = unit(1, tile: 0, type: :archer, player_id: 1)
+      target_camp = camp(%{id: 10, tile_id: target_tile, hp: 100})
+      st = state(%{1 => archer}, %{10 => target_camp})
+
+      assert Camps.shoot_camp(st, %{id: 1}, 1, 10) == {:error, :out_of_range}
+    end
+
+    test "refuses any non-Archer attacker" do
+      target_tile = tile_at_distance(0, 1)
+      warrior = unit(1, tile: 0, type: :warrior, player_id: 1)
+      target_camp = camp(%{id: 10, tile_id: target_tile, hp: 100})
+      st = state(%{1 => warrior}, %{10 => target_camp})
+
+      assert Camps.shoot_camp(st, %{id: 1}, 1, 10) == {:error, :not_archer}
+    end
+
+    test "refuses an already-destroyed camp — same :invalid_target attack_camp/4 uses" do
+      target_tile = tile_at_distance(0, 1)
+      archer = unit(1, tile: 0, type: :archer, player_id: 1)
+      destroyed_camp = camp(%{id: 10, tile_id: target_tile, hp: 0, destroyed_at: ~N[2026-01-01 00:00:00]})
+      st = state(%{1 => archer}, %{10 => destroyed_camp})
+
+      assert Camps.shoot_camp(st, %{id: 1}, 1, 10) == {:error, :invalid_target}
+    end
+
+    test "refuses an Archer with no movement left" do
+      target_tile = tile_at_distance(0, 1)
+      archer = unit(1, tile: 0, type: :archer, player_id: 1, movement: 0)
+      target_camp = camp(%{id: 10, tile_id: target_tile, hp: 100})
+      st = state(%{1 => archer}, %{10 => target_camp})
+
+      assert Camps.shoot_camp(st, %{id: 1}, 1, 10) == {:error, :out_of_movement}
+    end
   end
 end

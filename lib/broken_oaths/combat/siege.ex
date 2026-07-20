@@ -105,6 +105,7 @@ defmodule BrokenOaths.Combat.Siege do
   alias BrokenOaths.Game
   alias BrokenOaths.Combat.BarbarianAI
   alias BrokenOaths.Combat.CityDefense
+  alias BrokenOaths.Combat.Resolver
   alias BrokenOaths.Feudal.ProtectionPact
   alias BrokenOaths.Worlds.Regions
 
@@ -378,15 +379,25 @@ defmodule BrokenOaths.Combat.Siege do
     end
   end
 
-  defp resolve_city_attack(state, attacker, city) do
+  # `opts[:ranged?]` (QA issue 12bed1e4, `shoot_city/4` below) discards
+  # the city's own counter-fire before it's ever applied to `attacker`
+  # — the SAME "compute the real curve, then zero the return blow"
+  # shape `Resolver.resolve_attack/4`'s own `ranged?: true` opt uses for
+  # a unit target, so a ranged siege still resolves through the exact
+  # `CityDefense.resolve_attack/4` curve `attack_city/4` uses, never a
+  # second, drifting damage calculation.
+  defp resolve_city_attack(state, attacker, city, opts \\ []) do
     seed = {state.world.seed, state.turn, attacker.id, city.id}
     units = Map.values(state.units)
+    ranged? = Keyword.get(opts, :ranged?, false)
 
-    %{damage_to_city: dealt, damage_to_barbarian: taken} =
+    %{damage_to_city: dealt, damage_to_barbarian: countered} =
       CityDefense.resolve_attack(city, units, attacker,
         seed: seed,
         attacker_aura?: lord_adjacent?(state, attacker)
       )
+
+    taken = if ranged?, do: 0, else: countered
 
     new_city = take_damage(city, dealt)
     new_attacker = %{attacker | hp: max(attacker.hp - taken, 0), movement: 0}
@@ -403,6 +414,72 @@ defmodule BrokenOaths.Combat.Siege do
       |> ProtectionPact.resolve_protection_call_if_dead(new_attacker)
 
     {%{damage_dealt: dealt, damage_taken: taken}, state}
+  end
+
+  # -------------------------------------------------------------------
+  # Ranged city assault (QA issue 12bed1e4) — the Archer's own `shoot`
+  # sibling to `attack_city/4`, mirroring `Resolver.shoot/4`'s own
+  # shape: same `Game.feudal_enabled?/0` gate and `:own_city` refusal,
+  # RANGE (`Resolver.in_shoot_range?/3`) instead of adjacency, and no
+  # counter-fire back from the city's own garrison (`resolve_city_attack/4`'s
+  # `ranged?: true` opt).
+  # -------------------------------------------------------------------
+
+  @doc """
+  Resolve an immediate ranged "shoot" request against a city: `user`'s
+  own Archer `unit_id` strikes `city_id`'s own HP from up to `Resolver.
+  shoot_range/0` hexes away, without moving there and without taking
+  the counter-fire `attack_city/4`'s own melee siege takes from the
+  city's strongest garrisoned defender. Same `Game.feudal_enabled?/0`
+  gate and `:own_city` refusal as `attack_city/4`; `:not_archer` if
+  `unit_id` isn't an Archer, `:out_of_range` beyond `Resolver.
+  shoot_range/0` hexes.
+  """
+  @spec shoot_city(map(), map(), term(), term()) ::
+          {:ok, attack_outcome(), map(), city_alert()} | {:error, term()}
+  def shoot_city(state, user, unit_id, city_id) do
+    player = find_player(state, user.id)
+    attacker = Map.get(state.units, unit_id)
+    city = Map.get(state.cities, city_id)
+
+    cond do
+      is_nil(player) or is_nil(attacker) or attacker.player_id != player.id ->
+        {:error, :not_owner}
+
+      is_nil(city) ->
+        {:error, :invalid_target}
+
+      not Game.feudal_enabled?() ->
+        {:error, :not_hostile}
+
+      true ->
+        case validate_shoot_city(attacker, city, state.world) do
+          :ok ->
+            {result, new_state} = resolve_city_attack(state, attacker, city, ranged?: true)
+
+            alert =
+              {:city_alert, owner_user_id(state, city.player_id),
+               CityDefense.under_attack_alert(city.name)}
+
+            {:ok, result, new_state, alert}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
+
+  defp validate_shoot_city(attacker, city, world) do
+    cond do
+      attacker.type != :archer -> {:error, :not_archer}
+      attacker.movement <= 0 -> {:error, :out_of_movement}
+      attacker.player_id == city.player_id -> {:error, :own_city}
+      not Resolver.in_shoot_range?(world, attacker.tile_id, city.tile_id) ->
+        {:error, :out_of_range}
+
+      true ->
+        :ok
+    end
   end
 
   defp apply_combat_unit(units, id, %{hp: 0}), do: Map.delete(units, id)

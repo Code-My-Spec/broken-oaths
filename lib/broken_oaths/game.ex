@@ -227,6 +227,37 @@ defmodule BrokenOaths.Game do
              | :not_hostile}
   defdelegate attack_city(world, user, unit_id, city_id), to: Combat
 
+  @doc "Order `unit_id` (an Archer) to shoot `target_unit_id` (QA issue 12bed1e4). See `Combat.shoot/4`."
+  @spec shoot(map(), map(), term(), term()) ::
+          {:ok, %{damage_dealt: pos_integer(), damage_taken: 0}}
+          | {:error,
+             :not_owner
+             | :invalid_target
+             | :out_of_movement
+             | :out_of_range
+             | :not_archer
+             | :not_hostile}
+  defdelegate shoot(world, user, unit_id, target_unit_id), to: Combat
+
+  @doc "Order `unit_id` (an Archer) to shoot `camp_id` (QA issue 12bed1e4). See `Combat.shoot_camp/4`."
+  @spec shoot_camp(map(), map(), term(), term()) ::
+          {:ok, %{damage_dealt: pos_integer(), damage_taken: 0}}
+          | {:error, :not_owner | :invalid_target | :out_of_movement | :out_of_range | :not_archer}
+  defdelegate shoot_camp(world, user, unit_id, camp_id), to: Combat
+
+  @doc "Order `unit_id` (an Archer) to shoot `city_id` (QA issue 12bed1e4). See `Combat.shoot_city/4`."
+  @spec shoot_city(map(), map(), term(), term()) ::
+          {:ok, %{damage_dealt: non_neg_integer(), damage_taken: 0}}
+          | {:error,
+             :not_owner
+             | :invalid_target
+             | :out_of_movement
+             | :out_of_range
+             | :own_city
+             | :not_archer
+             | :not_hostile}
+  defdelegate shoot_city(world, user, unit_id, city_id), to: Combat
+
   @doc "Resolve the conqueror's execute-or-release choice for a captured city's fallen garrison (story 906). See `Combat.resolve_garrison_fate/4`."
   @spec resolve_garrison_fate(map(), map(), term(), :release | :execute) ::
           :ok | {:error, :invalid_target | :not_owner}

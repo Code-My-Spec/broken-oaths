@@ -230,6 +230,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
             enemy_cities: [],
             captured_cities: [],
             attackable_cities: [],
+            # QA issue 12bed1e4 — the "Shoot" affordance's own target
+            # list (barbarian units/camps/hostile cities in range of a
+            # selected Archer), same "real only once a unit is actually
+            # selected" status `attackable_cities` above already has.
+            shoot_targets: [],
             known_players: Game.known_players(world, user),
             selected_tile: nil,
             visible: [],
@@ -421,6 +426,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         selected_unit: nil,
         selected_order: nil,
         attackable_cities: [],
+        shoot_targets: [],
         selected_city_id: nil,
         selected_city: nil,
         selected_camp_id: nil,
@@ -450,6 +456,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         selected_unit: nil,
         selected_tile: nil,
         attackable_cities: [],
+        shoot_targets: [],
         selected_camp_id: nil,
         selected_camp: nil
       )
@@ -477,6 +484,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         selected_unit: nil,
         selected_order: nil,
         attackable_cities: [],
+        shoot_targets: [],
         selected_city_id: nil,
         selected_city: nil
       )
@@ -504,6 +512,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         allowed_improvements: [],
         current_dig: nil,
         attackable_cities: [],
+        shoot_targets: [],
         selected_city_id: nil,
         selected_city: nil,
         assignable_tiles: [],
@@ -754,6 +763,76 @@ defmodule BrokenOathsWeb.GameLive.Play do
     %{world: world, user: user} = socket.assigns
 
     case Game.attack_city(
+           world,
+           user,
+           PlayView.parse_id(unit_id),
+           PlayView.parse_id(target_city_id)
+         ) do
+      {:ok, %{damage_dealt: dealt, damage_taken: taken}} ->
+        socket =
+          socket
+          |> assign(combat_error: nil)
+          |> push_event("game:combat", %{damage_dealt: dealt, damage_taken: taken})
+
+        {:noreply, socket}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, combat_error: PlayView.combat_error_message(reason))}
+    end
+  end
+
+  # QA issue 12bed1e4 "Archers don't have a shoot action" — the Archer's
+  # own ranged "shoot" surface, same three-clause dispatch-by-key shape
+  # `"attack"` above already uses (`target_unit_id`/`target_camp_id`/
+  # `target_city_id`), same direct `"game:combat"` push. `damage_taken`
+  # is always 0 — the whole point of shooting instead of marching in.
+  def handle_event("shoot", %{"unit_id" => unit_id, "target_unit_id" => target_unit_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.shoot(world, user, PlayView.parse_id(unit_id), PlayView.parse_id(target_unit_id)) do
+      {:ok, %{damage_dealt: dealt, damage_taken: taken}} ->
+        socket =
+          socket
+          |> assign(combat_error: nil)
+          |> push_event("game:combat", %{damage_dealt: dealt, damage_taken: taken})
+
+        {:noreply, socket}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, combat_error: PlayView.combat_error_message(reason))}
+    end
+  end
+
+  # QA issue 12bed1e4 — the ranged sibling of the `target_camp_id`
+  # "attack" clause above.
+  def handle_event("shoot", %{"unit_id" => unit_id, "target_camp_id" => target_camp_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.shoot_camp(
+           world,
+           user,
+           PlayView.parse_id(unit_id),
+           PlayView.parse_id(target_camp_id)
+         ) do
+      {:ok, %{damage_dealt: dealt, damage_taken: taken}} ->
+        socket =
+          socket
+          |> assign(combat_error: nil)
+          |> push_event("game:combat", %{damage_dealt: dealt, damage_taken: taken})
+
+        {:noreply, socket}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, combat_error: PlayView.combat_error_message(reason))}
+    end
+  end
+
+  # QA issue 12bed1e4 — the ranged sibling of the `target_city_id`
+  # "attack" clause above.
+  def handle_event("shoot", %{"unit_id" => unit_id, "target_city_id" => target_city_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.shoot_city(
            world,
            user,
            PlayView.parse_id(unit_id),
@@ -1744,6 +1823,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         PlayView.worker_allowed_improvements(world, selected_unit, player_research),
       current_dig: PlayView.worker_current_dig(improvements, selected_unit),
       attackable_cities: PlayView.attackable_cities(world, selected_unit, enemy_cities),
+      shoot_targets: PlayView.shoot_targets(world, selected_unit, units, camps, enemy_cities),
       enemy_cities: enemy_cities,
       captured_cities: captured_cities,
       selected_city: selected_city,
@@ -2075,6 +2155,14 @@ defmodule BrokenOathsWeb.GameLive.Play do
       current_dig: PlayView.worker_current_dig(socket.assigns.improvements, unit),
       attackable_cities:
         PlayView.attackable_cities(socket.assigns.world, unit, socket.assigns.enemy_cities),
+      shoot_targets:
+        PlayView.shoot_targets(
+          socket.assigns.world,
+          unit,
+          socket.assigns.units,
+          socket.assigns.camps,
+          socket.assigns.enemy_cities
+        ),
       order_error: nil,
       improvement_error: nil,
       selected_city_id: nil,
@@ -2104,6 +2192,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
       selected_order: nil,
       selected_tile: nil,
       attackable_cities: [],
+      shoot_targets: [],
       selected_camp_id: nil,
       selected_camp: nil
     )
@@ -2239,6 +2328,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
           allowed_improvements={@allowed_improvements}
           current_dig={@current_dig}
           attackable_cities={@attackable_cities}
+          shoot_targets={@shoot_targets}
           selected_city={@selected_city}
           assignable_tiles={@assignable_tiles}
           copper_access?={@copper_access?}

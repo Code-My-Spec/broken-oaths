@@ -24,9 +24,10 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
   """
 
   alias BrokenOaths.Cities.{Improvement, Yields}
-  alias BrokenOaths.Combat.CityDefense
+  alias BrokenOaths.Combat.{CityDefense, Resolver}
   alias BrokenOaths.Game
   alias BrokenOaths.Technology.Research
+  alias BrokenOaths.Units.Actions
   alias BrokenOaths.Worlds.{Globe, Regions, Resources, Terrain}
 
   # Camera aimed at the centroid of the player's own units at spawn
@@ -184,6 +185,11 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
   def combat_error_message(:not_military),
     do: "Only military units can lay siege to a city — civilians cannot besiege."
 
+  # QA issue 12bed1e4 — the ranged "shoot" surface's own two refusal
+  # reasons `attack/4`'s melee gate never produces.
+  def combat_error_message(:not_archer), do: "Only an Archer can shoot."
+  def combat_error_message(:out_of_range), do: "That target is out of shooting range."
+
   def combat_error_message(_other), do: "That attack can't be ordered."
 
   def parse_agenda("restore"), do: :restore
@@ -242,10 +248,24 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
 
   def worker_allowed_improvements(_world, nil, _player_research), do: []
 
-  def worker_allowed_improvements(_world, %{type: type}, _player_research) when type != :worker,
-    do: []
+  # QA issue 12bed1e4's own "consult Units.Actions where it cleanly
+  # can" refactor: the coarse "is this unit's TYPE even eligible for
+  # `:build_improvement` at all" gate now reads off `Units.Actions.
+  # available/1` instead of a bare `type != :worker` guard — behavior-
+  # preserving (only `:worker` ever carries `:build_improvement`), but
+  # one fewer place that has to independently know which type builds.
+  # The REAL, state-aware rule (which improvement KINDS this worker's
+  # own tile supports right now) stays right here — `Units.Actions`
+  # only answers the type-level question.
+  def worker_allowed_improvements(world, unit, player_research) do
+    if :build_improvement in Actions.available(unit) do
+      compute_allowed_improvements(world, unit, player_research)
+    else
+      []
+    end
+  end
 
-  def worker_allowed_improvements(world, %{tile_id: tile_id}, player_research) do
+  defp compute_allowed_improvements(world, %{tile_id: tile_id}, player_research) do
     if Regions.tile_class(world, tile_id) == :land do
       terrain = Regions.terrain(world, tile_id)
       resource = Resources.at(world, tile_id)
@@ -320,6 +340,58 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
       []
     end
   end
+
+  # QA issue 12bed1e4 "Archers don't have a shoot action" — the
+  # discoverable "Shoot" affordance's own target list: every barbarian
+  # unit, barbarian camp, and (once `Game.feudal_enabled?/0`) hostile
+  # INTACT city within `Resolver.shoot_range/0` hexes of a SELECTED
+  # Archer right now — `Resolver.in_shoot_range?/3`'s raw mesh-adjacency
+  # distance, never a land-path walk (an arrow doesn't path around
+  # terrain the way a marching unit does). Mirrors `attackable_cities/3`'s
+  # own "compute here, `Play` has the world/fog access `UnitPanel`
+  # doesn't" reasoning, widened to the three target kinds `Combat.
+  # Resolver.shoot/4`/`Combat.Camps.shoot_camp/4`/`Combat.Siege.
+  # shoot_city/4` themselves support. Gated on `:shoot in Units.Actions.
+  # available/1` (only an Archer ever carries it) rather than a bare
+  # `unit.type == :archer` check — this module's own "consult Units.
+  # Actions where it cleanly can" refactor (QA issue 12bed1e4).
+  # `units`/`camps`/`enemy_cities` are already fog-filtered board reads
+  # (`Game.units_visible_to/2`/`Game.camps_visible_to/2`/`Game.
+  # enemy_cities_visible_to/2`) — a target this player can't see never
+  # reaches this filter in the first place. A rival PLAYER's own unit
+  # is deliberately never offered here (melee's own board affordances
+  # don't surface one either — see `Play`'s `.Board` hook's own
+  # `orderMove/1`): the narrow war/rebellion/protection-pact PvP
+  # exceptions `Resolver.pvp_target_allowed?/3` recognizes stay reachable
+  # by pushing `"shoot"`/`target_unit_id` directly, exactly like
+  # melee's own `"attack"`/`target_unit_id` today.
+  def shoot_targets(_world, nil, _units, _camps, _enemy_cities), do: []
+
+  def shoot_targets(world, unit, units, camps, enemy_cities) do
+    if :shoot in Actions.available(unit) do
+      unit_targets =
+        units
+        |> Enum.filter(&(&1.type == :barbarian_warrior and shoot_in_range?(world, unit, &1)))
+        |> Enum.map(&%{kind: :unit, id: &1.id, label: "Barbarian Warrior", tile_id: &1.tile_id})
+
+      camp_targets =
+        camps
+        |> Enum.filter(&shoot_in_range?(world, unit, &1))
+        |> Enum.map(&%{kind: :camp, id: &1.id, label: "Camp", tile_id: &1.tile_id})
+
+      city_targets =
+        enemy_cities
+        |> Enum.filter(&(not &1.broken and shoot_in_range?(world, unit, &1)))
+        |> Enum.map(&%{kind: :city, id: &1.id, label: &1.name, tile_id: &1.tile_id})
+
+      unit_targets ++ camp_targets ++ city_targets
+    else
+      []
+    end
+  end
+
+  defp shoot_in_range?(world, unit, target),
+    do: Resolver.in_shoot_range?(world, unit.tile_id, target.tile_id)
 
   def parse_id(nil), do: nil
   def parse_id(""), do: nil

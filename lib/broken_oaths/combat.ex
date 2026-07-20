@@ -68,6 +68,57 @@ defmodule BrokenOaths.Combat do
     do: WorldServer.call(world, {:attack_city, user, unit_id, city_id})
 
   @doc """
+  Order `unit_id` (an Archer) to shoot `target_unit_id` (QA issue
+  12bed1e4): up to `BrokenOaths.Combat.Resolver.shoot_range/0` hexes
+  away, without moving there and without taking the target's own
+  counter-blow — the ranged sibling to `attack/4`. Same target-legality
+  rules (barbarians/camps always shootable; a rival player's unit only
+  under the same narrow war/rebellion/protection-pact exceptions
+  `attack/4` itself allows).
+  """
+  @spec shoot(map(), map(), term(), term()) ::
+          {:ok, %{damage_dealt: pos_integer(), damage_taken: 0}}
+          | {:error,
+             :not_owner
+             | :invalid_target
+             | :out_of_movement
+             | :out_of_range
+             | :not_archer
+             | :not_hostile}
+  def shoot(world, user, unit_id, target_unit_id),
+    do: WorldServer.call(world, {:shoot, user, unit_id, target_unit_id})
+
+  @doc """
+  Order `unit_id` (an Archer) to shoot `camp_id` (QA issue 12bed1e4):
+  the ranged sibling to `attack_camp/4` — same flat, no-counter damage,
+  just range instead of adjacency.
+  """
+  @spec shoot_camp(map(), map(), term(), term()) ::
+          {:ok, %{damage_dealt: pos_integer(), damage_taken: 0}}
+          | {:error, :not_owner | :invalid_target | :out_of_movement | :out_of_range | :not_archer}
+  def shoot_camp(world, user, unit_id, camp_id),
+    do: WorldServer.call(world, {:shoot_camp, user, unit_id, camp_id})
+
+  @doc """
+  Order `unit_id` (an Archer) to shoot `city_id` (QA issue 12bed1e4):
+  the ranged sibling to `attack_city/4` — same `Game.feudal_enabled?/0`
+  gate and `:own_city` refusal, range instead of adjacency, and no
+  counter-fire back from the city's own garrison.
+  """
+  @spec shoot_city(map(), map(), term(), term()) ::
+          {:ok, %{damage_dealt: non_neg_integer(), damage_taken: 0}}
+          | {:error,
+             :not_owner
+             | :invalid_target
+             | :out_of_movement
+             | :out_of_range
+             | :own_city
+             | :not_archer
+             | :not_hostile}
+  def shoot_city(world, user, unit_id, city_id),
+    do: WorldServer.call(world, {:shoot_city, user, unit_id, city_id})
+
+  @doc """
   Resolve the conqueror's own execute-or-release choice for a captured
   city's fallen garrison (story 906): `choice` is `:release` (the
   garrison survives untouched) or `:execute` (removed from the board).

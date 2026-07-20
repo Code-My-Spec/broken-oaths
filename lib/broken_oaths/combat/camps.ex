@@ -449,6 +449,64 @@ defmodule BrokenOaths.Combat.Camps do
     {%{damage_dealt: dealt, damage_taken: 0}, state}
   end
 
+  # -------------------------------------------------------------------
+  # Ranged camp assault (QA issue 12bed1e4) — the Archer's own `shoot`
+  # sibling to `attack_camp/4`, mirroring `Resolver.shoot/4`'s own
+  # shape. A camp never counters either way (`Resolver.camp_damage/2`
+  # already has no return blow), so `shoot_camp/4` reuses
+  # `resolve_camp_attack/3` UNCHANGED — the only thing that differs
+  # from melee is the RANGE check standing in for adjacency, plus the
+  # attacker-must-be-an-Archer gate.
+  # -------------------------------------------------------------------
+
+  @doc """
+  Resolve an immediate ranged "shoot" request against a camp: `user`'s
+  own Archer `unit_id` strikes `camp_id` from up to `Resolver.
+  shoot_range/0` hexes away, without moving there. Same flat, no-counter
+  damage `attack_camp/4` already deals (a camp never counters either
+  way) — only the RANGE check (`Resolver.in_shoot_range?/3`) and the
+  `:not_archer` gate differ from the melee surface. An already-destroyed
+  (or nonexistent) camp is refused exactly like `attack_camp/4`'s own
+  `:invalid_target`.
+  """
+  @spec shoot_camp(map(), map(), term(), term()) ::
+          {:ok, attack_outcome(), map()} | {:error, term()}
+  def shoot_camp(state, user, unit_id, camp_id) do
+    player = find_player(state, user.id)
+    attacker = Map.get(state.units, unit_id)
+    camp = Map.get(state.camps, camp_id)
+
+    cond do
+      is_nil(player) or is_nil(attacker) or attacker.player_id != player.id ->
+        {:error, :not_owner}
+
+      is_nil(camp) or not is_nil(camp.destroyed_at) ->
+        {:error, :invalid_target}
+
+      true ->
+        case validate_shoot_camp(attacker, camp, state.world) do
+          :ok ->
+            {result, new_state} = resolve_camp_attack(state, attacker, camp)
+            {:ok, result, new_state}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
+
+  defp validate_shoot_camp(attacker, camp, world) do
+    cond do
+      attacker.type != :archer -> {:error, :not_archer}
+      attacker.movement <= 0 -> {:error, :out_of_movement}
+      not Resolver.in_shoot_range?(world, attacker.tile_id, camp.tile_id) ->
+        {:error, :out_of_range}
+
+      true ->
+        :ok
+    end
+  end
+
   # Story 901: every hit against a camp — from ANY player, not just
   # whoever eventually lands the killing blow — accumulates in the
   # in-memory damage ledger `apply_camp_damage/2`'s own `Cooperation.

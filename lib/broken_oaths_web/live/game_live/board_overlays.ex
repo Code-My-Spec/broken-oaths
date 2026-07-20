@@ -45,6 +45,10 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
   attr :allowed_improvements, :list, required: true
   attr :current_dig, :any, required: true
   attr :attackable_cities, :list, required: true
+  # QA issue 12bed1e4 — the "Shoot" affordance's own target list for a
+  # selected Archer, the same "computed by `Play`, only rendered here"
+  # status `attackable_cities` above already has.
+  attr :shoot_targets, :list, required: true
   attr :selected_city, :any, required: true
   attr :assignable_tiles, :list, required: true
   attr :copper_access?, :boolean, required: true
@@ -266,6 +270,7 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
         allowed_improvements={@allowed_improvements}
         current_dig={@current_dig}
         attackable_cities={@attackable_cities}
+        shoot_targets={@shoot_targets}
       />
 
       <.live_component

@@ -2,7 +2,7 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
   @moduledoc """
   Selected unit details (type, HP, movement remaining), its queued
   order, and its city-loop actions: Found City for a settler, Build
-  Improvement for a worker.
+  Improvement for a worker, Shoot for an Archer (QA issue 12bed1e4).
 
   A presentational component mounted by `BrokenOathsWeb.GameLive.Play`,
   which owns unit selection, order state, and command dispatch — every
@@ -14,11 +14,11 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
     * `:id` - the DOM id for this component instance
     * `:unit` - the selected unit, or `nil` when nothing is selected.
       Expected to carry `:id`, `:type` (`:lord` | `:settler` | `:worker`
-      | `:warrior` | `:barbarian_warrior` | `:bronze_spearman`), `:hp`,
-      `:max_hp`, `:movement`, `:max_movement`, `:charges` (story 882
-      playtest update, issue 1caa87e9 — a worker's remaining build
-      charges; every other unit type carries the same field but this
-      panel only ever renders it for `:worker`)
+      | `:warrior` | `:barbarian_warrior` | `:bronze_spearman` |
+      `:archer`), `:hp`, `:max_hp`, `:movement`, `:max_movement`,
+      `:charges` (story 882 playtest update, issue 1caa87e9 — a
+      worker's remaining build charges; every other unit type carries
+      the same field but this panel only ever renders it for `:worker`)
     * `:order` - the unit's queued order, or `nil`. Expected to carry
       `:target_tile` and `:status` (`:pending` | `:interrupted`)
     * `:allowed_improvements` - improvement kinds (`:farm` | `:mine` |
@@ -40,9 +40,27 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
       "Move In <name>" (`"queue_move"`/`to_tile`) once `broken` is true
       (QA issue 7f91cff2) — a 0-HP city is captured by walking a unit
       onto its tile, not by attacking it again.
+    * `:shoot_targets` - `[%{kind:, id:, label:, tile_id:}]` (QA issue
+      12bed1e4), `kind` one of `:unit` | `:camp` | `:city`: every
+      barbarian unit, barbarian camp, and hostile intact city within
+      shooting range of a selected Archer right now — `Play` computes
+      this too (`PlayView.shoot_targets/5`, same "needs world/fog
+      access this component doesn't have" reason). Each renders as its
+      own discoverable "Shoot <label>" button, dispatching `"shoot"`
+      with whichever `target_*_id` key matches `kind`.
+
+  Per-unit-TYPE action gating (which of the buttons above even CAN
+  appear for this unit) is delegated to `BrokenOaths.Units.Actions.
+  available/1` — a `unit.type == :settler`-style check in the template
+  would otherwise have to independently agree with every OTHER place
+  that already knows which type does what; `@actions` (computed once
+  per render) is that same catalog, consulted here instead of
+  duplicating it.
   """
 
   use BrokenOathsWeb, :live_component
+
+  alias BrokenOaths.Units.Actions
 
   def render(%{unit: nil} = assigns) do
     ~H"""
@@ -56,7 +74,9 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
       |> assign_new(:allowed_improvements, fn -> [] end)
       |> assign_new(:current_dig, fn -> nil end)
       |> assign_new(:attackable_cities, fn -> [] end)
+      |> assign_new(:shoot_targets, fn -> [] end)
       |> assign_new(:unit_id, fn -> Map.get(assigns.unit, :id) end)
+      |> assign(:actions, Actions.available(assigns.unit))
 
     ~H"""
     <div id={@id} data-test="unit-panel" class="card bg-base-200 shadow-sm w-64 relative">
@@ -89,7 +109,7 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
         <.order_summary order={@order} />
 
         <button
-          :if={@unit.type == :settler}
+          :if={:found_city in @actions}
           type="button"
           data-test="found-city"
           phx-click="found_city"
@@ -99,7 +119,7 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
           Found City
         </button>
 
-        <div :if={@unit.type == :worker} class="flex flex-col gap-1">
+        <div :if={:build_improvement in @actions} class="flex flex-col gap-1">
           <%!-- A dig in progress on the worker's tile is the loudest
                thing in the panel — silent success on Build reads as a
                dead button (issue b5cc4ae9). --%>
@@ -138,6 +158,21 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
         <.attack_city_button
           :for={city <- @attackable_cities}
           city={city}
+          unit_id={@unit_id}
+        />
+
+        <%!-- QA issue 12bed1e4 "Archers don't have a shoot action" — the
+             discoverable "Shoot" affordance: one button per target
+             `Play`'s own `PlayView.shoot_targets/5` found in range of
+             this Archer right now (barbarian unit, camp, or hostile
+             intact city — never a rival player's own unit, matching the
+             board's own melee affordances). Gated on `:shoot in @actions`
+             too — belt-and-suspenders alongside `shoot_targets` already
+             being empty for any non-Archer. --%>
+        <.shoot_button
+          :for={target <- @shoot_targets}
+          :if={:shoot in @actions}
+          target={target}
           unit_id={@unit_id}
         />
       </div>
@@ -201,6 +236,59 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
     """
   end
 
+  attr :target, :map, required: true
+  attr :unit_id, :any, required: true
+
+  # QA issue 12bed1e4 — one button per `PlayView.shoot_targets/5` entry,
+  # `phx-value-target_*_id` keyed off `target.kind` so the SAME `"shoot"`
+  # event `Play`'s own three-clause dispatch (mirroring `"attack"`'s own
+  # `target_unit_id`/`target_camp_id`/`target_city_id` clauses) already
+  # expects lands on the right one.
+  defp shoot_button(%{target: %{kind: :unit}} = assigns) do
+    ~H"""
+    <button
+      type="button"
+      data-test={"shoot-unit-#{@target.id}"}
+      phx-click="shoot"
+      phx-value-unit_id={@unit_id}
+      phx-value-target_unit_id={@target.id}
+      class="btn btn-sm btn-error btn-outline"
+    >
+      Shoot {@target.label}
+    </button>
+    """
+  end
+
+  defp shoot_button(%{target: %{kind: :camp}} = assigns) do
+    ~H"""
+    <button
+      type="button"
+      data-test={"shoot-camp-#{@target.id}"}
+      phx-click="shoot"
+      phx-value-unit_id={@unit_id}
+      phx-value-target_camp_id={@target.id}
+      class="btn btn-sm btn-error btn-outline"
+    >
+      Shoot {@target.label}
+    </button>
+    """
+  end
+
+  defp shoot_button(%{target: %{kind: :city}} = assigns) do
+    ~H"""
+    <button
+      type="button"
+      data-test={"shoot-city-#{@target.id}"}
+      phx-click="shoot"
+      phx-value-unit_id={@unit_id}
+      phx-value-target_city_id={@target.id}
+      class="btn btn-sm btn-error btn-outline"
+    >
+      Shoot {@target.label}
+    </button>
+    """
+  end
+
   defp improvement_label(:farm), do: "Farm"
   defp improvement_label(:mine), do: "Mine"
   defp improvement_label(:road), do: "Road"
@@ -243,8 +331,9 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
   # crashed this component with a FunctionClauseError; a garrisoned
   # bronze_spearman also blocked left-clicking the city under it).
   defp unit_type_label(:bronze_spearman), do: "Bronze Spearman"
-  # QA issue da39e50b — the Archery-gated melee unit; see
-  # `BrokenOaths.Cities.Production`'s own moduledoc, "The Archer".
+  # QA issue da39e50b — the Archery-gated unit; see `BrokenOaths.Cities.
+  # Production`'s own moduledoc, "The Archer", and (QA issue 12bed1e4)
+  # `BrokenOaths.Combat.Resolver`'s own "Ranged" doc for its `:shoot`.
   defp unit_type_label(:archer), do: "Archer"
   # Enemy units are selectable too — the panel doubles as the threat
   # readout (stats, HP), with every action already type/owner-gated.

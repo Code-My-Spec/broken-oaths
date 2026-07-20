@@ -69,10 +69,34 @@ defmodule BrokenOaths.Combat.Resolver do
   Two real players are never hostile to each other ("no Stone Age PvP"
   — story 891, criterion 7542): `validate_attack/3` refuses every
   cross-player attack where neither side is a barbarian.
+  `pvp_target_allowed?/3` is `hostile?/2` widened by the SAME two
+  narrow feudal exceptions `validate_pvp_attack/4` (below) already
+  carved out for melee — extracted to a public predicate so
+  `shoot/4`'s own ranged targeting can share it verbatim rather than
+  duplicating (and risking drifting from) the real gate.
+
+  ## Ranged (QA issue 12bed1e4 "Archers don't have a shoot action")
+
+  `shoot/4` is the Archer's own ranged sibling to `attack/4`: same
+  target-legality rules (`pvp_target_allowed?/3` — barbarians always
+  hostile, two real players only under the SAME war/rebellion/
+  protection-pact exceptions melee gets), but RANGE
+  (`in_shoot_range?/3`, `shoot_range/0` hexes — 2, raw mesh-adjacency
+  distance, no line-of-sight model, no land-path walk) instead of
+  bare adjacency, and no moving onto the target's tile. The whole
+  "ranged advantage" is `resolve_attack/4`'s own `ranged?: true` opt:
+  it runs the SAME damage curve (aura, garrison bonus, wounding, the
+  ±25% roll) `resolve_attack/3`'s melee callers already get, then
+  zeroes the counter-blow the defender would otherwise land — an
+  Archer that shoots never takes a return hit, whatever it's shooting
+  at. Refuses `:not_archer` for any other unit type; `Combat.Camps.
+  shoot_camp/4` and `Combat.Siege.shoot_city/4` are this same shape's
+  camp/city siblings, both reusing `in_shoot_range?/3` here instead of
+  a second, drifting range check.
 
   ## Attack orchestration (stories 891/893/896/899/914)
 
-  `attack/4` and `resolve_attack/3` are the pragdave-pattern "domain
+  `attack/4` and `resolve_attack/4` are the pragdave-pattern "domain
   model" home (`.code_my_spec/knowledge/genserver_decomposition.md`)
   for the unit-vs-unit "attack" flow `BrokenOaths.Simulation.WorldServer`
   used to bury inline: they take the WorldServer's own tick-`state`
@@ -81,12 +105,12 @@ defmodule BrokenOaths.Combat.Resolver do
   `GenServer`, no `handle_*`, no process awareness. `WorldServer`'s own
   `:attack` `handle_call` (and the test-only
   `:resolve_barbarian_attack_for_test` bridge) are thin delegations
-  into this section. Coordinates its siblings directly, per the north
-  star's "cross-cutting operations are orchestrated by their OWNING
-  domain model calling its siblings" rule: `BrokenOaths.Game.
-  Rebellion.War` and `BrokenOaths.Feudal.ProtectionPact` for the two
-  feudal PvP exceptions (never duplicated here), `BrokenOaths.Game.
-  CityDefense` for the garrison-bonus lookup.
+  into this section, as is `shoot/4` above. Coordinates its siblings
+  directly, per the north star's "cross-cutting operations are
+  orchestrated by their OWNING domain model calling its siblings"
+  rule: `BrokenOaths.Game.Rebellion.War` and `BrokenOaths.Feudal.
+  ProtectionPact` for the two feudal PvP exceptions (never duplicated
+  here), `BrokenOaths.Game.CityDefense` for the garrison-bonus lookup.
   """
 
   alias BrokenOaths.Combat.BarbarianAI
@@ -94,6 +118,7 @@ defmodule BrokenOaths.Combat.Resolver do
   alias BrokenOaths.Feudal.ProtectionPact
   alias BrokenOaths.Feudal.Rebellion.War
   alias BrokenOaths.Worlds.Regions
+  alias BrokenOaths.Worlds.World
 
   @type tile_id :: non_neg_integer()
   @type unit_type ::
@@ -125,6 +150,7 @@ defmodule BrokenOaths.Combat.Resolver do
         }
 
   @type refusal :: :out_of_movement | :not_adjacent | :not_hostile
+  @type ranged_refusal :: :out_of_movement | :out_of_range | :not_hostile | :not_archer
 
   @base_strength %{
     lord: 12,
@@ -138,11 +164,13 @@ defmodule BrokenOaths.Combat.Resolver do
     # so it reliably wins a 1v1 (criterion 7633).
     bronze_spearman: 16,
     # QA issue da39e50b "No archer" — a first-pass MELEE Archer (this
-    # engine has no ranged-attack model at all; see
-    # `BrokenOaths.Cities.Production`'s own moduledoc, "The Archer", for
-    # the full rationale and the ranged-attack follow-up flag), single
-    # strength like every other unit here, between the Warrior (10) and
-    # the Bronze Spearman (16).
+    # engine originally shipped with no ranged-attack model at all; QA
+    # issue 12bed1e4 is what actually adds one — see `shoot/4` and this
+    # module's own "Ranged" doc above), single strength like every
+    # other unit here, between the Warrior (10) and the Bronze Spearman
+    # (16). Unchanged by the ranged-attack fix: `shoot/4` reads this
+    # SAME base strength, `resolve_attack/4`'s `ranged?: true` opt only
+    # zeroes the counter-blow, never the archer's own damage curve.
     archer: 14
   }
   @lord_aura_bonus 2
@@ -151,6 +179,14 @@ defmodule BrokenOaths.Combat.Resolver do
   @damage_scale 0.04
   @roll_floor 0.75
   @roll_span 0.5
+  # QA issue 12bed1e4 — how far an Archer's `shoot/4` reaches: raw
+  # mesh-adjacency hexes (see `in_shoot_range?/3`'s own doc for why not
+  # a land-path distance), not a strategic-scale number like
+  # `BrokenOaths.Combat.CityDefense.approach_range/0` (3) or
+  # `BrokenOaths.Combat.Camps`'s own far-camp band (8-15) — just far
+  # enough that "don't move onto the target's tile" reads as a real
+  # tactical choice rather than a same-as-melee no-op.
+  @shoot_range 2
 
   @doc "A unit type's base combat strength, before wounding or the lord's aura."
   @spec base_strength(unit_type()) :: non_neg_integer()
@@ -270,6 +306,25 @@ defmodule BrokenOaths.Combat.Resolver do
   def hostile?(_attacker, _defender), do: false
 
   @doc """
+  Whether `attacker` may legally target `defender` under the SAME PvP
+  rules `attack/4` enforces: `hostile?/2`'s barbarian check, OR one of
+  the two narrow feudal exceptions (a lord striking back at their own
+  vassal's tracked besieger; an active rebellion war between the two
+  players) `validate_pvp_attack/4` (below) already carves out for
+  melee. Movement/range/adjacency are NOT this predicate's concern —
+  callers check those separately. Extracted to a public function
+  (never inlined twice) so `shoot/4`'s own ranged targeting shares
+  EXACTLY this gate rather than a second copy that could quietly
+  drift — `hostile?/2` itself is never weakened by either caller.
+  """
+  @spec pvp_target_allowed?(map(), unit(), unit()) :: boolean()
+  def pvp_target_allowed?(state, attacker, defender) do
+    hostile?(attacker, defender) or
+      protecting_lord_may_strike?(state, attacker, defender) or
+      War.rebellion_war?(state, attacker.player_id, defender.player_id)
+  end
+
+  @doc """
   Whether `attacker` may legally attack `camp` right now: movement
   left, camp on an adjacent tile. Every camp is a legal target while it
   stands (no `hostile?/2`-style ownership check — a camp has no
@@ -284,6 +339,47 @@ defmodule BrokenOaths.Combat.Resolver do
       camp.tile_id not in adjacent_tile_ids -> {:error, :not_adjacent}
       true -> :ok
     end
+  end
+
+  @doc """
+  How many hexes an Archer's `shoot/4` reaches (QA issue 12bed1e4).
+  """
+  @spec shoot_range() :: pos_integer()
+  def shoot_range, do: @shoot_range
+
+  @doc """
+  Whether `to_tile` sits within `shoot_range/0` raw mesh-adjacency
+  hexes of `from_tile` — the same "physical closeness on the globe,"
+  never a land-path walking distance, `BrokenOaths.Combat.CityDefense.
+  approaching?/4` already measures its own alert range with (an arrow
+  flies over water/mountains same as open ground;
+  `BrokenOaths.Combat.BarbarianAI`'s land-path distance is for a
+  WALKING unit's own approach, not a standing shot). `from_tile` itself
+  is never in range of itself — an archer doesn't "shoot" the tile
+  it's already standing on.
+  """
+  @spec in_shoot_range?(World.t(), tile_id(), tile_id()) :: boolean()
+  def in_shoot_range?(world, from_tile, to_tile) do
+    MapSet.member?(shoot_disk(world, from_tile), to_tile)
+  end
+
+  # Same growing-ring BFS shape `CityDefense`'s own private `mesh_disk/3`
+  # uses for its approach alert — duplicated (not shared) per this
+  # codebase's established "small pure state-accessor helpers live
+  # wherever they're needed" convention.
+  defp shoot_disk(world, start) do
+    {_frontier, seen} =
+      Enum.reduce(1..@shoot_range, {[start], MapSet.new([start])}, fn _, {frontier, seen} ->
+        next =
+          frontier
+          |> Enum.flat_map(&Regions.adjacent_tiles(world, &1))
+          |> Enum.uniq()
+          |> Enum.reject(&MapSet.member?(seen, &1))
+
+        {next, MapSet.union(seen, MapSet.new(next))}
+      end)
+
+    MapSet.delete(seen, start)
   end
 
   # A deterministic roll in [0.75, 1.25] for `seed` (any term). Hashed
@@ -355,14 +451,15 @@ defmodule BrokenOaths.Combat.Resolver do
   # Protection Pact calls ("the lord is notified and is expected to
   # defend" — the design doc's own words require the lord be ABLE to
   # fight back). Every other pairing of two real players falls through
-  # to `hostile?/2`'s own unchanged verdict.
+  # to `hostile?/2`'s own unchanged verdict. `pvp_target_allowed?/3`
+  # (above) is this SAME widened check, extracted to a public function
+  # `shoot/4` also calls — this stays the melee-only movement/adjacency
+  # wrapper around it.
   defp validate_pvp_attack(state, attacker, defender, adjacent_tile_ids) do
     cond do
       attacker.movement <= 0 -> {:error, :out_of_movement}
       defender.tile_id not in adjacent_tile_ids -> {:error, :not_adjacent}
-      hostile?(attacker, defender) -> :ok
-      protecting_lord_may_strike?(state, attacker, defender) -> :ok
-      War.rebellion_war?(state, attacker.player_id, defender.player_id) -> :ok
+      pvp_target_allowed?(state, attacker, defender) -> :ok
       true -> {:error, :not_hostile}
     end
   end
@@ -378,16 +475,25 @@ defmodule BrokenOaths.Combat.Resolver do
   post-`validate_pvp_attack/4` step, also reused by `WorldServer`'s
   test-only `:resolve_barbarian_attack_for_test` bridge, which needs
   the SAME pipeline without `attack/4`'s player-ownership check (a
-  barbarian attacker has no owning session to satisfy it). Applies
-  `resolve/3`'s damage, drops whichever side reached 0 HP, schedules an
-  heir if a lord fell, pays the barbarian-kill bounty, and
-  raises/resolves any Protection Pact call the exchange touches.
-  """
-  @spec resolve_attack(map(), unit(), unit()) :: {attack_outcome(), map()}
-  def resolve_attack(state, attacker, defender) do
-    seed = {state.world.seed, state.turn, attacker.id, defender.id}
+  barbarian attacker has no owning session to satisfy it), and by
+  `shoot/4` (QA issue 12bed1e4). Applies `resolve/3`'s damage, drops
+  whichever side reached 0 HP, schedules an heir if a lord fell, pays
+  the barbarian-kill bounty, and raises/resolves any Protection Pact
+  call the exchange touches. `opts`:
 
-    %{damage_to_defender: dealt, damage_to_attacker: taken} =
+    * `:ranged?` — when `true` (the Archer's own `shoot/4`), the
+      defender's own counter-blow is computed exactly like every other
+      melee exchange (so the SAME aura/garrison/wounding curve applies
+      either way) and then discarded before it's ever applied to
+      `attacker` — the whole "no counterattack" ranged advantage.
+      Defaults `false` (ordinary melee, unchanged).
+  """
+  @spec resolve_attack(map(), unit(), unit(), keyword()) :: {attack_outcome(), map()}
+  def resolve_attack(state, attacker, defender, opts \\ []) do
+    seed = {state.world.seed, state.turn, attacker.id, defender.id}
+    ranged? = Keyword.get(opts, :ranged?, false)
+
+    %{damage_to_defender: dealt, damage_to_attacker: countered} =
       resolve(attacker, defender,
         seed: seed,
         attacker_aura?: lord_adjacent?(state, attacker),
@@ -395,6 +501,8 @@ defmodule BrokenOaths.Combat.Resolver do
         attacker_garrisoned?: CityDefense.garrisoned?(attacker, Map.values(state.cities)),
         defender_garrisoned?: CityDefense.garrisoned?(defender, Map.values(state.cities))
       )
+
+    taken = if ranged?, do: 0, else: countered
 
     new_attacker = %{attacker | hp: max(attacker.hp - taken, 0), movement: 0}
     new_defender = %{defender | hp: max(defender.hp - dealt, 0)}
@@ -468,5 +576,62 @@ defmodule BrokenOaths.Combat.Resolver do
 
   defp find_player(state, user_id) do
     state.players |> Map.values() |> Enum.find(&(&1.user_id == user_id))
+  end
+
+  # -------------------------------------------------------------------
+  # Ranged (QA issue 12bed1e4) — the Archer's own `shoot/4`, mirroring
+  # `attack/4`'s own shape; see this module's "Ranged" moduledoc
+  # section above.
+  # -------------------------------------------------------------------
+
+  @doc """
+  Resolve an immediate ranged "shoot" request: `user`'s own Archer
+  `unit_id` strikes `target_unit_id` from up to `shoot_range/0` hexes
+  away, without moving there and without taking `target_unit_id`'s own
+  counter-blow — see this module's "Ranged" doc. Same target-legality
+  rules `attack/4` enforces (`pvp_target_allowed?/3`), just RANGE
+  instead of adjacency; refuses `:not_archer` for any other attacking
+  unit type. `WorldServer`'s own `:shoot` `handle_call` wraps this with
+  persistence and the broadcast, mirroring `attack/4`'s own wrapper.
+  """
+  @spec shoot(map(), term(), term(), term()) ::
+          {:ok, attack_outcome(), map()} | {:error, term()}
+  def shoot(state, user, unit_id, target_unit_id) do
+    player = find_player(state, user.id)
+    attacker = Map.get(state.units, unit_id)
+    defender = Map.get(state.units, target_unit_id)
+
+    cond do
+      is_nil(player) or is_nil(attacker) or attacker.player_id != player.id ->
+        {:error, :not_owner}
+
+      is_nil(defender) ->
+        {:error, :invalid_target}
+
+      true ->
+        case validate_shoot(state, attacker, defender) do
+          :ok ->
+            {result, new_state} = resolve_attack(state, attacker, defender, ranged?: true)
+            {:ok, result, new_state}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
+
+  defp validate_shoot(state, attacker, defender) do
+    cond do
+      attacker.type != :archer -> {:error, :not_archer}
+      attacker.movement <= 0 -> {:error, :out_of_movement}
+      not in_shoot_range?(state.world, attacker.tile_id, defender.tile_id) ->
+        {:error, :out_of_range}
+
+      pvp_target_allowed?(state, attacker, defender) ->
+        :ok
+
+      true ->
+        {:error, :not_hostile}
+    end
   end
 end

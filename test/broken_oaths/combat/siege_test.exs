@@ -2,7 +2,34 @@ defmodule BrokenOaths.Combat.SiegeTest do
   use ExUnit.Case, async: true
 
   alias BrokenOaths.Combat.CityDefense
+  alias BrokenOaths.Combat.Resolver
   alias BrokenOaths.Combat.Siege
+  alias BrokenOaths.Worlds.Regions
+  alias BrokenOaths.Worlds.World
+
+  @frequency 8
+  @seed 424_242
+
+  defp world, do: %World{seed: @seed, frequency: @frequency}
+
+  # A tile at EXACTLY `distance` raw mesh-adjacency hops from `from` —
+  # same growing-ring BFS `ResolverTest`/`CampsTest` already use.
+  defp tile_at_distance(from, 0), do: from
+
+  defp tile_at_distance(from, distance) do
+    {frontier, _seen} =
+      Enum.reduce(1..distance, {[from], MapSet.new([from])}, fn _, {frontier, seen} ->
+        next =
+          frontier
+          |> Enum.flat_map(&Regions.adjacent_tiles(world(), &1))
+          |> Enum.uniq()
+          |> Enum.reject(&MapSet.member?(seen, &1))
+
+        {next, MapSet.union(seen, MapSet.new(next))}
+      end)
+
+    List.first(frontier)
+  end
 
   defp unit(id, opts) do
     max_hp = Keyword.get(opts, :max_hp, 100)
@@ -330,6 +357,92 @@ defmodule BrokenOaths.Combat.SiegeTest do
     test "executing costs a small, fixed Honor penalty" do
       assert Siege.execute_garrison_honor_penalty() > 0
       assert Siege.apply_execute_honor_penalty(100) == 100 - Siege.execute_garrison_honor_penalty()
+    end
+  end
+  # -------------------------------------------------------------------
+  # Ranged city assault (QA issue 12bed1e4 "Archers don't have a shoot
+  # action") — the Archer's own `shoot_city/4`. Only the VALIDATION
+  # refusal paths are covered here: a successful hit falls all the way
+  # through to `resolve_city_attack/4`, which (like `attack_city/4`
+  # before it) raises a Protection Pact call via a real `Repo` query —
+  # exercised at the LiveView/spex integration level instead, the same
+  # "orchestration-level attack_city/4 isn't hand-fixture-tested here
+  # either" status this file's own `attack_city/4` already has.
+  # -------------------------------------------------------------------
+
+  describe "shoot_city/4" do
+    setup do
+      original = Application.get_env(:broken_oaths, :feudal_enabled)
+      on_exit(fn -> Application.put_env(:broken_oaths, :feudal_enabled, original) end)
+      Application.put_env(:broken_oaths, :feudal_enabled, true)
+      :ok
+    end
+
+    defp shoot_state(units, cities) do
+      %{world: world(), turn: 0, units: units, cities: cities, players: %{1 => %{id: 1, user_id: 1}}}
+    end
+
+    test "refuses any non-Archer attacker" do
+      target_tile = tile_at_distance(0, 1)
+      warrior = unit(1, type: :warrior, tile: 0, player_id: 1)
+      target_city = city(10, tile: target_tile, player_id: 2)
+      st = shoot_state(%{1 => warrior}, %{10 => target_city})
+
+      assert Siege.shoot_city(st, %{id: 1}, 1, 10) == {:error, :not_archer}
+    end
+
+    test "refuses an Archer with no movement left" do
+      target_tile = tile_at_distance(0, 1)
+      archer = unit(1, type: :archer, tile: 0, player_id: 1, movement: 0)
+      target_city = city(10, tile: target_tile, player_id: 2)
+      st = shoot_state(%{1 => archer}, %{10 => target_city})
+
+      assert Siege.shoot_city(st, %{id: 1}, 1, 10) == {:error, :out_of_movement}
+    end
+
+    test "refuses shooting your own city" do
+      target_tile = tile_at_distance(0, 1)
+      archer = unit(1, type: :archer, tile: 0, player_id: 1)
+      own_city = city(10, tile: target_tile, player_id: 1)
+      st = shoot_state(%{1 => archer}, %{10 => own_city})
+
+      assert Siege.shoot_city(st, %{id: 1}, 1, 10) == {:error, :own_city}
+    end
+
+    test "refuses a city beyond Resolver.shoot_range/0 — out of range" do
+      target_tile = tile_at_distance(0, Resolver.shoot_range() + 1)
+      archer = unit(1, type: :archer, tile: 0, player_id: 1)
+      target_city = city(10, tile: target_tile, player_id: 2)
+      st = shoot_state(%{1 => archer}, %{10 => target_city})
+
+      assert Siege.shoot_city(st, %{id: 1}, 1, 10) == {:error, :out_of_range}
+    end
+
+    test "refused outright with the feudal batch OFF — the same restore attack_city/4 falls back to" do
+      Application.put_env(:broken_oaths, :feudal_enabled, false)
+
+      target_tile = tile_at_distance(0, 1)
+      archer = unit(1, type: :archer, tile: 0, player_id: 1)
+      target_city = city(10, tile: target_tile, player_id: 2)
+      st = shoot_state(%{1 => archer}, %{10 => target_city})
+
+      assert Siege.shoot_city(st, %{id: 1}, 1, 10) == {:error, :not_hostile}
+    end
+
+    test "refuses an unowned unit_id" do
+      target_tile = tile_at_distance(0, 1)
+      archer = unit(1, type: :archer, tile: 0, player_id: 1)
+      target_city = city(10, tile: target_tile, player_id: 2)
+      st = shoot_state(%{1 => archer}, %{10 => target_city})
+
+      assert Siege.shoot_city(st, %{id: 999}, 1, 10) == {:error, :not_owner}
+    end
+
+    test "refuses a nonexistent target city" do
+      archer = unit(1, type: :archer, tile: 0, player_id: 1)
+      st = shoot_state(%{1 => archer}, %{})
+
+      assert Siege.shoot_city(st, %{id: 1}, 1, 999) == {:error, :invalid_target}
     end
   end
 end
