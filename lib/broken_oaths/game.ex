@@ -314,11 +314,11 @@ defmodule BrokenOaths.Game do
   the batch is fully built and wired into `WorldServer`, but still
   missing its Bank/Stewardship/first-class panels/QA/balance pass, so
   it must stay dormant in prod until that lands. This is the single
-  check point every feudal entry point reads: `WorldServer.
-  do_attack_city/4`'s Siege path (attacking another player's city is
+  check point every feudal entry point reads: `Siege.
+  attack_city/4`'s own gate (attacking another player's city is
   refused outright, `{:error, :not_hostile}`, restoring the pre-906
   "no Stone Age PvP" rule, exactly like unit-vs-unit `Combat.
-  hostile?/2`), `apply_captures/1` (no vassalage), and `apply_tribute/1`
+  hostile?/2`), `Vassalization.apply_captures/1` (no vassalage), and `apply_tribute/1`
   (no tribute collected) — each a no-op while this reads `false`. The
   feudal LiveView UI (vassals panel, oath screen, vassal-status/
   tribute-rate/levy badges, occupied-city status) never needs its own

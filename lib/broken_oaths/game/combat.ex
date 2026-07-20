@@ -69,7 +69,31 @@ defmodule BrokenOaths.Game.Combat do
   Two real players are never hostile to each other ("no Stone Age PvP"
   — story 891, criterion 7542): `validate_attack/3` refuses every
   cross-player attack where neither side is a barbarian.
+
+  ## Attack orchestration (stories 891/893/896/899/914)
+
+  `attack/4` and `resolve_attack/3` are the pragdave-pattern "domain
+  model" home (`.code_my_spec/knowledge/genserver_decomposition.md`)
+  for the unit-vs-unit "attack" flow `BrokenOaths.Game.WorldServer`
+  used to bury inline: they take the WorldServer's own tick-`state`
+  (see `BrokenOaths.Game.Turn`'s moduledoc for that shape) plus plain
+  args and return either a reply tuple or an updated `state` — no
+  `GenServer`, no `handle_*`, no process awareness. `WorldServer`'s own
+  `:attack` `handle_call` (and the test-only
+  `:resolve_barbarian_attack_for_test` bridge) are thin delegations
+  into this section. Coordinates its siblings directly, per the north
+  star's "cross-cutting operations are orchestrated by their OWNING
+  domain model calling its siblings" rule: `BrokenOaths.Game.
+  Rebellion.War` and `BrokenOaths.Game.ProtectionPact` for the two
+  feudal PvP exceptions (never duplicated here), `BrokenOaths.Game.
+  CityDefense` for the garrison-bonus lookup.
   """
+
+  alias BrokenOaths.Game.BarbarianAI
+  alias BrokenOaths.Game.CityDefense
+  alias BrokenOaths.Game.ProtectionPact
+  alias BrokenOaths.Game.Rebellion.War
+  alias BrokenOaths.Worlds.Regions
 
   @type tile_id :: non_neg_integer()
   @type unit_type ::
@@ -90,6 +114,8 @@ defmodule BrokenOaths.Game.Combat do
           damage_to_defender: pos_integer(),
           damage_to_attacker: pos_integer()
         }
+
+  @type attack_outcome :: %{damage_dealt: non_neg_integer(), damage_taken: non_neg_integer()}
 
   @type camp :: %{
           id: term(),
@@ -275,5 +301,172 @@ defmodule BrokenOaths.Game.Combat do
   defp seed_tuple(term) do
     h = :erlang.phash2(term, 1_000_000_000)
     {h, h * 7 + 13, h * 31 + 97}
+  end
+
+  # -------------------------------------------------------------------
+  # Attack orchestration (stories 891/893/896/899/914) — moved home
+  # from `BrokenOaths.Game.WorldServer`; see this module's own
+  # "Attack orchestration" moduledoc section above.
+  # -------------------------------------------------------------------
+
+  @doc """
+  Resolve an immediate "attack" request: `user`'s own `unit_id` strikes
+  `target_unit_id` right now, against whatever movement the attacker
+  has left — an order resolves immediately, not queued (see this
+  module's moduledoc for the damage math and target-legality rules).
+  `WorldServer`'s own `:attack` `handle_call` wraps this with
+  persistence and the broadcast.
+  """
+  @spec attack(map(), term(), term(), term()) ::
+          {:ok, attack_outcome(), map()} | {:error, term()}
+  def attack(state, user, unit_id, target_unit_id) do
+    player = find_player(state, user.id)
+    attacker = Map.get(state.units, unit_id)
+    defender = Map.get(state.units, target_unit_id)
+
+    cond do
+      is_nil(player) or is_nil(attacker) or attacker.player_id != player.id ->
+        {:error, :not_owner}
+
+      is_nil(defender) ->
+        {:error, :invalid_target}
+
+      true ->
+        adjacent_tile_ids = Regions.adjacent_tiles(state.world, attacker.tile_id)
+
+        case validate_pvp_attack(state, attacker, defender, adjacent_tile_ids) do
+          :ok ->
+            {result, new_state} = resolve_attack(state, attacker, defender)
+            {:ok, result, new_state}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
+
+  # Story 914: `validate_attack/3`'s own general "no PvP in the Stone
+  # Age" rule (`hostile?/2` — false for any two real players, LOCKED,
+  # see `BrokenOathsSpex.Story899.Criterion7603Spex`) stays untouched
+  # for everyone ELSE — this only widens the CALLER-side gate
+  # `attack/4` itself applies, with one narrow, story-914-scoped
+  # exception: a lord may always strike the SPECIFIC unit currently
+  # tracked as the besieger of one of their OWN vassal's active
+  # Protection Pact calls ("the lord is notified and is expected to
+  # defend" — the design doc's own words require the lord be ABLE to
+  # fight back). Every other pairing of two real players falls through
+  # to `hostile?/2`'s own unchanged verdict.
+  defp validate_pvp_attack(state, attacker, defender, adjacent_tile_ids) do
+    cond do
+      attacker.movement <= 0 -> {:error, :out_of_movement}
+      defender.tile_id not in adjacent_tile_ids -> {:error, :not_adjacent}
+      hostile?(attacker, defender) -> :ok
+      protecting_lord_may_strike?(state, attacker, defender) -> :ok
+      War.rebellion_war?(state, attacker.player_id, defender.player_id) -> :ok
+      true -> {:error, :not_hostile}
+    end
+  end
+
+  defp protecting_lord_may_strike?(state, attacker, defender) do
+    Enum.any?(protection_calls(state), fn {_vassal_player_id, call} ->
+      call.attacker_unit_id == defender.id and call.lord_player_id == attacker.player_id
+    end)
+  end
+
+  @doc """
+  Resolve a single already-validated exchange: `attack/4`'s own
+  post-`validate_pvp_attack/4` step, also reused by `WorldServer`'s
+  test-only `:resolve_barbarian_attack_for_test` bridge, which needs
+  the SAME pipeline without `attack/4`'s player-ownership check (a
+  barbarian attacker has no owning session to satisfy it). Applies
+  `resolve/3`'s damage, drops whichever side reached 0 HP, schedules an
+  heir if a lord fell, pays the barbarian-kill bounty, and
+  raises/resolves any Protection Pact call the exchange touches.
+  """
+  @spec resolve_attack(map(), unit(), unit()) :: {attack_outcome(), map()}
+  def resolve_attack(state, attacker, defender) do
+    seed = {state.world.seed, state.turn, attacker.id, defender.id}
+
+    %{damage_to_defender: dealt, damage_to_attacker: taken} =
+      resolve(attacker, defender,
+        seed: seed,
+        attacker_aura?: lord_adjacent?(state, attacker),
+        defender_aura?: lord_adjacent?(state, defender),
+        attacker_garrisoned?: CityDefense.garrisoned?(attacker, Map.values(state.cities)),
+        defender_garrisoned?: CityDefense.garrisoned?(defender, Map.values(state.cities))
+      )
+
+    new_attacker = %{attacker | hp: max(attacker.hp - taken, 0), movement: 0}
+    new_defender = %{defender | hp: max(defender.hp - dealt, 0)}
+
+    units =
+      state.units
+      |> apply_combat_unit(attacker.id, new_attacker)
+      |> apply_combat_unit(defender.id, new_defender)
+
+    state =
+      %{state | units: units}
+      |> schedule_heir_if_lord_fell(attacker, new_attacker)
+      |> schedule_heir_if_lord_fell(defender, new_defender)
+      |> pay_bounty_if_barbarian_fell(new_attacker, defender)
+      |> pay_bounty_if_barbarian_fell(new_defender, attacker)
+      |> ProtectionPact.maybe_raise_protection_call(attacker, defender.player_id)
+      |> ProtectionPact.resolve_protection_call_if_dead(new_attacker)
+      |> ProtectionPact.resolve_protection_call_if_dead(new_defender)
+
+    {%{damage_dealt: dealt, damage_taken: taken}, state}
+  end
+
+  defp apply_combat_unit(units, id, %{hp: 0}), do: Map.delete(units, id)
+  defp apply_combat_unit(units, id, unit), do: Map.put(units, id, unit)
+
+  # Story 893, criterion 7557: whichever side of a resolved exchange
+  # was a barbarian (`player_id: nil`) and reached 0 HP pays the OTHER
+  # side's owner the bounty. Story 904: the same kill also bumps the
+  # payee's own `barbarians_killed` career total.
+  defp pay_bounty_if_barbarian_fell(state, %{player_id: nil, hp: 0}, %{player_id: payee_id})
+       when not is_nil(payee_id) do
+    state = update_in(state.players[payee_id].gold, &(&1 + BarbarianAI.bounty_gold()))
+    update_in(state.players[payee_id].barbarians_killed, &(&1 + 1))
+  end
+
+  defp pay_bounty_if_barbarian_fell(state, _fallen, _other), do: state
+
+  # A living unit of the SAME player standing next door — dead units
+  # are already gone from `state.units`, so presence alone means
+  # living, and a lord's own tile is never its own neighbor, so this
+  # never accidentally self-buffs the lord. Duplicated (not shared)
+  # into `BrokenOaths.Game.Siege`/`BrokenOaths.Game.Turn`/`WorldServer`
+  # per this codebase's own established "small pure state-accessor
+  # helpers live wherever they're needed" convention (see e.g. `Turn`'s
+  # own `lord_adjacent?/2`).
+  defp lord_adjacent?(state, unit) do
+    adjacent_tile_ids = Regions.adjacent_tiles(state.world, unit.tile_id)
+
+    state.units
+    |> Map.values()
+    |> Enum.any?(
+      &(&1.type == :lord and &1.player_id == unit.player_id and &1.tile_id in adjacent_tile_ids)
+    )
+  end
+
+  # Schedules the heir 10 turn boundaries out (story 896, criterion
+  # 7573) — kept only in memory (`state.pending_heirs`), never
+  # persisted. `Turn.tick/1` resolves this map every boundary.
+  defp schedule_heir_if_lord_fell(state, %{type: :lord, player_id: player_id}, %{hp: 0}) do
+    pending_heirs =
+      state
+      |> Map.get(:pending_heirs, %{})
+      |> Map.put(player_id, state.turn + 10)
+
+    Map.put(state, :pending_heirs, pending_heirs)
+  end
+
+  defp schedule_heir_if_lord_fell(state, _original, _new), do: state
+
+  defp protection_calls(state), do: Map.get(state, :protection_calls, %{})
+
+  defp find_player(state, user_id) do
+    state.players |> Map.values() |> Enum.find(&(&1.user_id == user_id))
   end
 end

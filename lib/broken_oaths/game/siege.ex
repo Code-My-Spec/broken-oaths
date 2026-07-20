@@ -88,9 +88,25 @@ defmodule BrokenOaths.Game.Siege do
   tile the instant a capture happens. "Execute" must never delete the
   conqueror's own army as a side effect of executing the people they
   just conquered.
+
+  ## City assault + garrison-fate orchestration (stories 895/906)
+
+  `attack_city/4` and `apply_garrison_fate/4` are the pragdave-pattern
+  "domain model" home (`.code_my_spec/knowledge/genserver_decomposition.md`)
+  for the two immediate, stateful surfaces `BrokenOaths.Game.
+  WorldServer` used to bury inline: they take the WorldServer's own
+  tick-`state` (see `BrokenOaths.Game.Turn`'s moduledoc for that shape)
+  plus plain args and return either a reply tuple or an updated
+  `state` — no `GenServer`, no `handle_*`, no process awareness.
+  `WorldServer`'s own `:attack_city`/`:resolve_garrison_fate`
+  `handle_call` clauses are thin delegations into this section.
   """
 
+  alias BrokenOaths.Game
+  alias BrokenOaths.Game.BarbarianAI
   alias BrokenOaths.Game.CityDefense
+  alias BrokenOaths.Game.ProtectionPact
+  alias BrokenOaths.Worlds.Regions
 
   @type tile_id :: CityDefense.tile_id()
   @type unit :: CityDefense.unit()
@@ -104,6 +120,9 @@ defmodule BrokenOaths.Game.Siege do
           captor_player_id: player_id(),
           defeated_player_id: player_id()
         }
+
+  @type attack_outcome :: %{damage_dealt: non_neg_integer(), damage_taken: non_neg_integer()}
+  @type city_alert :: {:city_alert, term(), String.t()}
 
   # -------------------------------------------------------------------
   # Who may besiege
@@ -287,4 +306,203 @@ defmodule BrokenOaths.Game.Siege do
   @doc "`honor - execute_garrison_honor_penalty/0` — the Honor consequence for choosing to execute a fallen garrison."
   @spec apply_execute_honor_penalty(integer()) :: integer()
   def apply_execute_honor_penalty(honor), do: honor - @execute_garrison_honor_penalty
+
+  # -------------------------------------------------------------------
+  # City assault orchestration (stories 895/906) — moved home from
+  # `BrokenOaths.Game.WorldServer`; see this module's own "City assault
+  # + garrison-fate orchestration" moduledoc section above.
+  # -------------------------------------------------------------------
+
+  # Resolves immediately, like a player's own unit-vs-unit attack (see
+  # `BrokenOaths.Game.CityDefense`'s moduledoc for the damage math —
+  # city defensive strength vs. attacker strength, countered by the
+  # strongest garrisoned defender). Unlike `BrokenOaths.Game.Combat.
+  # hostile?/2`'s "no Stone Age PvP" rule for unit-vs-unit combat, ANY
+  # player's unit may assault ANY OTHER player's city — `validate_siege/3`
+  # layers ONE new rule on top of `CityDefense.validate_attack/3`'s own
+  # not-your-own-city/adjacency/movement checks: the attacker must be
+  # MILITARY, a civilian besieger is refused outright (`:not_military`)
+  # rather than merely ineffective. `Game.feudal_enabled?/0` is checked
+  # LAST, only once the request is otherwise well-formed (owned
+  # attacker, real city target) — with the batch dormant (`config
+  # :broken_oaths, :feudal_enabled, false`, prod's own default), any
+  # city assault is refused exactly the way `Combat.hostile?/2` already
+  # refuses unit-vs-unit PvP: `{:error, :not_hostile}`, same
+  # "Stone Age players cannot fight each other" copy renders for it —
+  # restoring the pre-906 no-PvP-city-capture behavior. Barbarian city
+  # assault (`CityDefense`'s pillage path, driven by `BrokenOaths.Game.
+  # Turn`'s own barbarian-AI phase, never this "attack" surface) is
+  # untouched either way.
+  @doc """
+  Resolve an immediate city-assault request: `user`'s own `unit_id`
+  besieges `city_id` right now, against whatever movement the attacker
+  has left. Returns `{:ok, result, new_state, alert}` on a legal
+  assault (`alert` is a `{:city_alert, owner_user_id, message}` tuple
+  for the defender's own "under attack" push) or `{:error, reason}` —
+  `WorldServer`'s own `:attack_city` `handle_call` is a thin wrapper
+  around this that adds persistence and the broadcast.
+  """
+  @spec attack_city(map(), term(), term(), term()) ::
+          {:ok, attack_outcome(), map(), city_alert()} | {:error, term()}
+  def attack_city(state, user, unit_id, city_id) do
+    player = find_player(state, user.id)
+    attacker = Map.get(state.units, unit_id)
+    city = Map.get(state.cities, city_id)
+
+    cond do
+      is_nil(player) or is_nil(attacker) or attacker.player_id != player.id ->
+        {:error, :not_owner}
+
+      is_nil(city) ->
+        {:error, :invalid_target}
+
+      not Game.feudal_enabled?() ->
+        {:error, :not_hostile}
+
+      true ->
+        adjacent_tile_ids = Regions.adjacent_tiles(state.world, attacker.tile_id)
+
+        case validate_siege(attacker, city, adjacent_tile_ids) do
+          :ok ->
+            {result, new_state} = resolve_city_attack(state, attacker, city)
+
+            alert =
+              {:city_alert, owner_user_id(state, city.player_id),
+               CityDefense.under_attack_alert(city.name)}
+
+            {:ok, result, new_state, alert}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
+
+  defp resolve_city_attack(state, attacker, city) do
+    seed = {state.world.seed, state.turn, attacker.id, city.id}
+    units = Map.values(state.units)
+
+    %{damage_to_city: dealt, damage_to_barbarian: taken} =
+      CityDefense.resolve_attack(city, units, attacker,
+        seed: seed,
+        attacker_aura?: lord_adjacent?(state, attacker)
+      )
+
+    new_city = take_damage(city, dealt)
+    new_attacker = %{attacker | hp: max(attacker.hp - taken, 0), movement: 0}
+
+    state =
+      %{
+        state
+        | units: apply_combat_unit(state.units, attacker.id, new_attacker),
+          cities: Map.put(state.cities, city.id, new_city)
+      }
+      |> schedule_heir_if_lord_fell(attacker, new_attacker)
+      |> pay_bounty_if_barbarian_fell(new_attacker, %{player_id: city.player_id})
+      |> ProtectionPact.maybe_raise_protection_call(attacker, city.player_id)
+      |> ProtectionPact.resolve_protection_call_if_dead(new_attacker)
+
+    {%{damage_dealt: dealt, damage_taken: taken}, state}
+  end
+
+  defp apply_combat_unit(units, id, %{hp: 0}), do: Map.delete(units, id)
+  defp apply_combat_unit(units, id, unit), do: Map.put(units, id, unit)
+
+  # Story 893, criterion 7557's own sibling for a city target: a
+  # barbarian attacker never reaches this surface (city assault is a
+  # real-player-only "attack" surface), but a barbarian-owned
+  # `%{player_id: nil}` `city.player_id` can never pay a bounty either
+  # (the `payee_id` guard below), so this stays a faithful copy of
+  # `BrokenOaths.Game.Combat`'s own helper.
+  defp pay_bounty_if_barbarian_fell(state, %{player_id: nil, hp: 0}, %{player_id: payee_id})
+       when not is_nil(payee_id) do
+    state = update_in(state.players[payee_id].gold, &(&1 + BarbarianAI.bounty_gold()))
+    update_in(state.players[payee_id].barbarians_killed, &(&1 + 1))
+  end
+
+  defp pay_bounty_if_barbarian_fell(state, _fallen, _other), do: state
+
+  # A living unit of the SAME player standing next door — duplicated
+  # (not shared) from `BrokenOaths.Game.Combat`'s own copy per this
+  # codebase's established "small pure state-accessor helpers live
+  # wherever they're needed" convention (see e.g. `Turn`'s own
+  # `lord_adjacent?/2`).
+  defp lord_adjacent?(state, unit) do
+    adjacent_tile_ids = Regions.adjacent_tiles(state.world, unit.tile_id)
+
+    state.units
+    |> Map.values()
+    |> Enum.any?(
+      &(&1.type == :lord and &1.player_id == unit.player_id and &1.tile_id in adjacent_tile_ids)
+    )
+  end
+
+  # Schedules the heir 10 turn boundaries out (story 896, criterion
+  # 7573) — kept only in memory (`state.pending_heirs`), never
+  # persisted. `Turn.tick/1` resolves this map every boundary.
+  defp schedule_heir_if_lord_fell(state, %{type: :lord, player_id: player_id}, %{hp: 0}) do
+    pending_heirs =
+      state
+      |> Map.get(:pending_heirs, %{})
+      |> Map.put(player_id, state.turn + 10)
+
+    Map.put(state, :pending_heirs, pending_heirs)
+  end
+
+  defp schedule_heir_if_lord_fell(state, _original, _new), do: state
+
+  defp owner_user_id(state, player_id), do: Map.fetch!(state.players, player_id).user_id
+
+  defp find_player(state, user_id) do
+    state.players |> Map.values() |> Enum.find(&(&1.user_id == user_id))
+  end
+
+  # -------------------------------------------------------------------
+  # Garrison-fate orchestration (story 906, QA issue ed1ff4c0) — moved
+  # home from `BrokenOaths.Game.WorldServer`.
+  # -------------------------------------------------------------------
+
+  @doc """
+  Resolve `user`'s own choice (`:release`/`:execute`) for the fallen
+  garrison of `city_id`, a city they just captured: removes any
+  executed unit ids from `state.units` (`resolve_garrison_fate/3`) and
+  applies the Honor consequence. `WorldServer`'s own
+  `:resolve_garrison_fate` `handle_call` is a thin wrapper around this
+  that adds persistence and the broadcast.
+  """
+  @spec apply_garrison_fate(map(), term(), term(), garrison_fate()) ::
+          {:ok, map()} | {:error, term()}
+  def apply_garrison_fate(state, user, city_id, choice) do
+    player = find_player(state, user.id)
+    city = Map.get(state.cities, city_id)
+
+    cond do
+      is_nil(player) or is_nil(city) ->
+        {:error, :invalid_target}
+
+      city.occupied_by_player_id != player.id ->
+        {:error, :not_owner}
+
+      true ->
+        to_remove = resolve_garrison_fate(choice, city, Map.values(state.units))
+
+        new_state =
+          state
+          |> Map.update!(:units, &Map.drop(&1, to_remove))
+          |> apply_garrison_fate_honor(player.id, choice)
+
+        {:ok, new_state}
+    end
+  end
+
+  # QA issue ed1ff4c0 — the conqueror's own Honor consequence for their
+  # garrison-fate choice (design doc: executing costs a small Honor
+  # penalty, releasing is neutral). Folded into the SAME `new_state`
+  # `apply_garrison_fate/4` already returns, so the caller's own
+  # `persist_tick/2` picks up the `state.players` diff.
+  defp apply_garrison_fate_honor(state, player_id, :execute) do
+    update_in(state.players[player_id].honor, &apply_execute_honor_penalty/1)
+  end
+
+  defp apply_garrison_fate_honor(state, _player_id, :release), do: state
 end

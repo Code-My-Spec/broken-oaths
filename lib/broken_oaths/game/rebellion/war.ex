@@ -22,19 +22,19 @@ defmodule BrokenOaths.Game.Rebellion.War do
   operations are orchestrated by their OWNING domain model calling its
   siblings" rule: `Rebellion`/`Rebellion.Resolution` for the schema and
   pure war math, `Vassalage` for severing (and, via
-  `BrokenOaths.Game.WorldServer.maybe_revassalize/3`, restoring) the
+  `BrokenOaths.Game.Vassalization.maybe_revassalize/3`, restoring) the
   oath, and `Unit`/`City` schemas for the immediate, targeted Repo
   writes a rebellion's own city-rising/army-spawn/city-freeing needs
   (bypassing `WorldServer`'s own generic tick-diff persistence, exactly
   as the original inline code did).
 
-  `maybe_revassalize/3` itself stays a `WorldServer`-owned, PUBLIC
-  utility rather than moving here: it's shared with the (out-of-scope
-  for this slice) capture/vassalization pipeline
-  (`WorldServer.persist_vassalization/2`) and the story-917 heir
-  reconciliation sweep (`WorldServer.reconcile_heir_vassals_for_user/2`,
-  also out of scope), so duplicating its DB-write + notification-
-  broadcast logic here would risk the two copies drifting apart.
+  `maybe_revassalize/3` lives on `BrokenOaths.Game.Vassalization`
+  (moved home from `WorldServer` alongside the rest of the capture/
+  vassalization pipeline — the combat/vassalization decomposition
+  slice): it's shared between this module's own peace/crushed endings
+  and `WorldServer`'s own story-917 heir reconciliation sweep, so a
+  single real DB-write + notification-broadcast implementation is the
+  single source of truth for both callers.
   """
 
   import Ecto.Query
@@ -48,6 +48,7 @@ defmodule BrokenOaths.Game.Rebellion.War do
   alias BrokenOaths.Game.Rebellion.Resolution
   alias BrokenOaths.Game.Unit
   alias BrokenOaths.Game.Vassalage
+  alias BrokenOaths.Game.Vassalization
   alias BrokenOaths.Game.WorldServer
   alias BrokenOaths.Repo
   alias BrokenOaths.Users
@@ -400,7 +401,7 @@ defmodule BrokenOaths.Game.Rebellion.War do
       |> transfer_reparations(accepting_player_id, offering_player_id, reparations_gold)
 
     if outcome == :restored_vassal do
-      WorldServer.maybe_revassalize(state, ended.former_lord_player_id, ended.rebel_player_id)
+      Vassalization.maybe_revassalize(state, ended.former_lord_player_id, ended.rebel_player_id)
     end
 
     state
@@ -471,13 +472,13 @@ defmodule BrokenOaths.Game.Rebellion.War do
   # Story 919, criterion 7753 — "the normal siege and vassalization
   # rules apply to the losing rebel, including being re-vassalized on
   # the loss of their last city": reuses the SAME real vassalization
-  # write story 906/907 already ship (`WorldServer.maybe_revassalize/3`).
+  # write story 906/907 already ship (`Vassalization.maybe_revassalize/3`).
   defp end_rebellion_crushed(state, rebellion) do
     {:ok, ended} = Resolution.crush(rebellion) |> Repo.update()
 
     state = disband_temporary_army(state, ended.id)
 
-    WorldServer.maybe_revassalize(state, ended.former_lord_player_id, ended.rebel_player_id)
+    Vassalization.maybe_revassalize(state, ended.former_lord_player_id, ended.rebel_player_id)
 
     broadcast(state.world.id, [:vassals_changed, :units_changed])
 

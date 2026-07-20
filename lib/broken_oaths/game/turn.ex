@@ -1051,7 +1051,7 @@ defmodule BrokenOaths.Game.Turn do
   end
 
   # Simultaneous exchange, same math a player's own attack uses
-  # (`WorldServer.resolve_attack/3`) — a dying defender still lands its
+  # (`BrokenOaths.Game.Combat.resolve_attack/3`) — a dying defender still lands its
   # counter-blow. A barbarian that dies here pays its killer's owner
   # the bounty; a lord that dies here schedules an heir exactly like a
   # player-initiated kill would. `defender_garrisoned?` (story 895):

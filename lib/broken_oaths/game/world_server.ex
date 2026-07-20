@@ -42,7 +42,6 @@ defmodule BrokenOaths.Game.WorldServer do
   alias BrokenOaths.Game.{
     Alliance,
     Bank,
-    BarbarianAI,
     Camp,
     Camps,
     City,
@@ -228,7 +227,7 @@ defmodule BrokenOaths.Game.WorldServer do
         # Orders execute immediately with whatever movement the unit has
         # left; the turn boundary only recharges and continues.
         moved = Turn.move_now(queued, unit_id)
-        {moved, capture_events} = apply_captures(moved)
+        {moved, capture_events} = Vassalization.apply_captures(moved)
         # Story 919: an adjacent march can knock a rebel out of the
         # fight (or hand the former lord back every risen city) without
         # ever needing a full turn boundary — see `process_rebellion_
@@ -263,7 +262,7 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   def handle_call({:attack, user, unit_id, target_unit_id}, _from, state) do
-    case do_attack(state, user, unit_id, target_unit_id) do
+    case Combat.attack(state, user, unit_id, target_unit_id) do
       {:ok, result, new_state} ->
         case persist_tick(state, new_state) do
           :ok ->
@@ -306,7 +305,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # direct-push pattern `:lineage_continued` uses for a player-scoped
   # notification.
   def handle_call({:attack_city, user, unit_id, city_id}, _from, state) do
-    case do_attack_city(state, user, unit_id, city_id) do
+    case Siege.attack_city(state, user, unit_id, city_id) do
       {:ok, result, new_state, alert} ->
         case persist_tick(state, new_state) do
           :ok ->
@@ -537,7 +536,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # like every other in-place unit mutation (`persist_unit_changes/2`
   # already deletes any unit missing from the new map).
   def handle_call({:resolve_garrison_fate, user, city_id, choice}, _from, state) do
-    case do_resolve_garrison_fate(state, user, city_id, choice) do
+    case Siege.apply_garrison_fate(state, user, city_id, choice) do
       {:ok, new_state} ->
         case persist_tick(state, new_state) do
           :ok ->
@@ -677,9 +676,9 @@ defmodule BrokenOaths.Game.WorldServer do
   # doc. Bypasses `persist_tick/2`'s own generic diff (which never
   # tracks a unit's own `player_id` changing, the defecting-garrison
   # case) in favor of its own immediate, targeted Repo writes — the
-  # SAME "immediate, not tick-state" status `apply_captures/1`'s own
-  # `persist_vassalization/2` already has for the sibling vassalization
-  # write.
+  # SAME "immediate, not tick-state" status `Vassalization.
+  # apply_captures/1`'s own persistence already has for the sibling
+  # vassalization write.
   def handle_call({:declare_independence, user, lord_user_id}, _from, state) do
     case War.declare_independence(state, user, lord_user_id) do
       {:ok, result, new_state, lord_events} ->
@@ -1060,8 +1059,8 @@ defmodule BrokenOaths.Game.WorldServer do
   # (their own captured holding isn't a fresh attack target — see
   # `captured_cities_visible_to/2`'s own doc for where THAT surfaces
   # instead). Empty unless `Game.feudal_enabled?/0` — belt-and-
-  # suspenders alongside `do_attack_city/4`'s own gate, matching
-  # `apply_captures/1`'s own posture.
+  # suspenders alongside `Siege.attack_city/4`'s own gate, matching
+  # `Vassalization.apply_captures/1`'s own posture.
   def handle_call({:enemy_cities_visible_to, user}, _from, state) do
     {:reply, visible_enemy_cities(state, user), state}
   end
@@ -1444,11 +1443,11 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   # Test-only: resolve an attack FROM a barbarian, bypassing the
-  # player-ownership check `do_attack/4` requires (a barbarian has no
+  # player-ownership check `Combat.attack/4` requires (a barbarian has no
   # owning player/session to drive it through the ordinary "attack"
   # event). Story 893 (barbarian AI) is what will drive this for real;
   # until then this reuses the exact same validate+resolve pipeline
-  # `do_attack/4` uses, same narrow, documented-bridge status as
+  # `Combat.attack/4` uses, same narrow, documented-bridge status as
   # `:spawn_barbarian_for_test` above.
   def handle_call({:resolve_barbarian_attack_for_test, attacker_id, target_id}, _from, state) do
     attacker = Map.fetch!(state.units, attacker_id)
@@ -1457,7 +1456,7 @@ defmodule BrokenOaths.Game.WorldServer do
 
     case Combat.validate_attack(attacker, defender, adjacent_tile_ids) do
       :ok ->
-        {result, new_state} = resolve_attack(state, attacker, defender)
+        {result, new_state} = Combat.resolve_attack(state, attacker, defender)
 
         case persist_tick(state, new_state) do
           :ok ->
@@ -1570,7 +1569,7 @@ defmodule BrokenOaths.Game.WorldServer do
     ticked = War.restore_gated_heirs(ticked, deferred_heirs)
     {events, ticked} = materialize_spawns(events, ticked)
     ticked = %{ticked | turn_started_at: DateTime.utc_now()}
-    {ticked, capture_events} = apply_captures(ticked)
+    {ticked, capture_events} = Vassalization.apply_captures(ticked)
     {ticked, tribute_logs} = apply_tribute(ticked)
     ticked = Ledger.apply_oath_strain_drift(ticked)
     ticked = ProtectionPact.apply_protection_pact_ticks(ticked)
@@ -1638,7 +1637,7 @@ defmodule BrokenOaths.Game.WorldServer do
 
         lord_player.id
         |> Resolution.heir_retained_vassals(vassal_player_ids, rebellions)
-        |> Enum.each(&maybe_revassalize(state, lord_player.id, &1))
+        |> Enum.each(&Vassalization.maybe_revassalize(state, lord_player.id, &1))
     end
   end
 
@@ -2045,124 +2044,16 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   # -------------------------------------------------------------------
-  # Attack
+  # Attack (story 891/893/896/899/914) — the "attack" `handle_call` is a
+  # thin delegation into `BrokenOaths.Game.Combat.attack/4`
+  # (`.code_my_spec/knowledge/genserver_decomposition.md`).
   # -------------------------------------------------------------------
-
-  # Resolves like a move order: immediately, against whatever movement
-  # the attacker has left right now (see `Combat`'s moduledoc for the
-  # damage math and target-legality rules this delegates to).
-  defp do_attack(state, user, unit_id, target_unit_id) do
-    player = find_player(state, user.id)
-    attacker = Map.get(state.units, unit_id)
-    defender = Map.get(state.units, target_unit_id)
-
-    cond do
-      is_nil(player) or is_nil(attacker) or attacker.player_id != player.id ->
-        {:error, :not_owner}
-
-      is_nil(defender) ->
-        {:error, :invalid_target}
-
-      true ->
-        adjacent_tile_ids = Regions.adjacent_tiles(state.world, attacker.tile_id)
-
-        case validate_attack(state, attacker, defender, adjacent_tile_ids) do
-          :ok ->
-            {result, new_state} = resolve_attack(state, attacker, defender)
-            {:ok, result, new_state}
-
-          {:error, reason} ->
-            {:error, reason}
-        end
-    end
-  end
-
-  # Story 914: `Combat.validate_attack/3`'s own general "no PvP in the
-  # Stone Age" rule (`Combat.hostile?/2` — false for any two real
-  # players, LOCKED, see `BrokenOathsSpex.Story899.Criterion7603Spex`)
-  # stays untouched for everyone ELSE — this only widens the CALLER-side
-  # gate `do_attack/4` itself applies, with one narrow, story-914-scoped
-  # exception: a lord may always strike the SPECIFIC unit currently
-  # tracked as the besieger of one of their OWN vassal's active
-  # Protection Pact calls ("the lord is notified and is expected to
-  # defend" — the design doc's own words require the lord be ABLE to
-  # fight back). Every other pairing of two real players falls through
-  # to `Combat.validate_attack/3`'s own unchanged verdict.
-  defp validate_attack(state, attacker, defender, adjacent_tile_ids) do
-    cond do
-      attacker.movement <= 0 -> {:error, :out_of_movement}
-      defender.tile_id not in adjacent_tile_ids -> {:error, :not_adjacent}
-      Combat.hostile?(attacker, defender) -> :ok
-      protecting_lord_may_strike?(state, attacker, defender) -> :ok
-      War.rebellion_war?(state, attacker.player_id, defender.player_id) -> :ok
-      true -> {:error, :not_hostile}
-    end
-  end
-
-  defp protecting_lord_may_strike?(state, attacker, defender) do
-    Enum.any?(protection_calls(state), fn {_vassal_player_id, call} ->
-      call.attacker_unit_id == defender.id and call.lord_player_id == attacker.player_id
-    end)
-  end
-
-  defp resolve_attack(state, attacker, defender) do
-    seed = {state.world.seed, state.turn, attacker.id, defender.id}
-
-    %{damage_to_defender: dealt, damage_to_attacker: taken} =
-      Combat.resolve(attacker, defender,
-        seed: seed,
-        attacker_aura?: lord_adjacent?(state, attacker),
-        defender_aura?: lord_adjacent?(state, defender),
-        attacker_garrisoned?: CityDefense.garrisoned?(attacker, Map.values(state.cities)),
-        defender_garrisoned?: CityDefense.garrisoned?(defender, Map.values(state.cities))
-      )
-
-    new_attacker = %{attacker | hp: max(attacker.hp - taken, 0), movement: 0}
-    new_defender = %{defender | hp: max(defender.hp - dealt, 0)}
-
-    units =
-      state.units
-      |> apply_combat_unit(attacker.id, new_attacker)
-      |> apply_combat_unit(defender.id, new_defender)
-
-    state =
-      %{state | units: units}
-      |> schedule_heir_if_lord_fell(attacker, new_attacker)
-      |> schedule_heir_if_lord_fell(defender, new_defender)
-      |> pay_bounty_if_barbarian_fell(new_attacker, defender)
-      |> pay_bounty_if_barbarian_fell(new_defender, attacker)
-      |> ProtectionPact.maybe_raise_protection_call(attacker, defender.player_id)
-      |> ProtectionPact.resolve_protection_call_if_dead(new_attacker)
-      |> ProtectionPact.resolve_protection_call_if_dead(new_defender)
-
-    {%{damage_dealt: dealt, damage_taken: taken}, state}
-  end
-
-  defp apply_combat_unit(units, id, %{hp: 0}), do: Map.delete(units, id)
-  defp apply_combat_unit(units, id, unit), do: Map.put(units, id, unit)
-
-  # Story 893, criterion 7557: whichever side of a resolved exchange was
-  # a barbarian (`player_id: nil`) and reached 0 HP pays the OTHER
-  # side's owner the bounty — covers both a player's own "attack" (the
-  # barbarian is always the defender there) and a barbarian-initiated
-  # exchange resolved by `Turn`'s own AI loop through this same
-  # function's sibling in that module (the barbarian is the attacker
-  # there, killed by the defender's counter-blow). Story 904: the same
-  # kill also bumps the payee's own `barbarians_killed` career total —
-  # the progress panel's "Total barbarians killed" figure.
-  defp pay_bounty_if_barbarian_fell(state, %{player_id: nil, hp: 0}, %{player_id: payee_id})
-       when not is_nil(payee_id) do
-    state = update_in(state.players[payee_id].gold, &(&1 + BarbarianAI.bounty_gold()))
-    update_in(state.players[payee_id].barbarians_killed, &(&1 + 1))
-  end
-
-  defp pay_bounty_if_barbarian_fell(state, _fallen, _other), do: state
 
   # -------------------------------------------------------------------
   # Camp assault (story 894)
   # -------------------------------------------------------------------
 
-  # Resolves immediately, like `do_attack/4` — flat damage, no counter
+  # Resolves immediately, like `Combat.attack/4` — flat damage, no counter
   # (see `Combat.camp_damage/2`). An already-destroyed (or nonexistent)
   # camp is refused the same way an already-dead unit target is.
   defp do_attack_camp(state, user, unit_id, camp_id) do
@@ -2258,203 +2149,19 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   # -------------------------------------------------------------------
-  # City assault (story 895)
+  # City assault (story 895/906) — the "attack_city"/"resolve_garrison_fate"
+  # `handle_call`s are thin delegations into `BrokenOaths.Game.Siege`
+  # (`.code_my_spec/knowledge/genserver_decomposition.md`).
   # -------------------------------------------------------------------
-
-  # Resolves immediately, like `do_attack/4` — see `CityDefense`'s
-  # moduledoc for the damage math (city defensive strength vs. attacker
-  # strength, countered by the strongest garrisoned defender). Unlike
-  # `Combat.hostile?/2`'s "no Stone Age PvP" rule for unit-vs-unit
-  # combat, ANY player's unit may assault ANY OTHER player's city —
-  # `Siege.validate_siege/3` (story 906) layers ONE new rule on top of
-  # `CityDefense.validate_attack/3`'s own not-your-own-city/adjacency/
-  # movement checks: the attacker must be MILITARY, a civilian besieger
-  # is refused outright (`:not_military`) rather than merely
-  # ineffective — matching this story's own spec convention of a second
-  # real player standing in for a barbarian. `Game.feudal_enabled?/0`
-  # is checked LAST, only once the request is otherwise well-formed
-  # (owned attacker, real city target) — with the batch dormant
-  # (`config :broken_oaths, :feudal_enabled, false`, prod's own
-  # default), any city assault is refused exactly the way `Combat.
-  # hostile?/2` already refuses unit-vs-unit PvP: `{:error,
-  # :not_hostile}`, same "Stone Age players cannot fight each other"
-  # copy `combat_error_message/1` already renders for it — restoring
-  # the pre-906 no-PvP-city-capture behavior. Barbarian city assault
-  # (`CityDefense`'s pillage path, driven by `Turn`'s own barbarian-AI
-  # phase, never this "attack" surface) is untouched either way.
-  defp do_attack_city(state, user, unit_id, city_id) do
-    player = find_player(state, user.id)
-    attacker = Map.get(state.units, unit_id)
-    city = Map.get(state.cities, city_id)
-
-    cond do
-      is_nil(player) or is_nil(attacker) or attacker.player_id != player.id ->
-        {:error, :not_owner}
-
-      is_nil(city) ->
-        {:error, :invalid_target}
-
-      not Game.feudal_enabled?() ->
-        {:error, :not_hostile}
-
-      true ->
-        adjacent_tile_ids = Regions.adjacent_tiles(state.world, attacker.tile_id)
-
-        case Siege.validate_siege(attacker, city, adjacent_tile_ids) do
-          :ok ->
-            {result, new_state} = resolve_city_attack(state, attacker, city)
-
-            alert =
-              {:city_alert, owner_user_id(state, city.player_id),
-               CityDefense.under_attack_alert(city.name)}
-
-            {:ok, result, new_state, alert}
-
-          {:error, reason} ->
-            {:error, reason}
-        end
-    end
-  end
-
-  defp resolve_city_attack(state, attacker, city) do
-    seed = {state.world.seed, state.turn, attacker.id, city.id}
-    units = Map.values(state.units)
-
-    %{damage_to_city: dealt, damage_to_barbarian: taken} =
-      CityDefense.resolve_attack(city, units, attacker,
-        seed: seed,
-        attacker_aura?: lord_adjacent?(state, attacker)
-      )
-
-    new_city = Siege.take_damage(city, dealt)
-    new_attacker = %{attacker | hp: max(attacker.hp - taken, 0), movement: 0}
-
-    state =
-      %{
-        state
-        | units: apply_combat_unit(state.units, attacker.id, new_attacker),
-          cities: Map.put(state.cities, city.id, new_city)
-      }
-      |> schedule_heir_if_lord_fell(attacker, new_attacker)
-      |> pay_bounty_if_barbarian_fell(new_attacker, %{player_id: city.player_id})
-      |> ProtectionPact.maybe_raise_protection_call(attacker, city.player_id)
-      |> ProtectionPact.resolve_protection_call_if_dead(new_attacker)
-
-    {%{damage_dealt: dealt, damage_taken: taken}, state}
-  end
 
   defp owner_user_id(state, player_id), do: Map.fetch!(state.players, player_id).user_id
 
   # -------------------------------------------------------------------
-  # Capture & Vassalization (stories 906/907)
+  # Capture & Vassalization (stories 906/907) — the capture/occupy ->
+  # swear-fealty flow is a thin delegation into
+  # `BrokenOaths.Game.Vassalization.apply_captures/1`
+  # (`.code_my_spec/knowledge/genserver_decomposition.md`).
   # -------------------------------------------------------------------
-
-  # Safe to call after ANY movement-producing change (an immediate
-  # `queue_move`, or a full tick) — `Siege.materialize_captures/2` is
-  # itself idempotent, so this never double-reports a city already
-  # captured on a prior call. A fresh capture that leaves its defeated
-  # player with zero free cities left also fires vassalization right
-  # here (`Vassalization.vassalization_events/2`), in the SAME pass —
-  # the DB write happens immediately (mirrors `do_propose_alliance/3`'s
-  # own "not tick-state, persisted immediately" status), never waiting
-  # on `persist_tick/2`'s own city/unit diff. A no-op while `Game.
-  # feudal_enabled?/0` reads `false` — belt-and-suspenders alongside
-  # `do_attack_city/4`'s own gate, which already keeps every city
-  # `Siege.broken?/1` (the only way `materialize_captures/2` ever finds
-  # anything to capture) from ever happening in the first place.
-  defp apply_captures(state) do
-    if Game.feudal_enabled?() do
-      {new_cities, capture_events} = Siege.materialize_captures(state.cities, state.units)
-      new_state = %{state | cities: new_cities}
-
-      case capture_events do
-        [] ->
-          {new_state, []}
-
-        _ ->
-          vassalize_events =
-            Vassalization.vassalization_events(capture_events, Map.values(new_cities))
-
-          Enum.each(vassalize_events, &persist_vassalization(new_state, &1))
-
-          events =
-            [:cities_changed] ++
-              Enum.flat_map(vassalize_events, &vassalization_broadcast(new_state, &1))
-
-          {new_state, events}
-      end
-    else
-      {state, []}
-    end
-  end
-
-  # Guards against ever double-inserting the same vassal's own row —
-  # `apply_captures/1` is idempotent about REPORTING a capture, but a
-  # defensive re-check here keeps this write idempotent too, in case a
-  # future caller ever runs it against the same event twice.
-  defp persist_vassalization(state, %{captor_player_id: lord_id, defeated_player_id: vassal_id}) do
-    case Repo.get_by(Vassalage,
-           world_id: state.world.id,
-           vassal_player_id: vassal_id,
-           status: :active
-         ) do
-      nil ->
-        upsert_vassalage!(state.world.id, lord_id, vassal_id)
-        :ok
-
-      _existing ->
-        :ok
-    end
-  end
-
-  # Story 915/919: `Vassalage`'s own unique index is on `(world_id,
-  # vassal_player_id)` ALONE, not scoped to `status` — "a vassal serves
-  # exactly one lord at a time... a broken/superseded row would need a
-  # DIFFERENT status, not a second active one for the same vassal"
-  # (`20260718090000_create_vassalages.exs`'s own comment). A rebel
-  # whose Vassalage was severed (`:broken`, story 915) and is later
-  # re-vassalized (crushed, story 919, or plain re-siege) reactivates
-  # that SAME row rather than inserting a fresh one that would violate
-  # the index — reset to a clean oath (default tribute/strain, no
-  # carried-over Hidden Agenda) under whichever lord captured them this
-  # time.
-  defp upsert_vassalage!(world_id, lord_player_id, vassal_player_id) do
-    case Repo.get_by(Vassalage, world_id: world_id, vassal_player_id: vassal_player_id) do
-      nil ->
-        {:ok, vassalage} =
-          Vassalization.vassalize_changeset(world_id, lord_player_id, vassal_player_id)
-          |> Repo.insert()
-
-        vassalage
-
-      existing ->
-        Vassalage.changeset(existing, %{
-          lord_player_id: lord_player_id,
-          status: :active,
-          tribute_rate: 0.25,
-          oath_strain: 0,
-          hidden_agenda: nil,
-          contract_terms: %{}
-        })
-        |> Repo.update!()
-    end
-  end
-
-  # Both halves of "both players notified": the fresh vassal's own
-  # `"game:vassalized"` push (story 906's own criterion 7665 trigger,
-  # reused as-is by 907) and the lord's own `"game:new_vassal"` push
-  # (907's own new half).
-  defp vassalization_broadcast(state, %{captor_player_id: lord_id, defeated_player_id: vassal_id}) do
-    lord_user_id = owner_user_id(state, lord_id)
-    vassal_user_id = owner_user_id(state, vassal_id)
-    lord_email = Users.get_user!(lord_user_id).email
-    vassal_email = Users.get_user!(vassal_user_id).email
-
-    [
-      {:vassalized, vassal_user_id, Vassalization.vassalized_message(lord_email)},
-      {:new_vassal, lord_user_id, vassal_user_id, Vassalization.new_vassal_message(vassal_email)}
-    ]
-  end
 
   # -------------------------------------------------------------------
   # Tribute (story 908)
@@ -2477,8 +2184,8 @@ defmodule BrokenOaths.Game.WorldServer do
   # in-tick gold change) and the returned `GoldLog` rows
   # (`persist_gold_logs/1`, immediately after). A no-op while `Game.
   # feudal_enabled?/0` reads `false` — belt-and-suspenders alongside
-  # `apply_captures/1`'s own gate, which already keeps `active_vassalages/1`
-  # from ever finding a row to collect against.
+  # `Vassalization.apply_captures/1`'s own gate, which already keeps
+  # `active_vassalages/1` from ever finding a row to collect against.
   defp apply_tribute(state) do
     if Game.feudal_enabled?() do
       case active_vassalages(state.world.id) do
@@ -2581,7 +2288,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # `:gold` while `Presence.online?/2` reads true, into the capped
   # `:banked_gold` otherwise. A no-op while `Game.feudal_enabled?/0`
   # reads `false` — same belt-and-suspenders status
-  # `apply_captures/1`/`apply_tribute/1` already carry, so prod's own
+  # `Vassalization.apply_captures/1`/`apply_tribute/1` already carry, so prod's own
   # gold economy (bounty kills, camp rewards — the only things that
   # ever moved `gold` before this story) stays exactly as it was until
   # the flag flips on for real (v0.3.0).
@@ -2622,24 +2329,6 @@ defmodule BrokenOaths.Game.WorldServer do
       &(&1.type == :lord and &1.player_id == unit.player_id and &1.tile_id in adjacent_tile_ids)
     )
   end
-
-  # Schedules the heir 10 turn boundaries out (story 896, criterion
-  # 7573) — kept only in memory (`state.pending_heirs`), never
-  # persisted to the DB. Known, narrow limitation: a `WorldServer`
-  # restart mid-wait drops the pending heir; nothing in the current
-  # schema tracks scheduled future spawns the way `Order`/`Improvement`
-  # do, and no spec exercises a restart during the wait. `Turn.tick/1`
-  # resolves this map every boundary (see its "Heir succession" phase).
-  defp schedule_heir_if_lord_fell(state, %{type: :lord, player_id: player_id}, %{hp: 0}) do
-    pending_heirs =
-      state
-      |> Map.get(:pending_heirs, %{})
-      |> Map.put(player_id, state.turn + 10)
-
-    Map.put(state, :pending_heirs, pending_heirs)
-  end
-
-  defp schedule_heir_if_lord_fell(state, _original, _new), do: state
 
   # -------------------------------------------------------------------
   # Found city
@@ -3537,44 +3226,9 @@ defmodule BrokenOaths.Game.WorldServer do
     end
   end
 
-  # Same "diff-and-persist" status every other in-place unit mutation
-  # already has (`Turn`'s own combat, etc.) — the caller runs this
-  # through `persist_tick/2`, which deletes any unit missing from the
-  # returned `state.units` (`persist_unit_changes/2`).
-  defp do_resolve_garrison_fate(state, user, city_id, choice) do
-    player = find_player(state, user.id)
-    city = Map.get(state.cities, city_id)
-
-    cond do
-      is_nil(player) or is_nil(city) ->
-        {:error, :invalid_target}
-
-      city.occupied_by_player_id != player.id ->
-        {:error, :not_owner}
-
-      true ->
-        to_remove = Siege.resolve_garrison_fate(choice, city, Map.values(state.units))
-
-        new_state =
-          state
-          |> Map.update!(:units, &Map.drop(&1, to_remove))
-          |> apply_garrison_fate_honor(player.id, choice)
-
-        {:ok, new_state}
-    end
-  end
-
-  # QA issue ed1ff4c0 — the conqueror's own Honor consequence for their
-  # garrison-fate choice (design doc: executing costs a small Honor
-  # penalty, releasing is neutral). Folded into the SAME `new_state`
-  # `do_resolve_garrison_fate/4` already returns, so the caller's own
-  # `persist_tick/2` picks up the `state.players` diff exactly like
-  # `resolve_steward_defend/5`'s own sabotage-penalty write above.
-  defp apply_garrison_fate_honor(state, player_id, :execute) do
-    update_in(state.players[player_id].honor, &Siege.apply_execute_honor_penalty/1)
-  end
-
-  defp apply_garrison_fate_honor(state, _player_id, :release), do: state
+  # `:resolve_garrison_fate`'s own `handle_call` is a thin delegation
+  # into `BrokenOaths.Game.Siege.apply_garrison_fate/4`
+  # (`.code_my_spec/knowledge/genserver_decomposition.md`).
 
   defp do_issue_levy(state, user, vassal_user_id, target_user_id, share) do
     with {:ok, lord_player} <- fetch_player(state, user.id),
@@ -3744,40 +3398,6 @@ defmodule BrokenOaths.Game.WorldServer do
   end
 
   defp peace_offers(state), do: Map.get(state, :peace_offers, %{})
-
-  @doc """
-  Re-vassalizes `vassal_player_id` under `lord_player_id` via the SAME
-  real `Vassalization.vassalize_changeset/3` write + `"game:vassalized"`/
-  `"game:new_vassal"` notifications story 906/907 already ship — a
-  no-op (no double row, no duplicate notification) if an active
-  Vassalage between the two already exists. PUBLIC: shared by
-  `BrokenOaths.Game.Rebellion.War` (peace/crushed endings) and this
-  module's own story-917 heir reconciliation sweep
-  (`reconcile_heir_vassals_for_user/2`) — see `Rebellion.War`'s own
-  moduledoc for why this utility stays WorldServer-owned.
-  """
-  @spec maybe_revassalize(map(), integer(), integer()) :: :ok
-  def maybe_revassalize(state, lord_player_id, vassal_player_id) do
-    case Repo.get_by(Vassalage,
-           world_id: state.world.id,
-           vassal_player_id: vassal_player_id,
-           status: :active
-         ) do
-      nil ->
-        upsert_vassalage!(state.world.id, lord_player_id, vassal_player_id)
-
-        broadcast(
-          state.world.id,
-          vassalization_broadcast(state, %{
-            captor_player_id: lord_player_id,
-            defeated_player_id: vassal_player_id
-          })
-        )
-
-      _existing ->
-        :ok
-    end
-  end
 
   # -------------------------------------------------------------------
   # Research (story 902)
@@ -3971,7 +3591,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # Shared gate every direct Bank/Stewardship command checks first — a
   # no-op (`{:error, :feudal_disabled}`) while `Game.feudal_enabled?/0`
   # reads `false` (prod's own default), same belt-and-suspenders status
-  # `apply_captures/1`/`apply_tribute/1`/`apply_bank/1` already carry
+  # `Vassalization.apply_captures/1`/`apply_tribute/1`/`apply_bank/1` already carry
   # for the turn-tick side of this same batch.
   defp ensure_feudal_enabled do
     if Game.feudal_enabled?(), do: :ok, else: {:error, :feudal_disabled}
@@ -4566,7 +4186,7 @@ defmodule BrokenOaths.Game.WorldServer do
   # Newly founded/renamed/reassigned cities are already persisted
   # immediately by their own command (see "Found city"/"Worked tiles"/
   # "Rename city" above) — this only ever catches what the TICK itself
-  # (or, since story 895, `do_attack_city/4`'s own immediate
+  # (or, since story 895, `Siege.attack_city/4`'s own immediate
   # resolution) changes: size, food, territory (growth), worked_tiles
   # (a settler's pop cost, or a pillage, un-working a tile), `hp`/
   # `production_halted_until` (city combat — see `CityDefense`),
