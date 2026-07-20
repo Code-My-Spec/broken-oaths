@@ -47,11 +47,11 @@ defmodule BrokenOaths.Game.Production do
   instead it flips `has_granary: true` directly on the completing city
   (read back by `BrokenOaths.Game.Yields.accrue_food/3` for its +2
   food/turn bonus, the same "unlock flips a flag, read back on demand"
-  pattern `BrokenOaths.Game.Research` already documents for its own
+  pattern `BrokenOaths.Technology.Research` already documents for its own
   unlocks). Gated on the city's OWNER having completed Pottery
   (`can_queue?/3`'s `granary_available?` option) and on the city not
   already having one (`:already_built` — a Granary is built once,
-  ever). `can_queue?/3` itself never touches `BrokenOaths.Game.Research`
+  ever). `can_queue?/3` itself never touches `BrokenOaths.Technology.Research`
   directly — opts arrive pre-resolved. The resolution lives one level
   up, in `granary_available?/2`, called from `queue_production/4`
   (moved home from `WorldServer` in the pragdave decomposition, slice
@@ -73,7 +73,7 @@ defmodule BrokenOaths.Game.Production do
   "Requires Copper" rather than a generic locked message. As with
   `granary_available?/2` above, `can_queue?/3` stays opt-driven and
   dependency-free; `bronze_age?/2`/`copper_access?/2` do the actual
-  `BrokenOaths.Game.Research`/`BrokenOaths.Worlds.Resources` reads,
+  `BrokenOaths.Technology.Research`/`BrokenOaths.Worlds.Resources` reads,
   called from `queue_production/4`.
 
   ## The Archer (QA issue da39e50b "No archer")
@@ -109,7 +109,7 @@ defmodule BrokenOaths.Game.Production do
 
   alias BrokenOaths.Game.CityDefense
   alias BrokenOaths.Game.ProductionItem
-  alias BrokenOaths.Game.Research
+  alias BrokenOaths.Technology.Research
   alias BrokenOaths.Game.Yields
   alias BrokenOaths.Repo
   alias BrokenOaths.Worlds.Globe
@@ -196,7 +196,7 @@ defmodule BrokenOaths.Game.Production do
   size-1 city has no population to spare; story 883, criterion 7487),
   and — for `:granary` only (story 902) — the city's owner having
   completed Pottery (`opts[:granary_available?]`, since this
-  dependency-free function never calls `BrokenOaths.Game.Research`
+  dependency-free function never calls `BrokenOaths.Technology.Research`
   itself) and not already having one (`:already_built`). Story 903/911:
   `:bronze_spearman` needs BOTH `opts[:bronze_age?]` (Bronze Working
   completed) and `opts[:copper_access?]` (a Copper tile somewhere in

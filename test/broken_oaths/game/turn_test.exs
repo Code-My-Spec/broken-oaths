@@ -1,9 +1,9 @@
 defmodule BrokenOaths.Game.TurnTest do
   use ExUnit.Case, async: true
 
-  alias BrokenOaths.Game.Research
+  alias BrokenOaths.Technology.Research
   alias BrokenOaths.Game.Turn
-  alias BrokenOaths.Game.Visibility
+  alias BrokenOaths.Vision.Visibility
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
 

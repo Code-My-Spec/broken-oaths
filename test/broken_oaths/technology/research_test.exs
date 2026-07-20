@@ -1,7 +1,7 @@
-defmodule BrokenOaths.Game.ResearchTest do
+defmodule BrokenOaths.Technology.ResearchTest do
   use ExUnit.Case, async: true
 
-  alias BrokenOaths.Game.Research
+  alias BrokenOaths.Technology.Research
 
   @all_techs [
     :pottery,

@@ -2,7 +2,7 @@ defmodule BrokenOathsSpex.Story902.Criterion7642Spex do
   @moduledoc """
   Story 902 — Stone Age Technology Tree
   Criterion 7642 — switching research and returning loses nothing:
-  `BrokenOaths.Game.Research` banks science per-tech
+  `BrokenOaths.Technology.Research` banks science per-tech
   (`banked_science: %{tech => amount}`), not against a single shared
   counter, so switching `current_research` away and back
   (`Research.set_research/2`) must never discard progress already

@@ -7,7 +7,7 @@ defmodule BrokenOathsSpex.Story902.Criterion7712Spex do
   technology prerequisites they aren't obvious"). Every tech row
   carries both its prerequisite link(s) (`[data-test='tech-prereqs-
   <tech>']`) and exactly one state marker
-  (`BrokenOaths.Game.Research.tech_state/2`): `:completed`, `:in_progress`,
+  (`BrokenOaths.Technology.Research.tech_state/2`): `:completed`, `:in_progress`,
   `:locked`, or (no marker) `:available`.
 
   This spec reaches a mixed-state tree — Mining completed, Bronze

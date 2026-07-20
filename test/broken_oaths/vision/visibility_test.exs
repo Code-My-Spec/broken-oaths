@@ -1,7 +1,7 @@
-defmodule BrokenOaths.Game.VisibilityTest do
+defmodule BrokenOaths.Vision.VisibilityTest do
   use ExUnit.Case, async: true
 
-  alias BrokenOaths.Game.Visibility
+  alias BrokenOaths.Vision.Visibility
   alias BrokenOaths.Worlds.Globe
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World

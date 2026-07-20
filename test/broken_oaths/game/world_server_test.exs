@@ -6,7 +6,7 @@ defmodule BrokenOaths.Game.WorldServerTest do
 
   alias BrokenOaths.Game
   alias BrokenOaths.Game.Improvement
-  alias BrokenOaths.Game.PlayerResearch
+  alias BrokenOaths.Technology.PlayerResearch
   alias BrokenOaths.Game.Unit
   alias BrokenOaths.Game.WorldServer
   alias BrokenOaths.Repo

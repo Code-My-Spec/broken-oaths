@@ -2,7 +2,7 @@ defmodule BrokenOaths.Game.RebellionTest do
   use BrokenOathsTest.DataCase, async: true
 
   alias BrokenOaths.Game.OathStrain
-  alias BrokenOaths.Game.Player
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.Game.Rebellion
   alias BrokenOaths.Game.Rebellion.Resolution
   alias BrokenOaths.UsersFixtures

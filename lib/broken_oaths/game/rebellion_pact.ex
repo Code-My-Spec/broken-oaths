@@ -31,7 +31,7 @@ defmodule BrokenOaths.Game.RebellionPact do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias BrokenOaths.Game.Player
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.Game.RebellionPactMember
   alias BrokenOaths.Worlds.World
 

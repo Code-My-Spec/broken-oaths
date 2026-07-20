@@ -19,7 +19,7 @@ defmodule BrokenOathsSpex.Story910.Criterion7689Spex do
 
   Reuses `subjugate/5`'s own `vassal_play_live` directly (rather than a
   fresh `live/2` remount) before calling `go_offline/1` on it —
-  `BrokenOaths.Game.Presence`'s own `:duplicate` Registry keys mean ANY
+  `BrokenOaths.Players.Presence`'s own `:duplicate` Registry keys mean ANY
   live connection for this user counts as "online" (multi-tab support,
   by design), so a stray extra mount left silently connected would
   strand the vassal "online" regardless of which OTHER connection

@@ -51,10 +51,10 @@ defmodule BrokenOaths.Game.City do
   alias BrokenOaths.Game.Camp
   alias BrokenOaths.Game.Camps
   alias BrokenOaths.Game.CityDefense
-  alias BrokenOaths.Game.Player
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.Game.Production
   alias BrokenOaths.Game.ProductionItem
-  alias BrokenOaths.Game.Research
+  alias BrokenOaths.Technology.Research
   alias BrokenOaths.Game.Siege
   alias BrokenOaths.Game.Unit
   alias BrokenOaths.Game.Yields

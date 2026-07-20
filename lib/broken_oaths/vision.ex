@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.API.Vision do
+defmodule BrokenOaths.Vision do
   @moduledoc """
   Fog-filtered read surface — "what does the fog show" for a player
   right now. Thin `GenServer.call` wrappers onto each world's

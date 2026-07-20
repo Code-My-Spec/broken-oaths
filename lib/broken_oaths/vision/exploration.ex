@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.Exploration do
+defmodule BrokenOaths.Vision.Exploration do
   @moduledoc """
   Per-player explored-tile mask for a world, persisted as part of the delta.
 
@@ -10,7 +10,7 @@ defmodule BrokenOaths.Game.Exploration do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias BrokenOaths.Game.Player
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.Worlds.World
 
   @type t :: %__MODULE__{

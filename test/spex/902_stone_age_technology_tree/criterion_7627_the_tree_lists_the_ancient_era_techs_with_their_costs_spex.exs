@@ -4,7 +4,7 @@ defmodule BrokenOathsSpex.Story902.Criterion7627Spex do
   Criterion 7627 — the tree lists the Ancient-era techs with their
   costs (EXPANDED per playtest issue 133b4893 from the original
   four-tech assertion to the full eleven-tech tree): opening the tech
-  tree shows all eleven of `BrokenOaths.Game.Research.techs/0`
+  tree shows all eleven of `BrokenOaths.Technology.Research.techs/0`
   alongside each one's science cost (`Research.cost/1`) — Pottery (50),
   Animal Husbandry (50), Mining (75), Sailing (90), and Astrology (90)
   with no prerequisite; Writing (90) and Irrigation (90) after Pottery;

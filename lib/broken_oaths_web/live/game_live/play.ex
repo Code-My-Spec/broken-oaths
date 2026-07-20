@@ -169,7 +169,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   alias BrokenOaths.Chat
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.{Camp, CityDefense, Improvement, Presence, Research, Yields}
+  alias BrokenOaths.Game.{Camp, CityDefense, Improvement, Yields}
+  alias BrokenOaths.Players.Presence
+  alias BrokenOaths.Technology.Research
   alias BrokenOaths.Worlds
   alias BrokenOaths.Worlds.{Generator, Globe, Regions, Resources, Terrain, Weather}
 
@@ -318,7 +320,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
     end
   end
 
-  # Story 909/910's own eligibility check (`BrokenOaths.Game.Presence.
+  # Story 909/910's own eligibility check (`BrokenOaths.Players.Presence.
   # online?/2`) reads off this connection's own registration dying —
   # `Presence.connect/2`'s own doc explains why a `Registry` needs no
   # explicit teardown, but disconnecting here (rather than only ever on

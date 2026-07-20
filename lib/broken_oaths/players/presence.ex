@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.Presence do
+defmodule BrokenOaths.Players.Presence do
   @moduledoc """
   Per-player online/offline status within a world — which players
   currently hold a live LiveView connection to `BrokenOaths.Game.

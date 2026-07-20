@@ -261,7 +261,7 @@ defmodule BrokenOathsWeb.GameLive.PlayTest do
       {:ok, play_live, _html} = join_and_mount(conn, world)
 
       [lord | _] = for u <- Game.player_units(world, user), u.type == :lord, do: u
-      # `spawn_unit_for_test/4` takes the `Game.Player` id, not the
+      # `spawn_unit_for_test/4` takes the `Players.Player` id, not the
       # `Accounts.User` one — `join_world/2` is idempotent (`do_join/2`
       # just hands back the already-joined row), so this re-fetches it
       # rather than threading a fresh assign through `join_and_mount/2`.

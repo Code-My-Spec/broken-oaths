@@ -18,7 +18,7 @@ defmodule BrokenOaths.Chat.Message do
   import Ecto.Changeset
 
   alias BrokenOaths.Chat.Conversation
-  alias BrokenOaths.Game.Player
+  alias BrokenOaths.Players.Player
 
   @body_max_length 500
 

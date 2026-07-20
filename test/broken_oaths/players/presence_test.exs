@@ -1,7 +1,7 @@
-defmodule BrokenOaths.Game.PresenceTest do
+defmodule BrokenOaths.Players.PresenceTest do
   use ExUnit.Case, async: true
 
-  alias BrokenOaths.Game.Presence
+  alias BrokenOaths.Players.Presence
 
   setup do
     world = %{id: System.unique_integer([:positive])}

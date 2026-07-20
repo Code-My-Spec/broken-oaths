@@ -5,7 +5,7 @@ defmodule BrokenOathsSpex.Story903.Criterion7636Spex do
   caps at city size 4, even with abundant food and unlimited turns.
   This is 903's own regression guard: the size-6 cap this story
   introduces (criterion 7635) must be conditional on
-  `BrokenOaths.Game.Research.age/1` returning `:bronze_age`, not a flat
+  `BrokenOaths.Technology.Research.age/1` returning `:bronze_age`, not a flat
   raise that would also lift the cap for Stone Age players. Source:
   stone_age.md §2.3 ("Maximum city size in Stone Age: 4") read
   alongside §6.2 ("Cities can now grow to size 6 (up from size 4)")

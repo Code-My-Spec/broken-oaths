@@ -12,7 +12,7 @@ defmodule BrokenOaths.Chat do
   same calling convention `BrokenOaths.Game` uses — never a raw
   conversation id — so callers never have to reason about `id`s that
   cross world boundaries. Internally, each `user` is resolved to their
-  `BrokenOaths.Game.Player` row for that `world` (via `Repo`, not
+  `BrokenOaths.Players.Player` row for that `world` (via `Repo`, not
   `WorldServer` — the FK resolution below doesn't touch a world's live
   tick-state).
 
@@ -29,7 +29,7 @@ defmodule BrokenOaths.Chat do
   alias BrokenOaths.Chat.Message
   alias BrokenOaths.Chat.Moderation
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.Player
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.Repo
   alias BrokenOaths.Users.User
   alias BrokenOaths.Worlds.World

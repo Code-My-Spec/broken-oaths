@@ -15,7 +15,7 @@ defmodule BrokenOaths.Game.Stewardship do
   `:alliances`, and `:steward_log` are thin delegations into this
   module; it resolves the DB-backed relationship facts (who's whose
   lord, who's allied with whom, who's currently online —
-  `BrokenOaths.Game.Presence`) into the plain values this module's own
+  `BrokenOaths.Players.Presence`) into the plain values this module's own
   pure functions take, applies the resulting decision, and persists the
   outcome (a `state.players`/`state.cities` diff via the caller's usual
   `persist_tick/2` path for a bank sweep/emergency move, an immediate
@@ -127,7 +127,7 @@ defmodule BrokenOaths.Game.Stewardship do
   alias BrokenOaths.Game.Alliance
   alias BrokenOaths.Game.Bank
   alias BrokenOaths.Game.Cooperation
-  alias BrokenOaths.Game.Presence
+  alias BrokenOaths.Players.Presence
   alias BrokenOaths.Game.Production
   alias BrokenOaths.Game.ProductionItem
   alias BrokenOaths.Game.StewardLog

@@ -20,7 +20,7 @@ defmodule BrokenOathsWeb.Application do
         # addressed by world id (see BrokenOaths.Game.WorldServer).
         {Registry, keys: :unique, name: BrokenOaths.GameRegistry},
         {DynamicSupervisor, name: BrokenOaths.GameSupervisor, strategy: :one_for_one},
-        # Per-(world, player) online tracking (see BrokenOaths.Game.Presence):
+        # Per-(world, player) online tracking (see BrokenOaths.Players.Presence):
         # a `:duplicate` registry so a player connected in several tabs still
         # registers once per LiveView pid, each entry auto-removed by the
         # Registry's own monitor the instant that connection's process dies —

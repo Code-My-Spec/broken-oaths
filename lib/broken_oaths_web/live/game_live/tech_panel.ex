@@ -3,10 +3,10 @@ defmodule BrokenOathsWeb.GameLive.TechPanel do
   The Ancient-era tech tree (story 902, EXPANDED per playtest issue
   133b4893 to the full eleven-tech, prerequisite-gated Civ-6-accurate
   tree): an always-visible `tech-tree-button` that toggles a panel
-  listing all eleven `BrokenOaths.Game.Research.techs/0` — cost,
+  listing all eleven `BrokenOaths.Technology.Research.techs/0` — cost,
   unlock description, prerequisite links, and each tech's `:locked |
   :available | :in_progress | :completed` state
-  (`BrokenOaths.Game.Research.tech_state/2`) — plus the player's
+  (`BrokenOaths.Technology.Research.tech_state/2`) — plus the player's
   current science income and, for whichever tech is `current_research`,
   a progress bar.
 
@@ -39,7 +39,7 @@ defmodule BrokenOathsWeb.GameLive.TechPanel do
       `bronze-working-warning` confirm modal one way or the other
 
   The catalog itself (cost, unlock prose, prerequisites) is read
-  straight from `BrokenOaths.Game.Research` — a pure, dependency-free
+  straight from `BrokenOaths.Technology.Research` — a pure, dependency-free
   core module, exactly the same "one source of truth for what's
   offered" status `GameLive.CityPanel` already gives `BrokenOaths.Game.
   Production`.
@@ -83,7 +83,7 @@ defmodule BrokenOathsWeb.GameLive.TechPanel do
 
   use BrokenOathsWeb, :live_component
 
-  alias BrokenOaths.Game.Research
+  alias BrokenOaths.Technology.Research
 
   @impl true
   def render(assigns) do

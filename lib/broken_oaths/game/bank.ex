@@ -48,8 +48,8 @@ defmodule BrokenOaths.Game.Bank do
   """
 
   alias BrokenOaths.Game
-  alias BrokenOaths.Game.Player
-  alias BrokenOaths.Game.Presence
+  alias BrokenOaths.Players.Player
+  alias BrokenOaths.Players.Presence
   alias BrokenOaths.Worlds.World
 
   @type player :: %{gold: integer(), banked_gold: integer(), bank_cap: integer()}

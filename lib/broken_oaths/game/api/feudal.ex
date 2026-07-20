@@ -371,7 +371,7 @@ defmodule BrokenOaths.Game.API.Feudal do
   # Feudal Stewardship (story 910)
   # -------------------------------------------------------------------
 
-  @doc "`user`'s own world-visible Honor reputation figure (`BrokenOaths.Game.Player.honor`)."
+  @doc "`user`'s own world-visible Honor reputation figure (`BrokenOaths.Players.Player.honor`)."
   @spec honor(map(), map()) :: integer()
   def honor(world, user), do: WorldServer.call(world, {:honor, user})
 
@@ -385,7 +385,7 @@ defmodule BrokenOaths.Game.API.Feudal do
   own treasury never moves. Refused unless `steward_user` is the
   owner's lord, a fellow vassal of the same lord, or an accepted ally
   (`BrokenOaths.Game.Stewardship.eligible?/1`), AND `owner_user_id` is
-  genuinely offline (`BrokenOaths.Game.Presence.online?/2`).
+  genuinely offline (`BrokenOaths.Players.Presence.online?/2`).
   """
   @spec steward_collect_bank(map(), map(), term()) ::
           :ok | {:error, :not_a_player | :not_eligible | :owner_online | :feudal_disabled}
@@ -502,7 +502,7 @@ defmodule BrokenOaths.Game.API.Feudal do
 
   @doc """
   Test-only: set `user`'s own world-visible Honor reputation
-  (`BrokenOaths.Game.Player.honor`) directly, same narrow, documented-
+  (`BrokenOaths.Players.Player.honor`) directly, same narrow, documented-
   bridge status as `set_player_gold_for_test/3` — a direct precondition
   setter for Honor, standing in for however many dishonorable acts it
   would otherwise take to depress it to a specific figure (`Siege.

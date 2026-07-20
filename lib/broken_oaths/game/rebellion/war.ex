@@ -42,7 +42,7 @@ defmodule BrokenOaths.Game.Rebellion.War do
   alias BrokenOaths.Game
   alias BrokenOaths.Game.City
   alias BrokenOaths.Game.CityDefense
-  alias BrokenOaths.Game.Player
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.Game.Production
   alias BrokenOaths.Game.Rebellion
   alias BrokenOaths.Game.Rebellion.Resolution

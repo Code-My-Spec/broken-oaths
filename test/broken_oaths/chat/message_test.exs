@@ -3,7 +3,7 @@ defmodule BrokenOaths.Chat.MessageTest do
 
   alias BrokenOaths.Chat.Conversation
   alias BrokenOaths.Chat.Message
-  alias BrokenOaths.Game.Player
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.WorldsFixtures
 

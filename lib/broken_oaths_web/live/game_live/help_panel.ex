@@ -12,7 +12,7 @@ defmodule BrokenOathsWeb.GameLive.HelpPanel do
   reads) but the NUMBERS quoted throughout are pulled straight from the
   game's own constants (`BrokenOaths.Game.Combat`, `BrokenOaths.Game.
   CityDefense`, `BrokenOaths.Game.Camps`, `BrokenOaths.Game.Production`,
-  `BrokenOaths.Game.Research`, `BrokenOaths.Game.Turn`'s healing phase,
+  `BrokenOaths.Technology.Research`, `BrokenOaths.Game.Turn`'s healing phase,
   `BrokenOaths.Game.Yields.threshold/2`) rather than invented — see each
   section's own comment for exactly which module/line it mirrors, so a
   future balance change has one clear place to update this copy too.

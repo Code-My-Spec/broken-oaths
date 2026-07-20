@@ -18,7 +18,7 @@ defmodule BrokenOathsSpex.Story903.Criterion7632Spex do
   Story 902's `TechPanel` (selecting Bronze Working) already exists —
   see the "Research-selection surface" section below. The backend this
   criterion rides on ALSO already exists and IS wired to fire an event
-  on completion: `BrokenOaths.Game.Research.age/1` derives the age
+  on completion: `BrokenOaths.Technology.Research.age/1` derives the age
   purely from `completed_techs` (no separate flag), and
   `BrokenOaths.Game.Turn.tick/1` already fires `{:tech_completed,
   user_id, tech}` the instant a tech's cost banks in full (`Turn.

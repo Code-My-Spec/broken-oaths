@@ -3,7 +3,7 @@ defmodule BrokenOathsSpex.Story902.Criterion7626Spex do
   Story 902 — Stone Age Technology Tree
   Criterion 7626 — science banks toward the chosen tech until it
   completes: every turn's science income accumulates against
-  `current_research` (`BrokenOaths.Game.Research.accrue/2`), and the
+  `current_research` (`BrokenOaths.Technology.Research.accrue/2`), and the
   tech only flips into `completed_techs` once its full cost is banked
   (`Research.complete/1`) — partial progress stays visibly partial in
   the meantime, never jumping straight to done.

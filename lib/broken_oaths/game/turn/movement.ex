@@ -30,7 +30,7 @@ defmodule BrokenOaths.Game.Turn.Movement do
   """
 
   alias BrokenOaths.Game.CityDefense
-  alias BrokenOaths.Game.Visibility
+  alias BrokenOaths.Vision.Visibility
 
   @doc "Reset every unit's `movement` to its `max_movement` at the start of a tick."
   @spec reset_movement(map()) :: map()

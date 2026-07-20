@@ -2,7 +2,7 @@ defmodule BrokenOathsSpex.Story905.Criterion7648Spex do
   @moduledoc """
   Story 905 — Tile Resources
   Criterion 7648 — Pasture is only offered once Animal Husbandry is
-  researched (`BrokenOaths.Game.Research.pasture_enabled?/1`, story
+  researched (`BrokenOaths.Technology.Research.pasture_enabled?/1`, story
   902's own exact spec — see that module's moduledoc: "story 905
   (Pasture/resources) should read `pasture_enabled?/1`"). Before the
   tech completes, a worker standing on an eligible (Cattle/Sheep) tile

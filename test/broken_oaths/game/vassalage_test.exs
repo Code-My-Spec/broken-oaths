@@ -1,7 +1,7 @@
 defmodule BrokenOaths.Game.VassalageTest do
   use BrokenOathsTest.DataCase, async: true
 
-  alias BrokenOaths.Game.Player
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.Game.Vassalage
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.WorldsFixtures

@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.Player do
+defmodule BrokenOaths.Players.Player do
   @moduledoc """
   A user's presence in a world — claimed region, gold, joined-at turn.
 

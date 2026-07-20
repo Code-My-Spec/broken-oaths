@@ -36,7 +36,7 @@ defmodule BrokenOaths.Game.Vassalage do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias BrokenOaths.Game.Player
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.Worlds.World
 
   @type hidden_agenda :: :restore | :usurp | :kingmaker | :merchant_prince

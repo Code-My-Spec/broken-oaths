@@ -22,7 +22,7 @@ defmodule BrokenOathsWeb.GameLive.ProgressPanel do
     * `:player_research` - `BrokenOaths.Game.player_research/2`'s own
       shape (the same one `GameLive.AgePanel`/`GameLive.TechPanel`
       already receive) — age, science/turn, and the Bronze Working
-      projection are all derived from it via `BrokenOaths.Game.Research`
+      projection are all derived from it via `BrokenOaths.Technology.Research`
     * `:cities_founded` - `length(Game.player_cities(world, user))`
       (story 904, criterion 7640/7641's own moduledoc: no city is ever
       deleted in this codebase, so a player's live city count already
@@ -49,7 +49,7 @@ defmodule BrokenOathsWeb.GameLive.ProgressPanel do
 
   use BrokenOathsWeb, :live_component
 
-  alias BrokenOaths.Game.Research
+  alias BrokenOaths.Technology.Research
 
   @impl true
   def render(assigns) do

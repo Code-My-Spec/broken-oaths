@@ -113,10 +113,10 @@ defmodule BrokenOaths.Game.Turn do
 
   `player_research` (story 902) is read the same defensive way, via
   `Map.get(state, :player_research, %{})` — one
-  `BrokenOaths.Game.Research.player_research()` map per player, created
+  `BrokenOaths.Technology.Research.player_research()` map per player, created
   at join (`WorldServer`, not this module) and advanced every tick by
-  `BrokenOaths.Game.Research`'s own science-accrual phase (below). A
-  player with no entry is treated as `BrokenOaths.Game.Research.new/0`
+  `BrokenOaths.Technology.Research`'s own science-accrual phase (below). A
+  player with no entry is treated as `BrokenOaths.Technology.Research.new/0`
   for that tick only — most of this module's own tests build a state
   map without this key.
 
@@ -185,7 +185,7 @@ defmodule BrokenOaths.Game.Turn do
        single owning domain model). Any player whose lord died gets a
        fresh Lord at their capital this tick, plus a
        `{:lineage_continued, user_id, message}` event.
-    8. science accrual (story 902) -- `BrokenOaths.Game.Research.
+    8. science accrual (story 902) -- `BrokenOaths.Technology.Research.
        accrue_science/1`; a tech that reaches its cost completes
        automatically and fires `{:tech_completed, user_id, tech}`.
 
@@ -198,12 +198,12 @@ defmodule BrokenOaths.Game.Turn do
   alias BrokenOaths.Game.CityDefense
   alias BrokenOaths.Game.Improvement
   alias BrokenOaths.Game.Production
-  alias BrokenOaths.Game.Research
+  alias BrokenOaths.Technology.Research
   alias BrokenOaths.Game.Turn.BarbarianPhase
   alias BrokenOaths.Game.Turn.HeirSuccession
   alias BrokenOaths.Game.Turn.Movement
   alias BrokenOaths.Game.Unit
-  alias BrokenOaths.Game.Visibility
+  alias BrokenOaths.Vision.Visibility
   alias BrokenOaths.Game.Yields
 
   @type unit_id :: term()

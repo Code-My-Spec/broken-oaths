@@ -48,16 +48,12 @@ defmodule BrokenOaths.Game.WorldServer do
     Combat,
     Cooperation,
     Discovery,
-    Exploration,
     GoldLog,
     Improvement,
     KnownPlayer,
     Levy,
     OathStrain.Ledger,
     Order,
-    Player,
-    PlayerResearch,
-    Presence,
     ProtectionPact,
     Production,
     ProductionItem,
@@ -66,7 +62,6 @@ defmodule BrokenOaths.Game.WorldServer do
     Rebellion.War,
     RebellionPact,
     RebellionPact.Conspiracy,
-    Research,
     Siege,
     Spawner,
     Stewardship,
@@ -75,13 +70,15 @@ defmodule BrokenOaths.Game.WorldServer do
     Unit,
     Vassalage,
     Vassalization,
-    Visibility,
     Yields
   }
 
   alias BrokenOaths.Game
+  alias BrokenOaths.Players.{Player, Presence}
   alias BrokenOaths.Repo
+  alias BrokenOaths.Technology.{PlayerResearch, Research}
   alias BrokenOaths.Users
+  alias BrokenOaths.Vision.{Exploration, Visibility}
   alias BrokenOaths.Worlds
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World

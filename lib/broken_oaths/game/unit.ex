@@ -70,7 +70,7 @@ defmodule BrokenOaths.Game.Unit do
   alias BrokenOaths.Game.Camp
   alias BrokenOaths.Game.CityDefense
   alias BrokenOaths.Game.Order
-  alias BrokenOaths.Game.Player
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.Game.Rebellion.War
   alias BrokenOaths.Game.Turn
   alias BrokenOaths.Game.Vassalization

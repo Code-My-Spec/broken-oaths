@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.Visibility do
+defmodule BrokenOaths.Vision.Visibility do
   @moduledoc """
   Pure fog-of-war math — vision radii per unit type, BFS visibility, and
   the per-player fog filter that keeps hidden state off the wire.

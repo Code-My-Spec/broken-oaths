@@ -2,7 +2,7 @@ defmodule BrokenOathsSpex.Story902.Criterion7625Spex do
   @moduledoc """
   Story 902 — Stone Age Technology Tree
   Criterion 7625 — bigger cities research faster: science income scales
-  with population (`BrokenOaths.Game.Research.science_per_turn/1`,
+  with population (`BrokenOaths.Technology.Research.science_per_turn/1`,
   `2 * size` summed over every city — story 902's own acceptance
   criteria: "Cities generate science based on population: 2 science
   per population per turn"), so a city that grows produces more science

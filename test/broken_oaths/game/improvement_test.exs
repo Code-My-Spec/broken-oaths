@@ -2,7 +2,7 @@ defmodule BrokenOaths.Game.ImprovementTest do
   use BrokenOathsTest.DataCase, async: true
 
   alias BrokenOaths.Game.Improvement
-  alias BrokenOaths.Game.Player
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.Game.Unit
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.Worlds.Terrain

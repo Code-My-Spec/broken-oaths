@@ -4,7 +4,7 @@ defmodule BrokenOathsWeb.GameLive.AgePanel do
   same "persistent status, not a selection-triggered side panel"
   status `GameLive.Play`'s own `player-gold` badge already has) reading
   "Stone Age" or "Bronze Age" — derived, never a separate flag, exactly
-  the way `BrokenOaths.Game.Research.age/1` itself is derived purely
+  the way `BrokenOaths.Technology.Research.age/1` itself is derived purely
   from `completed_techs`.
 
   A presentational component mounted unconditionally by
@@ -29,7 +29,7 @@ defmodule BrokenOathsWeb.GameLive.AgePanel do
 
   use BrokenOathsWeb, :live_component
 
-  alias BrokenOaths.Game.Research
+  alias BrokenOaths.Technology.Research
 
   @impl true
   def render(assigns) do

@@ -1,4 +1,4 @@
-defmodule BrokenOaths.Game.Research do
+defmodule BrokenOaths.Technology.Research do
   @moduledoc """
   Pure tech-tree core (story 902, EXPANDED per playtest issue 133b4893
   "basically copy Civ 6 ... beef up the tech tree"): the eleven
@@ -9,7 +9,7 @@ defmodule BrokenOaths.Game.Research do
   here takes and returns a plain `player_research()` map — the same
   "pure functional core, `WorldServer` is the imperative shell" split
   `BrokenOaths.Game.Production`/`BrokenOaths.Game.Yields` already use.
-  `BrokenOaths.Game.PlayerResearch` is the Ecto-backed persistence
+  `BrokenOaths.Technology.PlayerResearch` is the Ecto-backed persistence
   shape this module's maps round-trip through.
 
   ## Science generation

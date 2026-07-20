@@ -65,7 +65,7 @@ defmodule BrokenOaths.Game.Rebellion do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias BrokenOaths.Game.Player
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.Worlds.World
 
   @type status :: :active | :independence_won | :crushed | :peace

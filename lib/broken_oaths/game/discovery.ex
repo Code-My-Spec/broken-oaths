@@ -12,7 +12,7 @@ defmodule BrokenOaths.Game.Discovery do
   ## Detection
 
   A sighting is deliberately based on CURRENT vision
-  (`BrokenOaths.Game.Visibility.visible_tiles/2`), not the cumulative
+  (`BrokenOaths.Vision.Visibility.visible_tiles/2`), not the cumulative
   explored history fog-of-war otherwise tracks — first contact is about
   a LIVE sighting the instant it happens, not a tile remembered from
   the past. Barbarians (`player_id: nil`) are never a "viewer" (the
@@ -53,7 +53,7 @@ defmodule BrokenOaths.Game.Discovery do
   `known_players/2`.
   """
 
-  alias BrokenOaths.Game.Visibility
+  alias BrokenOaths.Vision.Visibility
   alias BrokenOaths.Users
 
   @type player_id :: term()
@@ -191,7 +191,7 @@ defmodule BrokenOaths.Game.Discovery do
   # -------------------------------------------------------------------
   # Shared, trivial lookup — duplicated rather than reaching back into
   # `WorldServer`, matching the sibling `BrokenOaths.Game.Unit`/
-  # `BrokenOaths.Game.Visibility`'s own "pure, process-unaware,
+  # `BrokenOaths.Vision.Visibility`'s own "pure, process-unaware,
   # unit-testable with no GenServer running" contract (small private
   # helper copies rather than expanding public APIs).
   # -------------------------------------------------------------------

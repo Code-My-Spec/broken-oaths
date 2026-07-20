@@ -14,7 +14,7 @@ defmodule BrokenOathsSpex.Story910.Criterion7695Spex do
   including reusing `subjugate/5`'s own `vassal_play_live` directly
   (rather than a fresh `live/2` remount) before `go_offline/1`, so a
   stray extra mount never strands the vassal "online" against
-  `BrokenOaths.Game.Presence`'s own `:duplicate` Registry keys.
+  `BrokenOaths.Players.Presence`'s own `:duplicate` Registry keys.
 
   Reconciled against story 912's REAL gold-income mechanic (QA issue
   589386f2): this spec no longer declares a hand-set income via the

@@ -2,7 +2,7 @@ defmodule BrokenOaths.Game.LevyTest do
   use BrokenOathsTest.DataCase, async: true
 
   alias BrokenOaths.Game.Levy
-  alias BrokenOaths.Game.Player
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.WorldsFixtures
 

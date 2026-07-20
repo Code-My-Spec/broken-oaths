@@ -76,7 +76,7 @@ defmodule BrokenOaths.Game.Improvement do
   (`BrokenOaths.Worlds.Resources.at/2` returning `:cattle` or
   `:sheep` — the two animal resources) as well as the building
   worker's OWNER having completed Animal Husbandry
-  (`BrokenOaths.Game.Research.pasture_enabled?/1`). Neither of those
+  (`BrokenOaths.Technology.Research.pasture_enabled?/1`). Neither of those
   is terrain, so `resource_allowed?/1` — not `allowed?/2` — is the
   gate `validate_improvement_terrain/4` uses for this one kind, folded
   into the research check before ever calling `persist_start_improvement!/3`.
@@ -88,7 +88,7 @@ defmodule BrokenOaths.Game.Improvement do
   target, resolved once, at creation (this module's own
   `persist_start_improvement!/3`, moved home from `WorldServer` in the
   pragdave decomposition, slice 3) from the building worker's OWNER's
-  research (`BrokenOaths.Game.Research.mine_duration/1` for a Mine,
+  research (`BrokenOaths.Technology.Research.mine_duration/1` for a Mine,
   `duration(kind)` for Farm/Road) — improvements themselves stay
   ownerless (see above: any player's worker may resume one), so it is
   specifically "whoever's worker broke ground here first" that decided
@@ -101,7 +101,7 @@ defmodule BrokenOaths.Game.Improvement do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias BrokenOaths.Game.Research
+  alias BrokenOaths.Technology.Research
   alias BrokenOaths.Game.Unit
   alias BrokenOaths.Repo
   alias BrokenOaths.Worlds.Regions
@@ -199,7 +199,7 @@ defmodule BrokenOaths.Game.Improvement do
   those two are eligible on (`BrokenOaths.Worlds.Resources`) already
   implies passable land, so no separate terrain check is needed here.
   Callers still owe the research gate
-  (`BrokenOaths.Game.Research.pasture_enabled?/1`) separately — this
+  (`BrokenOaths.Technology.Research.pasture_enabled?/1`) separately — this
   function only ever answers "is this tile the right KIND of tile."
   """
   @spec resource_allowed?(:cattle | :sheep | :wheat | :stone | nil) :: boolean()

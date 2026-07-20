@@ -93,7 +93,7 @@ defmodule BrokenOaths.Game.Yields do
   bank-while-offline split this feeds.
   """
 
-  alias BrokenOaths.Game.Research
+  alias BrokenOaths.Technology.Research
   alias BrokenOaths.Worlds.Globe
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.Resources
@@ -442,8 +442,8 @@ defmodule BrokenOaths.Game.Yields do
   this same reduce), so two cities eligible for the same tile in one
   tick resolve by ascending city id, the same determinism rule `grow/4`
   itself promises. The size cap (story 903) is the city OWNER's own age
-  (`BrokenOaths.Game.Research.age/1`, read off `state.player_research`
-  -- already advanced by `BrokenOaths.Game.Research.accrue_science/1`
+  (`BrokenOaths.Technology.Research.age/1`, read off `state.player_research`
+  -- already advanced by `BrokenOaths.Technology.Research.accrue_science/1`
   earlier in the tick pipeline, so a Bronze Working completion lifts
   the cap the instant it lands, same turn), never the city's own state.
 

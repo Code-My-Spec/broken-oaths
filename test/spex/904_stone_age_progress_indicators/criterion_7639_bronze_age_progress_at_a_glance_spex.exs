@@ -35,7 +35,7 @@ defmodule BrokenOathsSpex.Story904.Criterion7639Spex do
 
   ## Turns-to-Bronze formula (judgment call)
 
-  Story 902's `BrokenOaths.Game.Research` already tracks
+  Story 902's `BrokenOaths.Technology.Research` already tracks
   `banked_science` per tech INDEPENDENTLY of `current_research` (see
   that module's own moduledoc: "banked_science tracks progress for
   EVERY tech independently... switching current_research never
@@ -62,7 +62,7 @@ defmodule BrokenOathsSpex.Story904.Criterion7639Spex do
 
   "2 science per population per turn" is story 902's own rule
   (stone_age.md §6.1: "Cities generate science based on population: 2
-  science per population per turn") — `BrokenOaths.Game.Research.
+  science per population per turn") — `BrokenOaths.Technology.Research.
   science_per_turn/1` computes exactly `size * 2` per city. This spec
   hardcodes that same constant independently (it never calls
   `Research` itself, which sits outside the spec boundary) to derive

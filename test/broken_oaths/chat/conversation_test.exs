@@ -2,7 +2,7 @@ defmodule BrokenOaths.Chat.ConversationTest do
   use BrokenOathsTest.DataCase, async: true
 
   alias BrokenOaths.Chat.Conversation
-  alias BrokenOaths.Game.Player
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.WorldsFixtures
 

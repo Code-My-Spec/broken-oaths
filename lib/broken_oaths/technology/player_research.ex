@@ -1,21 +1,21 @@
-defmodule BrokenOaths.Game.PlayerResearch do
+defmodule BrokenOaths.Technology.PlayerResearch do
   @moduledoc """
   A player's Ancient-era research state in a world (story 902,
   EXPANDED per playtest issue 133b4893 to the full eleven-tech,
   prerequisite-gated Civ-6-accurate tree): every completed tech, which
   tech (if any) is currently being researched, and science banked PER
   TECH — switching `current_research` never loses progress on the tech
-  switched away from (Civ-style; see `BrokenOaths.Game.Research` for
+  switched away from (Civ-style; see `BrokenOaths.Technology.Research` for
   the tech catalog, costs, prerequisite edges, and unlock effects this
   schema's fields feed).
 
-  One row per (world, player) — same convention as `BrokenOaths.Game.Player`
+  One row per (world, player) — same convention as `BrokenOaths.Players.Player`
   itself (world + user) and `BrokenOaths.Game.KnownPlayer` (world +
   viewer + discovered): `unique_constraint/3` on `[:world_id, :player_id]`
   is the changeset-level backstop for the DB's own unique index.
 
   `banked_science` is a bare `:map` (Postgres jsonb) keyed by tech —
-  jsonb round-trips its keys as strings, so `BrokenOaths.Game.Research`
+  jsonb round-trips its keys as strings, so `BrokenOaths.Technology.Research`
   is the one place that converts between those string keys and the
   tech atoms every other function in this codebase works with.
   """
@@ -23,7 +23,7 @@ defmodule BrokenOaths.Game.PlayerResearch do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias BrokenOaths.Game.Player
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.Worlds.World
 
   @techs [
@@ -91,7 +91,7 @@ defmodule BrokenOaths.Game.PlayerResearch do
   end
 
   # A tech already banked as completed can never simultaneously be the
-  # one currently being researched — `BrokenOaths.Game.Research.set_research/2`
+  # one currently being researched — `BrokenOaths.Technology.Research.set_research/2`
   # already refuses to select one (`{:error, :already_completed}`); this
   # enforces the same rule at the persistence boundary.
   defp validate_current_research_not_completed(changeset) do

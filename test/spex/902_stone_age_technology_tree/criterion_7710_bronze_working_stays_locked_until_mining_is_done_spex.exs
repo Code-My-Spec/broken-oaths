@@ -4,7 +4,7 @@ defmodule BrokenOathsSpex.Story902.Criterion7710Spex do
   Criterion 7710 — Bronze Working stays locked until Mining is done:
   new for the expanded, prerequisite-gated Ancient-era tree (playtest
   issue 133b4893). A technology whose prerequisite hasn't been
-  completed yet is `:locked` (`BrokenOaths.Game.Research.tech_state/2`)
+  completed yet is `:locked` (`BrokenOaths.Technology.Research.tech_state/2`)
   and cannot be selected for research — attempting to `"select_research"`
   it is a silent no-op, and the tree itself names exactly which
   prerequisite it's waiting on

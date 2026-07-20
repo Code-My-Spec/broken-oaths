@@ -42,7 +42,7 @@ defmodule BrokenOaths.Game.Levy do
   import Ecto.Changeset
   import Ecto.Query
 
-  alias BrokenOaths.Game.Player
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.Game.Tribute
   alias BrokenOaths.Game.Vassalage
   alias BrokenOaths.Repo

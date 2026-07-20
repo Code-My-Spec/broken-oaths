@@ -4,7 +4,7 @@ defmodule BrokenOathsSpex.Story902.Criterion7711Spex do
   Criterion 7711 — finishing a prerequisite unlocks its followers: new
   for the expanded, prerequisite-gated Ancient-era tree (playtest issue
   133b4893). The moment a prerequisite tech completes,
-  `BrokenOaths.Game.Research.tech_state/2` immediately flips every one
+  `BrokenOaths.Technology.Research.tech_state/2` immediately flips every one
   of its dependents from `:locked` to `:available` — no separate
   unlock step, since the state is derived live from `completed_techs`
   (the same "one source of truth" the module's own moduledoc documents

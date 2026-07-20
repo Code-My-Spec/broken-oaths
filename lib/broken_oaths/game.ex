@@ -19,19 +19,24 @@ defmodule BrokenOaths.Game do
   (973) → split by domain" target, the wrapper bodies (and their full
   narrative docs) now live in per-domain sub-facades —
   `BrokenOaths.Game.API.Feudal`, `.Cities`, `.Combat`, `.Units`,
-  `.Diplomacy`, `.Vision` — and every one of those functions is
+  `.Diplomacy` — plus the top-level `BrokenOaths.Vision`, `BrokenOaths.
+  Players`, and `BrokenOaths.Technology` contexts (see
+  `.code_my_spec/knowledge/genserver_decomposition.md`'s "Target bounded
+  contexts" table) — and every one of those functions is
   `defdelegate`d back here unchanged, so no caller needs to know the
   split exists. The one-line `@doc` on each delegate below is a
-  pointer; read the sub-facade module for the full contract.
+  pointer; read the sub-facade/context module for the full contract.
 
   World lifecycle/runtime concerns (join/subscribe, turn clock control,
-  `feudal_enabled?/0`, research, and lifetime stats) have no clear
-  single owning domain among those six and stay directly on `Game`
-  itself.
+  and `feudal_enabled?/0`) have no clear single owning domain and stay
+  directly on `Game` itself.
   """
 
-  alias BrokenOaths.Game.API.{Cities, Combat, Diplomacy, Feudal, Units, Vision}
+  alias BrokenOaths.Game.API.{Cities, Combat, Diplomacy, Feudal, Units}
   alias BrokenOaths.Game.WorldServer
+  alias BrokenOaths.Players
+  alias BrokenOaths.Technology
+  alias BrokenOaths.Vision
 
   # -------------------------------------------------------------------
   # World lifecycle / runtime
@@ -63,8 +68,8 @@ defmodule BrokenOaths.Game do
   @doc "`DateTime` the next turn boundary fires."
   def turn_ends_at(world), do: WorldServer.call(world, :turn_ends_at)
 
-  @doc "`user`'s current gold in `world`."
-  def gold(world, user), do: WorldServer.call(world, {:gold, user})
+  @doc "`user`'s current gold in `world`. See `Players.gold/2`."
+  defdelegate gold(world, user), to: Players
 
   @doc "Run one deterministic turn tick — exactly what the 60s timer fires."
   def advance_turn(world), do: WorldServer.call(world, :advance_turn)
@@ -125,66 +130,31 @@ defmodule BrokenOaths.Game do
   def feudal_enabled?, do: Application.get_env(:broken_oaths, :feudal_enabled, false)
 
   # -------------------------------------------------------------------
-  # Research (story 902)
+  # Research (story 902) — delegated to BrokenOaths.Technology
   # -------------------------------------------------------------------
 
-  @doc """
-  The Stone Age tech catalog: `%{tech => %{cost:, unlock:}}` — every
-  tech's science cost and unlock description, unrelated to any single
-  world (`BrokenOaths.Game.Research.catalog/0`). What a future
-  TechPanel lists.
-  """
+  @doc "The Stone Age tech catalog. See `Technology.tech_catalog/0`."
   @spec tech_catalog() :: map()
-  def tech_catalog, do: BrokenOaths.Game.Research.catalog()
+  defdelegate tech_catalog, to: Technology
 
-  @doc """
-  `user`'s research state in `world` (story 902, expanded to the
-  eleven-tech Ancient-era tree per issue 133b4893): `%{completed_techs:,
-  current_research:, banked_science:, progress:, science_per_turn:}`,
-  or `nil` if `user` hasn't joined `world` — `progress` is
-  `%{tech:, banked:, cost:}` for `current_research`, or `nil` with
-  nothing selected (see `BrokenOaths.Game.Research.progress/1`).
-  `science_per_turn` is `2 * population` summed over every one of
-  `user`'s cities, right now (`BrokenOaths.Game.Research.science_per_turn/1`).
-  `banked_science` and `completed_techs` are both keyed/valued by tech
-  atom (`BrokenOaths.Game.Research.techs/0` names the full eleven-tech
-  set).
-  """
+  @doc "`user`'s research state in `world`. See `Technology.player_research/2`."
   @spec player_research(map(), map()) :: map() | nil
-  def player_research(world, user), do: WorldServer.call(world, {:player_research, user})
+  defdelegate player_research(world, user), to: Technology
 
-  @doc """
-  Select `tech` as `user`'s `current_research` in `world`, retaining
-  whatever science was already banked toward it
-  (`BrokenOaths.Game.Research.set_research/2`). Refuses an unknown tech,
-  one already completed, or — since the tree grew prerequisite edges —
-  one whose prerequisites aren't all completed yet
-  (`{:error, :prereqs_not_met}`, see `BrokenOaths.Game.Research.prereqs_met?/2`).
-  Persists immediately, like `rename_city/4` — no turn boundary required.
-  """
+  @doc "Select `tech` as `user`'s `current_research` in `world`. See `Technology.set_research/3`."
   @spec set_research(map(), map(), atom()) ::
           :ok
           | {:error, :not_a_player | :invalid_tech | :already_completed | :prereqs_not_met}
-  def set_research(world, user, tech), do: WorldServer.call(world, {:set_research, user, tech})
+  defdelegate set_research(world, user, tech), to: Technology
 
   # -------------------------------------------------------------------
-  # Progress panel (story 904)
+  # Progress panel (story 904) — delegated to BrokenOaths.Players
   # -------------------------------------------------------------------
 
-  @doc """
-  `user`'s lifetime combat totals in `world` (story 904): `%{
-  barbarians_killed:, camps_destroyed:}`, or `nil` if `user` hasn't
-  joined `world` — the two running counts a `BrokenOaths.Game.Player`
-  row itself has to carry (unlike cities founded, which is just
-  `length(player_cities/2)`; no city is ever deleted in this
-  codebase). Bumped alongside the gold a barbarian bounty or a camp's
-  destroy-reward already pays (`attack/4`, `attack_camp/4`, and
-  `Turn`'s own barbarian-initiated exchanges), so this always stays in
-  lockstep with `gold/2`.
-  """
+  @doc "`user`'s lifetime combat totals in `world`. See `Players.player_stats/2`."
   @spec player_stats(map(), map()) ::
           %{barbarians_killed: non_neg_integer(), camps_destroyed: non_neg_integer()} | nil
-  def player_stats(world, user), do: WorldServer.call(world, {:player_stats, user})
+  defdelegate player_stats(world, user), to: Players
 
   # -------------------------------------------------------------------
   # Units (queue_move / orders) — delegated to BrokenOaths.Game.API.Units
@@ -651,7 +621,7 @@ defmodule BrokenOaths.Game do
   defdelegate set_player_honor_for_test(world, user, honor), to: Feudal
 
   # -------------------------------------------------------------------
-  # Vision (fog-filtered reads) — delegated to BrokenOaths.Game.API.Vision
+  # Vision (fog-filtered reads) — delegated to BrokenOaths.Vision
   # -------------------------------------------------------------------
 
   @doc "Fog-filtered units `user` can currently see. See `Vision.units_visible_to/2`."

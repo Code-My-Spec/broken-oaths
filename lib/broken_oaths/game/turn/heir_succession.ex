@@ -14,7 +14,7 @@ defmodule BrokenOaths.Game.Turn.HeirSuccession do
   back — an edge case no story covers.
 
   `pending_heirs` is a scheduled arrival turn, not a fact about any
-  single domain model (`BrokenOaths.Game.Player` is a thin schema, and
+  single domain model (`BrokenOaths.Players.Player` is a thin schema, and
   a fallen lord's replacement touches `Player`/`Unit`/`City` at once),
   so this phase lives on the turn pipeline itself rather than on any
   one of its siblings — `state` throughout is the canonical tick-state

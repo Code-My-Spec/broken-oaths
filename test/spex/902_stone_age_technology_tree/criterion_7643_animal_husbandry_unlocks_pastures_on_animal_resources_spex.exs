@@ -4,7 +4,7 @@ defmodule BrokenOathsSpex.Story902.Criterion7643Spex do
   Criterion 7643 — Animal Husbandry unlocks pastures on animal
   resources: completing Animal Husbandry grants its unlock, "Enables
   the Pasture improvement (+2 food on animal resources)"
-  (`BrokenOaths.Game.Research.unlock_description(:animal_husbandry)`,
+  (`BrokenOaths.Technology.Research.unlock_description(:animal_husbandry)`,
   read back via `Research.pasture_enabled?/1`).
 
   Placing a Pasture on an actual animal-resource tile is out of scope

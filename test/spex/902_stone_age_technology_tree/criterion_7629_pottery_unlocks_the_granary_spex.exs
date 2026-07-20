@@ -3,7 +3,7 @@ defmodule BrokenOathsSpex.Story902.Criterion7629Spex do
   Story 902 — Stone Age Technology Tree
   Criterion 7629 — Pottery unlocks the granary: completing Pottery
   grants its unlock, "Enables the Granary building (+2 food storage)"
-  (`BrokenOaths.Game.Research.unlock_description(:pottery)`,
+  (`BrokenOaths.Technology.Research.unlock_description(:pottery)`,
   read back via `Research.granary_enabled?/1`).
 
   The Granary BUILDING itself has no production-catalog entry yet

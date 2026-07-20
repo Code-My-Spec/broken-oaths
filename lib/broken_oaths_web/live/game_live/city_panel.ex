@@ -88,7 +88,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
 
   alias BrokenOaths.Game.CityDefense
   alias BrokenOaths.Game.Production
-  alias BrokenOaths.Game.Research
+  alias BrokenOaths.Technology.Research
   alias BrokenOaths.Game.Yields
 
   def render(%{city: nil} = assigns) do
