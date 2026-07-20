@@ -63,6 +63,39 @@ defmodule BrokenOathsWeb.GameLive.TechPanel do
     * `:available` renders no extra marker — an enabled, unlabeled row
       is the default "you can pick this" state.
 
+  ## Mobile layering + overflow (QA issue ff4400be "Revise tech menu")
+
+  The open panel used to be `absolute top-full left-0` inside `Play`'s
+  own top status bar row — the same row that carries
+  `overflow-x-auto` below `md:` so the bar itself can scroll
+  horizontally instead of wrapping (see `Play`'s render/1 moduledoc
+  note next to that row). Per the CSS overflow spec, setting
+  `overflow-x` to anything but `visible` forces the *other* axis to
+  compute to `auto` too, even if never written — so on a portrait
+  phone that row silently clipped anything a child popped open below
+  it. The dropdown wasn't behind the globe board so much as clipped
+  away entirely by its own scrolling ancestor, which reads to a player
+  as "it's rendering behind the board" since the board is exactly
+  what they see where the panel should have been. A raw z-index bump
+  alone can't fix that — z-index only orders paint among boxes that
+  are actually visible, it doesn't rescue a box an ancestor has
+  clipped.
+
+  Below `md:` the panel now escapes that ancestor with `fixed`
+  positioning (anchored to the viewport, clear of both the app navbar
+  and this game's own top bar), `inset-x-3` for a bounded, full-width-
+  minus-margin box instead of a fixed `w-80` that could run past a
+  narrow screen's edge, `max-h-[70vh] overflow-y-auto` (the same
+  bounded-scroll convention `BoardOverlays`'s own side panels already
+  use) so the eleven-tech list scrolls inside the card instead of
+  running off-screen, and `z-30` — above `BoardOverlays`'s own z-20
+  overlay tier, so it's guaranteed to paint over the board canvas
+  regardless of DOM order. `md:` and up is untouched: `md:absolute
+  md:top-full md:left-0 md:w-80 md:z-10`, the same dropdown-under-the-
+  button shape this panel (and `ChatPanel`/`AlliancePanel`/
+  `FeudalTopBar`'s own dropdowns) already have at desktop widths,
+  where the top bar never scrolls and never clips.
+
   ## The Bronze Working confirm flow
 
   Clicking `tech-bronze_working` never reaches `Game.set_research/3`
@@ -103,7 +136,7 @@ defmodule BrokenOathsWeb.GameLive.TechPanel do
       <div
         :if={@open?}
         data-test="tech-panel"
-        class="card bg-base-200 shadow-xl w-80 absolute top-full left-0 mt-1 z-10"
+        class="card bg-base-200 shadow-xl z-30 fixed inset-x-3 top-24 max-h-[70vh] overflow-y-auto md:absolute md:inset-x-auto md:left-0 md:top-full md:mt-1 md:w-80 md:z-10"
       >
         <div class="card-body p-3 gap-2">
           <h3 class="card-title text-sm">Technology</h3>
