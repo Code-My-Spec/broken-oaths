@@ -156,7 +156,7 @@ defmodule BrokenOaths.Vision.VisibilityTest do
   end
 
   describe "visible_tile_of/3 (playtest issue 4 — center on player)" do
-    defp state_with(units, cities, players) do
+    defp state_with(units, cities, players, explored \\ %{}) do
       %{
         world: world(),
         turn: 1,
@@ -164,7 +164,7 @@ defmodule BrokenOaths.Vision.VisibilityTest do
         cities: cities,
         orders: %{},
         players: players,
-        explored: %{}
+        explored: explored
       }
     end
 
@@ -173,7 +173,7 @@ defmodule BrokenOaths.Vision.VisibilityTest do
       p2: %{id: :p2, user_id: 2, region_id: 1, gold: 50}
     }
 
-    test "returns the target's city tile once it's in the viewer's current sight" do
+    test "returns the target's city tile when it sits on explored ground" do
       w = world()
       [neighbor | _] = Regions.adjacent_tiles(w, 0)
 
@@ -185,12 +185,12 @@ defmodule BrokenOaths.Vision.VisibilityTest do
         10 => %{id: 10, player_id: :p2, tile_id: neighbor, name: "Rival City"}
       }
 
-      state = state_with(units, cities, @players)
+      state = state_with(units, cities, @players, %{p1: MapSet.new([neighbor])})
 
       assert Visibility.visible_tile_of(state, %{id: 1}, 2) == neighbor
     end
 
-    test "falls back to the target's unit when no city of theirs is in sight" do
+    test "falls back to the target's unit when no city of theirs is on explored ground" do
       w = world()
       [neighbor | _] = Regions.adjacent_tiles(w, 0)
 
@@ -199,12 +199,12 @@ defmodule BrokenOaths.Vision.VisibilityTest do
         2 => %{id: 2, player_id: :p2, type: :lord, tile_id: neighbor}
       }
 
-      state = state_with(units, %{}, @players)
+      state = state_with(units, %{}, @players, %{p1: MapSet.new([neighbor])})
 
       assert Visibility.visible_tile_of(state, %{id: 1}, 2) == neighbor
     end
 
-    test "prefers a visible city over a visible unit of the same target" do
+    test "prefers an explored city over an explored unit of the same target" do
       w = world()
       [city_tile, unit_tile | _] = Regions.adjacent_tiles(w, 0)
 
@@ -217,12 +217,12 @@ defmodule BrokenOaths.Vision.VisibilityTest do
         10 => %{id: 10, player_id: :p2, tile_id: city_tile, name: "Rival City"}
       }
 
-      state = state_with(units, cities, @players)
+      state = state_with(units, cities, @players, %{p1: MapSet.new([city_tile, unit_tile])})
 
       assert Visibility.visible_tile_of(state, %{id: 1}, 2) == city_tile
     end
 
-    test "returns nil with nothing of the target's currently in sight" do
+    test "returns nil when the target sits on unexplored ground" do
       w = world()
       lord_ball = ring(w, 0, 3)
       hidden_tile = Enum.find(0..(Globe.tile_count(@frequency) - 1), &(&1 not in lord_ball))
@@ -235,6 +235,23 @@ defmodule BrokenOaths.Vision.VisibilityTest do
       state = state_with(units, %{}, @players)
 
       assert Visibility.visible_tile_of(state, %{id: 1}, 2) == nil
+    end
+
+    test "centers on a target on explored ground even when out of current sight" do
+      w = world()
+      lord_ball = ring(w, 0, 3)
+      far_tile = Enum.find(0..(Globe.tile_count(@frequency) - 1), &(&1 not in lord_ball))
+
+      units = %{
+        1 => %{id: 1, player_id: :p1, type: :lord, tile_id: 0},
+        2 => %{id: 2, player_id: :p2, type: :lord, tile_id: far_tile}
+      }
+
+      # p1 explored far_tile earlier but cannot see it right now — the fix
+      # (explored set, not current visible) means the click still centers.
+      state = state_with(units, %{}, @players, %{p1: MapSet.new([far_tile])})
+
+      assert Visibility.visible_tile_of(state, %{id: 1}, 2) == far_tile
     end
 
     test "returns nil for an unknown viewer or target user_id" do

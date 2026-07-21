@@ -354,12 +354,15 @@ defmodule BrokenOaths.Vision.Visibility do
   # -------------------------------------------------------------------
 
   @doc """
-  The tile a `target_user_id`'s nearest city or unit currently sits on,
-  restricted to what `user` can see RIGHT NOW (`filter/2`'s own
-  `visible` set — current sight, not `explored` history the way
-  `visible_enemy_cities/2`/`visible_camps/2` above read). A city is
-  checked before a unit; `nil` with nothing of theirs in view this
-  instant, or if either user isn't a real player in this world.
+  The tile a `target_user_id`'s nearest city or unit sits on, restricted
+  to terrain `user` has EXPLORED (`filter/2`'s own `explored` set — the
+  fog-of-war history, the same set `visible_enemy_cities/2`/
+  `visible_camps/2` above read, not the narrower current-sight `visible`
+  set). Centering on a known neighbor should work wherever you have been,
+  not only while they stand in your live vision this instant — the
+  current-sight rule no-opped almost every click. A city is checked
+  before a unit; `nil` if nothing of theirs sits on explored ground, or
+  if either user isn't a real player in this world.
 
   Unlike `visible_enemy_cities/2` this is never gated on
   `Game.feudal_enabled?/0` (any two known players can look each other
@@ -373,19 +376,19 @@ defmodule BrokenOaths.Vision.Visibility do
   def visible_tile_of(state, user, target_user_id) do
     with player when not is_nil(player) <- find_player(state, user.id),
          target when not is_nil(target) <- find_player(state, target_user_id) do
-      visible = state |> filter(player.id) |> Map.fetch!(:visible) |> MapSet.new()
+      explored = state |> filter(player.id) |> Map.fetch!(:explored) |> MapSet.new()
 
-      nearest_visible_tile(state.cities, target.id, visible) ||
-        nearest_visible_tile(state.units, target.id, visible)
+      nearest_seen_tile(state.cities, target.id, explored) ||
+        nearest_seen_tile(state.units, target.id, explored)
     else
       nil -> nil
     end
   end
 
-  defp nearest_visible_tile(entities, target_player_id, visible) do
+  defp nearest_seen_tile(entities, target_player_id, explored) do
     entities
     |> Map.values()
-    |> Enum.find(&(&1.player_id == target_player_id and MapSet.member?(visible, &1.tile_id)))
+    |> Enum.find(&(&1.player_id == target_player_id and MapSet.member?(explored, &1.tile_id)))
     |> case do
       %{tile_id: tile_id} -> tile_id
       nil -> nil
