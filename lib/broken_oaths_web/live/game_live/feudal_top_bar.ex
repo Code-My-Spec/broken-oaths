@@ -139,7 +139,7 @@ defmodule BrokenOathsWeb.GameLive.FeudalTopBar do
         class="badge badge-error gap-1"
         data-test="at-war-with"
       >
-        <.icon name="hero-fire" class="w-3 h-3" /> At war with {rebellion.rebel_email}
+        <.icon name="hero-fire" class="w-3 h-3" /> At war with {rebellion.rebel_name}
       </span>
 
       <.rebellion_panel rebellion={rebellion} viewer_user_id={@user.id} />
@@ -189,7 +189,7 @@ defmodule BrokenOathsWeb.GameLive.FeudalTopBar do
              while a call to arms is still pending. --%>
     <div :if={@vassal_status} class="flex items-center gap-1">
       <span class="badge badge-secondary gap-1" data-test="vassal-status">
-        Sworn to {@vassal_status.lord_email}
+        Sworn to {@vassal_status.lord_name}
       </span>
       <span class="badge badge-outline" data-test="my-tribute-rate">
         {tribute_rate_label(@vassal_status.tribute_rate)}
@@ -216,7 +216,7 @@ defmodule BrokenOathsWeb.GameLive.FeudalTopBar do
         class="badge badge-error badge-sm"
         data-test="my-protection-call"
       >
-        Under attack — protection requested from {@vassal_status.lord_email} (<span data-test="my-protection-window">{@vassal_status.protection_call.window_remaining}</span> turns left)
+        Under attack — protection requested from {@vassal_status.lord_name} (<span data-test="my-protection-window">{@vassal_status.protection_call.window_remaining}</span> turns left)
       </span>
       <button
         :if={@vassal_status.protection_call}
@@ -306,7 +306,7 @@ defmodule BrokenOathsWeb.GameLive.FeudalTopBar do
                 value={candidate.user_id}
                 class="checkbox checkbox-xs"
               />
-              <span class="truncate">{candidate.email}</span>
+              <span class="truncate">{candidate.display_name}</span>
             </div>
 
             <div class="flex items-center gap-1">
@@ -367,7 +367,7 @@ defmodule BrokenOathsWeb.GameLive.FeudalTopBar do
             data-test={"pact-member-#{member.user_id}"}
             class="flex items-center justify-between text-xs"
           >
-            <span class="truncate">{member.email}</span>
+            <span class="truncate">{member.display_name}</span>
             <span data-test={"pact-member-status-#{member.user_id}"}>
               {pact_status_label(member.status)}
             </span>
@@ -464,7 +464,7 @@ defmodule BrokenOathsWeb.GameLive.FeudalTopBar do
         class="badge badge-error gap-1"
         data-test="at-war-with"
       >
-        <.icon name="hero-fire" class="w-3 h-3" /> At war with {@rebellion_status.former_lord_email}
+        <.icon name="hero-fire" class="w-3 h-3" /> At war with {@rebellion_status.former_lord_name}
       </span>
 
       <.rebellion_panel rebellion={@rebellion_status} viewer_user_id={@user.id} />
@@ -500,8 +500,8 @@ defmodule BrokenOathsWeb.GameLive.FeudalTopBar do
     >
       <div class="flex items-center justify-between gap-2">
         <span class="font-semibold">
-          <span data-test="rebellion-rebel">{@rebellion.rebel_email}</span>
-          vs <span data-test="rebellion-former-lord">{@rebellion.former_lord_email}</span>
+          <span data-test="rebellion-rebel">{@rebellion.rebel_name}</span>
+          vs <span data-test="rebellion-former-lord">{@rebellion.former_lord_name}</span>
         </span>
         <span class="badge badge-outline badge-sm" data-test="rebellion-status">
           {@rebellion.status}
@@ -526,7 +526,7 @@ defmodule BrokenOathsWeb.GameLive.FeudalTopBar do
         data-test="pending-peace-offer"
       >
         <span>
-          {@rebellion.pending_peace_offer.offered_by_email} offers peace: {peace_outcome_label(
+          {@rebellion.pending_peace_offer.offered_by_name} offers peace: {peace_outcome_label(
             @rebellion.pending_peace_offer.outcome
           )}
           <span :if={@rebellion.pending_peace_offer.reparations_gold}>
@@ -632,7 +632,7 @@ defmodule BrokenOathsWeb.GameLive.FeudalTopBar do
       class="flex flex-col gap-1 border-b border-base-300 pb-2 last:border-b-0"
     >
       <div class="flex items-center justify-between gap-2">
-        <span class="text-sm">{@vassal.email}</span>
+        <span class="text-sm">{@vassal.display_name}</span>
         <span class="badge badge-outline badge-sm" data-test="vassal-tribute-rate">
           {tribute_rate_label(@vassal.tribute_rate)}
         </span>
@@ -657,7 +657,7 @@ defmodule BrokenOathsWeb.GameLive.FeudalTopBar do
            `levy-status`'s own "no element at all with nothing to show"
            posture above. --%>
       <div :if={@vassal.protection_call} class="text-xs text-error" data-test="protection-call">
-        {@vassal.email} is under attack — respond within
+        {@vassal.display_name} is under attack — respond within
         <span data-test="protection-window">{@vassal.protection_call.window_remaining}</span>
         turn(s)
       </div>
@@ -739,7 +739,7 @@ defmodule BrokenOathsWeb.GameLive.FeudalTopBar do
         <input type="hidden" name="vassal_user_id" value={@vassal.vassal_user_id} />
         <div class="flex items-center gap-1">
           <select name="target_user_id" class="select select-xs select-bordered flex-1">
-            <option :for={target <- @levy_targets} value={target.user_id}>{target.email}</option>
+            <option :for={target <- @levy_targets} value={target.user_id}>{target.display_name}</option>
           </select>
           <input
             type="number"
@@ -990,7 +990,7 @@ defmodule BrokenOathsWeb.GameLive.FeudalTopBar do
           data-test="steward-log-entry"
           class="flex items-center justify-between gap-2 text-xs border-b border-base-300 pb-1 last:border-b-0"
         >
-          <span class="truncate">{entry.steward_email}</span>
+          <span class="truncate">{entry.steward_name}</span>
           <span class="opacity-70">{entry.action}</span>
           <span :if={entry.sabotage} class="badge badge-error badge-xs">sabotage</span>
         </div>

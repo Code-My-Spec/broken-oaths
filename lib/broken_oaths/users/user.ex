@@ -4,6 +4,11 @@ defmodule BrokenOaths.Users.User do
 
   schema "users" do
     field :email, :string
+    # Playtest issue 2a9df843: the player-facing handle other players see
+    # in place of the email (Known Players, chat, alliances). Optional —
+    # `display_name/1` falls back to a non-email "Player ##{id}" when blank,
+    # so the email is never exposed to anyone else.
+    field :display_name, :string
     field :password, :string, virtual: true, redact: true
     field :hashed_password, :string, redact: true
     field :confirmed_at, :utc_datetime
@@ -53,6 +58,44 @@ defmodule BrokenOaths.Users.User do
       add_error(changeset, :email, "did not change")
     else
       changeset
+    end
+  end
+
+  @doc """
+  A changeset for setting or changing the player-facing display name.
+
+  Trims surrounding whitespace and treats an all-blank value as "unset"
+  (nulls it), so a player who clears the field falls back to the
+  `display_name/1` "Player #N" label. A present name must be 3–20
+  characters. Not required to be unique.
+  """
+  def display_name_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:display_name])
+    |> update_change(:display_name, &normalize_display_name/1)
+    |> validate_length(:display_name, min: 3, max: 20)
+  end
+
+  defp normalize_display_name(nil), do: nil
+
+  defp normalize_display_name(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  @doc """
+  The player-facing handle for `user` — their chosen `display_name`, or a
+  non-email `"Player #N"` fallback when they have not set one. This is
+  the single place the fallback lives; every surface that shows a player's
+  identity to *other* players routes through here so the raw email is never
+  exposed (playtest issue 2a9df843).
+  """
+  def display_name(%__MODULE__{display_name: name, id: id}) do
+    case name && String.trim(name) do
+      trimmed when is_binary(trimmed) and trimmed != "" -> trimmed
+      _ -> "Player ##{id}"
     end
   end
 

@@ -71,6 +71,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
   alias BrokenOaths.Technology.{PlayerResearch, Research}
   alias BrokenOaths.Units.{Order, Unit}
   alias BrokenOaths.Users
+  alias BrokenOaths.Users.User
   alias BrokenOaths.Vision.{Exploration, Visibility}
   alias BrokenOaths.Worlds
   alias BrokenOaths.Worlds.Regions
@@ -2261,7 +2262,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
 
     %{
       vassal_user_id: vassal_user.id,
-      email: vassal_user.email,
+      display_name: User.display_name(vassal_user),
       tribute_rate: vassalage.tribute_rate,
       oath_strain: vassalage.oath_strain,
       levy_status:
@@ -2307,7 +2308,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
 
             %{
               lord_user_id: lord_user.id,
-              lord_email: lord_user.email,
+              lord_name: User.display_name(lord_user),
               tribute_rate: vassalage.tribute_rate,
               oath_strain: vassalage.oath_strain,
               agenda_pending?: Vassalization.agenda_pending?(vassalage),
@@ -2447,9 +2448,9 @@ defmodule BrokenOaths.Simulation.WorldServer do
       id: rebellion.id,
       status: rebellion.status,
       rebel_user_id: rebel_user && rebel_user.id,
-      rebel_email: rebel_user && rebel_user.email,
+      rebel_name: rebel_user && User.display_name(rebel_user),
       former_lord_user_id: lord_user && lord_user.id,
-      former_lord_email: lord_user && lord_user.email,
+      former_lord_name: lord_user && User.display_name(lord_user),
       started_turn: rebellion.started_turn,
       army_size: rebellion.army_size,
       risen_city_ids: rebellion.risen_city_ids,
@@ -2474,7 +2475,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
 
         %{
           offered_by_user_id: offering_user && offering_user.id,
-          offered_by_email: offering_user && offering_user.email,
+          offered_by_name: offering_user && User.display_name(offering_user),
           outcome: offer.outcome,
           reparations_gold: offer.reparations_gold
         }

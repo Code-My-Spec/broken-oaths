@@ -59,10 +59,21 @@ defmodule BrokenOaths.ChatTest do
 
       assert [contact] = Chat.list_conversations(world, user)
       assert contact.user_id == other_user.id
-      assert contact.email == other_user.email
+      # Playtest issue 2a9df843: a contact carries the display-name handle,
+      # never the raw email. The fixture user set no name, so it falls back.
+      assert contact.display_name == "Player ##{other_user.id}"
+      refute Map.has_key?(contact, :email)
       assert contact.conversation_id == nil
       assert contact.unread_count == 0
       assert contact.blocked == false
+    end
+
+    test "a contact shows the chosen display name once the player sets one" do
+      %{world: world, user: user, other_user: other_user} = discovered_pair_fixture()
+      {:ok, _} = BrokenOaths.Users.update_user_display_name(other_user, %{display_name: "Rowan"})
+
+      assert [contact] = Chat.list_conversations(world, user)
+      assert contact.display_name == "Rowan"
     end
 
     test "does not list a player who hasn't been discovered" do

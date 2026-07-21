@@ -106,10 +106,25 @@ defmodule BrokenOathsSpex.Story915.Criterion7731Spex do
         {:ok, fresh_vassal_live, _html} = live(context.other_conn, "/play/#{context.world.id}")
         {:ok, fresh_lord_live, _html} = live(context.conn, "/play/#{context.world.id}")
 
-        assert has_element?(fresh_vassal_live, "[data-test='at-war-with']", context.user.email)
-        assert has_element?(fresh_lord_live, "[data-test='at-war-with']", context.other_user.email)
+        # Playtest issue 2a9df843: identities render as the display-name
+        # handle ("Player #N" fallback here), never the raw email.
+        assert has_element?(
+                 fresh_vassal_live,
+                 "[data-test='at-war-with']",
+                 "Player ##{context.user.id}"
+               )
 
-        refute has_element?(fresh_vassal_live, "[data-test='vassal-status']", context.user.email),
+        assert has_element?(
+                 fresh_lord_live,
+                 "[data-test='at-war-with']",
+                 "Player ##{context.other_user.id}"
+               )
+
+        refute has_element?(
+                 fresh_vassal_live,
+                 "[data-test='vassal-status']",
+                 "Player ##{context.user.id}"
+               ),
                "Wes should no longer read as sworn to Mira — the oath is severed"
 
         {:ok, context}

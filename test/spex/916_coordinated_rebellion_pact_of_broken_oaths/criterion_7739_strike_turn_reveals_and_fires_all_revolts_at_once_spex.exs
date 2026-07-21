@@ -111,7 +111,11 @@ defmodule BrokenOathsSpex.Story916.Criterion7739Spex do
             context do
         {:ok, bo_live, _html} = live(context.bo.conn, "/play/#{context.world.id}")
 
-        assert has_element?(bo_live, "[data-test='vassal-status']", "Sworn to #{context.user.email}"),
+        assert has_element?(
+                 bo_live,
+                 "[data-test='vassal-status']",
+                 "Sworn to Player ##{context.user.id}"
+               ),
                "Bo never committed, so turn 50 should leave his oath to Mira untouched"
 
         refute has_element?(bo_live, "[data-test='rebellion-status']"),

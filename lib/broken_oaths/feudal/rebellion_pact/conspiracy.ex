@@ -35,6 +35,7 @@ defmodule BrokenOaths.Feudal.RebellionPact.Conspiracy do
   alias BrokenOaths.Feudal.Vassalage
   alias BrokenOaths.Repo
   alias BrokenOaths.Users
+  alias BrokenOaths.Users.User
 
   # -------------------------------------------------------------------
   # Read-only, masked coordination state (criterion 7738)
@@ -74,7 +75,7 @@ defmodule BrokenOaths.Feudal.RebellionPact.Conspiracy do
             do: member.commit_status,
             else: :invited
 
-        %{user_id: member_user.id, email: member_user.email, status: status}
+        %{user_id: member_user.id, display_name: User.display_name(member_user), status: status}
       end
 
     %{
@@ -131,7 +132,7 @@ defmodule BrokenOaths.Feudal.RebellionPact.Conspiracy do
   defp format_pact_candidate(state, fellow) do
     fellow_player = Map.fetch!(state.players, fellow.vassal_player_id)
     fellow_user = Users.get_user!(fellow_player.user_id)
-    %{user_id: fellow_user.id, email: fellow_user.email}
+    %{user_id: fellow_user.id, display_name: User.display_name(fellow_user)}
   end
 
   # -------------------------------------------------------------------

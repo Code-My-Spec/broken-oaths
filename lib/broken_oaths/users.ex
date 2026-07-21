@@ -134,6 +134,26 @@ defmodule BrokenOaths.Users do
   end
 
   @doc """
+  Returns an `%Ecto.Changeset{}` for setting the player-facing display name.
+  """
+  def change_user_display_name(user, attrs \\ %{}) do
+    User.display_name_changeset(user, attrs)
+  end
+
+  @doc """
+  Sets the user's player-facing display name (playtest issue 2a9df843).
+
+  A blank value clears the name, falling back to the `"Player #N"`
+  label. Requires no sudo mode — a handle is low-sensitivity, unlike the
+  email/password.
+  """
+  def update_user_display_name(user, attrs) do
+    user
+    |> User.display_name_changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
   Updates the user email using the given token.
 
   If the token matches, the user email is updated and the token is deleted.

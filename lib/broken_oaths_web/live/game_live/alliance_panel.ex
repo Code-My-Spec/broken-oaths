@@ -31,7 +31,7 @@ defmodule BrokenOathsWeb.GameLive.AlliancePanel do
     * `:id` - required, DOM id for this component instance
     * `:world` - the `BrokenOaths.Worlds.World` alliances are scoped to
     * `:user` - the viewing player's `BrokenOaths.Users.User`
-    * `:known_players` - `[%{user_id:, email:}]`, `Play`'s own
+    * `:known_players` - `[%{user_id:, display_name:}]`, `Play`'s own
       `Game.known_players/2` read (story 899) — who's even eligible to
       propose an alliance with. `Chat.list_conversations/2`
       independently re-derives the same fact for `ChatPanel`'s own
@@ -200,7 +200,7 @@ defmodule BrokenOathsWeb.GameLive.AlliancePanel do
       data-test={"ally-candidate-#{@contact.user_id}"}
       class="flex items-center justify-between gap-2 text-sm"
     >
-      <span class="truncate">{@contact.email}</span>
+      <span class="truncate">{@contact.display_name}</span>
       <button
         type="button"
         data-test="propose-alliance"
@@ -225,7 +225,7 @@ defmodule BrokenOathsWeb.GameLive.AlliancePanel do
       class="flex flex-col gap-1"
     >
       <div class="flex items-center justify-between gap-2 text-sm">
-        <span class="truncate">{@alliance.other_email}</span>
+        <span class="truncate">{@alliance.other_name}</span>
 
         <span
           :if={@alliance.status == :accepted}

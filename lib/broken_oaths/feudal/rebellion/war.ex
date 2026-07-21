@@ -52,6 +52,7 @@ defmodule BrokenOaths.Feudal.Rebellion.War do
   alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.Repo
   alias BrokenOaths.Users
+  alias BrokenOaths.Users.User
 
   # -------------------------------------------------------------------
   # Declare independence (story 915)
@@ -151,8 +152,8 @@ defmodule BrokenOaths.Feudal.Rebellion.War do
       rebel_user = Users.get_user!(vassal_player.user_id)
 
       lord_events = [
-        {:rebellion_declared, lord_user.id, "#{rebel_user.email} has declared independence!",
-         risen_ids}
+        {:rebellion_declared, lord_user.id,
+         "#{User.display_name(rebel_user)} has declared independence!", risen_ids}
       ]
 
       {:ok, %{rebellion: rebellion, message: rebellion_message(risen_ids)}, new_state,

@@ -106,6 +106,7 @@ defmodule BrokenOathsWeb.GameLive.ChatPanel do
   alias BrokenOaths.Chat
   alias BrokenOaths.Chat.Message
   alias BrokenOaths.Users
+  alias BrokenOaths.Users.User
 
   @impl true
   def update(%{new_message: %Message{}}, socket) do
@@ -270,7 +271,9 @@ defmodule BrokenOathsWeb.GameLive.ChatPanel do
   defp own_message?(message, user), do: message.sender_player.user.id == user.id
 
   defp sender_label(message, user) do
-    if own_message?(message, user), do: "You", else: message.sender_player.user.email
+    if own_message?(message, user),
+      do: "You",
+      else: User.display_name(message.sender_player.user)
   end
 
   defp format_timestamp(naive_datetime), do: Calendar.strftime(naive_datetime, "%b %d, %H:%M")
@@ -350,7 +353,7 @@ defmodule BrokenOathsWeb.GameLive.ChatPanel do
         @selected? && "bg-base-300"
       ]}
     >
-      <span class="truncate">{@contact.email}</span>
+      <span class="truncate">{@contact.display_name}</span>
       <span
         :if={@contact.unread_count > 0}
         data-test={"unread-count-#{@contact.user_id}"}

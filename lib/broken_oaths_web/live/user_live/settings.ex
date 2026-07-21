@@ -16,6 +16,24 @@ defmodule BrokenOathsWeb.UserLive.Settings do
         </.header>
       </div>
 
+      <.form
+        for={@display_name_form}
+        id="display_name_form"
+        phx-submit="update_display_name"
+        phx-change="validate_display_name"
+      >
+        <.input
+          field={@display_name_form[:display_name]}
+          type="text"
+          label="Display name"
+          placeholder="How other players see you"
+          autocomplete="off"
+        />
+        <.button variant="primary" phx-disable-with="Saving...">Save Display Name</.button>
+      </.form>
+
+      <div class="divider" />
+
       <.form for={@email_form} id="email_form" phx-submit="update_email" phx-change="validate_email">
         <.input
           field={@email_form[:email]}
@@ -91,6 +109,7 @@ defmodule BrokenOathsWeb.UserLive.Settings do
     socket =
       socket
       |> assign(:current_email, user.email)
+      |> assign(:display_name_form, to_form(Users.change_user_display_name(user)))
       |> assign(:email_form, to_form(email_changeset))
       |> assign(:password_form, to_form(password_changeset))
       |> assign(:trigger_submit, false)
@@ -99,6 +118,29 @@ defmodule BrokenOathsWeb.UserLive.Settings do
   end
 
   @impl true
+  def handle_event("validate_display_name", %{"user" => user_params}, socket) do
+    display_name_form =
+      socket.assigns.current_scope.user
+      |> Users.change_user_display_name(user_params)
+      |> Map.put(:action, :validate)
+      |> to_form()
+
+    {:noreply, assign(socket, display_name_form: display_name_form)}
+  end
+
+  def handle_event("update_display_name", %{"user" => user_params}, socket) do
+    case Users.update_user_display_name(socket.assigns.current_scope.user, user_params) do
+      {:ok, user} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Display name updated.")
+         |> assign(:display_name_form, to_form(Users.change_user_display_name(user)))}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, display_name_form: to_form(changeset, action: :insert))}
+    end
+  end
+
   def handle_event("validate_email", params, socket) do
     %{"user" => user_params} = params
 

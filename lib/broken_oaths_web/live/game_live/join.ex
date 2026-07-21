@@ -20,15 +20,47 @@ defmodule BrokenOathsWeb.GameLive.Join do
   use BrokenOathsWeb, :live_view
 
   alias BrokenOaths.Game
+  alias BrokenOaths.Users
+  alias BrokenOaths.Users.User
   alias BrokenOaths.Worlds
 
   @impl true
   def mount(_params, _session, socket) do
+    user = socket.assigns.current_scope.user
+
     {:ok,
      socket
      |> assign(:page_title, "Play")
      |> assign(:join_error, nil)
+     |> assign(:name_form, to_form(Users.change_user_display_name(user)))
      |> assign(:worlds, active_worlds())}
+  end
+
+  # Playtest issue 2a9df843: let a player choose the handle other players
+  # see (Known Players, chat, alliances) instead of their raw email. Set
+  # here on the way into a world — the first surface a new player lands on.
+  @impl true
+  def handle_event("validate_name", %{"user" => user_params}, socket) do
+    name_form =
+      socket.assigns.current_scope.user
+      |> Users.change_user_display_name(user_params)
+      |> Map.put(:action, :validate)
+      |> to_form()
+
+    {:noreply, assign(socket, :name_form, name_form)}
+  end
+
+  def handle_event("save_name", %{"user" => user_params}, socket) do
+    case Users.update_user_display_name(socket.assigns.current_scope.user, user_params) do
+      {:ok, user} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "You'll appear as #{User.display_name(user)} to other players.")
+         |> assign(:name_form, to_form(Users.change_user_display_name(user)))}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :name_form, to_form(changeset))}
+    end
   end
 
   # Quick Play — the frictionless entry that makes recruiting scale: drop the
@@ -73,6 +105,28 @@ defmodule BrokenOathsWeb.GameLive.Join do
       <p :if={@join_error} data-test="join-error" class="alert alert-error mt-4">
         {@join_error}
       </p>
+
+      <%!-- Playtest issue 2a9df843: choose the name other players see, in
+           place of the email. Optional — blank falls back to "Player #N". --%>
+      <.form
+        for={@name_form}
+        id="display-name-form"
+        phx-change="validate_name"
+        phx-submit="save_name"
+        class="mt-6 flex items-end gap-2"
+      >
+        <.input
+          field={@name_form[:display_name]}
+          type="text"
+          label="Your display name"
+          placeholder="How other players see you"
+          data-test="display-name-input"
+          autocomplete="off"
+        />
+        <.button type="submit" data-test="save-display-name" class="btn-secondary">
+          Save
+        </.button>
+      </.form>
 
       <%!-- Quick Play: one click into a world with room, creating a fresh one
            when every world is full. Always available, so a new player never

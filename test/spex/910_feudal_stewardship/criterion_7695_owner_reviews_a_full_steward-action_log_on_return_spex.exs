@@ -92,7 +92,7 @@ defmodule BrokenOathsSpex.Story910.Criterion7695Spex do
         assert length(entries) >= 2,
                "expected at least 2 steward-log-entry rows (bank collect + production order), got #{length(entries)}"
 
-        assert log_html =~ context.user.email
+        assert log_html =~ "Player ##{context.user.id}"
         {:ok, context}
       end
     end

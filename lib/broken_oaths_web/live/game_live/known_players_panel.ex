@@ -30,10 +30,11 @@ defmodule BrokenOathsWeb.GameLive.KnownPlayersPanel do
   Assigns:
 
     * `:id` - the DOM id for this component instance
-    * `:known_players` - `[%{user_id:, email:}]`, every civilization
-      `Play`'s own player has discovered in this world (`Game.
-      known_players/2`) — `[]` before any discovery has happened, which
-      renders the panel's empty state
+    * `:known_players` - `[%{user_id:, display_name:}]`, every
+      civilization `Play`'s own player has discovered in this world
+      (`Game.known_players/2`). `display_name` is the player-facing
+      handle, never the email (playtest issue 2a9df843) — `[]` before any
+      discovery has happened, which renders the panel's empty state
 
   `Play` hides this panel while `GameLive.ChatPanel` is open (its own
   contact list reuses the same `known-player-ID` row shape story 900's
@@ -75,14 +76,14 @@ defmodule BrokenOathsWeb.GameLive.KnownPlayersPanel do
       phx-value-user_id={@player.user_id}
       class="flex items-center justify-between gap-2 text-sm cursor-pointer"
     >
-      <span class="truncate">{@player.email}</span>
+      <span class="truncate">{@player.display_name}</span>
       <button
         type="button"
         data-test="chat-link"
         phx-click="open_chat"
         phx-value-user_id={@player.user_id}
         class="btn btn-ghost btn-xs"
-        aria-label={"Chat with #{@player.email}"}
+        aria-label={"Chat with #{@player.display_name}"}
       >
         <.icon name="hero-chat-bubble-left-right" class="w-3 h-3" />
       </button>

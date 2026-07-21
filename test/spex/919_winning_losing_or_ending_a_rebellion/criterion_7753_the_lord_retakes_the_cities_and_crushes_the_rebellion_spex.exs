@@ -88,7 +88,11 @@ defmodule BrokenOathsSpex.Story919.Criterion7753Spex do
 
         {:ok, fresh_wes_live, _html} = live(context.other_conn, "/play/#{context.world.id}")
 
-        assert has_element?(fresh_wes_live, "[data-test='vassal-status']", "Sworn to #{context.user.email}")
+        assert has_element?(
+                 fresh_wes_live,
+                 "[data-test='vassal-status']",
+                 "Sworn to Player ##{context.user.id}"
+               )
 
         {:ok, context}
       end

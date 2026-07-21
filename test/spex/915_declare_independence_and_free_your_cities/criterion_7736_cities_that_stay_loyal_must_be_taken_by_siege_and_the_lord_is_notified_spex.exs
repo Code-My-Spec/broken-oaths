@@ -147,7 +147,7 @@ defmodule BrokenOathsSpex.Story915.Criterion7736Spex do
         )
 
         assert message =~ "declared independence"
-        assert message =~ context.other_user.email
+        assert message =~ "Player ##{context.other_user.id}"
 
         assert Enum.sort(pushed_risen_ids) == Enum.sort(context.risen_city_ids),
                "the lord's own notification should list exactly the cities the preview marked will-rise"

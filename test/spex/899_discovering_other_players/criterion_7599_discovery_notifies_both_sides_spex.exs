@@ -109,14 +109,19 @@ defmodule BrokenOathsSpex.Story899.Criterion7599Spex do
       then_ "I am told I discovered them", context do
         assert_push_event(context.play_live, "game:discovery", %{message: my_message}, 500)
         assert my_message =~ "discovered"
-        assert my_message =~ context.other_user.email
+        # Playtest issue 2a9df843: the notification names the other party by
+        # their display-name handle (the "Player #N" fallback here), never
+        # the raw email.
+        assert my_message =~ "Player ##{context.other_user.id}"
+        refute my_message =~ context.other_user.email
         {:ok, context}
       end
 
       then_ "they are told I discovered them", context do
         assert_push_event(context.other_play_live, "game:discovery", %{message: their_message}, 500)
         assert their_message =~ "discovered"
-        assert their_message =~ context.user.email
+        assert their_message =~ "Player ##{context.user.id}"
+        refute their_message =~ context.user.email
         {:ok, context}
       end
     end

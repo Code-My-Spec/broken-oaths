@@ -106,7 +106,11 @@ defmodule BrokenOathsSpex.Story915.Criterion7735Spex do
       then_ "Wes remains at war with Ada, with those cities still to be taken by force", context do
         {:ok, fresh_vassal_live, _html} = live(context.other_conn, "/play/#{context.world.id}")
 
-        assert has_element?(fresh_vassal_live, "[data-test='at-war-with']", context.user.email)
+        assert has_element?(
+                 fresh_vassal_live,
+                 "[data-test='at-war-with']",
+                 "Player ##{context.user.id}"
+               )
 
         {:ok, context}
       end

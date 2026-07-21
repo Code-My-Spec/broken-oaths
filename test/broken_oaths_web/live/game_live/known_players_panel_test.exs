@@ -15,8 +15,8 @@ defmodule BrokenOathsWeb.GameLive.KnownPlayersPanelTest do
   end
 
   describe "one or more known players" do
-    test "lists each discovered player by email" do
-      known_players = [%{user_id: 7, email: "rival@example.com"}]
+    test "lists each discovered player by display name, never the email" do
+      known_players = [%{user_id: 7, display_name: "Sir Rival"}]
 
       html =
         render_component(KnownPlayersPanel,
@@ -26,11 +26,14 @@ defmodule BrokenOathsWeb.GameLive.KnownPlayersPanelTest do
 
       refute html =~ ~s(data-test="known-players-empty")
       assert html =~ ~s(data-test="known-player-7")
-      assert html =~ "rival@example.com"
+      assert html =~ "Sir Rival"
+      # Playtest issue 2a9df843: the panel only ever receives display names,
+      # so an email can never reach the other player's screen.
+      refute html =~ "@example.com"
     end
 
     test "each row carries a chat-link affordance" do
-      known_players = [%{user_id: 7, email: "rival@example.com"}]
+      known_players = [%{user_id: 7, display_name: "Sir Rival"}]
 
       html =
         render_component(KnownPlayersPanel,
@@ -42,7 +45,7 @@ defmodule BrokenOathsWeb.GameLive.KnownPlayersPanelTest do
     end
 
     test "each row pushes center_on_player with the player's own user_id (playtest issue 4)" do
-      known_players = [%{user_id: 7, email: "rival@example.com"}]
+      known_players = [%{user_id: 7, display_name: "Sir Rival"}]
 
       html =
         render_component(KnownPlayersPanel,
@@ -56,8 +59,8 @@ defmodule BrokenOathsWeb.GameLive.KnownPlayersPanelTest do
 
     test "renders one row per discovered player" do
       known_players = [
-        %{user_id: 7, email: "rival@example.com"},
-        %{user_id: 9, email: "another@example.com"}
+        %{user_id: 7, display_name: "Sir Rival"},
+        %{user_id: 9, display_name: "Lady Foe"}
       ]
 
       html =

@@ -65,6 +65,7 @@ defmodule BrokenOaths.Feudal.Vassalization do
   alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.Repo
   alias BrokenOaths.Users
+  alias BrokenOaths.Users.User
 
   @type player_id :: term()
 
@@ -125,12 +126,12 @@ defmodule BrokenOaths.Feudal.Vassalization do
 
   @doc "The fresh vassal's own notification copy — the `\"game:vassalized\"` push both 906 and 907 share."
   @spec vassalized_message(String.t()) :: String.t()
-  def vassalized_message(lord_email),
-    do: "Your last free city has fallen — you are now sworn to #{lord_email}."
+  def vassalized_message(lord_name),
+    do: "Your last free city has fallen — you are now sworn to #{lord_name}."
 
   @doc "The lord's own notification copy for their new vassal — the `\"game:new_vassal\"` push."
   @spec new_vassal_message(String.t()) :: String.t()
-  def new_vassal_message(vassal_email), do: "#{vassal_email} has sworn fealty to you."
+  def new_vassal_message(vassal_name), do: "#{vassal_name} has sworn fealty to you."
 
   # -------------------------------------------------------------------
   # Capture -> vassalization orchestration (stories 906/907) — moved
@@ -240,12 +241,12 @@ defmodule BrokenOaths.Feudal.Vassalization do
   defp vassalization_broadcast(state, %{captor_player_id: lord_id, defeated_player_id: vassal_id}) do
     lord_user_id = owner_user_id(state, lord_id)
     vassal_user_id = owner_user_id(state, vassal_id)
-    lord_email = Users.get_user!(lord_user_id).email
-    vassal_email = Users.get_user!(vassal_user_id).email
+    lord_name = User.display_name(Users.get_user!(lord_user_id))
+    vassal_name = User.display_name(Users.get_user!(vassal_user_id))
 
     [
-      {:vassalized, vassal_user_id, vassalized_message(lord_email)},
-      {:new_vassal, lord_user_id, vassal_user_id, new_vassal_message(vassal_email)}
+      {:vassalized, vassal_user_id, vassalized_message(lord_name)},
+      {:new_vassal, lord_user_id, vassal_user_id, new_vassal_message(vassal_name)}
     ]
   end
 

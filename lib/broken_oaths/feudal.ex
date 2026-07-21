@@ -33,7 +33,7 @@ defmodule BrokenOaths.Feudal do
   def vassals(world, user), do: WorldServer.call(world, {:vassals, user})
 
   @doc """
-  `user`'s own oath, if any: `%{lord_user_id:, lord_email:,
+  `user`'s own oath, if any: `%{lord_user_id:, lord_name:,
   tribute_rate:, oath_strain:, agenda_pending?:, levy_status:,
   lord_fallen?:}`, or `nil` for a free player. `agenda_pending?` is the
   Oath screen's own trigger — `true` until `choose_hidden_agenda/3`
@@ -183,7 +183,7 @@ defmodule BrokenOaths.Feudal do
   @doc """
   `user`'s own active-or-most-recent Rebellion as REBEL, or `nil` if
   they've never declared one: `%{id:, status:, rebel_user_id:,
-  rebel_email:, former_lord_user_id:, former_lord_email:, started_turn:,
+  rebel_name:, former_lord_user_id:, former_lord_name:, started_turn:,
   army_size:, risen_city_ids:, loyal_city_ids:}`. Once a rebellion ends
   (`independence_won`/`crushed`/`peace`) this keeps reading that same
   settled row — a rebel only ever carries one ACTIVE rebellion at a

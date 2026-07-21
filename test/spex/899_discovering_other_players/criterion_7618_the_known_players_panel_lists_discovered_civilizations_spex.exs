@@ -101,11 +101,16 @@ defmodule BrokenOathsSpex.Story899.Criterion7618Spex do
       end
 
       then_ "the panel lists the discovered player's civilization by name", context do
+        # Playtest issue 2a9df843: the row shows the player-facing display
+        # name (here the "Player #N" fallback, since the fixture set none),
+        # never the raw email.
         assert has_element?(
                  context.play_live,
                  "[data-test='known-player-#{context.other_user.id}']",
-                 context.other_user.email
+                 "Player ##{context.other_user.id}"
                )
+
+        refute render(context.play_live) =~ context.other_user.email
 
         {:ok, context}
       end

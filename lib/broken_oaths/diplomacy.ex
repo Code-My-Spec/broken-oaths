@@ -26,7 +26,7 @@ defmodule BrokenOaths.Diplomacy do
   @doc """
   Every alliance (`:proposed` or `:accepted`) `user` is a party to in
   `world` (story 901) — `[%{id:, status:, proposed_by_me?:,
-  other_user_id:, other_email:}]`, the OTHER party's identity resolved
+  other_user_id:, other_name:}]`, the OTHER party's identity resolved
   for each row so `GameLive.AlliancePanel` never has to cross-reference
   a raw `player_id` itself. See `BrokenOaths.Diplomacy.Alliance` and
   `BrokenOaths.Diplomacy.Cooperation`'s propose/accept business rules —

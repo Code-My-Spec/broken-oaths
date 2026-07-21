@@ -113,6 +113,44 @@ defmodule BrokenOaths.UsersTest do
     end
   end
 
+  describe "display name (playtest issue 2a9df843)" do
+    test "display_name/1 returns a non-email fallback when unset" do
+      user = user_fixture()
+      assert User.display_name(user) == "Player ##{user.id}"
+    end
+
+    test "display_name/1 returns the chosen handle when set" do
+      assert User.display_name(%User{id: 5, display_name: "Rowan"}) == "Rowan"
+    end
+
+    test "display_name/1 falls back for a blank handle" do
+      assert User.display_name(%User{id: 5, display_name: "   "}) == "Player #5"
+    end
+
+    test "update_user_display_name/2 trims and stores the handle" do
+      user = user_fixture()
+      assert {:ok, user} = Users.update_user_display_name(user, %{display_name: "  Rowan  "})
+      assert user.display_name == "Rowan"
+    end
+
+    test "update_user_display_name/2 nils a blank handle" do
+      user = user_fixture(%{})
+      {:ok, user} = Users.update_user_display_name(user, %{display_name: "Rowan"})
+      assert {:ok, user} = Users.update_user_display_name(user, %{display_name: "  "})
+      assert user.display_name == nil
+    end
+
+    test "update_user_display_name/2 rejects a name outside 3-20 chars" do
+      user = user_fixture()
+      assert {:error, changeset} = Users.update_user_display_name(user, %{display_name: "ab"})
+      assert "should be at least 3 character(s)" in errors_on(changeset).display_name
+
+      long = String.duplicate("a", 21)
+      assert {:error, changeset} = Users.update_user_display_name(user, %{display_name: long})
+      assert "should be at most 20 character(s)" in errors_on(changeset).display_name
+    end
+  end
+
   describe "deliver_user_update_email_instructions/3" do
     setup do
       %{user: user_fixture()}

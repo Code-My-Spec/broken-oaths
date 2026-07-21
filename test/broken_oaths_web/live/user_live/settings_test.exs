@@ -37,6 +37,37 @@ defmodule BrokenOathsWeb.UserLive.SettingsTest do
     end
   end
 
+  describe "update display name form" do
+    setup %{conn: conn} do
+      user = user_fixture()
+      %{conn: log_in_user(conn, user), user: user}
+    end
+
+    test "sets the player-facing display name", %{conn: conn, user: user} do
+      {:ok, lv, _html} = live(conn, ~p"/users/settings")
+
+      result =
+        lv
+        |> form("#display_name_form", %{"user" => %{"display_name" => "Rowan"}})
+        |> render_submit()
+
+      assert result =~ "Display name updated."
+      assert Users.get_user!(user.id).display_name == "Rowan"
+    end
+
+    test "rejects a too-short name", %{conn: conn, user: user} do
+      {:ok, lv, _html} = live(conn, ~p"/users/settings")
+
+      result =
+        lv
+        |> form("#display_name_form", %{"user" => %{"display_name" => "ab"}})
+        |> render_submit()
+
+      assert result =~ "should be at least 3 character"
+      assert Users.get_user!(user.id).display_name == nil
+    end
+  end
+
   describe "update email form" do
     setup %{conn: conn} do
       user = user_fixture()

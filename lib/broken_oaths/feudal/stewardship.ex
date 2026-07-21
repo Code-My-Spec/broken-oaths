@@ -136,6 +136,7 @@ defmodule BrokenOaths.Feudal.Stewardship do
   alias BrokenOaths.Feudal.Vassalage
   alias BrokenOaths.Repo
   alias BrokenOaths.Users
+  alias BrokenOaths.Users.User
   alias BrokenOaths.Worlds.Regions
 
   @type player_id :: term()
@@ -541,7 +542,7 @@ defmodule BrokenOaths.Feudal.Stewardship do
 
     %{
       id: log.id,
-      steward_email: steward_user.email,
+      steward_name: User.display_name(steward_user),
       action: log.action,
       turn: log.turn,
       sabotage: log.sabotage
@@ -658,7 +659,7 @@ defmodule BrokenOaths.Feudal.Stewardship do
       status: alliance.status,
       proposed_by_me?: alliance.proposer_player_id == my_player_id,
       other_user_id: other_user.id,
-      other_email: other_user.email,
+      other_name: User.display_name(other_user),
       # Story 910: same "offer Steward only while offline" status
       # `WorldServer.format_vassal/2` already carries.
       online?: online?,

@@ -47,14 +47,15 @@ defmodule BrokenOaths.Diplomacy.Discovery do
   is diffed), this module only decides WHAT changed and WHAT to say
   about it.
 
-  `known_players/2` is the companion READ — `%{user_id:, email:}` for
-  every player `user` has discovered, powering the client's own Known
+  `known_players/2` is the companion READ — `%{user_id:, display_name:}`
+  for every player `user` has discovered, powering the client's own Known
   Players panel. Also moved home from `WorldServer`'s own private
   `known_players/2`.
   """
 
   alias BrokenOaths.Vision.Visibility
   alias BrokenOaths.Users
+  alias BrokenOaths.Users.User
 
   @type player_id :: term()
   @type state :: %{
@@ -151,12 +152,12 @@ defmodule BrokenOaths.Diplomacy.Discovery do
   defp discovery_events(state, player_a_id, player_b_id) do
     user_a_id = Map.fetch!(state.players, player_a_id).user_id
     user_b_id = Map.fetch!(state.players, player_b_id).user_id
-    email_a = Users.get_user!(user_a_id).email
-    email_b = Users.get_user!(user_b_id).email
+    name_a = User.display_name(Users.get_user!(user_a_id))
+    name_b = User.display_name(Users.get_user!(user_b_id))
 
     [
-      {:discovery, user_a_id, "You have discovered #{email_b}'s civilization!"},
-      {:discovery, user_b_id, "#{email_a} has discovered your civilization!"}
+      {:discovery, user_a_id, "You have discovered #{name_b}'s civilization!"},
+      {:discovery, user_b_id, "#{name_a} has discovered your civilization!"}
     ]
   end
 
@@ -165,13 +166,15 @@ defmodule BrokenOaths.Diplomacy.Discovery do
   # -------------------------------------------------------------------
 
   @doc """
-  `%{user_id:, email:}` for every player `user` has discovered — the
-  `KnownPlayersPanel`'s own read. Ordered by `viewer_player_id`'s own
-  directional `KnownPlayer` pairs in `state.known_players`, not
-  fog-filtered current visibility (unrelated to current fog of war —
-  see this module's own moduledoc).
+  `%{user_id:, display_name:}` for every player `user` has discovered —
+  the `KnownPlayersPanel`'s own read. `display_name` is the player-facing
+  handle (`User.display_name/1`), never the raw email (playtest issue
+  2a9df843). Ordered by `viewer_player_id`'s own directional
+  `KnownPlayer` pairs in `state.known_players`, not fog-filtered current
+  visibility (unrelated to current fog of war — see this module's own
+  moduledoc).
   """
-  @spec known_players(state(), map()) :: [%{user_id: term(), email: String.t()}]
+  @spec known_players(state(), map()) :: [%{user_id: term(), display_name: String.t()}]
   def known_players(state, user) do
     case find_player(state, user.id) do
       nil ->
@@ -183,7 +186,7 @@ defmodule BrokenOaths.Diplomacy.Discovery do
         for {viewer_id, discovered_id} <- known, viewer_id == player.id do
           discovered_player = Map.fetch!(state.players, discovered_id)
           discovered_user = Users.get_user!(discovered_player.user_id)
-          %{user_id: discovered_user.id, email: discovered_user.email}
+          %{user_id: discovered_user.id, display_name: User.display_name(discovered_user)}
         end
     end
   end

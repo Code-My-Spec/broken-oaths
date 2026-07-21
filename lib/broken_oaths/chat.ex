@@ -38,7 +38,7 @@ defmodule BrokenOaths.Chat do
 
   @type contact_summary :: %{
           user_id: integer(),
-          email: String.t(),
+          display_name: String.t(),
           conversation_id: integer() | nil,
           unread_count: non_neg_integer(),
           blocked: boolean()
@@ -249,13 +249,13 @@ defmodule BrokenOaths.Chat do
 
   # -- Conversations -----------------------------------------------------
 
-  defp contact_summary(world, player, %{user_id: other_user_id, email: email}) do
+  defp contact_summary(world, player, %{user_id: other_user_id, display_name: display_name}) do
     other_player = fetch_player_by_user_id!(world, other_user_id)
     conversation = find_conversation(world, player, other_player)
 
     %{
       user_id: other_user_id,
-      email: email,
+      display_name: display_name,
       conversation_id: conversation && conversation.id,
       unread_count: conversation_unread_count(conversation, player),
       blocked: blocked_players?(world, player, other_player)

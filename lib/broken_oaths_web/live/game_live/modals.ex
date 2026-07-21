@@ -48,7 +48,7 @@ defmodule BrokenOathsWeb.GameLive.Modals do
       <div class="modal-box">
         <h3 class="font-bold text-lg">Terms of Oath</h3>
         <p class="py-2 opacity-70">
-          Your last free city has fallen. You are sworn to {@vassal_status.lord_email} — but your
+          Your last free city has fallen. You are sworn to {@vassal_status.lord_name} — but your
           story is far from over. Choose the ambition you'll secretly pursue as a vassal:
         </p>
         <div class="flex flex-col gap-2">
