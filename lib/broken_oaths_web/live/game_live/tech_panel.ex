@@ -120,7 +120,10 @@ defmodule BrokenOathsWeb.GameLive.TechPanel do
 
   @impl true
   def render(assigns) do
-    assigns = assign(assigns, :techs, Research.techs())
+    assigns =
+      assigns
+      |> assign(:techs, Research.techs())
+      |> assign(:button_fill_pct, button_fill_pct(assigns.player_research.progress))
 
     ~H"""
     <div id={@id} class="relative">
@@ -128,9 +131,20 @@ defmodule BrokenOathsWeb.GameLive.TechPanel do
         type="button"
         data-test="tech-tree-button"
         phx-click="toggle_tech_panel"
-        class="btn btn-sm btn-outline gap-1"
+        class="btn btn-sm btn-outline gap-1 relative overflow-hidden"
       >
-        <.icon name="hero-academic-cap" class="w-4 h-4" /> Tech
+        <%!-- Playtest issue 2 — a compact fill (banked/cost of whatever's
+             currently researching) so progress reads at a glance without
+             opening the panel below; zero width with nothing selected. --%>
+        <span
+          data-test="tech-button-fill"
+          class="absolute inset-y-0 left-0 bg-primary/30 pointer-events-none"
+          style={"width: #{@button_fill_pct}%"}
+        >
+        </span>
+        <span class="relative flex items-center gap-1">
+          <.icon name="hero-academic-cap" class="w-4 h-4" /> Tech
+        </span>
       </button>
 
       <div
@@ -218,11 +232,11 @@ defmodule BrokenOathsWeb.GameLive.TechPanel do
           @locked? && "opacity-50"
         ]}
       >
-        <span>{tech_label(@tech)}</span>
+        <span>{Research.tech_label(@tech)}</span>
         <span data-test={"tech-cost-#{@tech}"}>{@cost}</span>
       </button>
       <p :if={@prereqs != []} class="text-xs opacity-60" data-test={"tech-prereqs-#{@tech}"}>
-        Requires: {Enum.map_join(@prereqs, ", ", &tech_label/1)}
+        Requires: {Enum.map_join(@prereqs, ", ", &Research.tech_label/1)}
       </p>
       <p class="text-xs opacity-70" data-test={"tech-unlock-#{@tech}"}>{@unlock}</p>
       <p :if={@completed?} class="text-xs text-success" data-test={"tech-completed-#{@tech}"}>
@@ -244,7 +258,7 @@ defmodule BrokenOathsWeb.GameLive.TechPanel do
     ~H"""
     <div class="flex flex-col gap-1">
       <div data-test="research-progress" class="text-sm font-medium">
-        {tech_label(@progress.tech)} {@progress.banked}/{@progress.cost}
+        {Research.tech_label(@progress.tech)} {@progress.banked}/{@progress.cost}
       </div>
       <progress
         data-test="research-progress-bar"
@@ -257,15 +271,10 @@ defmodule BrokenOathsWeb.GameLive.TechPanel do
     """
   end
 
-  defp tech_label(:pottery), do: "Pottery"
-  defp tech_label(:animal_husbandry), do: "Animal Husbandry"
-  defp tech_label(:mining), do: "Mining"
-  defp tech_label(:sailing), do: "Sailing"
-  defp tech_label(:astrology), do: "Astrology"
-  defp tech_label(:writing), do: "Writing"
-  defp tech_label(:irrigation), do: "Irrigation"
-  defp tech_label(:archery), do: "Archery"
-  defp tech_label(:masonry), do: "Masonry"
-  defp tech_label(:the_wheel), do: "The Wheel"
-  defp tech_label(:bronze_working), do: "Bronze Working"
+  # Playtest issue 2 — the Tech button's own collapsed-state preview:
+  # zero with nothing selected, else banked/cost as a whole percent
+  # (capped at 100 the same defensive-clamp way `ProgressPanel`'s own
+  # Bronze Working row already caps an over-banked tech).
+  defp button_fill_pct(nil), do: 0
+  defp button_fill_pct(%{banked: banked, cost: cost}), do: div(min(banked, cost) * 100, cost)
 end

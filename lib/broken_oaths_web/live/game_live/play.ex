@@ -76,7 +76,18 @@ defmodule BrokenOathsWeb.GameLive.Play do
     * `game:age`        — `%{message: string}` (story 903), fired once when
                            `{:tech_completed, user_id, :bronze_working}`
                            lands for this player — player-scoped, same shape
-                           as `game:alert`/`game:discovery`/`game:lineage`
+                           as `game:alert`/`game:discovery`/`game:lineage`.
+                           Every OTHER tech, and every finished production
+                           item (unit or building), reuses `game:alert`
+                           itself instead of a dedicated event (playtest
+                           issue 6 — "Researched <Tech>."/"Built <thing>
+                           in <City>.", same player-scoped push)
+    * `globe3d:center`  — `%{yaw: float, pitch: float}` (playtest issue 4),
+                           pushed once per `"center_on_player"` click that
+                           actually resolves to a visible tile
+                           (`Game.visible_tile_of/3`) — the `.Board` hook
+                           just points the camera there, the same yaw/pitch
+                           shape `data-yaw`/`data-pitch` seed it with at mount
 
   Turn number, countdown, and the selected-unit's/-city's details are each
   their own `liveview_component` (`GameLive.TurnBar`, `GameLive.UnitPanel`,
@@ -168,7 +179,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
   use BrokenOathsWeb, :live_view
 
   alias BrokenOaths.Chat
-  alias BrokenOaths.Cities.Yields
+  alias BrokenOaths.Cities.{Production, Yields}
   alias BrokenOaths.Game
   alias BrokenOaths.Players.Presence
   alias BrokenOaths.Technology.Research
@@ -1444,6 +1455,30 @@ defmodule BrokenOathsWeb.GameLive.Play do
     {:noreply, assign(socket, chat_open: true, chat_target_user_id: PlayView.parse_id(user_id))}
   end
 
+  # Playtest issue 4 — a Known Players row's own click (mirrors
+  # "open_chat"'s row-scoped shape above) points the camera at that
+  # player: `Game.visible_tile_of/3` names the nearest city/unit of
+  # theirs `user` can see RIGHT NOW (fog-respecting — a player known but
+  # currently out of sight yields `nil`), and `PlayView.camera_on/2`
+  # (the same centroid math `mount/3` already uses for spawn) turns
+  # that one tile into a yaw/pitch pair the `.Board` hook's own
+  # `"globe3d:center"` handler points the camera at. Nothing in sight
+  # right now is a quiet no-op — never worth interrupting a click with a
+  # modal over.
+  def handle_event("center_on_player", %{"user_id" => user_id}, socket) do
+    %{world: world, user: user, mesh: mesh} = socket.assigns
+    target_user_id = PlayView.parse_id(user_id)
+
+    case Game.visible_tile_of(world, user, target_user_id) do
+      nil ->
+        {:noreply, socket}
+
+      tile_id ->
+        {yaw, pitch} = PlayView.camera_on([%{tile_id: tile_id}], mesh)
+        {:noreply, push_event(socket, "globe3d:center", %{yaw: yaw, pitch: pitch})}
+    end
+  end
+
   def handle_event("abandon_world", _params, socket) do
     {:noreply, assign(socket, confirm_abandon?: true)}
   end
@@ -1580,6 +1615,22 @@ defmodule BrokenOathsWeb.GameLive.Play do
     {:noreply, socket}
   end
 
+  # Playtest issue 6 — the "build complete" toast: `Production.
+  # resolve_completions/1`'s own `completions` list (threaded through
+  # `Turn.tick/1` as `{:city_completed, user_id, city_name, type}`,
+  # sibling to `{:unit_spawned, _}` above but carrying the human-facing
+  # fields a placement intent has no reason to) fires once per finished
+  # queue item, unit or Granary alike — player-scoped, same direct-push
+  # shape as `{:tech_completed, ...}` above.
+  def handle_info({:city_completed, user_id, city_name, type}, socket) do
+    if user_id == socket.assigns.user.id do
+      message = "Built #{Production.buildable_label(type)} in #{city_name}."
+      {:noreply, push_event(socket, "game:alert", %{message: message})}
+    else
+      {:noreply, socket}
+    end
+  end
+
   # Story 903: completing Bronze Working is the one tech completion
   # that gets its own one-shot notification (the story's own
   # acceptance text) — player-scoped, same `"game:<name>"` + `message`
@@ -1600,16 +1651,22 @@ defmodule BrokenOathsWeb.GameLive.Play do
     end
   end
 
-  # Story 902: `Turn.tick/1`'s science-accrual phase (phase 8) pairs a
-  # tech reaching its cost with its own `{:tech_completed, user_id,
-  # tech}` broadcast, alongside the SAME tick's `{:turn_advanced, turn}`
-  # this view already refreshes `player_research` on (see that handler's
-  # own doc) — so, like `{:unit_spawned, _}` above, every OTHER tech
-  # completion is a safe no-op; it exists so an unhandled event never
-  # crashes the LiveView (a future "Animal Husbandry researched!" toast
-  # would hook in here).
-  def handle_info({:tech_completed, _user_id, _tech}, socket) do
-    {:noreply, socket}
+  # Playtest issue 6 — every OTHER tech completion (anything but Bronze
+  # Working, handled above with its own age-advance copy) gets the
+  # generic "Researched <Tech>." toast: same player-scoped, direct-push
+  # shape as `{:city_alert, ...}`/`{:discovery, ...}` below, reusing
+  # `"game:alert"` rather than inventing a new client event (the team's
+  # own stated preference where the existing convention already fits).
+  # `player_research` is already refreshed by the `{:turn_advanced, _}`
+  # handler this same tick's broadcast batch also carries (see that
+  # handler's own doc), so nothing else needs refreshing here.
+  def handle_info({:tech_completed, user_id, tech}, socket) do
+    if user_id == socket.assigns.user.id do
+      message = "Researched #{Research.tech_label(tech)}."
+      {:noreply, push_event(socket, "game:alert", %{message: message})}
+    else
+      {:noreply, socket}
+    end
   end
 
   # `Turn.tick/1`'s heir-succession phase (story 896, criterion 7573)
@@ -2498,6 +2555,16 @@ defmodule BrokenOathsWeb.GameLive.Play do
             this.handleEvent("game:alert", ({message}) => showToast(message))
             this.handleEvent("game:lineage", ({message}) => showToast(message))
             this.handleEvent("game:age", ({message}) => showToast(message))
+
+            // Playtest issue 4 — a Known Players row click resolves
+            // server-side to a yaw/pitch pair (`PlayView.camera_on/2`,
+            // the same centroid math the initial mount already uses)
+            // and this just points the camera at it, same as dragging.
+            this.handleEvent("globe3d:center", ({yaw, pitch}) => {
+              this.yaw = yaw
+              this.pitch = pitch
+              this.draw()
+            })
 
             // Unified pointer input for mouse, pen and touch. One active
             // pointer pans (drag); two active pointers pinch-zoom and

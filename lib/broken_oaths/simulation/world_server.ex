@@ -1154,6 +1154,12 @@ defmodule BrokenOaths.Simulation.WorldServer do
     {:reply, Improvement.visible_improvements(state, user), state}
   end
 
+  # Playtest issue 4 — "click a known player to center the globe on
+  # them": the tile of THEIR nearest city/unit `user` can currently see.
+  def handle_call({:visible_tile_of, user, target_user_id}, _from, state) do
+    {:reply, Visibility.visible_tile_of(state, user, target_user_id), state}
+  end
+
   def handle_call({:set_unit_hp_for_test, unit_id, hp}, _from, state) do
     Repo.update_all(from(u in Unit, where: u.id == ^unit_id), set: [hp: hp])
     unit = Map.fetch!(state.units, unit_id)

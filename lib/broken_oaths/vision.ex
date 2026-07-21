@@ -61,4 +61,14 @@ defmodule BrokenOaths.Vision do
   """
   def improvements_visible_to(world, user),
     do: WorldServer.call(world, {:improvements_visible_to, user})
+
+  @doc """
+  The tile `target_user_id`'s nearest city or unit currently visible to
+  `user` sits on — `nil` if nothing of theirs is in sight right now.
+  Playtest issue 4's "click a known player to center the globe on
+  them." See `Visibility.visible_tile_of/3`.
+  """
+  @spec visible_tile_of(map(), map(), term()) :: non_neg_integer() | nil
+  def visible_tile_of(world, user, target_user_id),
+    do: WorldServer.call(world, {:visible_tile_of, user, target_user_id})
 end

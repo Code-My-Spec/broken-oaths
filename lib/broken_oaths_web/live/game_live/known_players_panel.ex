@@ -11,10 +11,13 @@ defmodule BrokenOathsWeb.GameLive.KnownPlayersPanel do
   known_players/2`) and re-pulls it on every `:units_changed`/
   `:turn_advanced` refresh — this component never reads from
   `BrokenOaths.Game` itself and defines no `handle_event/3` of its own.
-  The one interactive element (`chat-link`) pushes a plain `"open_chat"`
-  DOM event with no `phx-target`, so it bubbles to `Play` exactly like
-  `GameLive.CityPanel`/`GameLive.UnitPanel`'s pattern — no
-  component-owned state.
+  Every interactive element pushes a plain DOM event with no
+  `phx-target`, so it bubbles to `Play` exactly like `GameLive.
+  CityPanel`/`GameLive.UnitPanel`'s pattern — no component-owned state.
+  `chat-link` pushes `"open_chat"`; the row itself (playtest issue 4)
+  pushes `"center_on_player"` with `phx-value-user_id`, which `Play`
+  resolves into a fog-respecting camera move (`Game.visible_tile_of/3`)
+  rather than anything this component computes.
 
   The discovery TOAST half of this component's job (story 899,
   criterion 7617 — "flashed and logged") is already handled by `Play`
@@ -68,7 +71,9 @@ defmodule BrokenOathsWeb.GameLive.KnownPlayersPanel do
     ~H"""
     <div
       data-test={"known-player-#{@player.user_id}"}
-      class="flex items-center justify-between gap-2 text-sm"
+      phx-click="center_on_player"
+      phx-value-user_id={@player.user_id}
+      class="flex items-center justify-between gap-2 text-sm cursor-pointer"
     >
       <span class="truncate">{@player.email}</span>
       <button

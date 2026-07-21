@@ -213,6 +213,9 @@ defmodule BrokenOaths.Cities.Production do
         }
 
   @type spawn_event :: %{player_id: term(), type: unit_buildable(), tile_id: tile_id()}
+  # Playtest issue 6 — see `resolve_completions/1`'s own doc for why
+  # this is a separate shape from `spawn_event()` above.
+  @type completion_event :: %{user_id: term(), city_name: String.t(), type: buildable()}
   @type can_queue_error ::
           :size_one | :locked | :already_built | :copper_required | :not_coastal
 
@@ -260,6 +263,23 @@ defmodule BrokenOaths.Cities.Production do
   @doc "Production cost of a buildable type."
   @spec cost(buildable()) :: pos_integer()
   def cost(type), do: Map.fetch!(@catalog, type)
+
+  @doc """
+  A buildable's display label, e.g. `"Bronze Spearman"` for
+  `:bronze_spearman` — the single source of truth `GameLive.CityPanel`
+  reads (moved home from that module's own private copy) and, per the
+  playtest "build complete" toast (`GameLive.Play`'s
+  `{:city_completed, ...}` handler), what a completion notification
+  names too.
+  """
+  @spec buildable_label(buildable()) :: String.t()
+  def buildable_label(:settler), do: "Settler"
+  def buildable_label(:worker), do: "Worker"
+  def buildable_label(:warrior), do: "Warrior"
+  def buildable_label(:granary), do: "Granary"
+  def buildable_label(:bronze_spearman), do: "Bronze Spearman"
+  def buildable_label(:archer), do: "Archer"
+  def buildable_label(:galley), do: "Galley"
 
   @doc "Starting `%{hp:, movement:}` for any unit type — Lord and Settler included."
   @spec unit_stats(unit_type()) :: %{hp: pos_integer(), movement: pos_integer()}
@@ -820,26 +840,42 @@ defmodule BrokenOaths.Cities.Production do
   `state` is the canonical tick-state described in
   `BrokenOaths.Simulation.Turn`.
 
-  Returns `{new_state, spawn_events, occupied, settled_this_tick}`.
+  Also returns `completions` — one entry per queue item that finished
+  THIS tick, unit or building alike (`%{user_id:, city_name:, type:}`,
+  playtest issue 6's own "build complete" toast): every `spawn_event`
+  above names ITS OWN completion, plus a Granary's (which produces no
+  `spawn_event` at all — see `complete_loop/4`'s own Granary clause)
+  detected by diffing `has_granary` before/after. `spawn_event` itself
+  stays `%{player_id:, type:, tile_id:}` (unchanged, `turn_test.exs`
+  asserts on it by exact map equality) — `completions` is a SEPARATE
+  list built only here, at the tick-loop level, so it can carry the
+  human-facing `user_id`/`city_name` a spawn intent has no reason to.
+
+  Returns `{new_state, spawn_events, occupied, settled_this_tick, completions}`.
   """
-  @spec resolve_completions(map()) :: {map(), [spawn_event()], map(), MapSet.t()}
+  @spec resolve_completions(map()) ::
+          {map(), [spawn_event()], map(), MapSet.t(), [completion_event()]}
   def resolve_completions(state) do
     occupied = Map.new(state.units, fn {_id, unit} -> {unit.tile_id, true} end)
     ids = state.cities |> Map.keys() |> Enum.sort()
 
-    {cities, events, occupied, settled_this_tick} =
+    {cities, events, occupied, settled_this_tick, completions} =
       Enum.reduce(
         ids,
-        {state.cities, [], occupied, MapSet.new()},
-        &resolve_city_completion(state.world, &1, &2)
+        {state.cities, [], occupied, MapSet.new(), []},
+        &resolve_city_completion(state, &1, &2)
       )
 
-    {%{state | cities: cities}, events, occupied, settled_this_tick}
+    {%{state | cities: cities}, events, occupied, settled_this_tick, completions}
   end
 
-  defp resolve_city_completion(world, id, {cities, events, occupied, settled_this_tick}) do
+  defp resolve_city_completion(
+         state,
+         id,
+         {cities, events, occupied, settled_this_tick, completions}
+       ) do
     city = Map.fetch!(cities, id)
-    {new_city, city_events} = complete(city, occupied, world)
+    {new_city, city_events} = complete(city, occupied, state.world)
     newly_occupied = Map.new(city_events, fn event -> {event.tile_id, true} end)
 
     settled_this_tick =
@@ -853,8 +889,45 @@ defmodule BrokenOaths.Cities.Production do
       Map.put(cities, id, new_city),
       events ++ city_events,
       Map.merge(occupied, newly_occupied),
-      settled_this_tick
+      settled_this_tick,
+      completions ++ city_completions(state.players, city, new_city, city_events)
     }
+  end
+
+  # Every `city_events` entry (a real unit landing) is its own
+  # completion; a Granary has none of its own (see `complete_loop/4`),
+  # so it's detected separately off the `has_granary` flip — `Map.get/3`
+  # defaults to `false` the same defensive way `Yields.accrue_food/3`/
+  # `can_queue?/3` already read this optional field. `completion_base/2`
+  # returning `nil` (no row in `players` for this city's own owner — a
+  # gap plenty of hand-built tick-state fixtures leave, since they only
+  # care about spawn placement, not the notification this feeds) simply
+  # produces no completions for this city rather than raising: nobody's
+  # `user_id` to notify means nothing to build here.
+  defp city_completions(players, city, new_city, city_events) do
+    case completion_base(players, city) do
+      nil ->
+        []
+
+      base ->
+        unit_completions = Enum.map(city_events, &Map.put(base, :type, &1.type))
+
+        had_granary = Map.get(city, :has_granary, false)
+        has_granary = Map.get(new_city, :has_granary, false)
+
+        if !had_granary and has_granary do
+          unit_completions ++ [Map.put(base, :type, :granary)]
+        else
+          unit_completions
+        end
+    end
+  end
+
+  defp completion_base(players, city) do
+    case Map.get(players, city.player_id) do
+      nil -> nil
+      player -> %{user_id: player.user_id, city_name: city.name}
+    end
   end
 
   # -------------------------------------------------------------------

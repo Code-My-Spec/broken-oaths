@@ -108,6 +108,29 @@ defmodule BrokenOaths.Cities.ImprovementTest do
     assert paused.builder_unit_id == nil
   end
 
+  describe "pillage/1 (story 893 criterion 7556)" do
+    test "a completed improvement becomes pillaged, one repair-tick from done, builder cleared" do
+      imp = %{kind: :farm, status: :complete, progress: 99, builder_unit_id: 7}
+
+      pillaged = Improvement.pillage(imp)
+
+      assert pillaged.status == :pillaged
+      # Left one tick short of complete, so a worker repairs it in a single tick.
+      assert pillaged.progress == max(Improvement.duration(:farm) - 1, 0)
+      assert pillaged.builder_unit_id == nil
+    end
+
+    test "leaves a still-building improvement untouched" do
+      imp = %{kind: :farm, status: :building, progress: 1, builder_unit_id: 7}
+      assert Improvement.pillage(imp) == imp
+    end
+
+    test "leaves an already-pillaged improvement untouched" do
+      imp = %{kind: :mine, status: :pillaged, progress: 0, builder_unit_id: nil}
+      assert Improvement.pillage(imp) == imp
+    end
+  end
+
   describe "duration (story 902, Mining's 3-turn unlock)" do
     test "duration is nil by default — WorldServer resolves it explicitly at build-start" do
       world = WorldsFixtures.world_fixture()

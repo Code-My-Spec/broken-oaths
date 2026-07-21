@@ -16,6 +16,15 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
   them — that is outside this module. A path fully consumed within the
   tick is an arrival: the order is removed entirely.
 
+  Story 925: one step per round no longer means one movement point per
+  round — each step spends whatever `BrokenOaths.Units.Unit.entry_cost/3`
+  prices the target tile at (1 for open terrain or a completed Road, 2
+  for DIFFICULT terrain — hills/woods/rainforest/marsh — with no Road),
+  clamped at 0 rather than going negative. `active_movers/1`'s own gate
+  (`movement_left > 0`, not `>= cost`) preserves Civ 6's "a unit with
+  any movement may always move at least one tile" rule, so a
+  movement-1 unit is never stuck outside a forest it can't afford.
+
   This logic is genuinely cross-cutting (it reads `BrokenOaths.Game.
   CityDefense`'s own garrison rule and `BrokenOaths.Combat.Siege`'s own
   broken-city walk-in exception to decide what counts as "blocked") and
@@ -32,6 +41,7 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
   """
 
   alias BrokenOaths.Combat.CityDefense
+  alias BrokenOaths.Units.Unit
   alias BrokenOaths.Vision.Visibility
 
   @doc "Reset every unit's `movement` to its `max_movement` at the start of a tick."
@@ -62,7 +72,9 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
         positions,
         state.units,
         garrisonable_tiles(state.cities),
-        broken_city_tiles(state.cities)
+        broken_city_tiles(state.cities),
+        state.world,
+        Map.get(state, :roads, %{})
       )
 
     %{
@@ -133,7 +145,9 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
             positions,
             state.units,
             garrisonable_tiles(state.cities),
-            broken_city_tiles(state.cities)
+            broken_city_tiles(state.cities),
+            state.world,
+            Map.get(state, :roads, %{})
           )
 
         %{
@@ -153,10 +167,12 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
   # tiles); `garrisonable` is `player_id => MapSet.t(their own cities'
   # tile_ids)`, precomputed once via `garrisonable_tiles/1`; `broken_cities`
   # is `tile_id => owner_player_id`, precomputed once via
-  # `broken_city_tiles/1`. All three are read-only context for
-  # `attempt_step/5`'s story-895 garrison exception and story-906 broken-
-  # city exception below.
-  defp run_rounds(movers, positions, units, garrisonable, broken_cities) do
+  # `broken_city_tiles/1`. `world`/`roads` (story 925) are the same
+  # read-only pair `attempt_step/7`'s own `Unit.entry_cost/3` call needs
+  # to price each step. All five are read-only context for
+  # `attempt_step/7`'s story-895 garrison exception, story-906 broken-
+  # city exception, and story-925 terrain/road cost below.
+  defp run_rounds(movers, positions, units, garrisonable, broken_cities, world, roads) do
     case active_movers(movers) do
       [] ->
         {movers, positions}
@@ -166,13 +182,20 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
           Enum.reduce(
             ids,
             {movers, positions},
-            &attempt_step(&1, &2, units, garrisonable, broken_cities)
+            &attempt_step(&1, &2, units, garrisonable, broken_cities, world, roads)
           )
 
-        run_rounds(movers, positions, units, garrisonable, broken_cities)
+        run_rounds(movers, positions, units, garrisonable, broken_cities, world, roads)
     end
   end
 
+  # Story 925's Civ 6 "min 1" rule falls out of this gate for free: it's
+  # `movement_left > 0`, never `movement_left >= entry_cost`, so a
+  # Warrior (movement 1) with any movement left still gets to attempt
+  # its next step even when the target tile costs 2 — `attempt_step/7`
+  # below just clamps the result to 0 rather than refusing the step.
+  # Without this, a movement-1 unit could never enter a DIFFICULT tile
+  # (hills/woods/rainforest/marsh) at all.
   defp active_movers(movers) do
     movers
     |> Enum.filter(fn {_id, m} ->
@@ -208,7 +231,15 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
     |> Map.new(&{&1.tile_id, &1.player_id})
   end
 
-  defp attempt_step(unit_id, {movers, positions}, units, garrisonable, broken_cities) do
+  defp attempt_step(
+         unit_id,
+         {movers, positions},
+         units,
+         garrisonable,
+         broken_cities,
+         world,
+         roads
+       ) do
     mover = Map.fetch!(movers, unit_id)
     [target | rest] = mover.path
     mover_unit = Map.fetch!(units, unit_id)
@@ -224,7 +255,20 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
          blocked?(target, positions, units, mover_unit, garrisonable, broken_cities) do
       {Map.put(movers, unit_id, %{mover | status: :interrupted}), positions}
     else
-      moved = %{mover | tile_id: target, path: rest, movement_left: mover.movement_left - 1}
+      # Story 925: spend the tile's own cost (`Unit.entry_cost/3` —
+      # terrain, or 1 flat if a completed Road covers it), clamped at 0
+      # rather than going negative — the min-1 rule (`active_movers/1`
+      # above) already let a unit with less than the full cost left
+      # attempt this step; it simply can't go any further this round.
+      cost = Unit.entry_cost(world, roads, target)
+
+      moved = %{
+        mover
+        | tile_id: target,
+          path: rest,
+          movement_left: max(mover.movement_left - cost, 0)
+      }
+
       {Map.put(movers, unit_id, moved), Map.put(positions, unit_id, target)}
     end
   end

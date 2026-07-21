@@ -19,7 +19,10 @@ defmodule BrokenOathsWeb.GameLive.KnownPlayersPanelTest do
       known_players = [%{user_id: 7, email: "rival@example.com"}]
 
       html =
-        render_component(KnownPlayersPanel, id: "known-players-panel", known_players: known_players)
+        render_component(KnownPlayersPanel,
+          id: "known-players-panel",
+          known_players: known_players
+        )
 
       refute html =~ ~s(data-test="known-players-empty")
       assert html =~ ~s(data-test="known-player-7")
@@ -30,9 +33,25 @@ defmodule BrokenOathsWeb.GameLive.KnownPlayersPanelTest do
       known_players = [%{user_id: 7, email: "rival@example.com"}]
 
       html =
-        render_component(KnownPlayersPanel, id: "known-players-panel", known_players: known_players)
+        render_component(KnownPlayersPanel,
+          id: "known-players-panel",
+          known_players: known_players
+        )
 
       assert html =~ ~s(data-test="chat-link")
+    end
+
+    test "each row pushes center_on_player with the player's own user_id (playtest issue 4)" do
+      known_players = [%{user_id: 7, email: "rival@example.com"}]
+
+      html =
+        render_component(KnownPlayersPanel,
+          id: "known-players-panel",
+          known_players: known_players
+        )
+
+      assert html =~ ~s(phx-click="center_on_player")
+      assert html =~ ~s(phx-value-user_id="7")
     end
 
     test "renders one row per discovered player" do
@@ -42,7 +61,10 @@ defmodule BrokenOathsWeb.GameLive.KnownPlayersPanelTest do
       ]
 
       html =
-        render_component(KnownPlayersPanel, id: "known-players-panel", known_players: known_players)
+        render_component(KnownPlayersPanel,
+          id: "known-players-panel",
+          known_players: known_players
+        )
 
       assert html =~ ~s(data-test="known-player-7")
       assert html =~ ~s(data-test="known-player-9")

@@ -256,7 +256,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
     <div class="flex flex-col gap-1">
       <div class="flex items-center justify-between">
         <div data-test="city-production-current" class="text-sm font-medium">
-          {catalog_label(@current.type)} {@current.banked}/{@current.cost}
+          {Production.buildable_label(@current.type)} {@current.banked}/{@current.cost}
         </div>
         <%!-- Abandoning mid-build is a real choice (story 879: it
              forfeits the invested production), so it gets a real
@@ -313,7 +313,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
         phx-value-item={@type}
         class="btn btn-sm btn-outline justify-between w-full"
       >
-        <span>{catalog_label(@type)}</span>
+        <span>{Production.buildable_label(@type)}</span>
         <span>{@cost}</span>
       </button>
       <p
@@ -361,7 +361,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
   defp queue_item(assigns) do
     ~H"""
     <div data-test={"queue-item-#{@item.id}"} class="flex items-center justify-between text-sm">
-      <span>{catalog_label(@item.type)} ({@item.cost})</span>
+      <span>{Production.buildable_label(@item.type)} ({@item.cost})</span>
       <div class="flex items-center gap-1">
         <%!-- Free reordering (story 879) — one slot toward the head
              per click; progress stays with the item. --%>
@@ -460,16 +460,4 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
       coastal?: coastal?
     ]
   end
-
-  defp catalog_label(:settler), do: "Settler"
-  defp catalog_label(:worker), do: "Worker"
-  defp catalog_label(:warrior), do: "Warrior"
-  defp catalog_label(:granary), do: "Granary"
-  defp catalog_label(:bronze_spearman), do: "Bronze Spearman"
-  # QA issue da39e50b — see `BrokenOaths.Cities.Production`'s own
-  # moduledoc, "The Archer".
-  defp catalog_label(:archer), do: "Archer"
-  # Story 921 — see `BrokenOaths.Cities.Production`'s own moduledoc,
-  # "The Galley".
-  defp catalog_label(:galley), do: "Galley"
 end

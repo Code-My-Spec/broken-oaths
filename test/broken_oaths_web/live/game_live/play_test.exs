@@ -356,4 +356,175 @@ defmodule BrokenOathsWeb.GameLive.PlayTest do
       refute html =~ ~s(data-test="help-modal")
     end
   end
+
+  # -------------------------------------------------------------------
+  # Playtest issue 6 — "task complete" toasts: research finishing and a
+  # city finishing production both toast the OWNING player the instant
+  # they land, reusing the existing "game:alert" push convention.
+  # -------------------------------------------------------------------
+
+  describe "task/completion notifications (playtest issue 6)" do
+    test "a completed (non-Bronze-Working) tech toasts \"Researched <Tech>.\"", %{
+      conn: conn,
+      world: world,
+      user: user
+    } do
+      {:ok, play_live, _html} = join_and_mount(conn, world)
+      found_first_city(play_live, world, user)
+
+      render_hook(play_live, "toggle_tech_panel", %{})
+      render_hook(play_live, "select_research", %{"tech" => "pottery"})
+
+      # A lone size-1 city earns 2 science/turn (`Research.
+      # science_per_turn/1`); Pottery costs 80 (QA issue d95ea179
+      # rebalance) — ceil(80/2) == 40. 45 is a safe overshoot.
+      Enum.reduce_while(1..45, :ok, fn _, :ok ->
+        if :pottery in Game.player_research(world, user).completed_techs do
+          {:halt, :ok}
+        else
+          Game.advance_turn(world)
+          {:cont, :ok}
+        end
+      end)
+
+      assert :pottery in Game.player_research(world, user).completed_techs
+      assert_push_event(play_live, "game:alert", %{message: "Researched Pottery."}, 500)
+    end
+
+    test "a finished production item toasts \"Built <thing> in <City>.\"", %{
+      conn: conn,
+      world: world,
+      user: user
+    } do
+      {:ok, play_live, _html} = join_and_mount(conn, world)
+      {city, _camps} = found_first_city(play_live, world, user)
+
+      render_hook(play_live, "queue_production", %{
+        "city_id" => to_string(city.id),
+        "item" => "warrior"
+      })
+
+      # The flat production base is 5/turn (`Production.flat_base/0`) —
+      # a Warrior costs 40, so ceil(40/5) == 8 turns even with zero
+      # worked-tile production on top. 12 is a safe overshoot.
+      Enum.reduce_while(1..12, :ok, fn _, :ok ->
+        if Enum.any?(Game.player_units(world, user), &(&1.type == :warrior)) do
+          {:halt, :ok}
+        else
+          Game.advance_turn(world)
+          {:cont, :ok}
+        end
+      end)
+
+      assert Enum.any?(Game.player_units(world, user), &(&1.type == :warrior))
+      expected = "Built Warrior in #{city.name}."
+      assert_push_event(play_live, "game:alert", %{message: ^expected}, 500)
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Playtest issue 4 — clicking a Known Players row centers the globe on
+  # that player's nearest tile the viewer can currently see.
+  # -------------------------------------------------------------------
+
+  describe "center on player (playtest issue 4)" do
+    test "pushes globe3d:center at the target's own visible tile", %{
+      conn: conn,
+      world: world,
+      user: user
+    } do
+      other_user = BrokenOathsSpex.Fixtures.user_fixture()
+
+      other_conn =
+        Phoenix.ConnTest.build_conn() |> BrokenOathsTest.ConnCase.log_in_user(other_user)
+
+      {:ok, play_live, _html} = join_and_mount(conn, world)
+
+      {:ok, other_join_live, _html} = live(other_conn, ~p"/play")
+      other_join_live |> element("[data-test='join-world-#{world.id}']") |> render_click()
+      {:ok, _other_play_live, _html} = live(other_conn, ~p"/play/#{world.id}")
+
+      [my_lord] = for u <- Game.player_units(world, user), u.type == :lord, do: u
+      [other_lord] = for u <- Game.player_units(world, other_user), u.type == :lord, do: u
+
+      occupied =
+        for u <- Game.player_units(world, user) ++ Game.player_units(world, other_user),
+            do: u.tile_id
+
+      [target | _] =
+        world
+        |> Regions.adjacent_tiles(my_lord.tile_id)
+        |> Enum.filter(&(Regions.tile_class(world, &1) == :land))
+        |> Enum.reject(&(&1 in occupied))
+
+      :ok = BrokenOathsSpex.Fixtures.relocate_unit(world, other_lord.id, target)
+      # A turn boundary both runs first-contact detection (so the row
+      # actually exists — a stranger is never clickable before
+      # discovery) and refreshes explored/visible sets.
+      Game.advance_turn(world)
+
+      assert has_element?(play_live, "[data-test='known-player-#{other_user.id}']")
+
+      render_hook(play_live, "center_on_player", %{"user_id" => to_string(other_user.id)})
+
+      mesh = BrokenOaths.Worlds.Globe.get(world.frequency)
+
+      {expected_yaw, expected_pitch} =
+        BrokenOathsWeb.GameLive.PlayView.camera_on([%{tile_id: target}], mesh)
+
+      assert_push_event(play_live, "globe3d:center", %{yaw: ^expected_yaw, pitch: ^expected_pitch})
+    end
+
+    test "a click on a known player currently out of sight is a quiet no-op", %{
+      conn: conn,
+      world: world,
+      user: user
+    } do
+      other_user = BrokenOathsSpex.Fixtures.user_fixture()
+
+      other_conn =
+        Phoenix.ConnTest.build_conn() |> BrokenOathsTest.ConnCase.log_in_user(other_user)
+
+      {:ok, play_live, _html} = join_and_mount(conn, world)
+
+      {:ok, other_join_live, _html} = live(other_conn, ~p"/play")
+      other_join_live |> element("[data-test='join-world-#{world.id}']") |> render_click()
+      {:ok, _other_play_live, _html} = live(other_conn, ~p"/play/#{world.id}")
+
+      [my_lord] = for u <- Game.player_units(world, user), u.type == :lord, do: u
+      [other_lord] = for u <- Game.player_units(world, other_user), u.type == :lord, do: u
+
+      occupied =
+        for u <- Game.player_units(world, user) ++ Game.player_units(world, other_user),
+            do: u.tile_id
+
+      [target | _] =
+        world
+        |> Regions.adjacent_tiles(my_lord.tile_id)
+        |> Enum.filter(&(Regions.tile_class(world, &1) == :land))
+        |> Enum.reject(&(&1 in occupied))
+
+      :ok = BrokenOathsSpex.Fixtures.relocate_unit(world, other_lord.id, target)
+      Game.advance_turn(world)
+      assert has_element?(play_live, "[data-test='known-player-#{other_user.id}']")
+
+      # Move them back out of sight (still known — discovery is
+      # permanent, story 899) and advance again so the fog updates.
+      # `my_lord`'s own vision radius is 3 (`Visibility.vision_radius/1`)
+      # — pick a tile entirely outside that ball, not merely non-adjacent.
+      my_ball = BrokenOaths.Vision.Visibility.visible_tiles(world, [my_lord])
+
+      far_tile =
+        Enum.find(
+          0..(BrokenOaths.Worlds.Globe.tile_count(world.frequency) - 1),
+          &(&1 not in my_ball)
+        )
+
+      :ok = BrokenOathsSpex.Fixtures.relocate_unit(world, other_lord.id, far_tile)
+      Game.advance_turn(world)
+
+      render_hook(play_live, "center_on_player", %{"user_id" => to_string(other_user.id)})
+      refute_push_event(play_live, "globe3d:center", %{})
+    end
+  end
 end

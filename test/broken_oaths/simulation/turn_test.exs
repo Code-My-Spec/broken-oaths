@@ -111,9 +111,12 @@ defmodule BrokenOaths.Simulation.TurnTest do
   describe "tick/1 movement" do
     test "resets movement to max_movement before consuming the path" do
       # movement is 0 going in (spent last tick); max_movement is 2, and a
-      # 2-hex path should still fully resolve this tick.
+      # 2-hex path should still fully resolve this tick. Path tiles 9 and
+      # 11 are both OPEN (cost 1, story 925) — this test is about the
+      # reset, not terrain cost (see the "terrain & road cost" describe
+      # below for that).
       u = unit(1, tile: 5, movement: 0, max_movement: 2)
-      order = %{kind: :move, path: [10, 11], status: :pending}
+      order = %{kind: :move, path: [9, 11], status: :pending}
       state = base_state(%{1 => u}, %{1 => order})
 
       {new_state, _events} = Turn.tick(state)
@@ -123,8 +126,9 @@ defmodule BrokenOaths.Simulation.TurnTest do
     end
 
     test "a unit advances up to its movement rate; a longer path stays pending" do
+      # Path tiles 9, 11, 12 are all OPEN (cost 1, story 925).
       u = unit(1, tile: 5, max_movement: 2)
-      order = %{kind: :move, path: [10, 11, 12], status: :pending}
+      order = %{kind: :move, path: [9, 11, 12], status: :pending}
       state = base_state(%{1 => u}, %{1 => order})
 
       {new_state, _events} = Turn.tick(state)
@@ -135,8 +139,9 @@ defmodule BrokenOaths.Simulation.TurnTest do
     end
 
     test "arrival (path fully consumed) removes the order" do
+      # Path tiles 9, 11 are both OPEN (cost 1, story 925).
       u = unit(1, tile: 5, max_movement: 3)
-      order = %{kind: :move, path: [10, 11], status: :pending}
+      order = %{kind: :move, path: [9, 11], status: :pending}
       state = base_state(%{1 => u}, %{1 => order})
 
       {new_state, _events} = Turn.tick(state)
@@ -168,6 +173,91 @@ defmodule BrokenOaths.Simulation.TurnTest do
     end
   end
 
+  # Story 925 — terrain costs movement (Civ 6 model) and a completed Road
+  # negates it. Tile relationships below are verified against `Regions`/
+  # `Terrain` directly (same "never hardcoded blind" discipline
+  # `unit_test.exs`'s own `bfs_path/4` tests use), all in the SAME
+  # fixture world (`@seed`/`@frequency`) these `tick/1` tests already
+  # share: tile 1's own neighbors include tile 9 (open — snow, flat,
+  # cost 1) and tile 10 (DIFFICULT — snow hills, cost 2); tile 10's own
+  # neighbors include tile 11 (open, cost 1).
+  describe "tick/1 movement — terrain & road cost (story 925)" do
+    test "entering an open tile spends 1 movement point, same as before" do
+      u = unit(1, tile: 1, max_movement: 2)
+      order = %{kind: :move, path: [9], status: :pending}
+      state = base_state(%{1 => u}, %{1 => order})
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.units[1].tile_id == 9
+      assert new_state.units[1].movement == 1
+      refute Map.has_key?(new_state.orders, 1)
+    end
+
+    test "entering a DIFFICULT (hills) tile spends 2 movement points" do
+      u = unit(1, tile: 1, max_movement: 2)
+      order = %{kind: :move, path: [10], status: :pending}
+      state = base_state(%{1 => u}, %{1 => order})
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.units[1].tile_id == 10
+      assert new_state.units[1].movement == 0
+      refute Map.has_key?(new_state.orders, 1)
+    end
+
+    test "the Civ 6 min-1 rule: a movement-1 unit still enters a cost-2 tile, ending at 0 rather than being stuck" do
+      u = unit(1, tile: 1, max_movement: 1)
+      order = %{kind: :move, path: [10], status: :pending}
+      state = base_state(%{1 => u}, %{1 => order})
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.units[1].tile_id == 10
+      assert new_state.units[1].movement == 0
+      refute Map.has_key?(new_state.orders, 1)
+    end
+
+    test "a completed Road on the DIFFICULT tile drops its cost to 1, letting the unit reach further this turn" do
+      u = unit(1, tile: 1, max_movement: 2)
+      order = %{kind: :move, path: [10, 11], status: :pending}
+
+      state =
+        %{1 => u}
+        |> base_state(%{1 => order})
+        |> Map.put(:roads, %{
+          10 => %{tile_id: 10, kind: :road, progress: 4, status: :complete, builder_unit_id: nil}
+        })
+
+      {new_state, _events} = Turn.tick(state)
+
+      # Without the road, entering 10 alone (cost 2) would spend the
+      # unit's entire turn — see the DIFFICULT-tile test above. With the
+      # road (cost 1), the SAME 2 movement points also cover the open
+      # tile 11 right after.
+      assert new_state.units[1].tile_id == 11
+      assert new_state.units[1].movement == 0
+      refute Map.has_key?(new_state.orders, 1)
+    end
+
+    test "a road still :building (not yet complete) grants nothing" do
+      u = unit(1, tile: 1, max_movement: 2)
+      order = %{kind: :move, path: [10], status: :pending}
+
+      state =
+        %{1 => u}
+        |> base_state(%{1 => order})
+        |> Map.put(:roads, %{
+          10 => %{tile_id: 10, kind: :road, progress: 1, status: :building, builder_unit_id: nil}
+        })
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.units[1].tile_id == 10
+      assert new_state.units[1].movement == 0
+    end
+  end
+
   # Story 920 rework — `Movement.advance_fortify/1` runs right after
   # `resolve_orders/1` in `Turn.tick/1`, so a unit's own `fortified_turns`
   # (defaulting to 0 via `Map.get/3` for the shared `unit/2` fixture
@@ -194,8 +284,9 @@ defmodule BrokenOaths.Simulation.TurnTest do
     end
 
     test "a unit that actually displaces this tick ends it at 0, never ramped" do
+      # Path tiles 9, 11 are both OPEN (cost 1, story 925).
       u = unit(1, tile: 5, max_movement: 2) |> Map.put(:fortified_turns, 1)
-      order = %{kind: :move, path: [10, 11], status: :pending}
+      order = %{kind: :move, path: [9, 11], status: :pending}
       state = base_state(%{1 => u}, %{1 => order})
 
       {new_state, _events} = Turn.tick(state)

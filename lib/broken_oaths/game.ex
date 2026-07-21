@@ -283,7 +283,8 @@ defmodule BrokenOaths.Game do
   @doc "Order `unit_id` (an Archer) to shoot `camp_id` (QA issue 12bed1e4). See `Combat.shoot_camp/4`."
   @spec shoot_camp(map(), map(), term(), term()) ::
           {:ok, %{damage_dealt: pos_integer(), damage_taken: 0}}
-          | {:error, :not_owner | :invalid_target | :out_of_movement | :out_of_range | :not_archer}
+          | {:error,
+             :not_owner | :invalid_target | :out_of_movement | :out_of_range | :not_archer}
   defdelegate shoot_camp(world, user, unit_id, camp_id), to: Combat
 
   @doc "Order `unit_id` (an Archer) to shoot `city_id` (QA issue 12bed1e4). See `Combat.shoot_city/4`."
@@ -529,7 +530,8 @@ defmodule BrokenOaths.Game do
   @doc "Either side of an active Rebellion offers a negotiated peace (story 919). See `Feudal.offer_peace/5`."
   @spec offer_peace(map(), map(), term(), String.t(), non_neg_integer() | nil) ::
           :ok | {:error, :not_a_player | :no_active_rebellion}
-  defdelegate offer_peace(world, user, counterparty_user_id, outcome, reparations_gold), to: Feudal
+  defdelegate offer_peace(world, user, counterparty_user_id, outcome, reparations_gold),
+    to: Feudal
 
   @doc "`user` accepts `counterparty_user_id`'s own pending peace offer. See `Feudal.accept_peace/3`."
   @spec accept_peace(map(), map(), term()) ::
@@ -620,7 +622,11 @@ defmodule BrokenOaths.Game do
   defdelegate upgrade_bank(world, user), to: Feudal
 
   @doc "`user`'s own live `%{income:, upkeep:, net:}` gold/turn readout (stories 922/923). See `Feudal.gold_per_turn/2`."
-  @spec gold_per_turn(map(), map()) :: %{income: non_neg_integer(), upkeep: non_neg_integer(), net: integer()}
+  @spec gold_per_turn(map(), map()) :: %{
+          income: non_neg_integer(),
+          upkeep: non_neg_integer(),
+          net: integer()
+        }
   defdelegate gold_per_turn(world, user), to: Feudal
 
   # -------------------------------------------------------------------
@@ -658,8 +664,14 @@ defmodule BrokenOaths.Game do
   @doc "Always refused — no cancel-griefing (story 910). See `Feudal.steward_cancel_production_item/5`."
   @spec steward_cancel_production_item(map(), map(), term(), term(), term()) ::
           {:error, :not_constructive}
-  defdelegate steward_cancel_production_item(world, steward_user, owner_user_id, city_id, item_id),
-    to: Feudal
+  defdelegate steward_cancel_production_item(
+                world,
+                steward_user,
+                owner_user_id,
+                city_id,
+                item_id
+              ),
+              to: Feudal
 
   @doc "Always refused — no disbanding (story 910). See `Feudal.steward_disband_unit/4`."
   @spec steward_disband_unit(map(), map(), term(), term()) :: {:error, :not_constructive}
@@ -728,4 +740,8 @@ defmodule BrokenOaths.Game do
 
   @doc "Improvements on tiles the player knows (home region or explored). See `Vision.improvements_visible_to/2`."
   defdelegate improvements_visible_to(world, user), to: Vision
+
+  @doc "The tile of `target_user_id`'s nearest city/unit currently visible to `user`, or `nil`. See `Vision.visible_tile_of/3`."
+  @spec visible_tile_of(map(), map(), term()) :: non_neg_integer() | nil
+  defdelegate visible_tile_of(world, user, target_user_id), to: Vision
 end

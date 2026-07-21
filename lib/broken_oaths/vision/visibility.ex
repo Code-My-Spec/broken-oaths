@@ -340,6 +340,49 @@ defmodule BrokenOaths.Vision.Visibility do
   end
 
   # -------------------------------------------------------------------
+  # Center-on-player (playtest issue 4)
+  # -------------------------------------------------------------------
+
+  @doc """
+  The tile a `target_user_id`'s nearest city or unit currently sits on,
+  restricted to what `user` can see RIGHT NOW (`filter/2`'s own
+  `visible` set — current sight, not `explored` history the way
+  `visible_enemy_cities/2`/`visible_camps/2` above read). A city is
+  checked before a unit; `nil` with nothing of theirs in view this
+  instant, or if either user isn't a real player in this world.
+
+  Unlike `visible_enemy_cities/2` this is never gated on
+  `Game.feudal_enabled?/0` (any two known players can look each other
+  up, allied or not) and unlike `format_unit/3`'s own wire format it
+  needs the RAW `player_id` on both sides — ownership is stripped
+  before a unit ever reaches the client, so this reads `state.units`/
+  `state.cities` directly rather than through either existing
+  fog-filtered surface.
+  """
+  @spec visible_tile_of(map(), map(), term()) :: tile_id() | nil
+  def visible_tile_of(state, user, target_user_id) do
+    with player when not is_nil(player) <- find_player(state, user.id),
+         target when not is_nil(target) <- find_player(state, target_user_id) do
+      visible = state |> filter(player.id) |> Map.fetch!(:visible) |> MapSet.new()
+
+      nearest_visible_tile(state.cities, target.id, visible) ||
+        nearest_visible_tile(state.units, target.id, visible)
+    else
+      nil -> nil
+    end
+  end
+
+  defp nearest_visible_tile(entities, target_player_id, visible) do
+    entities
+    |> Map.values()
+    |> Enum.find(&(&1.player_id == target_player_id and MapSet.member?(visible, &1.tile_id)))
+    |> case do
+      %{tile_id: tile_id} -> tile_id
+      nil -> nil
+    end
+  end
+
+  # -------------------------------------------------------------------
   # Shared, trivial lookup — duplicated rather than reaching back into
   # `WorldServer`, matching the sibling `BrokenOaths.Units.Unit`/
   # `BrokenOaths.Cities.City`'s own "pure, process-unaware, unit-testable

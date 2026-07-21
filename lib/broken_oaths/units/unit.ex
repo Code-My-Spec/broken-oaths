@@ -94,6 +94,7 @@ defmodule BrokenOaths.Units.Unit do
   alias BrokenOaths.Feudal.Vassalization
   alias BrokenOaths.Repo
   alias BrokenOaths.Worlds.Regions
+  alias BrokenOaths.Worlds.Terrain
   alias BrokenOaths.Worlds.World
 
   @type unit_type ::
@@ -379,57 +380,89 @@ defmodule BrokenOaths.Units.Unit do
   end
 
   @doc """
-  Shortest path over tiles `unit_type` may occupy (`passable_tile?/2`),
-  excluding `from`, including `to`. Plan around units that are on the
-  board RIGHT NOW: occupied tiles are impassable as intermediate steps
-  (an equally short free path must be preferred; a knowingly-blocked
-  plan would interrupt on step one). The DESTINATION may be occupied —
-  approaching another player's tile is legal; `BrokenOaths.Simulation.Turn`'s
-  dynamic collision check is what stops the mover adjacent to it.
-  Public (pragdave decomposition, slice 6) — the same "shared, real"
-  reason `persist_order!/2` above is public: `BrokenOaths.Feudal.
-  Stewardship`'s own emergency-defense move calls this directly rather
-  than WorldServer keeping a duplicate copy.
+  LEAST-TOTAL-COST path (story 925 — Dijkstra, upgraded from a plain
+  BFS now that `entry_cost/3` prices tiles unevenly) over tiles
+  `unit_type` may occupy (`passable_tile?/2`), excluding `from`,
+  including `to`. Plan around units that are on the board RIGHT NOW:
+  occupied tiles are impassable as intermediate steps (an equally cheap
+  free path must be preferred; a knowingly-blocked plan would interrupt
+  on step one). The DESTINATION may be occupied — approaching another
+  player's tile is legal; `BrokenOaths.Simulation.Turn`'s dynamic
+  collision check is what stops the mover adjacent to it. A unit now
+  routes ALONG roads and open ground and around difficult terrain
+  whenever a cheaper route exists, rather than beelining through a
+  forest a road runs around. Ties (equal total cost via more than one
+  route) resolve deterministically, lowest tile id first, via the
+  `{cost, tile_id}` frontier key below — same "reproducible regardless
+  of map order" contract the old BFS held. Public (pragdave
+  decomposition, slice 6) — the same "shared, real" reason
+  `persist_order!/2` above is public: `BrokenOaths.Feudal.Stewardship`'s
+  own emergency-defense move calls this directly rather than
+  WorldServer keeping a duplicate copy.
   """
   @spec bfs_path(map(), tile_id(), tile_id(), unit_type()) :: [tile_id()] | nil
   def bfs_path(state, from, to, unit_type) do
     occupied =
       for {_id, u} <- state.units, u.tile_id != from, into: MapSet.new(), do: u.tile_id
 
-    bfs_loop(
+    roads = Map.get(state, :roads, %{})
+
+    dijkstra(
       state.world,
+      roads,
       occupied,
-      :queue.from_list([{from, []}]),
-      MapSet.new([from]),
+      :gb_sets.singleton({0, from}),
+      %{from => 0},
+      %{},
       to,
       unit_type
     )
   end
 
-  defp bfs_loop(world, occupied, queue, visited, to, unit_type) do
-    case :queue.out(queue) do
-      {:empty, _} ->
-        nil
+  defp dijkstra(world, roads, occupied, frontier, dist, prev, to, unit_type) do
+    if :gb_sets.is_empty(frontier) do
+      nil
+    else
+      {{cost, tile}, frontier} = :gb_sets.take_smallest(frontier)
 
-      {{:value, {^to, path}}, _rest} ->
-        Enum.reverse(path)
+      cond do
+        tile == to ->
+          reconstruct_path(prev, to, [])
 
-      {{:value, {tile, path}}, rest} ->
-        neighbors =
-          world
-          |> Regions.adjacent_tiles(tile)
-          |> Enum.filter(
-            &(passable_tile?(unit_type, Regions.tile_class(world, &1)) and
-                not MapSet.member?(visited, &1) and
-                (&1 == to or not MapSet.member?(occupied, &1)))
-          )
+        # A stale duplicate: a cheaper route to `tile` was already found
+        # and popped (and expanded) earlier — nothing new to explore.
+        cost > Map.get(dist, tile) ->
+          dijkstra(world, roads, occupied, frontier, dist, prev, to, unit_type)
 
-        {queue, visited} =
-          Enum.reduce(neighbors, {rest, visited}, fn n, {q, v} ->
-            {:queue.in({n, [n | path]}, q), MapSet.put(v, n)}
-          end)
+        true ->
+          neighbors =
+            world
+            |> Regions.adjacent_tiles(tile)
+            |> Enum.filter(
+              &(passable_tile?(unit_type, Regions.tile_class(world, &1)) and
+                  (&1 == to or not MapSet.member?(occupied, &1)))
+            )
 
-        bfs_loop(world, occupied, queue, visited, to, unit_type)
+          {frontier, dist, prev} =
+            Enum.reduce(neighbors, {frontier, dist, prev}, fn n, {f, d, p} ->
+              new_cost = cost + entry_cost(world, roads, n)
+
+              if new_cost < Map.get(d, n, :infinity) do
+                {:gb_sets.add({new_cost, n}, f), Map.put(d, n, new_cost), Map.put(p, n, tile)}
+              else
+                {f, d, p}
+              end
+            end)
+
+          dijkstra(world, roads, occupied, frontier, dist, prev, to, unit_type)
+      end
+    end
+  end
+
+  defp reconstruct_path(prev, tile, acc) do
+    case Map.fetch(prev, tile) do
+      {:ok, parent} -> reconstruct_path(prev, parent, [tile | acc])
+      :error -> acc
     end
   end
 
@@ -446,6 +479,27 @@ defmodule BrokenOaths.Units.Unit do
   @spec passable_tile?(unit_type(), Regions.tile_class()) :: boolean()
   def passable_tile?(:galley, tile_class), do: tile_class == :coastal_water
   def passable_tile?(_land_unit, tile_class), do: tile_class == :land
+
+  @doc """
+  Movement points to enter `tile_id` — story 925's single place cost is
+  decided, read by both `bfs_path/4` below (pathfinding) and
+  `BrokenOaths.Simulation.Turn.Movement.attempt_step/7` (the actual
+  per-round step, `roads` threaded down from `state.roads`) so the two
+  can never quietly disagree on what a tile costs. A COMPLETED Road
+  (`status: :complete` — a `:building` road grants nothing yet) always
+  costs 1 regardless of terrain, Civ 6's road-negates-difficult-terrain
+  rule; anything else falls through to `Worlds.Terrain.movement_cost/1`
+  (open terrain 1, DIFFICULT terrain — hills/woods/rainforest/marsh —
+  2).
+  """
+  @spec entry_cost(World.t(), map(), tile_id()) :: 1 | 2
+  def entry_cost(world, roads, tile_id) do
+    if match?(%{status: :complete}, Map.get(roads, tile_id)) do
+      1
+    else
+      world |> Regions.terrain(tile_id) |> Terrain.movement_cost()
+    end
+  end
 
   # -------------------------------------------------------------------
   # Fortify (story 920) — mirrors `Combat.Resolver.shoot/4`'s own shape

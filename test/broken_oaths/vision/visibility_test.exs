@@ -155,6 +155,96 @@ defmodule BrokenOaths.Vision.VisibilityTest do
     end
   end
 
+  describe "visible_tile_of/3 (playtest issue 4 — center on player)" do
+    defp state_with(units, cities, players) do
+      %{
+        world: world(),
+        turn: 1,
+        units: units,
+        cities: cities,
+        orders: %{},
+        players: players,
+        explored: %{}
+      }
+    end
+
+    @players %{
+      p1: %{id: :p1, user_id: 1, region_id: 0, gold: 50},
+      p2: %{id: :p2, user_id: 2, region_id: 1, gold: 50}
+    }
+
+    test "returns the target's city tile once it's in the viewer's current sight" do
+      w = world()
+      [neighbor | _] = Regions.adjacent_tiles(w, 0)
+
+      units = %{
+        1 => %{id: 1, player_id: :p1, type: :lord, tile_id: 0}
+      }
+
+      cities = %{
+        10 => %{id: 10, player_id: :p2, tile_id: neighbor, name: "Rival City"}
+      }
+
+      state = state_with(units, cities, @players)
+
+      assert Visibility.visible_tile_of(state, %{id: 1}, 2) == neighbor
+    end
+
+    test "falls back to the target's unit when no city of theirs is in sight" do
+      w = world()
+      [neighbor | _] = Regions.adjacent_tiles(w, 0)
+
+      units = %{
+        1 => %{id: 1, player_id: :p1, type: :lord, tile_id: 0},
+        2 => %{id: 2, player_id: :p2, type: :lord, tile_id: neighbor}
+      }
+
+      state = state_with(units, %{}, @players)
+
+      assert Visibility.visible_tile_of(state, %{id: 1}, 2) == neighbor
+    end
+
+    test "prefers a visible city over a visible unit of the same target" do
+      w = world()
+      [city_tile, unit_tile | _] = Regions.adjacent_tiles(w, 0)
+
+      units = %{
+        1 => %{id: 1, player_id: :p1, type: :lord, tile_id: 0},
+        2 => %{id: 2, player_id: :p2, type: :lord, tile_id: unit_tile}
+      }
+
+      cities = %{
+        10 => %{id: 10, player_id: :p2, tile_id: city_tile, name: "Rival City"}
+      }
+
+      state = state_with(units, cities, @players)
+
+      assert Visibility.visible_tile_of(state, %{id: 1}, 2) == city_tile
+    end
+
+    test "returns nil with nothing of the target's currently in sight" do
+      w = world()
+      lord_ball = ring(w, 0, 3)
+      hidden_tile = Enum.find(0..(Globe.tile_count(@frequency) - 1), &(&1 not in lord_ball))
+
+      units = %{
+        1 => %{id: 1, player_id: :p1, type: :lord, tile_id: 0},
+        2 => %{id: 2, player_id: :p2, type: :lord, tile_id: hidden_tile}
+      }
+
+      state = state_with(units, %{}, @players)
+
+      assert Visibility.visible_tile_of(state, %{id: 1}, 2) == nil
+    end
+
+    test "returns nil for an unknown viewer or target user_id" do
+      state = state_with(%{}, %{}, @players)
+
+      assert Visibility.visible_tile_of(state, %{id: 999}, 2) == nil
+      assert Visibility.visible_tile_of(state, %{id: 1}, 999) == nil
+    end
+  end
+
   # Independent BFS reference (mirrors the spex fixture technique) used to
   # cross-check Visibility's internal ball computation.
   defp ring(world, start, depth) do

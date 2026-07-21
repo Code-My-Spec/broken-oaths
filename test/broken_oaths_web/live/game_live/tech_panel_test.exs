@@ -115,4 +115,61 @@ defmodule BrokenOathsWeb.GameLive.TechPanelTest do
       refute has_element?(play_live, "[data-test='tech-prereqs-pottery']")
     end
   end
+
+  describe "the Tech button's own progress fill (playtest issue 2)" do
+    alias BrokenOathsWeb.GameLive.TechPanel
+
+    @no_research %{
+      completed_techs: [],
+      current_research: nil,
+      banked_science: %{},
+      science_per_turn: 0,
+      progress: nil
+    }
+
+    defp render_panel(overrides) do
+      assigns =
+        Map.merge(
+          %{
+            id: "tech-panel",
+            open?: false,
+            player_research: @no_research,
+            bronze_working_pending?: false
+          },
+          overrides
+        )
+
+      render_component(TechPanel, assigns)
+    end
+
+    test "renders a zero-width fill with nothing currently researching" do
+      html = render_panel(%{})
+      assert html =~ ~s(data-test="tech-button-fill")
+      assert html =~ "width: 0%"
+    end
+
+    test "fills proportionally to banked/cost of the current research" do
+      player_research = %{
+        @no_research
+        | current_research: :pottery,
+          banked_science: %{pottery: 40},
+          progress: %{tech: :pottery, banked: 40, cost: 80}
+      }
+
+      html = render_panel(%{player_research: player_research})
+      assert html =~ "width: 50%"
+    end
+
+    test "caps the fill at 100% for an over-banked tech" do
+      player_research = %{
+        @no_research
+        | current_research: :pottery,
+          banked_science: %{pottery: 200},
+          progress: %{tech: :pottery, banked: 200, cost: 80}
+      }
+
+      html = render_panel(%{player_research: player_research})
+      assert html =~ "width: 100%"
+    end
+  end
 end

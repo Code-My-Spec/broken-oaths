@@ -76,7 +76,11 @@ defmodule BrokenOathsWeb.GameLive.ProgressPanel do
       |> assign(:bronze_cost, bronze_cost)
       |> assign(
         :turns_to_bronze,
-        turns_to_bronze(banked_bronze, bronze_cost, assigns.player_research.science_per_turn)
+        turns_remaining(banked_bronze, bronze_cost, assigns.player_research.science_per_turn)
+      )
+      |> assign(
+        :current_research_line,
+        current_research_line(assigns.player_research)
       )
       |> assign(:first_city?, assigns.cities_founded > 0)
       |> assign(:first_kill?, assigns.barbarians_killed > 0)
@@ -96,6 +100,18 @@ defmodule BrokenOathsWeb.GameLive.ProgressPanel do
         <div class="text-sm flex justify-between">
           <span class="opacity-70">Science/turn</span>
           <span data-test="progress-science-per-turn">{@player_research.science_per_turn}</span>
+        </div>
+
+        <%!-- Playtest issue 3 — current research + progress, without
+             opening the tech menu: whatever `current_research` is right
+             now (any of the eleven techs, not just Bronze Working —
+             `progress-bronze-working`/`progress-turns-to-bronze` below
+             stay put as their own always-visible milestone rows). --%>
+        <div class="text-sm flex justify-between gap-2">
+          <span class="opacity-70">Researching</span>
+          <span data-test="progress-current-research" class="text-right">
+            {@current_research_line}
+          </span>
         </div>
 
         <div class="text-sm flex justify-between">
@@ -189,14 +205,29 @@ defmodule BrokenOathsWeb.GameLive.ProgressPanel do
 
   # A forward projection at the CURRENT science/turn rate — `nil` (no
   # meaningful answer) with zero science income. `remaining` floors at
-  # 0 so a completed (or fully banked) Bronze Working reads 0 turns,
-  # never a stale positive number.
-  defp turns_to_bronze(_banked, _cost, 0), do: nil
+  # 0 so a completed (or fully banked) tech reads 0 turns, never a
+  # stale positive number. Shared by the Bronze Working row above and
+  # `current_research_line/1` below — both are the same "banked, cost,
+  # rate -> turns" math, just for a different tech.
+  defp turns_remaining(_banked, _cost, 0), do: nil
 
-  defp turns_to_bronze(banked, cost, science_per_turn) do
+  defp turns_remaining(banked, cost, science_per_turn) do
     remaining = max(cost - banked, 0)
     ceil_div(remaining, science_per_turn)
   end
 
   defp ceil_div(dividend, divisor), do: div(dividend + divisor - 1, divisor)
+
+  # Playtest issue 3 — "Researching: nothing" with no `current_research`
+  # selected, else "Researching: <Tech> — <banked>/<cost> (<n> turns)"
+  # (`turns_remaining/3`'s own "—" fallback with no science income yet).
+  defp current_research_line(%{current_research: nil}), do: "Researching: nothing"
+
+  defp current_research_line(%{current_research: tech} = player_research) do
+    cost = Research.cost(tech)
+    banked = Research.banked(player_research, tech)
+    turns = turns_remaining(banked, cost, player_research.science_per_turn)
+
+    "Researching: #{Research.tech_label(tech)} — #{banked}/#{cost} (#{turns || "—"} turns)"
+  end
 end

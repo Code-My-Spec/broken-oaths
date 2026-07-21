@@ -42,6 +42,25 @@ defmodule BrokenOaths.Worlds.Terrain do
   def water?(%__MODULE__{base: base}), do: base in [:ocean, :coast]
 
   @doc """
+  Movement points to ENTER a tile of this terrain (story 925, Civ 6's
+  road/terrain movement model): DIFFICULT terrain — `:hills` relief, or
+  a `:woods`/`:rainforest`/`:marsh` feature — costs 2; everything else
+  costs 1. Mountains and water are never asked: they're already
+  impassable at the `Regions.tile_class/2` level, one layer up from
+  terrain — this only prices tiles a unit could otherwise step onto. A
+  completed Road overrides this back down to 1 regardless of terrain —
+  see `BrokenOaths.Units.Unit.entry_cost/3`, the caller that layers the
+  road check on top of this.
+  """
+  @spec movement_cost(t()) :: 1 | 2
+  def movement_cost(%__MODULE__{relief: :hills}), do: 2
+
+  def movement_cost(%__MODULE__{feature: feature}) when feature in [:woods, :rainforest, :marsh],
+    do: 2
+
+  def movement_cost(%__MODULE__{}), do: 1
+
+  @doc """
   Which billboard decor sprite (if any) this terrain earns on a canvas
   globe (ADR game-art-pipeline). Mountains dominate features; hills
   yield to tree cover. Relief is decor's job, never the texture's.

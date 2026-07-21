@@ -95,6 +95,33 @@ defmodule BrokenOathsWeb.GameLive.ProgressPanelTest do
       assert span(html, "progress-turns-to-bronze") == "—"
     end
 
+    test "shows \"nothing\" with no current research selected" do
+      html = render_panel(%{player_research: @no_research})
+      assert span(html, "progress-current-research") == "Researching: nothing"
+    end
+
+    test "shows the current research, banked/cost, and turns remaining" do
+      player_research = %{
+        @no_research
+        | current_research: :pottery,
+          science_per_turn: 8,
+          banked_science: %{pottery: 16}
+      }
+
+      html = render_panel(%{player_research: player_research})
+
+      # Pottery costs 80 (QA issue d95ea179 rebalance); ceil((80-16)/8) == 8.
+      assert span(html, "progress-current-research") ==
+               "Researching: Pottery — 16/80 (8 turns)"
+    end
+
+    test "shows a placeholder turn count with zero science income" do
+      player_research = %{@no_research | current_research: :mining}
+      html = render_panel(%{player_research: player_research})
+
+      assert span(html, "progress-current-research") == "Researching: Mining — 0/110 (— turns)"
+    end
+
     test "reads Bronze Age once bronze_working is completed" do
       player_research = %{
         @no_research

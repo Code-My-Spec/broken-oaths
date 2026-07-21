@@ -201,4 +201,79 @@ defmodule BrokenOaths.Units.UnitTest do
       assert Unit.bfs_path(tick_state(%{99 => other_galley}), 32, 33, :galley) == [33]
     end
   end
+
+  # -------------------------------------------------------------------
+  # entry_cost/3 + weighted bfs_path/4 (story 925 — Civ-faithful
+  # road/terrain movement). Same fixture world as above (seed 424_242,
+  # frequency 8). Tile relationships below are verified against
+  # `Regions`/`Terrain` directly, never hardcoded blind:
+  #   * tile 10 is DIFFICULT (snow hills, `Terrain.movement_cost/1` 2).
+  #   * tile 1's own neighbors include tile 9 (OPEN — snow flat, cost 1)
+  #     and tile 10; tile 9's own neighbors include tile 17 (OPEN, cost
+  #     1); tile 10's own neighbors ALSO include tile 17 — but tile 17
+  #     is NOT itself a neighbor of tile 1, so 1 -> 17 has exactly two
+  #     2-hop routes: via 9 (total cost 1 + 1 = 2) or via 10 (total cost
+  #     2 + 1 = 3).
+  #   * tile 1's own neighbors also include tile 2 (also DIFFICULT,
+  #     cost 2); both 2 and 10's own neighbors include tile 11 (OPEN,
+  #     cost 1), and 11 is likewise not itself a neighbor of tile 1, so
+  #     1 -> 11 has two more 2-hop routes, via 2 or via 10, tied at cost
+  #     2 + 1 = 3 with neither Road.
+  # -------------------------------------------------------------------
+
+  describe "entry_cost/3" do
+    test "open terrain costs 1" do
+      world = fixture_world()
+      assert Unit.entry_cost(world, %{}, 9) == 1
+    end
+
+    test "DIFFICULT terrain (hills) costs 2 with no road" do
+      world = fixture_world()
+      assert Unit.entry_cost(world, %{}, 10) == 2
+    end
+
+    test "a completed Road overrides DIFFICULT terrain back down to 1" do
+      world = fixture_world()
+      roads = %{10 => %{tile_id: 10, kind: :road, progress: 4, status: :complete}}
+      assert Unit.entry_cost(world, roads, 10) == 1
+    end
+
+    test "a road still :building (not yet complete) grants nothing" do
+      world = fixture_world()
+      roads = %{10 => %{tile_id: 10, kind: :road, progress: 1, status: :building}}
+      assert Unit.entry_cost(world, roads, 10) == 2
+    end
+  end
+
+  describe "bfs_path/4 — weighted (story 925)" do
+    test "routes along cheap terrain over a parallel DIFFICULT-terrain route, and the path's total cost is the cheaper one" do
+      assert Unit.bfs_path(tick_state(), 1, 17, :warrior) == [9, 17]
+
+      world = fixture_world()
+
+      total_cost =
+        [9, 17]
+        |> Enum.reduce(0, fn tile, acc -> acc + Unit.entry_cost(world, %{}, tile) end)
+
+      assert total_cost == 2
+    end
+
+    test "a completed Road on the DIFFICULT leg makes it the cheaper route, flipping the choice" do
+      # Unroaded, 1 -> 11 ties at cost 3 either way (via tile 2 or via
+      # tile 10, both DIFFICULT). A completed Road on 10 drops that leg
+      # to 1, making 1 -> 10 -> 11 (cost 1 + 1 = 2) strictly cheaper
+      # than 1 -> 2 -> 11 (cost 2 + 1 = 3) — the reported "units don't
+      # route along roads" bug, fixed at the pathfinding level.
+      state =
+        Map.put(tick_state(), :roads, %{
+          10 => %{tile_id: 10, kind: :road, progress: 4, status: :complete}
+        })
+
+      assert Unit.bfs_path(state, 1, 11, :warrior) == [10, 11]
+    end
+
+    test "ties (no road, both routes DIFFICULT) resolve deterministically by lowest tile id" do
+      assert Unit.bfs_path(tick_state(), 1, 11, :warrior) == [2, 11]
+    end
+  end
 end

@@ -235,6 +235,26 @@ defmodule BrokenOaths.Technology.Research do
   def unlock_description(tech), do: fetch_tech!(tech).unlock
 
   @doc """
+  A tech's display label, e.g. `"Bronze Working"` for `:bronze_working`
+  — the single source of truth `GameLive.TechPanel` reads (moved home
+  from that module's own private copy) and, per the playtest
+  "researched" toast (`GameLive.Play`'s `{:tech_completed, ...}`
+  handler), what a completion notification names too.
+  """
+  @spec tech_label(tech()) :: String.t()
+  def tech_label(:pottery), do: "Pottery"
+  def tech_label(:animal_husbandry), do: "Animal Husbandry"
+  def tech_label(:mining), do: "Mining"
+  def tech_label(:sailing), do: "Sailing"
+  def tech_label(:astrology), do: "Astrology"
+  def tech_label(:writing), do: "Writing"
+  def tech_label(:irrigation), do: "Irrigation"
+  def tech_label(:archery), do: "Archery"
+  def tech_label(:masonry), do: "Masonry"
+  def tech_label(:the_wheel), do: "The Wheel"
+  def tech_label(:bronze_working), do: "Bronze Working"
+
+  @doc """
   `tech`'s prerequisite techs — empty for every tier-1 tech, exactly
   one entry for every tier-2 tech in this tree (`set_research/2`
   requires ALL of them to be completed, but no tech here currently has

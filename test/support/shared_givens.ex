@@ -735,6 +735,18 @@ defmodule BrokenOathsSpex.SharedGivens do
   ground) is what's missing. Returns `%{play_live_a:, play_live_b:}`,
   both fresh, freshly re-mounted post-acceptance so their own `alliances`
   assign is current.
+
+  `clear_all_camps/1` runs right before the scouting march below — a
+  no-op for a caller whose own `given_` hasn't founded any city yet
+  (nothing to clear), but load-bearing for one that HAS (like
+  `StewardUiTest`'s own ally-production scenario, which founds `city_b`
+  before calling this): story 925's weighted `Unit.bfs_path/4` can
+  route the march through open ground the OLD uniform-cost BFS never
+  touched, and this scouting march is exactly the "dozens of turns
+  near a camp ring" shape `clear_all_camps/1`'s own moduledoc already
+  warns about — without it, an independently-roaming barbarian can (and
+  did) kill `lord_a` mid-march for a reason that has nothing to do with
+  alliance mechanics.
   """
   def establish_accepted_alliance(world, conn_a, user_a, conn_b, user_b) do
     for conn <- [conn_a, conn_b] do
@@ -749,6 +761,8 @@ defmodule BrokenOathsSpex.SharedGivens do
 
     [lord_a | _] = for u <- Fixtures.player_units(world, user_a), u.type == :lord, do: u
     [unit_b | _] = Fixtures.player_units(world, user_b)
+
+    clear_all_camps(world)
 
     render_hook(play_live_a, "queue_move", %{
       "unit_id" => to_string(lord_a.id),

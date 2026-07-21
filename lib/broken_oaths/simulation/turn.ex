@@ -258,6 +258,11 @@ defmodule BrokenOaths.Simulation.Turn do
           {:turn_advanced, non_neg_integer()}
           | {:unit_spawned, Production.spawn_event()}
           | {:lineage_continued, term(), String.t()}
+          # Playtest issue 6 — the "build complete" toast: one per queue
+          # item (unit or building) that finished THIS tick. See
+          # `Production.resolve_completions/1`'s own doc for why this
+          # rides a separate list from `{:unit_spawned, _}` above.
+          | {:city_completed, term(), String.t(), Production.buildable()}
 
   @doc """
   Advance the world by one turn: reset movement, resolve every pending
@@ -269,7 +274,12 @@ defmodule BrokenOaths.Simulation.Turn do
   `{:turn_advanced, new_turn}`, plus one `{:unit_spawned, spawn_event}`
   per completed production item that found a landing tile this tick —
   `new_state.units` does NOT yet contain those units, since only the
-  caller (`WorldServer`) can allocate a real, persisted unit id.
+  caller (`WorldServer`) can allocate a real, persisted unit id — and
+  one `{:city_completed, user_id, city_name, type}` per queue item
+  that actually finished this tick, unit (needs a landing tile, same
+  gate `{:unit_spawned, _}` above already sits behind) or Granary
+  (needs none — see `Production.resolve_completions/1`'s own doc)
+  alike (playtest issue 6's "build complete" toast).
   """
   @spec tick(state()) :: {state(), [event()]}
   def tick(state) do
@@ -288,7 +298,9 @@ defmodule BrokenOaths.Simulation.Turn do
       |> Improvement.advance()
       |> Production.accrue_cities()
 
-    {state, spawn_events, occupied, settled_this_tick} = Production.resolve_completions(state)
+    {state, spawn_events, occupied, settled_this_tick, city_completions} =
+      Production.resolve_completions(state)
+
     {state, camp_events, occupied} = Camps.resolve_spawns(state, occupied)
     {state, attacked_cities} = BarbarianPhase.resolve(state, occupied, new_turn)
     {state, heir_events} = HeirSuccession.resolve(state, new_turn)
@@ -308,7 +320,10 @@ defmodule BrokenOaths.Simulation.Turn do
       [
         {:turn_advanced, new_turn}
         | Enum.map(spawn_events ++ camp_events, &{:unit_spawned, &1})
-      ] ++ heir_events ++ tech_events
+      ] ++
+        heir_events ++
+        tech_events ++
+        Enum.map(city_completions, &{:city_completed, &1.user_id, &1.city_name, &1.type})
 
     {new_state, events}
   end

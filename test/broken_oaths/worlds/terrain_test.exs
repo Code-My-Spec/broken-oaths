@@ -58,6 +58,30 @@ defmodule BrokenOaths.Worlds.TerrainTest do
     end
   end
 
+  describe "movement_cost/1" do
+    test "open (flat, no difficult feature) terrain costs 1" do
+      assert Terrain.movement_cost(%Terrain{base: :grassland}) == 1
+      assert Terrain.movement_cost(%Terrain{base: :plains}) == 1
+      assert Terrain.movement_cost(%Terrain{base: :desert, feature: :ice}) == 1
+    end
+
+    test "hills relief costs 2, regardless of base or feature" do
+      assert Terrain.movement_cost(%Terrain{base: :plains, relief: :hills}) == 2
+      assert Terrain.movement_cost(%Terrain{base: :snow, relief: :hills, feature: nil}) == 2
+    end
+
+    test "woods/rainforest/marsh features cost 2 even on flat relief" do
+      assert Terrain.movement_cost(%Terrain{base: :grassland, feature: :woods}) == 2
+      assert Terrain.movement_cost(%Terrain{base: :plains, feature: :rainforest}) == 2
+      assert Terrain.movement_cost(%Terrain{base: :grassland, feature: :marsh}) == 2
+    end
+
+    test "hills stacked with a difficult feature still costs 2, not 4" do
+      assert Terrain.movement_cost(%Terrain{base: :grassland, relief: :hills, feature: :woods}) ==
+               2
+    end
+  end
+
   test "legend has distinct labels and valid colors" do
     legend = Terrain.legend()
     labels = Enum.map(legend, fn {_c, l} -> l end)
