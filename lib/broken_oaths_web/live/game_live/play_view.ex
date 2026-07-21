@@ -405,8 +405,14 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
 
   defp chop_offered(_feature, _cities, _unit, _player_research), do: nil
 
+  # `cities` is `Game.player_cities/2` — the viewer's OWN cities in wire
+  # format, which carries no `player_id` (ownership is implied), so the
+  # worker's tile is inside the player's own borders iff it falls in one
+  # of those cities' territory. (The old `&1.player_id` read crashed the
+  # LiveView with a KeyError on every worker click.) `Improvement.chop/3`
+  # re-checks ownership server-side, so this only decides the button.
   defp owns_tile?(cities, unit),
-    do: Enum.any?(cities, &(&1.player_id == unit.player_id and unit.tile_id in &1.territory))
+    do: Enum.any?(cities, &(unit.tile_id in &1.territory))
 
   defp chop_research_enabled?(_feature, nil), do: false
   defp chop_research_enabled?(:woods, pr), do: Research.chop_woods_enabled?(pr)
