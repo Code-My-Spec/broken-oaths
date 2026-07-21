@@ -38,6 +38,10 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
   # own transient error toast, same status `improvement_error` above
   # already has.
   attr :chop_error, :any, required: true
+  # Story 929 "Build road to a destination" — the build_road_to
+  # command's own transient error toast, same status `chop_error`
+  # above already has.
+  attr :road_error, :any, required: true
   attr :steward_error, :any, required: true
   attr :player_research, :any, required: true
   attr :cities, :list, required: true
@@ -70,6 +74,13 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
   # Story 933 (the Pyramids/Hanging Gardens wonders) — see
   # `GameLive.CityPanel`'s own moduledoc.
   attr :wonders_claimed, :map, required: true
+  # Story 929 — The Wheel gate for `UnitPanel`'s own "Build Road To"
+  # button, and whether IT (or some OTHER worker) is currently armed
+  # (`Play`'s own `road_mode_unit_id` assign) — both computed by `Play`,
+  # only rendered here, the same status `current_dig`/`copper_access?`
+  # above already have.
+  attr :road_enabled?, :boolean, required: true
+  attr :road_mode_unit_id, :any, required: true
 
   def overlays(assigns) do
     ~H"""
@@ -168,6 +179,12 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
                pattern as `improvement-error` above. --%>
       <div :if={@chop_error} class="alert alert-error w-auto shadow-lg" data-test="chop-error">
         <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@chop_error}
+      </div>
+
+      <%!-- Story 929 "Build road to a destination" — same toast pattern
+               as `chop-error` above. --%>
+      <div :if={@road_error} class="alert alert-error w-auto shadow-lg" data-test="road-error">
+        <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@road_error}
       </div>
 
       <%!-- QA issue bd93cc0a: production-stewardship + emergency-
@@ -297,6 +314,8 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
         choppable_feature={@choppable_feature}
         attackable_cities={@attackable_cities}
         shoot_targets={@shoot_targets}
+        road_enabled?={@road_enabled?}
+        road_mode_unit_id={@road_mode_unit_id}
       />
 
       <.live_component

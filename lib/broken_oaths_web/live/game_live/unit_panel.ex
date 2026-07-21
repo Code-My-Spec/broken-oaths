@@ -54,6 +54,15 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
       access this component doesn't have" reason). Each renders as its
       own discoverable "Shoot <label>" button, dispatching `"shoot"`
       with whichever `target_*_id` key matches `kind`.
+    * `:road_enabled?` - story 929: whether the OWNER has researched
+      The Wheel — `Play` computes this too (`Research.road_enabled?/1`,
+      same "needs world/research access this component doesn't have"
+      reason), gating the "Build Road To" button for a selected worker.
+    * `:road_mode_unit_id` - story 929: whichever worker (if any) is
+      currently ARMED for road-targeting (`Play`'s own transient UI
+      flag, never persisted) — lets this unit's own button read "Build
+      Road To…" vs "Cancel Road Target" depending on whether IT is the
+      armed one.
 
   Per-unit-TYPE action gating (which of the buttons above even CAN
   appear for this unit) is delegated to `BrokenOaths.Units.Actions.
@@ -82,6 +91,8 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
       |> assign_new(:choppable_feature, fn -> nil end)
       |> assign_new(:attackable_cities, fn -> [] end)
       |> assign_new(:shoot_targets, fn -> [] end)
+      |> assign_new(:road_enabled?, fn -> false end)
+      |> assign_new(:road_mode_unit_id, fn -> nil end)
       |> assign_new(:unit_id, fn -> Map.get(assigns.unit, :id) end)
       |> assign(:actions, Actions.available(assigns.unit))
       # Story 920 — same `Map.get/3` default the `:charges` readout
@@ -201,6 +212,29 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
             unit_id={@unit_id}
           />
         </div>
+
+        <%!-- Story 929 "Build road to a destination" — arms/disarms
+             this worker's road-target mode (`Play`'s own
+             "arm_road_mode" handler); the NEXT board click, while
+             armed, issues the order. Gated on The Wheel the same way
+             the Build buttons above are gated on terrain — offering
+             the button before the tech exists would just bounce off
+             `:tech_locked`. Re-clicking while THIS worker is the armed
+             one disarms it instead — the discoverable "Cancel"
+             gesture, no separate button needed. --%>
+        <button
+          :if={:build_improvement in @actions and @road_enabled?}
+          type="button"
+          data-test="build-road-to"
+          phx-click="arm_road_mode"
+          phx-value-unit_id={@unit_id}
+          class={[
+            "btn btn-sm btn-outline",
+            @road_mode_unit_id == @unit_id && "btn-active"
+          ]}
+        >
+          {if @road_mode_unit_id == @unit_id, do: "Cancel Road Target", else: "Build Road To…"}
+        </button>
 
         <%!-- Story 927 "Workers chop woods and rainforest" — the
              discoverable "Chop" affordance: `Play` precomputes
@@ -398,6 +432,20 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
     ~H"""
     <p data-test="unit-order" class="text-sm text-base-content/60">
       No orders queued
+    </p>
+    """
+  end
+
+  # Story 929 — a `:road_to` order never carries `:interrupted` (a
+  # blocked step cancels the whole order outright rather than pausing
+  # it — see `Simulation.Turn.RoadBuilder`'s own moduledoc), so one
+  # clause covers it regardless of `status`. Matched BEFORE the
+  # `:interrupted`/catch-all clauses below so a `:move` order (never
+  # `kind: :road_to`) still falls through to those unchanged.
+  defp order_summary(%{order: %{kind: :road_to}} = assigns) do
+    ~H"""
+    <p data-test="unit-order" class="text-sm">
+      Building road to tile {@order.target_tile}
     </p>
     """
   end

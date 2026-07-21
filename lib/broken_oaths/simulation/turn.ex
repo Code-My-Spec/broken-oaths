@@ -37,9 +37,10 @@ defmodule BrokenOaths.Simulation.Turn do
           charges: non_neg_integer()
         }},
         orders: %{unit_id => %{
-          kind: :move,
+          kind: :move | :road_to,
           path: [tile_id],
-          status: :pending | :interrupted
+          status: :pending | :interrupted,
+          hp_at_issue: non_neg_integer() | nil
         }},
         players: %{player_id => %{
           id: player_id,
@@ -211,6 +212,16 @@ defmodule BrokenOaths.Simulation.Turn do
     3d. city regeneration (story 895) -- `BrokenOaths.Combat.CityDefense.
        regen_cities/2`, skipping every city phase 3c's own barbarian-AI
        assault struck THIS tick.
+    3e. road-to walk-or-build (story 929) -- `BrokenOaths.Simulation.
+       Turn.RoadBuilder.resolve/1` (cross-cutting: walks `Units.Unit`'s
+       own worker and builds through `Cities.Improvement`, so it has
+       no single owning domain model, the same status 3c/7 below
+       already have). NEVER economy-gated -- a `:road_to` order's own
+       walk should feel as responsive as an ordinary move order, even
+       though the Road improvement it starts only actually progresses
+       on an economy tick (phase 1 above). Runs after 3c so this same
+       tick's own barbarian damage (if any) already counts toward its
+       own "attacked mid-build cancels" check.
     4. [ECONOMY] food accrual -- `BrokenOaths.Cities.Yields.accrue_food_all/1`.
     5. [ECONOMY] growth -- `BrokenOaths.Cities.Yields.grow_cities/2`, at
        most once per city per tick, and never for a city that already
@@ -241,6 +252,7 @@ defmodule BrokenOaths.Simulation.Turn do
   alias BrokenOaths.Simulation.Turn.BarbarianPhase
   alias BrokenOaths.Simulation.Turn.HeirSuccession
   alias BrokenOaths.Simulation.Turn.Movement
+  alias BrokenOaths.Simulation.Turn.RoadBuilder
   alias BrokenOaths.Units.Unit
   alias BrokenOaths.Vision.Visibility
   alias BrokenOaths.Cities.Yields
@@ -300,6 +312,14 @@ defmodule BrokenOaths.Simulation.Turn do
           # `Production.resolve_completions/1`'s own doc for why this
           # rides a separate list from `{:unit_spawned, _}` above.
           | {:city_completed, term(), String.t(), Production.buildable()}
+          # Story 929 — a `:road_to` order's own worker arrived at a
+          # gap tile with no road row there yet at all; see
+          # `RoadBuilder`'s own "Pure core, impure shell" moduledoc
+          # section for why this can't just insert the row itself.
+          # Purely internal plumbing: `WorldServer.run_tick/1`'s own
+          # `materialize_road_starts/2` consumes and drops every one of
+          # these before `events` is ever broadcast to a client.
+          | RoadBuilder.event()
 
   @doc """
   Advance the world by one turn: reset movement, resolve every pending
@@ -349,6 +369,17 @@ defmodule BrokenOaths.Simulation.Turn do
     {state, heir_events} = HeirSuccession.resolve(state, new_turn)
     {state, tech_events} = if economy?, do: Research.accrue_science(state), else: {state, []}
 
+    # Story 929 — every `:road_to` order's own one-segment-per-tick
+    # walk-or-build step (never economy-gated, see `RoadBuilder`'s own
+    # moduledoc), placed AFTER `BarbarianPhase` so this same tick's own
+    # barbarian damage already shows in `state.units` for its own
+    # "attacked mid-build cancels" check. `road_events` (a brand new
+    # road's own `{:road_start_needed, ...}`, when one is needed) rides
+    # the SAME "pure tick emits, the imperative shell materializes"
+    # split `spawn_events`/`camp_events` above already use — see
+    # `RoadBuilder`'s own moduledoc, "Pure core, impure shell".
+    {state, road_events} = RoadBuilder.resolve(state)
+
     new_state =
       state
       |> Improvement.clear_orphaned_builders()
@@ -365,6 +396,7 @@ defmodule BrokenOaths.Simulation.Turn do
       ] ++
         heir_events ++
         tech_events ++
+        road_events ++
         Enum.map(city_completions, &{:city_completed, &1.user_id, &1.city_name, &1.type})
 
     {new_state, events}

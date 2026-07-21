@@ -757,6 +757,137 @@ defmodule BrokenOaths.Simulation.TurnTest do
     end
   end
 
+  # Story 929 "Build road to a destination" — `Turn.RoadBuilder`'s own
+  # per-tick walk-or-build state machine, exercised via `Turn.tick/1`
+  # for everything that stays PURE state (walk, skip-a-complete-road,
+  # block-cancels, attacked-cancels, a dead worker). Starting a BRAND
+  # NEW road needs a real `Repo.insert` `Turn.tick/1` may never make
+  # itself (see `RoadBuilder`'s own "Pure core, impure shell"
+  # moduledoc) — that ONE seam, plus the full multi-segment walk-then-
+  # build-then-walk sequencing, is covered directly against
+  # `RoadBuilder.resolve/1` in `RoadBuilderTest`, and end to end
+  # (through the real `WorldServer`, real inserts included) in
+  # `WorldServerTest`'s own `build_road_to/4` describe block. Orders are
+  # hand-built directly (`kind: :road_to`), the same "bypass the
+  # command-layer validation, drive the tick phase itself" posture the
+  # "tick/1 movement" describe block already takes for `:move` orders.
+  # Tile 5's own neighbor chain (5 -> 9 -> 11, both OPEN terrain, cost 1
+  # each) is the SAME fixture path the "tick/1 movement" describe block
+  # above already established for this seed/frequency.
+  describe "tick/1 road-to (story 929)" do
+    defp road_worker(id, tile, opts \\ []) do
+      unit(id, Keyword.merge([tile: tile, type: :worker], opts))
+    end
+
+    test "walks the immutable route one hex per tick toward the first gap tile" do
+      worker = road_worker(1, 5)
+      order = %{kind: :road_to, path: [9, 11], status: :pending, hp_at_issue: worker.hp}
+      state = base_state(%{1 => worker}, %{1 => order})
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.units[1].tile_id == 9
+      assert new_state.orders[1] == order
+    end
+
+    test "arriving at an unroaded gap tile with no road row yet emits a road_start_needed event, leaving state.roads untouched" do
+      worker = road_worker(1, 9)
+      order = %{kind: :road_to, path: [9, 11], status: :pending, hp_at_issue: worker.hp}
+      state = base_state(%{1 => worker}, %{1 => order})
+
+      {new_state, events} = Turn.tick(state)
+
+      assert {:road_start_needed, 9, 1} in events
+      assert Map.get(new_state, :roads, %{}) == %{}
+      assert new_state.units[1].tile_id == 9
+      assert new_state.orders[1] == order
+    end
+
+    test "resumes (claims as builder) an already-building road row in place, purely in memory" do
+      worker = road_worker(1, 9)
+      order = %{kind: :road_to, path: [9, 11], status: :pending, hp_at_issue: worker.hp}
+      building = %{9 => %{tile_id: 9, kind: :road, status: :building, progress: 0, builder_unit_id: 99}}
+      state = base_state(%{1 => worker}, %{1 => order}) |> Map.put(:roads, building)
+
+      {new_state, events} = Turn.tick(state)
+
+      assert new_state.roads[9].builder_unit_id == 1
+      assert events == [{:turn_advanced, 1}]
+    end
+
+    test "an already-complete road tile is walked through, never rebuilt" do
+      worker = road_worker(1, 5)
+      order = %{kind: :road_to, path: [9, 11], status: :pending, hp_at_issue: worker.hp}
+      pre_built = %{9 => %{tile_id: 9, kind: :road, status: :complete, progress: 2}}
+      state = base_state(%{1 => worker}, %{1 => order}) |> Map.put(:roads, pre_built)
+
+      {t1, _} = Turn.tick(state)
+      assert t1.units[1].tile_id == 9
+      assert t1.roads[9] == pre_built[9]
+
+      {t2, _events} = Turn.tick(t1)
+      assert t2.units[1].tile_id == 11
+      assert t2.roads[9] == pre_built[9]
+      refute Map.has_key?(t2.roads, 11)
+
+      # Only NOW (standing on the real gap tile, tile 9 skipped for good)
+      # does a build get requested.
+      {t3, events} = Turn.tick(t2)
+      assert {:road_start_needed, 11, 1} in events
+      refute Map.has_key?(t3.roads, 11)
+    end
+
+    test "the order completes and is removed once every tile on the route, including the destination, is complete" do
+      worker = road_worker(1, 11)
+      order = %{kind: :road_to, path: [9, 11], status: :pending, hp_at_issue: worker.hp}
+
+      roads = %{
+        9 => %{tile_id: 9, kind: :road, status: :complete, progress: 2},
+        11 => %{tile_id: 11, kind: :road, status: :complete, progress: 2}
+      }
+
+      state = base_state(%{1 => worker}, %{1 => order}) |> Map.put(:roads, roads)
+
+      {new_state, _events} = Turn.tick(state)
+
+      refute Map.has_key?(new_state.orders, 1)
+      assert new_state.units[1].tile_id == 11
+    end
+
+    test "a next tile occupied by another unit cancels the whole order" do
+      worker = road_worker(1, 5)
+      blocker = unit(2, tile: 9, max_movement: 0)
+      order = %{kind: :road_to, path: [9, 11], status: :pending, hp_at_issue: worker.hp}
+      state = base_state(%{1 => worker, 2 => blocker}, %{1 => order})
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.units[1].tile_id == 5
+      refute Map.has_key?(new_state.orders, 1)
+    end
+
+    test "hp dropping below hp_at_issue (attacked mid-build) cancels the order" do
+      worker = road_worker(1, 9, hp: 6)
+      order = %{kind: :road_to, path: [9, 11], status: :pending, hp_at_issue: 10}
+      state = base_state(%{1 => worker}, %{1 => order})
+
+      {new_state, _events} = Turn.tick(state)
+
+      refute Map.has_key?(new_state.orders, 1)
+      assert new_state.units[1].tile_id == 9
+      assert Map.get(new_state, :roads, %{}) == %{}
+    end
+
+    test "a dead worker's order is dropped, not resolved" do
+      order = %{kind: :road_to, path: [9, 11], status: :pending, hp_at_issue: 10}
+      state = base_state(%{}, %{1 => order})
+
+      {new_state, _events} = Turn.tick(state)
+
+      refute Map.has_key?(new_state.orders, 1)
+    end
+  end
+
   # Story 882 playtest update (issue 1caa87e9 — worker build charges).
   describe "tick/1 worker build charges" do
     defp worker_with_charges(id, tile, charges) do

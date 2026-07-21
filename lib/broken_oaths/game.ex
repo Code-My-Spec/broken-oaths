@@ -209,6 +209,11 @@ defmodule BrokenOaths.Game do
   @spec queue_move(map(), map(), term(), term()) :: {:ok, %{path: [term()]}} | {:error, atom()}
   defdelegate queue_move(world, user, unit_id, to_tile), to: Units
 
+  @doc "Queue a `:road_to` order (story 929) for worker `unit_id` to `destination`. See `Units.build_road_to/4`."
+  @spec build_road_to(map(), map(), term(), term()) ::
+          {:ok, %{route: [term()]}} | {:error, atom()}
+  defdelegate build_road_to(world, user, unit_id, destination), to: Units
+
   @doc "Fortify `unit_id` (story 920): the defensive stance. See `Units.fortify/3`."
   @spec fortify(map(), map(), term()) :: :ok | {:error, :not_owner | :not_fortifiable}
   defdelegate fortify(world, user, unit_id), to: Units

@@ -116,6 +116,104 @@ defmodule BrokenOaths.Cities.ImprovementTest do
     assert paused.builder_unit_id == nil
   end
 
+  # Story 929 "Build road to a destination" — `ensure_building/3`,
+  # `start_improvement/4`'s own user-less tick-time sibling
+  # (`Simulation.WorldServer.materialize_road_starts/2` is the real
+  # caller; here it's driven directly, a plain hand-built tick-`state`,
+  # same "no GenServer, no process" posture every OTHER pure function
+  # in this module already gets tested with). Fixed seed/frequency (33,
+  # 8) — the same fixture `WorldServerTest`'s own "start_improvement/4
+  # gates :road on The Wheel" describe block already uses — so a land
+  # tile can be found deterministically rather than risking a random
+  # seed landing on water/mountain.
+  describe "ensure_building/3 (story 929)" do
+    defp land_tile(world) do
+      Enum.find(0..641, &(BrokenOaths.Worlds.Regions.tile_class(world, &1) == :land))
+    end
+
+    defp road_state(world, player_id, opts \\ []) do
+      research =
+        if Keyword.get(opts, :the_wheel?, true) do
+          %{completed_techs: [:mining, :the_wheel], current_research: nil, banked_science: %{}}
+        else
+          %{completed_techs: [], current_research: nil, banked_science: %{}}
+        end
+
+      %{
+        world: world,
+        improvements: %{},
+        roads: Keyword.get(opts, :roads, %{}),
+        player_research: %{player_id => research}
+      }
+    end
+
+    test "starts a brand new :road row, given The Wheel is researched" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      player = player_fixture(world)
+      worker = worker_fixture(world, player)
+      tile = land_tile(world)
+      worker = %{worker | tile_id: tile, player_id: player.id}
+      state = road_state(world, player.id)
+
+      assert {:ok, new_state} = Improvement.ensure_building(state, worker, :road)
+
+      assert %{status: :building, progress: 0, builder_unit_id: id} = new_state.roads[tile]
+      assert id == worker.id
+      assert Repo.get_by(Improvement, world_id: world.id, tile_id: tile, kind: :road)
+    end
+
+    test "refuses (does not insert a row) before The Wheel is researched" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      player = player_fixture(world)
+      worker = worker_fixture(world, player)
+      tile = land_tile(world)
+      worker = %{worker | tile_id: tile, player_id: player.id}
+      state = road_state(world, player.id, the_wheel?: false)
+
+      assert {:error, :invalid_terrain} = Improvement.ensure_building(state, worker, :road)
+      refute Repo.get_by(Improvement, world_id: world.id, tile_id: tile, kind: :road)
+    end
+
+    test "resumes an already-building row rather than restarting progress, claiming the new builder" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      player = player_fixture(world)
+      original_worker = worker_fixture(world, player)
+      new_worker = worker_fixture(world, player)
+      tile = land_tile(world)
+
+      {:ok, _row} =
+        %Improvement{}
+        |> Improvement.changeset(%{
+          world_id: world.id,
+          tile_id: tile,
+          kind: :road,
+          progress: 1,
+          status: :building,
+          builder_unit_id: original_worker.id
+        })
+        |> Repo.insert()
+
+      new_worker = %{new_worker | tile_id: tile, player_id: player.id}
+
+      roads = %{
+        tile => %{
+          tile_id: tile,
+          kind: :road,
+          progress: 1,
+          status: :building,
+          builder_unit_id: original_worker.id
+        }
+      }
+
+      state = road_state(world, player.id, roads: roads)
+
+      assert {:ok, new_state} = Improvement.ensure_building(state, new_worker, :road)
+
+      assert %{status: :building, progress: 1, builder_unit_id: id} = new_state.roads[tile]
+      assert id == new_worker.id
+    end
+  end
+
   describe "pillage/1 (story 893 criterion 7556)" do
     test "a completed improvement becomes pillaged, one repair-tick from done, builder cleared" do
       imp = %{kind: :farm, status: :complete, progress: 99, builder_unit_id: 7}

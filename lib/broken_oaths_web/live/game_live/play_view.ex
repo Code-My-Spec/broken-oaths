@@ -593,6 +593,15 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
   def chop_error_message(:enemy_present), do: "An enemy unit holds this tile."
   def chop_error_message(_other), do: "That can't be chopped."
 
+  # Story 929 "Build road to a destination".
+  def road_error_message(:not_owner), do: "You don't control that unit."
+  def road_error_message(:not_worker), do: "Only a worker can build roads."
+  def road_error_message(:tech_locked), do: "You haven't researched The Wheel yet."
+  def road_error_message(:invalid_tile), do: "That's not a valid destination."
+  def road_error_message(:not_territory), do: "That tile isn't inside your own borders."
+  def road_error_message(:unreachable), do: "There's no route there."
+  def road_error_message(_other), do: "That road can't be ordered."
+
   def bank_error_message(:insufficient_gold), do: "You can't afford that upgrade yet."
   def bank_error_message(_other), do: "The bank refused that action."
 

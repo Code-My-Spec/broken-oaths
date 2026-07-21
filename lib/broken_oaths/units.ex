@@ -27,6 +27,21 @@ defmodule BrokenOaths.Units do
     do: WorldServer.call(world, {:queue_move, user, unit_id, to_tile})
 
   @doc """
+  Queue a `:road_to` order (story 929) for `unit_id` — `user`'s own
+  worker — to `destination`: walk the cheapest owned-territory route
+  and lay road tile-by-tile as it arrives. Validates ownership, worker
+  type, The Wheel research, and an in-territory destination, then
+  computes the route the same weighted cheapest-path model `queue_move/4`
+  uses. See `BrokenOaths.Units.Unit.build_road_to/4` for the full
+  contract and `BrokenOaths.Simulation.Turn.RoadBuilder` for how it
+  resolves, one segment per tick.
+  """
+  @spec build_road_to(map(), map(), term(), term()) ::
+          {:ok, %{route: [term()]}} | {:error, atom()}
+  def build_road_to(world, user, unit_id, destination),
+    do: WorldServer.call(world, {:build_road_to, user, unit_id, destination})
+
+  @doc """
   Fortify `unit_id` (story 920): grants the caller's own unit the
   defensive stance immediately, no dig-in turn. Legal for any
   `:defend`-capable type; idempotent. See `BrokenOaths.Units.Unit.

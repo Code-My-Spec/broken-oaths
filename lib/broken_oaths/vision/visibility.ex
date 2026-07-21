@@ -215,9 +215,14 @@ defmodule BrokenOaths.Vision.Visibility do
 
   # The remaining path travels with the order (owner-only, see above) so
   # the board can render the route from the unit to its destination and
-  # keep it current as movement consumes steps (story 875 rule).
-  defp format_order(%{path: path, status: status}),
-    do: %{target_tile: List.last(path), status: status, path: path}
+  # keep it current as movement consumes steps (story 875 rule). `kind`
+  # (story 929) rides along too, unchanged for a `:move` order but
+  # letting `GameLive.UnitPanel`'s own `order_summary/1` tell a
+  # `:road_to` order apart — its own `path` is the FULL immutable route,
+  # not a shrinking remainder, but `List.last/1` still lands on the
+  # destination either way.
+  defp format_order(%{path: path, status: status, kind: kind}),
+    do: %{target_tile: List.last(path), status: status, path: path, kind: kind}
 
   # -------------------------------------------------------------------
   # Camp reads

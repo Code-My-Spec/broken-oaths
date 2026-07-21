@@ -404,6 +404,34 @@ defmodule BrokenOaths.Cities.Improvement do
     end
   end
 
+  @doc """
+  Story 929 — `start_improvement/4`'s own tick-time sibling: start (or
+  resume) `kind` on `unit`'s own tile WITHOUT the player-facing `user`/
+  ownership hop `start_improvement/4` needs. `BrokenOaths.Simulation.
+  WorldServer.materialize_road_starts/2` is the one caller — the real
+  `Repo.insert` a brand-new `:road_to` segment needs, deferred out of
+  pure `Turn.tick/1` (see `Simulation.Turn.RoadBuilder`'s own "Pure
+  core, impure shell" moduledoc section) to the imperative shell, the
+  exact same "pure tick emits an event, the shell does the one real
+  write" split a freshly-completed production item's own real unit id
+  allocation already uses (`WorldServer.materialize_spawns/2`). By the
+  time it runs, `unit` is already a known-owned worker (ownership was
+  validated once, at `Units.Unit.build_road_to/4`'s own order-issue
+  time), so there's no live `user` struct to re-derive one from. Shares
+  every OTHER gate `start_improvement/4` already runs — terrain/research
+  via `validate_improvement_terrain/4`, slot occupancy via
+  `validate_improvement_slot/3` — only the ownership check itself is
+  skipped.
+  """
+  @spec ensure_building(map(), map(), kind()) :: {:ok, map()} | {:error, atom()}
+  def ensure_building(state, unit, kind) do
+    with :ok <- validate_improvement_terrain(state, unit.tile_id, kind, unit.player_id),
+         :ok <- validate_improvement_slot(state, unit.tile_id, kind) do
+      improvement = persist_start_improvement!(state, unit, kind)
+      {:ok, put_improvement(state, kind, unit.tile_id, improvement)}
+    end
+  end
+
   # QA issue 5656770d — a Road (`state.roads`) and the tile's yield
   # improvement (Farm/Mine/Pasture, `state.improvements`) are
   # independent slots; see this module's own moduledoc.

@@ -265,6 +265,16 @@ defmodule BrokenOathsWeb.GameLive.Play do
             chop_error: nil,
             order_error: nil,
             combat_error: nil,
+            # Story 929 "Build road to a destination" — `road_enabled?`
+            # (The Wheel) is a real value only via `refresh_board/1`'s own
+            # trailing call below, same placeholder status `copper_access?`
+            # already has; `road_mode_unit_id` is the "Build Road To"
+            # button's own armed-mode flag (`nil` = not armed, a unit id =
+            # the NEXT board click issues that worker's road-to order) —
+            # purely transient UI state, never persisted.
+            road_enabled?: false,
+            road_mode_unit_id: nil,
+            road_error: nil,
             selected_city_id: nil,
             selected_city: nil,
             assignable_tiles: [],
@@ -699,6 +709,55 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
       {:error, reason} ->
         {:noreply, assign(socket, chop_error: PlayView.chop_error_message(reason))}
+    end
+  end
+
+  # Story 929 "Build road to a destination" — `UnitPanel`'s own "Build
+  # Road To" button arms/disarms this worker's road-target mode: the
+  # `.Board` hook's `click/1` intercepts the NEXT board click while
+  # armed (`game:road_mode`, below) and dispatches `"build_road_to"`
+  # instead of the ordinary select dispatch. A second click on the
+  # SAME worker's own button (already armed) disarms it — the
+  # discoverable "Cancel" gesture; there's no separate Cancel button.
+  def handle_event("arm_road_mode", %{"unit_id" => unit_id}, socket) do
+    unit_id = PlayView.parse_id(unit_id)
+    already_armed? = socket.assigns.road_mode_unit_id == unit_id
+    armed_id = if already_armed?, do: nil, else: unit_id
+
+    socket =
+      socket
+      |> assign(road_mode_unit_id: armed_id, road_error: nil)
+      |> push_event("game:road_mode", %{unit_id: armed_id})
+
+    {:noreply, socket}
+  end
+
+  # The armed worker's own road-to order, issued at whichever tile the
+  # `.Board` hook's `click/1` resolved the next click to (`to_tile`,
+  # already an integer — see `handle_event("select_tile", ...)`'s own
+  # server-side resolution the hook already leans on for every OTHER
+  # click). Mode disarms unconditionally — success or refusal, the
+  # click that triggered this already consumed it (same one-shot
+  # posture the JS hook's own `this.roadMode = null` mirrors
+  # client-side the instant it fires this event).
+  def handle_event("build_road_to", %{"unit_id" => unit_id, "to_tile" => to_tile}, socket) do
+    %{world: world, user: user} = socket.assigns
+    unit_id = PlayView.parse_id(unit_id)
+    to_tile = PlayView.parse_id(to_tile)
+
+    socket = assign(socket, road_mode_unit_id: nil) |> push_event("game:road_mode", %{unit_id: nil})
+
+    case Game.build_road_to(world, user, unit_id, to_tile) do
+      {:ok, %{route: route}} ->
+        socket =
+          socket
+          |> assign(road_error: nil)
+          |> push_event("game:path", %{unit_id: unit_id, tiles: route})
+
+        {:noreply, socket}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, road_error: PlayView.road_error_message(reason))}
     end
   end
 
@@ -1940,6 +1999,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
           cleared_features
         ),
       current_dig: PlayView.worker_current_dig(improvements, selected_unit),
+      # Story 929 — The Wheel gate for the "Build Road To" button,
+      # same "single source of truth, re-fetched on every signal"
+      # status `copper_access?` below already has.
+      road_enabled?: Research.road_enabled?(player_research),
       cleared_features: cleared_features,
       choppable_feature:
         PlayView.worker_choppable_feature(
@@ -2472,6 +2535,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
           city_error={@city_error}
           improvement_error={@improvement_error}
           chop_error={@chop_error}
+          road_error={@road_error}
           steward_error={@steward_error}
           player_research={@player_research}
           cities={@cities}
@@ -2491,6 +2555,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
           copper_access?={@copper_access?}
           coastal?={@coastal?}
           wonders_claimed={@wonders_claimed}
+          road_enabled?={@road_enabled?}
+          road_mode_unit_id={@road_mode_unit_id}
         />
       </div>
 
@@ -2523,6 +2589,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
             this.visibleSet = new Set()
             this.selectedId = null
             this.path = null
+            // Story 929 "Build road to a destination" — armed by
+            // `UnitPanel`'s own "Build Road To" button (`game:road_mode`,
+            // below); while set, the worker's own unit id, the NEXT
+            // `click/1` on ANY known tile issues that worker's road-to
+            // order instead of the ordinary select dispatch.
+            this.roadMode = null
             this.anims = new Map()
             this.raf = null
             this.drawScheduled = false
@@ -2601,6 +2673,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
               if (unit_id === this.selectedId) this.path = tiles
               this.draw()
             })
+            // Story 929 — see this hook's own `this.roadMode` init above.
+            this.handleEvent("game:road_mode", ({unit_id}) => { this.roadMode = unit_id })
 
             // Transient player-scoped notifications (story 895 alert,
             // 896 lineage, 899 discovery) arrive as one-shot pushes with
@@ -2806,6 +2880,18 @@ defmodule BrokenOathsWeb.GameLive.Play do
           click(e) {
             const tile = this.hitTile(e)
             if (tile == null) return
+
+            // Story 929 — "Build Road To" mode, armed by `UnitPanel`'s
+            // own button (`game:road_mode`): the NEXT click on ANY
+            // known tile (unit/city/camp/ground alike — a road route
+            // can legally pass through any of them) issues the order
+            // instead of the ordinary select dispatch below, then
+            // disarms itself, one-shot.
+            if (this.roadMode != null) {
+              this.pushEvent("build_road_to", {unit_id: this.roadMode, to_tile: tile})
+              this.roadMode = null
+              return
+            }
 
             const unit = this.units.find((u) => u.tile_id === tile)
             if (unit) { this.pushEvent("select_unit", {unit_id: unit.id, tile_id: tile}); return }

@@ -232,6 +232,33 @@ defmodule BrokenOaths.Simulation.WorldServer do
     end
   end
 
+  # Story 929 "Build road to a destination" — queues a `:road_to` order
+  # (see `Units.Unit.build_road_to/4`'s own doc); unlike `:queue_move`
+  # above, there's no immediate partial resolution to push back — the
+  # order always waits for the next tick boundary to take its first
+  # step (`Simulation.Turn.RoadBuilder.resolve/1`). `result` carries
+  # `route:` (the full planned path), which `GameLive.Play`'s own
+  # `"build_road_to"` handler pushes straight to `"game:path"` the same
+  # immediate way `:queue_move`'s own reply already does, so the ghost
+  # route appears in the SAME render as the click rather than waiting
+  # on the `:units_changed` broadcast round trip.
+  def handle_call({:build_road_to, user, unit_id, destination}, _from, state) do
+    case Unit.build_road_to(state, user, unit_id, destination) do
+      {:ok, result, new_state} ->
+        case persist_tick(state, new_state) do
+          :ok ->
+            broadcast(new_state.world.id, [:units_changed])
+            {:reply, {:ok, result}, new_state}
+
+          :stale ->
+            {:reply, {:error, :stale}, resync(state)}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   def handle_call({:attack, user, unit_id, target_unit_id}, _from, state) do
     case Resolver.attack(state, user, unit_id, target_unit_id) do
       {:ok, result, new_state} ->
@@ -1741,6 +1768,12 @@ defmodule BrokenOaths.Simulation.WorldServer do
     {ticked, events} = Turn.tick(gated_state)
     ticked = War.restore_gated_heirs(ticked, deferred_heirs)
     {events, ticked} = materialize_spawns(events, ticked)
+    # Story 929 — see `Simulation.Turn.RoadBuilder`'s own "Pure core,
+    # impure shell" moduledoc section: the ONE real `Repo.insert` a
+    # brand-new road needs, deferred out of pure `Turn.tick/1` the same
+    # way `materialize_spawns/2` above already defers a freshly-spawned
+    # unit's own real id allocation.
+    {events, ticked} = materialize_road_starts(events, ticked)
     ticked = %{ticked | turn_started_at: DateTime.utc_now()}
     {ticked, capture_events} = Vassalization.apply_captures(ticked)
     {ticked, tribute_logs} = apply_tribute(ticked)
@@ -1886,6 +1919,48 @@ defmodule BrokenOaths.Simulation.WorldServer do
       other_event, acc_state ->
         {other_event, acc_state}
     end)
+  end
+
+  # Story 929 — see `Simulation.Turn.RoadBuilder`'s own "Pure core,
+  # impure shell" moduledoc: the ONE real `Repo.insert` a brand-new
+  # road needs, deferred out of pure `Turn.tick/1` the exact same way
+  # `materialize_spawns/2` above defers a freshly-spawned unit's own
+  # real id allocation. Every `{:road_start_needed, ...}` event is
+  # purely internal plumbing — dropped here (mapped to `nil`, filtered
+  # out below) rather than passed through, unlike `materialize_spawns/2`'s
+  # own `{:unit_spawned, ...}` (which a client DOES care about).
+  defp materialize_road_starts(events, state) do
+    {mapped, new_state} =
+      Enum.map_reduce(events, state, fn
+        {:road_start_needed, tile_id, unit_id}, acc_state ->
+          {nil, materialize_road_start(acc_state, tile_id, unit_id)}
+
+        other_event, acc_state ->
+          {other_event, acc_state}
+      end)
+
+    {Enum.reject(mapped, &is_nil/1), new_state}
+  end
+
+  # The worker that requested this segment may have died between
+  # `RoadBuilder.resolve/1`'s own check and here — nothing later in
+  # `Turn.tick/1`'s own pipeline kills a unit, but `Repo`-materializing
+  # against a unit id that's no longer in `state.units` at all would
+  # crash `Improvement.ensure_building/3`'s own `unit.player_id` read,
+  # so this is the same defensive "shouldn't happen, but don't crash
+  # the whole tick over it" posture the rest of this module already
+  # takes for a road-to order's own tick-time seams.
+  defp materialize_road_start(state, _tile_id, unit_id) do
+    case Map.get(state.units, unit_id) do
+      nil ->
+        state
+
+      unit ->
+        case Improvement.ensure_building(state, unit, :road) do
+          {:ok, new_state} -> new_state
+          {:error, _reason} -> state
+        end
+    end
   end
 
   defp insert_spawned_unit!(state, %{player_id: player_id, type: type, tile_id: tile_id} = event) do
@@ -3146,7 +3221,10 @@ defmodule BrokenOaths.Simulation.WorldServer do
       select: o
     )
     |> Repo.all()
-    |> Map.new(&{&1.unit_id, %{kind: &1.kind, path: &1.path, status: &1.status}})
+    |> Map.new(fn o ->
+      {o.unit_id,
+       %{kind: o.kind, path: o.path, status: o.status, hp_at_issue: o.hp_at_issue}}
+    end)
   end
 
   defp load_explored(world_id) do

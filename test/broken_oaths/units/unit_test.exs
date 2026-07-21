@@ -311,4 +311,33 @@ defmodule BrokenOaths.Units.UnitTest do
       assert Unit.bfs_path(tick_state(), 1, 11, :warrior) == [2, 11]
     end
   end
+
+  # Story 929 "Build road to a destination" — `allowed_tiles`, the
+  # territory restriction `Unit.build_road_to/4` passes in so a road
+  # route never strays outside the issuing player's own borders. Same
+  # fixture tiles the "bfs_path/4 — weighted" describe block above
+  # already documents: 1 -> 17's cheapest route is [9, 17] (cost 2,
+  # via OPEN tile 9); tile 10 (DIFFICULT) is a pricier alternate also
+  # reaching 17 directly.
+  describe "bfs_path/5 — territory restriction (story 929)" do
+    test "the default (no 5th arg, or an explicit nil) is unrestricted — identical to bfs_path/4" do
+      assert Unit.bfs_path(tick_state(), 1, 17, :warrior) ==
+               Unit.bfs_path(tick_state(), 1, 17, :warrior, nil)
+    end
+
+    test "a territory wide enough to include the cheapest route changes nothing" do
+      territory = MapSet.new([1, 9, 17])
+      assert Unit.bfs_path(tick_state(), 1, 17, :warrior, territory) == [9, 17]
+    end
+
+    test "a territory that excludes the cheapest route's own tile forces the pricier detour that stays inside it" do
+      territory = MapSet.new([1, 10, 17])
+      assert Unit.bfs_path(tick_state(), 1, 17, :warrior, territory) == [10, 17]
+    end
+
+    test "a territory that never reaches the destination at all returns nil, same as any other unreachable route" do
+      territory = MapSet.new([1])
+      assert Unit.bfs_path(tick_state(), 1, 17, :warrior, territory) == nil
+    end
+  end
 end

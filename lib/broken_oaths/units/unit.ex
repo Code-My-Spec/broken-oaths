@@ -93,6 +93,7 @@ defmodule BrokenOaths.Units.Unit do
   alias BrokenOaths.Simulation.Turn
   alias BrokenOaths.Feudal.Vassalization
   alias BrokenOaths.Repo
+  alias BrokenOaths.Technology.Research
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.Terrain
   alias BrokenOaths.Worlds.World
@@ -379,6 +380,130 @@ defmodule BrokenOaths.Units.Unit do
     end
   end
 
+  # -------------------------------------------------------------------
+  # Build road to (story 929) — issues a `:road_to` order on a worker:
+  # walk the cheapest owned-territory route to `destination`, laying
+  # road tile-by-tile as it arrives. Resolution (the walk-vs-build state
+  # machine, one segment per tick) lives on `BrokenOaths.Simulation.Turn.
+  # RoadBuilder` — genuinely cross-cutting (Units + Cities.Improvement),
+  # no single owning domain model, same "gets its own Turn.* submodule"
+  # status `Turn.Movement`/`Turn.BarbarianPhase`/`Turn.HeirSuccession`
+  # already have. This function only ever VALIDATES and PERSISTS the
+  # order — the same "queue-time command, tick-time resolution" split
+  # `queue_move/4` above already draws for `:move` orders.
+  # -------------------------------------------------------------------
+
+  @doc """
+  Queue a `:road_to` order: `user`'s own worker `unit_id` walks the
+  cheapest route — `bfs_path/5`, restricted to tiles inside `user`'s
+  OWN territory (every one of their own cities' `territory`, unioned;
+  `player_territory_tiles/2` below) — to `destination`, laying road on
+  every gap tile along the way (already-complete road tiles are simply
+  walked through, never rebuilt) until `destination` itself is roaded.
+
+  Refuses: an unowned/non-worker unit (`:not_owner`/`:not_worker`), a
+  player who hasn't researched The Wheel (`:tech_locked` —
+  `Research.road_enabled?/1`, the same gate `Improvement.
+  validate_improvement_terrain/4`'s own `:road` clause already reads),
+  an out-of-range/malformed tile id (`:invalid_tile`), a destination
+  outside the player's own borders (`:not_territory`), or no
+  owned-territory route at all (`:unreachable`, including the
+  degenerate case of `destination` already being the worker's own
+  tile — `bfs_path/5` returns `[]` for `from == to`, same as
+  `queue_move/4`'s own handling below).
+
+  `hp_at_issue` (the worker's own HP right now) is captured on the
+  order the instant it's persisted — `Turn.RoadBuilder`'s own
+  "attacked mid-build cancels" check reads it back every tick; see that
+  module's moduledoc.
+
+  Returns `{:ok, %{route: [tile_id()]}, new_state}` — unlike
+  `queue_move/4`, there is no immediate partial resolution here: a
+  `:road_to` order always waits for the next tick boundary to take its
+  first step (`Turn.RoadBuilder.resolve/1`), rather than spending
+  movement the instant it's issued — PM decision, story 929 (walking a
+  road route is deliberately paced to the tick, not an "instant dash"
+  the way a bare move order is).
+  """
+  @spec build_road_to(map(), map(), term(), tile_id()) ::
+          {:ok, %{route: [tile_id()]}, map()} | {:error, atom()}
+  def build_road_to(state, user, unit_id, destination) do
+    player = find_player(state, user.id)
+    unit = Map.get(state.units, unit_id)
+
+    cond do
+      is_nil(player) or is_nil(unit) or unit.player_id != player.id ->
+        {:error, :not_owner}
+
+      unit.type != :worker ->
+        {:error, :not_worker}
+
+      not Research.road_enabled?(player_research_for(state, player.id)) ->
+        {:error, :tech_locked}
+
+      not is_integer(destination) or destination < 0 or
+          destination >= 10 * state.world.frequency * state.world.frequency + 2 ->
+        {:error, :invalid_tile}
+
+      true ->
+        territory = player_territory_tiles(state, player.id)
+
+        cond do
+          not MapSet.member?(territory, destination) ->
+            {:error, :not_territory}
+
+          true ->
+            case bfs_path(state, unit.tile_id, destination, unit.type, territory) do
+              route when route in [[], nil] ->
+                {:error, :unreachable}
+
+              route ->
+                persist_road_order!(unit_id, route, unit.hp)
+
+                new_orders =
+                  Map.put(state.orders, unit_id, %{
+                    kind: :road_to,
+                    path: route,
+                    status: :pending,
+                    hp_at_issue: unit.hp
+                  })
+
+                {:ok, %{route: route}, %{state | orders: new_orders}}
+            end
+        end
+    end
+  end
+
+  # Every tile inside ANY of `player_id`'s own cities' `territory` —
+  # the "owned borders" `build_road_to/4`'s own destination check AND
+  # `bfs_path/5`'s own route restriction both read, so the two can
+  # never quietly disagree on what counts as "in territory."
+  defp player_territory_tiles(state, player_id) do
+    for {_id, city} <- state.cities,
+        city.player_id == player_id,
+        tile_id <- city.territory,
+        into: MapSet.new(),
+        do: tile_id
+  end
+
+  defp persist_road_order!(unit_id, route, hp_at_issue) do
+    attrs = %{
+      unit_id: unit_id,
+      kind: :road_to,
+      path: route,
+      status: :pending,
+      hp_at_issue: hp_at_issue
+    }
+
+    case Repo.get_by(Order, unit_id: unit_id) do
+      nil -> %Order{} |> Order.changeset(attrs) |> Repo.insert!()
+      existing -> existing |> Order.changeset(attrs) |> Repo.update!()
+    end
+  end
+
+  defp player_research_for(state, player_id),
+    do: Map.get(state.player_research, player_id, Research.new())
+
   @doc """
   LEAST-TOTAL-COST path (story 925 — Dijkstra, upgraded from a plain
   BFS now that `entry_cost/3` prices tiles unevenly) over tiles
@@ -399,9 +524,17 @@ defmodule BrokenOaths.Units.Unit do
   `persist_order!/2` above is public: `BrokenOaths.Feudal.Stewardship`'s
   own emergency-defense move calls this directly rather than
   WorldServer keeping a duplicate copy.
+
+  `allowed_tiles` (story 929, default `nil` — unrestricted, every
+  existing caller's behavior unchanged) optionally narrows every
+  candidate tile (the destination included) to a `MapSet` — `build_road_to/4`
+  above passes the issuing player's own territory (`player_territory_tiles/2`)
+  so a road route never strays outside their own borders, "restricted
+  to owned-territory tiles" per that story's own PM decision.
   """
-  @spec bfs_path(map(), tile_id(), tile_id(), unit_type()) :: [tile_id()] | nil
-  def bfs_path(state, from, to, unit_type) do
+  @spec bfs_path(map(), tile_id(), tile_id(), unit_type(), MapSet.t(tile_id()) | nil) ::
+          [tile_id()] | nil
+  def bfs_path(state, from, to, unit_type, allowed_tiles \\ nil) do
     occupied =
       for {_id, u} <- state.units, u.tile_id != from, into: MapSet.new(), do: u.tile_id
 
@@ -413,6 +546,7 @@ defmodule BrokenOaths.Units.Unit do
       roads,
       cleared_features,
       occupied,
+      allowed_tiles,
       :gb_sets.singleton({0, from}),
       %{from => 0},
       %{},
@@ -421,7 +555,18 @@ defmodule BrokenOaths.Units.Unit do
     )
   end
 
-  defp dijkstra(world, roads, cleared_features, occupied, frontier, dist, prev, to, unit_type) do
+  defp dijkstra(
+         world,
+         roads,
+         cleared_features,
+         occupied,
+         allowed_tiles,
+         frontier,
+         dist,
+         prev,
+         to,
+         unit_type
+       ) do
     if :gb_sets.is_empty(frontier) do
       nil
     else
@@ -434,7 +579,18 @@ defmodule BrokenOaths.Units.Unit do
         # A stale duplicate: a cheaper route to `tile` was already found
         # and popped (and expanded) earlier — nothing new to explore.
         cost > Map.get(dist, tile) ->
-          dijkstra(world, roads, cleared_features, occupied, frontier, dist, prev, to, unit_type)
+          dijkstra(
+            world,
+            roads,
+            cleared_features,
+            occupied,
+            allowed_tiles,
+            frontier,
+            dist,
+            prev,
+            to,
+            unit_type
+          )
 
         true ->
           neighbors =
@@ -442,7 +598,8 @@ defmodule BrokenOaths.Units.Unit do
             |> Regions.adjacent_tiles(tile)
             |> Enum.filter(
               &(passable_tile?(unit_type, Regions.tile_class(world, &1)) and
-                  (&1 == to or not MapSet.member?(occupied, &1)))
+                  (&1 == to or not MapSet.member?(occupied, &1)) and
+                  (is_nil(allowed_tiles) or MapSet.member?(allowed_tiles, &1)))
             )
 
           {frontier, dist, prev} =
@@ -456,7 +613,18 @@ defmodule BrokenOaths.Units.Unit do
               end
             end)
 
-          dijkstra(world, roads, cleared_features, occupied, frontier, dist, prev, to, unit_type)
+          dijkstra(
+            world,
+            roads,
+            cleared_features,
+            occupied,
+            allowed_tiles,
+            frontier,
+            dist,
+            prev,
+            to,
+            unit_type
+          )
       end
     end
   end

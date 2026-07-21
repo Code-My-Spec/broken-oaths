@@ -712,6 +712,114 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
     end
   end
 
+  # Story 929 "Build road to a destination" — `build_road_to/4`'s own
+  # real WorldServer/Game path: validation refusals, then the full
+  # walk-then-build-then-complete flow driven through real `Turn.tick/1`
+  # boundaries (`Game.advance_turn/1`), same "drive it for real" style
+  # the `start_improvement/4`/"a completed road" describe blocks above
+  # already use.
+  describe "build_road_to/4 (story 929)" do
+    test "refuses before The Wheel is researched" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+      :ok = Game.isolate_camp_for_test(world, -1)
+
+      [city] = Game.player_cities(world, user)
+      destination = hd(Regions.adjacent_tiles(world, city.tile_id))
+      worker = Game.spawn_unit_for_test(world, player.id, :worker, city.tile_id)
+
+      assert {:error, :tech_locked} = Game.build_road_to(world, user, worker.id, destination)
+
+      WorldServer.restart(world)
+    end
+
+    test "refuses a destination outside the player's own territory" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+      :ok = Game.isolate_camp_for_test(world, -1)
+      research_the_wheel(world, user)
+
+      [city] = Game.player_cities(world, user)
+      worker = Game.spawn_unit_for_test(world, player.id, :worker, city.tile_id)
+      far_tile = far_from_territory_tile(world, city.tile_id)
+
+      assert {:error, :not_territory} = Game.build_road_to(world, user, worker.id, far_tile)
+
+      WorldServer.restart(world)
+    end
+
+    test "refuses a non-worker unit" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+      :ok = Game.isolate_camp_for_test(world, -1)
+      research_the_wheel(world, user)
+
+      [city] = Game.player_cities(world, user)
+      destination = hd(Regions.adjacent_tiles(world, city.tile_id))
+      warrior = Game.spawn_unit_for_test(world, player.id, :warrior, city.tile_id)
+
+      assert {:error, :not_worker} = Game.build_road_to(world, user, warrior.id, destination)
+
+      WorldServer.restart(world)
+    end
+
+    test "walks to the destination, lays road tile-by-tile, and completes — the order clears once every gap tile is roaded" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+      :ok = Game.isolate_camp_for_test(world, -1)
+      research_the_wheel(world, user)
+
+      [city] = Game.player_cities(world, user)
+      worker = Game.spawn_unit_for_test(world, player.id, :worker, city.tile_id)
+      destination = hd(Regions.adjacent_tiles(world, city.tile_id))
+
+      assert {:ok, %{route: route}} = Game.build_road_to(world, user, worker.id, destination)
+      assert route == [destination]
+
+      Enum.reduce_while(1..30, :ok, fn _, :ok ->
+        roaded? =
+          Enum.any?(
+            Game.improvements_visible_to(world, user),
+            &(&1.tile_id == destination and &1.kind == :road and &1.status == :complete)
+          )
+
+        if roaded? do
+          {:halt, :ok}
+        else
+          :ok = Game.advance_turn(world)
+          {:cont, :ok}
+        end
+      end)
+
+      assert Enum.any?(
+               Game.improvements_visible_to(world, user),
+               &(&1.tile_id == destination and &1.kind == :road and &1.status == :complete)
+             )
+
+      [worker_after] = for u <- Game.player_units(world, user), u.id == worker.id, do: u
+      assert worker_after.tile_id == destination
+      refute worker_after.order
+
+      WorldServer.restart(world)
+    end
+  end
+
   # QA issue 8aa2c571 — a worker mid-dig had no way to back out of it.
   describe "cancel_improvement/3" do
     test "deletes the in-progress build outright, freeing the tile for a different kind" do
@@ -1149,6 +1257,19 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
     :ok = Game.set_research(world, user, :masonry)
     complete_current_research(world, user)
     assert :masonry in Game.player_research(world, user).completed_techs
+  end
+
+  # Story 929 — any land tile that ISN'T `city_tile_id` itself nor one
+  # of its own immediate neighbors, i.e. provably outside a freshly
+  # founded city's own `founding_territory/2` ring
+  # (`[tile_id | adjacent_tiles]`) — the `:not_territory` refusal
+  # `build_road_to/4`'s own describe block below needs.
+  defp far_from_territory_tile(world, city_tile_id) do
+    territory = MapSet.new([city_tile_id | Regions.adjacent_tiles(world, city_tile_id)])
+
+    Enum.find(0..641, fn t ->
+      Regions.tile_class(world, t) == :land and not MapSet.member?(territory, t)
+    end)
   end
 
   defp hills_tile(world) do
