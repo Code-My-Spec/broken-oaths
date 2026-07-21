@@ -924,12 +924,13 @@ defmodule BrokenOaths.Cities.Production do
   (head) queue item. A no-op with an empty queue — nothing is queued
   to receive it.
   """
-  @spec accrue(city(), World.t(), map()) :: city()
-  def accrue(%{queue: []} = city, _world, _improvements), do: city
+  @spec accrue(city(), World.t(), map(), MapSet.t()) :: city()
+  def accrue(city, world, improvements, cleared_features \\ MapSet.new())
+  def accrue(%{queue: []} = city, _world, _improvements, _cleared_features), do: city
 
-  def accrue(%{queue: [current | rest]} = city, world, improvements) do
+  def accrue(%{queue: [current | rest]} = city, world, improvements, cleared_features) do
     income =
-      @flat_production + worked_production(city, world, improvements) +
+      @flat_production + worked_production(city, world, improvements, cleared_features) +
         barracks_bonus(city, current.type) + water_mill_production_bonus(city)
 
     %{city | queue: [%{current | banked: current.banked + income} | rest]}
@@ -955,9 +956,9 @@ defmodule BrokenOaths.Cities.Production do
   def credit(%{queue: [current | rest]} = city, amount),
     do: %{city | queue: [%{current | banked: current.banked + amount} | rest]}
 
-  defp worked_production(city, world, improvements) do
+  defp worked_production(city, world, improvements, cleared_features) do
     city
-    |> Yields.worked_yields(world, improvements)
+    |> Yields.worked_yields(world, improvements, cleared_features)
     |> Enum.map(& &1.production)
     |> Enum.sum()
   end
@@ -1025,7 +1026,7 @@ defmodule BrokenOaths.Cities.Production do
     if CityDefense.production_halted?(city, state.turn) do
       city
     else
-      accrue(city, state.world, state.improvements)
+      accrue(city, state.world, state.improvements, Map.get(state, :cleared_features, MapSet.new()))
     end
   end
 

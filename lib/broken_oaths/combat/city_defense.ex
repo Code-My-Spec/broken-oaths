@@ -138,7 +138,7 @@ defmodule BrokenOaths.Combat.CityDefense do
   # QA issue da39e50b — the Archer is a genuine (melee-for-now) military
   # unit; it garrisons/counts toward defense exactly like the Warrior
   # and Bronze Spearman.
-  @military_types [:lord, :warrior, :bronze_spearman, :archer]
+  @military_types [:lord, :warrior, :bronze_spearman, :archer, :scout]
 
   @max_hp 100
   @base_defense 20

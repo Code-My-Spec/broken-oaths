@@ -264,10 +264,11 @@ defmodule BrokenOaths.Cities.Yields do
   `worked_tiles` order — terrain + bonus resource (story 905) +
   completed improvement, all stacked (`worked_tile_yield/3`).
   """
-  @spec worked_yields(city(), World.t(), %{tile_id() => improvement()}) :: [yield()]
-  def worked_yields(city, world, improvements) do
+  @spec worked_yields(city(), World.t(), %{tile_id() => improvement()}, MapSet.t(tile_id())) ::
+          [yield()]
+  def worked_yields(city, world, improvements, cleared_features \\ MapSet.new()) do
     for tile_id <- city.worked_tiles do
-      terrain = Regions.terrain(world, tile_id)
+      terrain = Regions.terrain(world, tile_id, cleared_features)
       resource = Resources.at(world, tile_id)
       worked_tile_yield(terrain, completed_kind(improvements, tile_id), resource)
     end
@@ -278,9 +279,13 @@ defmodule BrokenOaths.Cities.Yields do
   unassignable), including its bonus resource (story 905) if it's
   settled on one.
   """
-  @spec center_yield(city(), World.t()) :: yield()
-  def center_yield(city, world),
-    do: city_center_yield(Regions.terrain(world, city.tile_id), Resources.at(world, city.tile_id))
+  @spec center_yield(city(), World.t(), MapSet.t(tile_id())) :: yield()
+  def center_yield(city, world, cleared_features \\ MapSet.new()),
+    do:
+      city_center_yield(
+        Regions.terrain(world, city.tile_id, cleared_features),
+        Resources.at(world, city.tile_id)
+      )
 
   @doc """
   Bank this turn's food income: the center's floor, every worked
@@ -290,10 +295,15 @@ defmodule BrokenOaths.Cities.Yields do
   (which reads its own `water_mill_production_bonus/0` for that
   building's other half).
   """
-  @spec accrue_food(city(), World.t(), %{tile_id() => improvement()}) :: city()
-  def accrue_food(city, world, improvements) do
-    center = center_yield(city, world)
-    worked_food = worked_yields(city, world, improvements) |> Enum.map(& &1.food) |> Enum.sum()
+  @spec accrue_food(city(), World.t(), %{tile_id() => improvement()}, MapSet.t(tile_id())) ::
+          city()
+  def accrue_food(city, world, improvements, cleared_features \\ MapSet.new()) do
+    center = center_yield(city, world, cleared_features)
+
+    worked_food =
+      worked_yields(city, world, improvements, cleared_features)
+      |> Enum.map(& &1.food)
+      |> Enum.sum()
 
     %{
       city
@@ -345,9 +355,11 @@ defmodule BrokenOaths.Cities.Yields do
   """
   @spec accrue_food_all(map()) :: map()
   def accrue_food_all(state) do
+    cleared = Map.get(state, :cleared_features, MapSet.new())
+
     cities =
       Map.new(state.cities, fn {id, city} ->
-        {id, accrue_food(city, state.world, state.improvements)}
+        {id, accrue_food(city, state.world, state.improvements, cleared)}
       end)
 
     %{state | cities: cities}

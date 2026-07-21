@@ -449,7 +449,11 @@ defmodule BrokenOaths.Cities.City do
   defp format_city(state, city) do
     worked_production =
       city
-      |> Yields.worked_yields(state.world, state.improvements)
+      |> Yields.worked_yields(
+        state.world,
+        state.improvements,
+        Map.get(state, :cleared_features, MapSet.new())
+      )
       |> Enum.map(& &1.production)
       |> Enum.sum()
 

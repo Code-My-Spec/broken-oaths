@@ -82,7 +82,7 @@ defmodule BrokenOaths.Feudal.Bank do
   # Lord never eligible at all (filtered before this split — see
   # `disband_target/2`). `:barbarian_warrior` never appears here; a
   # barbarian carries no `player_id`, so it's never among `owned`.
-  @military_disband_types [:warrior, :bronze_spearman, :archer, :galley]
+  @military_disband_types [:warrior, :bronze_spearman, :archer, :galley, :scout]
   @civilian_disband_types [:settler, :worker]
 
   @starting_cap 100
