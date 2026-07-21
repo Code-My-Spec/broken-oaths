@@ -97,6 +97,42 @@ defmodule BrokenOaths.Game.ChopTest do
     end
   end
 
+  # Same as `found_city_near_feature/4`, but requires at least TWO
+  # distinct `feature` neighbors — the overflow test's own setup (below):
+  # two chops on the same city, each paying the full lump, needs two
+  # DIFFERENT tiles (once chopped, a tile has nothing left to chop).
+  defp found_city_near_two_feature_tiles(world, user, player_id, feature) do
+    Enum.find_value(0..641, fn tile ->
+      if Regions.tile_class(world, tile) == :land do
+        candidates =
+          world
+          |> Regions.adjacent_tiles(tile)
+          |> Enum.filter(fn n ->
+            Regions.tile_class(world, n) == :land and
+              Regions.terrain(world, n).feature == feature
+          end)
+
+        case candidates do
+          [tile_a, tile_b | _] -> try_found_two(world, user, player_id, tile, tile_a, tile_b)
+          _short -> nil
+        end
+      end
+    end)
+  end
+
+  defp try_found_two(world, user, player_id, tile, tile_a, tile_b) do
+    settler = Game.spawn_unit_for_test(world, player_id, :settler, tile)
+
+    case Game.found_city(world, user, settler.id) do
+      :ok ->
+        city = Game.player_cities(world, user) |> Enum.find(&(&1.tile_id == tile))
+        %{city_id: city.id, tiles: [tile_a, tile_b]}
+
+      {:error, _} ->
+        nil
+    end
+  end
+
   defp research_mining(world, user) do
     :ok = Game.set_research(world, user, :mining)
     complete_current_research(world, user)
@@ -138,8 +174,16 @@ defmodule BrokenOaths.Game.ChopTest do
       user: user,
       player: player
     } do
-      research_mining(world, user)
+      # The near-feature city is founded BEFORE the research grind, not
+      # after: `City.persist_found_city!/3`'s founding territory is
+      # unconditional (never dedupes against another city's own claims),
+      # but `Yields.pick_growth_tile/3`'s `claimed_tiles/1` check DOES
+      # skip any tile already claimed by ANOTHER city — so founding
+      # early means the capital's own later growth (science accrual
+      # over dozens of turns) can never encroach on this city's chop
+      # tile and steal the production credit out from under it.
       %{tile: tile} = found_city_near_feature(world, user, player.id, :woods)
+      research_mining(world, user)
       worker = Game.spawn_unit_for_test(world, player.id, :worker, tile)
 
       assert Terrain.movement_cost(Regions.terrain(world, tile)) == 2
@@ -158,8 +202,10 @@ defmodule BrokenOaths.Game.ChopTest do
       user: user,
       player: player
     } do
-      research_mining(world, user)
+      # Founded before research — see the "removes the feature" test's
+      # own comment for why this order matters.
       %{city_id: city_id, tile: tile} = found_city_near_feature(world, user, player.id, :woods)
+      research_mining(world, user)
       worker = Game.spawn_unit_for_test(world, player.id, :worker, tile)
 
       :ok = Game.queue_production(world, user, city_id, :warrior)
@@ -175,11 +221,14 @@ defmodule BrokenOaths.Game.ChopTest do
       user: user,
       player: player
     } do
-      research_bronze_working(world, user)
-
+      # Founded before research (and Bronze Working's own two-step
+      # research chain is the LONGEST grind in this whole suite) — see
+      # the "removes the feature" test's own comment for why this order
+      # matters; it matters most of all here.
       %{city_id: city_id, tile: tile} =
         found_city_near_feature(world, user, player.id, :rainforest)
 
+      research_bronze_working(world, user)
       worker = Game.spawn_unit_for_test(world, player.id, :worker, tile)
 
       :ok = Game.queue_production(world, user, city_id, :warrior)
@@ -192,49 +241,52 @@ defmodule BrokenOaths.Game.ChopTest do
 
     test "overflow beyond the current item's own cost carries to the next queued item at the next turn boundary",
          %{world: world, user: user, player: player} do
+      # Two DISTINCT chop tiles on the SAME city — see
+      # `found_city_near_two_feature_tiles/4`'s own doc — so both chops
+      # can land before ANY turn ever advances: a size-1, freshly
+      # founded city banks 0 toward its queue, and two Woods lumps
+      # (28 + 28 = 56, at 1 tech) alone already clear the Warrior's own
+      # cost (40) with room to spare, with no pre-banking turn loop
+      # needed at all. That matters here specifically: `research_mining/2`
+      # itself already spends ~55 turns accruing science, during which
+      # THIS city (founded first, so it exists for that whole window —
+      # see the "removes the feature" test's own comment) freely grows
+      # on its own food income; a pre-banking loop that assumed a
+      # STILL-size-1 city with a fixed, captured-once income figure
+      # would silently go stale the instant that growth changed its
+      # worked tiles. Reading `production` fresh, immediately before the
+      # ONE turn that actually resolves the completion, sidesteps that
+      # entirely — this test never needs to know or care what size the
+      # city ended up at.
+      %{city_id: city_id, tiles: [tile_a, tile_b]} =
+        found_city_near_two_feature_tiles(world, user, player.id, :woods)
+
       research_mining(world, user)
-      %{city_id: city_id, tile: tile} = found_city_near_feature(world, user, player.id, :woods)
-      worker = Game.spawn_unit_for_test(world, player.id, :worker, tile)
+      worker_a = Game.spawn_unit_for_test(world, player.id, :worker, tile_a)
+      worker_b = Game.spawn_unit_for_test(world, player.id, :worker, tile_b)
 
       :ok = Game.queue_production(world, user, city_id, :warrior)
       :ok = Game.queue_production(world, user, city_id, :worker)
 
-      # This city's own per-turn income (founding auto-works its own
-      # best-scoring tile, story 878 — `City.persist_found_city!/3` — so
-      # this varies by seed/site, never hardcoded here) times however
-      # many turns bank enough that the chop's own lump (28, Woods at 1
-      # tech) is guaranteed to push the Warrior (cost 40) over the top —
-      # `Improvement.chop_yield/2` already has its own dedicated formula
-      # coverage (`improvement_test.exs`); this test's own subject is
-      # ONLY the overflow-carries mechanics.
-      income = city_by_id(world, user, city_id).production
       lump = Improvement.chop_yield(:woods, Game.player_research(world, user))
-      turns = max(1, div(40 - lump, income) + 1)
-
-      for _ <- 1..turns, do: :ok = Game.advance_turn(world)
-      pre_chop = city_by_id(world, user, city_id)
-      # A sanity check on the "no confound" assumption above: still
-      # size 1 (no growth reshuffled territory/worked_tiles mid-loop).
-      assert pre_chop.size == 1
-
-      assert [%{type: :warrior, banked: pre_chop_banked}, %{type: :worker, banked: 0}] =
-               pre_chop.queue
-
-      assert Game.chop(world, user, worker.id) == :ok
+      assert Game.chop(world, user, worker_a.id) == :ok
+      assert Game.chop(world, user, worker_b.id) == :ok
 
       # `chop/3` only ever credits `banked` — it never runs completion
       # itself, so this is still sitting over cost (40), unresolved.
-      after_chop_banked = pre_chop_banked + lump
-      assert after_chop_banked > 40
+      double_lump = 2 * lump
+      assert double_lump > 40
 
-      assert [%{type: :warrior, banked: ^after_chop_banked}, %{type: :worker, banked: 0}] =
+      assert [%{type: :warrior, banked: ^double_lump}, %{type: :worker, banked: 0}] =
                city_by_id(world, user, city_id).queue
 
-      # This turn's own income lands first, THEN the Warrior completes
-      # and whatever's left over carries into the Worker right behind
-      # it — nothing is wasted.
+      # This turn's own income (read fresh, right before the turn that
+      # actually spends it) lands first, THEN the Warrior completes and
+      # whatever's left over carries into the Worker right behind it —
+      # nothing is wasted.
+      income = city_by_id(world, user, city_id).production
       :ok = Game.advance_turn(world)
-      overflow = after_chop_banked + income - 40
+      overflow = double_lump + income - 40
       assert [%{type: :worker, banked: ^overflow}] = city_by_id(world, user, city_id).queue
     end
 
@@ -250,16 +302,16 @@ defmodule BrokenOaths.Game.ChopTest do
       user: user,
       player: player
     } do
-      research_mining(world, user)
       %{tile: tile} = found_city_near_feature(world, user, player.id, :rainforest)
+      research_mining(world, user)
       worker = Game.spawn_unit_for_test(world, player.id, :worker, tile)
 
       assert Game.chop(world, user, worker.id) == {:error, :tech_locked}
     end
 
     test "spends a worker build charge", %{world: world, user: user, player: player} do
-      research_mining(world, user)
       %{tile: tile} = found_city_near_feature(world, user, player.id, :woods)
+      research_mining(world, user)
       worker = Game.spawn_unit_for_test(world, player.id, :worker, tile)
       assert worker.charges == 3
 
@@ -268,8 +320,8 @@ defmodule BrokenOaths.Game.ChopTest do
     end
 
     test "a worker with no charges left can't chop", %{world: world, user: user, player: player} do
-      research_mining(world, user)
       %{tile: tile} = found_city_near_feature(world, user, player.id, :woods)
+      research_mining(world, user)
       worker = Game.spawn_unit_for_test(world, player.id, :worker, tile)
 
       Repo.update_all(from(u in Unit, where: u.id == ^worker.id), set: [charges: 0])
@@ -283,8 +335,8 @@ defmodule BrokenOaths.Game.ChopTest do
       user: user,
       player: player
     } do
-      research_mining(world, user)
       %{tile: tile} = found_city_near_feature(world, user, player.id, :woods)
+      research_mining(world, user)
       worker = Game.spawn_unit_for_test(world, player.id, :worker, tile)
 
       Repo.update_all(from(u in Unit, where: u.id == ^worker.id), set: [charges: 1])
@@ -313,8 +365,8 @@ defmodule BrokenOaths.Game.ChopTest do
     end
 
     test "refuses a tile with a hostile co-occupant", %{world: world, user: user, player: player} do
-      research_mining(world, user)
       %{tile: tile} = found_city_near_feature(world, user, player.id, :woods)
+      research_mining(world, user)
       worker = Game.spawn_unit_for_test(world, player.id, :worker, tile)
       _barbarian = Game.spawn_barbarian_for_test(world, tile)
 
@@ -322,8 +374,8 @@ defmodule BrokenOaths.Game.ChopTest do
     end
 
     test "a chopped grassland becomes Farm-allowed", %{world: world, user: user, player: player} do
-      research_mining(world, user)
       %{tile: tile} = found_city_near_farmable_woods(world, user, player.id)
+      research_mining(world, user)
       worker = Game.spawn_unit_for_test(world, player.id, :worker, tile)
 
       assert Game.start_improvement(world, user, worker.id, :farm) == {:error, :invalid_terrain}
@@ -333,8 +385,8 @@ defmodule BrokenOaths.Game.ChopTest do
     end
 
     test "refuses a unit_id the caller doesn't own", %{world: world, user: user, player: player} do
-      research_mining(world, user)
       %{tile: tile} = found_city_near_feature(world, user, player.id, :woods)
+      research_mining(world, user)
       worker = Game.spawn_unit_for_test(world, player.id, :worker, tile)
 
       stranger = UsersFixtures.user_fixture()
@@ -344,8 +396,8 @@ defmodule BrokenOaths.Game.ChopTest do
     end
 
     test "refuses a non-worker unit", %{world: world, user: user, player: player} do
-      research_mining(world, user)
       %{tile: tile} = found_city_near_feature(world, user, player.id, :woods)
+      research_mining(world, user)
       warrior = Game.spawn_unit_for_test(world, player.id, :warrior, tile)
 
       assert Game.chop(world, user, warrior.id) == {:error, :not_worker}
@@ -369,8 +421,8 @@ defmodule BrokenOaths.Game.ChopTest do
       user: user,
       player: player
     } do
-      research_mining(world, user)
       %{tile: tile} = found_city_near_feature(world, user, player.id, :woods)
+      research_mining(world, user)
       worker = Game.spawn_unit_for_test(world, player.id, :worker, tile)
 
       assert Game.chop(world, user, worker.id) == :ok
