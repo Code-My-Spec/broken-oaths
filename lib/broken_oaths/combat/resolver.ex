@@ -46,24 +46,30 @@ defmodule BrokenOaths.Combat.Resolver do
   from the same tick-state always agree, which lockstep resolution
   requires.
 
-  ## Fortify (story 920)
+  ## Fortify (story 920, reworked to ramp like Civ 6)
 
   `fortify/3`-driven (see `BrokenOaths.Units.Unit.fortify/3`) — a
   `:defend`-capable unit's own defensive stance, applied the instant
-  it's chosen, no dig-in turn: +50% of the unit's BASE strength,
+  it's chosen (no dig-in turn) at a PARTIAL level that ramps to FULL
+  the longer it holds: `unit.fortified_turns` is 1 the instant it
+  fortifies (a QUARTER of the unit's BASE strength) and 2, capped
+  there, once the unit survives a whole turn boundary without moving
+  or attacking (`Simulation.Turn.Movement.advance_fortify/1` — HALF of
+  base, matching Civ 6's own +3-after-1-turn/+6-after-2-turns ramp).
   DEFENSE ONLY (the attacker never gets it, even if the attacker itself
-  happens to be fortified — see `combat_strength/3`'s own `side` check
-  below), folded into strength BEFORE the wounded penalty scales it,
-  same ordering as the lord's aura above — `(base + aura + round(base *
-  0.5)) * wounded`. Composes with the garrison bonus (story 895) the
-  same way the aura does: `garrisoned_strength/3` multiplies the WHOLE
-  fortified-and-wounded figure by 1.5, never the other way around.
-  Clears the instant the unit itself moves (`Simulation.Turn.Movement.
+  happens to carry a nonzero `fortified_turns` — see
+  `combat_strength/3`'s own `side` check below), folded into strength
+  BEFORE the wounded penalty scales it, same ordering as the lord's
+  aura above — `(base + aura + round(base * ratio)) * wounded`.
+  Composes with the garrison bonus (story 895) the same way the aura
+  does: `garrisoned_strength/3` multiplies the WHOLE fortified-and-
+  wounded figure by 1.5, never the other way around. Clears (back to 0)
+  the instant the unit itself moves (`Simulation.Turn.Movement.
   apply_positions/3`) or attacks (`resolve_attack/4` below, `Combat.
   Camps.resolve_camp_attack/3`, `Combat.Siege`'s own
   `resolve_city_attack/4`) — being attacked while fortified never
-  clears it, so a defender that survives an exchange keeps the bonus
-  for the next one.
+  clears it, so a defender that survives an exchange keeps whatever
+  level it held for the next one.
 
   ## Garrison bonus (story 895)
 
@@ -159,7 +165,7 @@ defmodule BrokenOaths.Combat.Resolver do
           max_hp: pos_integer(),
           movement: non_neg_integer(),
           max_movement: non_neg_integer(),
-          fortified: boolean()
+          fortified_turns: non_neg_integer()
         }
 
   @type attack_result :: %{
@@ -209,10 +215,13 @@ defmodule BrokenOaths.Combat.Resolver do
     galley: 12
   }
   @lord_aura_bonus 2
-  # Story 920 — the Fortify stance's own defensive bonus: half the
-  # unit's BASE strength (see `fortify_bonus/2` and this module's own
-  # "Fortify" doc above).
-  @fortify_bonus_ratio 0.5
+  # Story 920 rework — the Fortify stance's own defensive bonus ramps
+  # with how long the unit has held it (`unit.fortified_turns`, see
+  # `fortify_bonus/2` and this module's own "Fortify" doc above): a
+  # QUARTER of the unit's BASE strength at 1 turn held (partial), HALF
+  # at 2+ (full, unchanged from the flat rate this shipped with).
+  @fortify_partial_ratio 0.25
+  @fortify_full_ratio 0.5
   @garrison_bonus 1.5
   @base_damage 30
   @damage_scale 0.04
@@ -235,13 +244,15 @@ defmodule BrokenOaths.Combat.Resolver do
   `unit`'s effective strength right now: base strength plus the lord's
   aura (when `aura?` is true) plus the Fortify stance's own bonus (when
   `fortified?` is true — story 920, see this module's own "Fortify"
-  doc), scaled by the linear wounded penalty (100% at full HP, 50% at 0
-  HP). Callers determine `aura?` by checking whether a living,
-  same-player lord stands adjacent to `unit`; `fortified?` is DEFENSE
-  ONLY (`combat_strength/3` below is the one caller that ever passes
-  `true`, and only for the defending side of an exchange) — this module
-  has no notion of "adjacent," "same player," or "which side of the
-  fight," only the numbers those decisions produce.
+  doc), RAMPED by `unit.fortified_turns` itself (1 -> the partial
+  ratio, 2+ -> the full one), scaled by the linear wounded penalty
+  (100% at full HP, 50% at 0 HP). Callers determine `aura?` by checking
+  whether a living, same-player lord stands adjacent to `unit`;
+  `fortified?` is DEFENSE ONLY (`combat_strength/3` below is the one
+  caller that ever passes `true`, and only for the defending side of an
+  exchange) — this module has no notion of "adjacent," "same player,"
+  or "which side of the fight," only the numbers those decisions
+  produce.
   """
   @spec effective_strength(unit(), boolean(), boolean()) :: float()
   def effective_strength(unit, aura? \\ false, fortified? \\ false) do
@@ -252,7 +263,20 @@ defmodule BrokenOaths.Combat.Resolver do
   defp aura_bonus(true), do: @lord_aura_bonus
   defp aura_bonus(false), do: 0
 
-  defp fortify_bonus(unit, true), do: round(base_strength(unit.type) * @fortify_bonus_ratio)
+  # `fortified?` is the caller's own "does the Fortify bonus even apply
+  # to this side of the exchange" gate (`combat_strength/3`'s own
+  # defense-only check below) — once true, the RAMP level itself comes
+  # straight off `unit.fortified_turns`: 2+ is the full bonus, exactly 1
+  # is the partial one, anything else (0, or a hand-built unit map that
+  # predates the field) is none at all.
+  defp fortify_bonus(unit, true) do
+    case Map.get(unit, :fortified_turns, 0) do
+      n when n >= 2 -> round(base_strength(unit.type) * @fortify_full_ratio)
+      1 -> round(base_strength(unit.type) * @fortify_partial_ratio)
+      _ -> 0
+    end
+  end
+
   defp fortify_bonus(_unit, false), do: 0
 
   defp wounded_multiplier(%{hp: hp, max_hp: max_hp}), do: 0.5 + 0.5 * (hp / max_hp)
@@ -296,11 +320,11 @@ defmodule BrokenOaths.Combat.Resolver do
 
   defp combat_strength(unit, opts, side) do
     aura? = Keyword.get(opts, :"#{side}_aura?", false)
-    # Story 920 — defense only: `unit.fortified` never inflates the
-    # ATTACKING side's own strength, even for a unit that happens to
-    # still carry the flag mid-exchange (see this module's own
-    # "Fortify" doc for why that can briefly be true).
-    fortified? = side == :defender and Map.get(unit, :fortified, false)
+    # Story 920 — defense only: `unit.fortified_turns` never inflates
+    # the ATTACKING side's own strength, even for a unit that happens
+    # to still carry a nonzero count mid-exchange (see this module's
+    # own "Fortify" doc for why that can briefly be true).
+    fortified? = side == :defender and Map.get(unit, :fortified_turns, 0) > 0
 
     if Keyword.get(opts, :"#{side}_garrisoned?", false) do
       garrisoned_strength(unit, aura?, fortified?)
@@ -559,13 +583,15 @@ defmodule BrokenOaths.Combat.Resolver do
     taken = if ranged?, do: 0, else: countered
 
     # Story 920 — attacking (melee or a ranged shot) drops the
-    # attacker's own Fortify stance, if any; the defender's own stance
-    # (if it has one) is untouched by simply being attacked — see this
-    # module's "Fortify" doc. `Map.put/3` (not the strict `%{... | ...}`
-    # update syntax) so this never raises on a hand-built test unit map
-    # that predates the `fortified` field.
+    # attacker's own Fortify stance, if any, back to 0; the defender's
+    # own stance (if it has one) is untouched by simply being attacked
+    # — see this module's "Fortify" doc. `Map.put/3` (not the strict
+    # `%{... | ...}` update syntax) so this never raises on a
+    # hand-built test unit map that predates the `fortified_turns`
+    # field.
     new_attacker =
-      %{attacker | hp: max(attacker.hp - taken, 0), movement: 0} |> Map.put(:fortified, false)
+      %{attacker | hp: max(attacker.hp - taken, 0), movement: 0}
+      |> Map.put(:fortified_turns, 0)
 
     new_defender = %{defender | hp: max(defender.hp - dealt, 0)}
 

@@ -140,6 +140,67 @@ defmodule BrokenOaths.Simulation.TurnTest do
     end
   end
 
+  # Story 920 rework — `Movement.advance_fortify/1` runs right after
+  # `resolve_orders/1` in `Turn.tick/1`, so a unit's own `fortified_turns`
+  # (defaulting to 0 via `Map.get/3` for the shared `unit/2` fixture
+  # above, which carries no such key) only ramps when it actually held
+  # still THIS tick — a mover's own fresh 0 (set by `apply_positions/3`)
+  # is never bumped back up.
+  describe "tick/1 Fortify ramp (story 920, Civ 6 ramp)" do
+    test "a unit with no order (holding fortify) ramps from 1 (partial) to 2 (full)" do
+      u = unit(1, tile: 5, max_movement: 2) |> Map.put(:fortified_turns, 1)
+      state = base_state(%{1 => u})
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.units[1].fortified_turns == 2
+    end
+
+    test "the ramp caps at 2 — an already-full unit stays at 2 across another boundary" do
+      u = unit(1, tile: 5, max_movement: 2) |> Map.put(:fortified_turns, 2)
+      state = base_state(%{1 => u})
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.units[1].fortified_turns == 2
+    end
+
+    test "a unit that actually displaces this tick ends it at 0, never ramped" do
+      u = unit(1, tile: 5, max_movement: 2) |> Map.put(:fortified_turns, 1)
+      order = %{kind: :move, path: [10, 11], status: :pending}
+      state = base_state(%{1 => u}, %{1 => order})
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.units[1].tile_id == 11
+      assert new_state.units[1].fortified_turns == 0
+    end
+
+    test "a unit whose own step is blocked in place keeps and ramps its fortify, same as never having an order" do
+      u = unit(1, tile: 5, max_movement: 1) |> Map.put(:fortified_turns, 1)
+      order = %{kind: :move, path: [5], status: :pending}
+      state = base_state(%{1 => u}, %{1 => order})
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.units[1].tile_id == 5
+      assert new_state.units[1].fortified_turns == 2
+    end
+
+    test "a unit that never fortified (no key at all, like every other tick_test.exs fixture) is left untouched" do
+      u = unit(1, tile: 5, max_movement: 2)
+      state = base_state(%{1 => u})
+
+      {new_state, _events} = Turn.tick(state)
+
+      # `advance_fortify/1` never ADDS the key (`bump_fortify/1`'s own
+      # `0 -> unit` clause returns the unit as-is) — same `Map.get/3`
+      # default (0, not fortified) every other reader of this field
+      # already uses.
+      assert Map.get(new_state.units[1], :fortified_turns, 0) == 0
+    end
+  end
+
   describe "tick/1 simultaneous conflict resolution" do
     test "two units converging on the same tile resolve to exactly one occupant, lowest id wins" do
       u1 = unit(1, tile: 1, max_movement: 1)

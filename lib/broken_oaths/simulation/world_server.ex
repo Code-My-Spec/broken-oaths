@@ -348,9 +348,10 @@ defmodule BrokenOaths.Simulation.WorldServer do
 
   # Story 920 — the Fortify stance's own single-target, no-result
   # command: same immediate-resolution, persist+broadcast shape as
-  # `:attack` above (a bare flag flip is still a unit-only diff
-  # `persist_tick` picks up now that `persist_unit_changes/2` writes
-  # back `Units.Unit`'s own `fortified` field).
+  # `:attack` above (setting `fortified_turns` to 1 is still a
+  # unit-only diff `persist_tick` picks up now that
+  # `persist_unit_changes/2` writes back `Units.Unit`'s own
+  # `fortified_turns` field).
   def handle_call({:fortify, user, unit_id}, _from, state) do
     case Unit.fortify(state, user, unit_id) do
       {:ok, new_state} ->
@@ -2626,10 +2627,10 @@ defmodule BrokenOaths.Simulation.WorldServer do
           movement: unit.movement,
           hp: unit.hp,
           charges: Map.get(unit, :charges, 3),
-          # Story 920 — the Fortify stance's own flag; `Map.get/3`
-          # default matches the schema's own `false` (see `Units.Unit`'s
-          # own "fortified" moduledoc paragraph).
-          fortified: Map.get(unit, :fortified, false)
+          # Story 920 — the Fortify stance's own turns-held counter;
+          # `Map.get/3` default matches the schema's own `0` (see
+          # `Units.Unit`'s own "fortified_turns" moduledoc paragraph).
+          fortified_turns: Map.get(unit, :fortified_turns, 0)
         ]
       )
     end
@@ -3070,7 +3071,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
       max_movement: u.max_movement,
       charges: u.charges,
       temporary: u.temporary,
-      fortified: u.fortified,
+      fortified_turns: u.fortified_turns,
       rebellion_id: u.rebellion_id
     }
   end

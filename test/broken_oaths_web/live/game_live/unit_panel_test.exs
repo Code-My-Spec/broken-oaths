@@ -195,9 +195,11 @@ defmodule BrokenOathsWeb.GameLive.UnitPanelTest do
   end
 
   # Story 920 — the discoverable Fortify affordance: a `:defend`-capable
-  # unit not yet braced gets the button; once braced, a "Fortified"
-  # badge stands in for it instead — never both at once.
-  describe "Fortify (story 920)" do
+  # unit not yet braced gets the button; once braced, a status badge
+  # stands in for it instead — never both at once. Reworked to ramp
+  # like Civ 6: the badge itself reads "Fortifying" at the partial (1)
+  # level and "Fortified" at the full (2+) one.
+  describe "Fortify (story 920, Civ 6 ramp)" do
     test "shows the Fortify button for a defend-capable unit that isn't fortified" do
       html = render_component(UnitPanel, id: "unit-panel", unit: @lord, order: nil)
 
@@ -207,13 +209,24 @@ defmodule BrokenOathsWeb.GameLive.UnitPanelTest do
       refute html =~ ~s(data-test="unit-fortified")
     end
 
-    test "swaps the button for a Fortified badge once the unit carries the flag" do
-      fortified_lord = Map.put(@lord, :fortified, true)
+    test "swaps the button for a Fortifying badge at fortified_turns 1 (the partial bonus)" do
+      fortifying_lord = Map.put(@lord, :fortified_turns, 1)
+
+      html = render_component(UnitPanel, id: "unit-panel", unit: fortifying_lord, order: nil)
+
+      assert html =~ ~s(data-test="unit-fortified")
+      assert html =~ "Fortifying"
+      refute html =~ ~s(data-test="fortify")
+    end
+
+    test "the badge reads Fortified at fortified_turns 2+ (the full bonus)" do
+      fortified_lord = Map.put(@lord, :fortified_turns, 2)
 
       html = render_component(UnitPanel, id: "unit-panel", unit: fortified_lord, order: nil)
 
       assert html =~ ~s(data-test="unit-fortified")
       assert html =~ "Fortified"
+      refute html =~ "Fortifying"
       refute html =~ ~s(data-test="fortify")
     end
 
@@ -229,7 +242,7 @@ defmodule BrokenOathsWeb.GameLive.UnitPanelTest do
       refute html =~ ~s(data-test="unit-fortified")
     end
 
-    test "defaults to not fortified when the unit map carries no :fortified key" do
+    test "defaults to not fortified when the unit map carries no :fortified_turns key" do
       html = render_component(UnitPanel, id: "unit-panel", unit: @lord, order: nil)
 
       refute html =~ ~s(data-test="unit-fortified")

@@ -37,8 +37,8 @@ defmodule BrokenOaths.Combat.ResolverTest do
       max_hp: max_hp,
       movement: Keyword.get(opts, :movement, max_movement),
       max_movement: max_movement,
-      # Story 920 — the Fortify stance's own flag.
-      fortified: Keyword.get(opts, :fortified, false)
+      # Story 920 — the Fortify stance's own turns-held counter.
+      fortified_turns: Keyword.get(opts, :fortified_turns, 0)
     }
   end
 
@@ -150,19 +150,39 @@ defmodule BrokenOaths.Combat.ResolverTest do
       assert Resolver.effective_strength(lord) == 12.0
     end
 
-    test "story 920: the Fortify bonus adds +50% of BASE strength before the wounded penalty scales it" do
-      full = unit(1, type: :warrior, hp: 100, max_hp: 100)
+    test "story 920 ramp: fortified_turns 1 (the instant fortify/3 fires) adds a QUARTER of BASE strength — the partial bonus" do
+      full = unit(1, type: :warrior, hp: 100, max_hp: 100, fortified_turns: 1)
+      # round(10 * 0.25) = 3 (Elixir's round/1 rounds a tie away from zero)
+      assert Resolver.effective_strength(full, false, true) == 13.0
+
+      # At 20/100 HP (0.6x): (10 + 3) * 0.6 = 7.8 — folded in BEFORE
+      # wounding scales it, same ordering the aura already gets (see
+      # the test above).
+      wounded = unit(1, type: :warrior, hp: 20, max_hp: 100, fortified_turns: 1)
+      assert_in_delta Resolver.effective_strength(wounded, false, true), 7.8, 1.0e-9
+    end
+
+    test "story 920 ramp: fortified_turns 2+ adds HALF of BASE strength — the full bonus, unchanged from the flat rate this shipped with" do
+      full = unit(1, type: :warrior, hp: 100, max_hp: 100, fortified_turns: 2)
       assert Resolver.effective_strength(full, false, true) == 15.0
 
-      # At 20/100 HP (0.6x): (10 + 5) * 0.6 = 9.0 — the fortify bonus is
-      # folded in BEFORE wounding scales it, same ordering the aura
-      # already gets (see the test above).
-      wounded = unit(1, type: :warrior, hp: 20, max_hp: 100)
+      # At 20/100 HP (0.6x): (10 + 5) * 0.6 = 9.0
+      wounded = unit(1, type: :warrior, hp: 20, max_hp: 100, fortified_turns: 2)
       assert_in_delta Resolver.effective_strength(wounded, false, true), 9.0, 1.0e-9
     end
 
-    test "story 920: the aura and the fortify bonus stack — (base + aura + fortify) * wounded" do
-      full = unit(1, type: :warrior, hp: 100, max_hp: 100)
+    test "story 920 ramp: fortified_turns caps its own bonus at 2 — a 3rd+ turn held is still the full bonus, not more" do
+      full = unit(1, type: :warrior, hp: 100, max_hp: 100, fortified_turns: 5)
+      assert Resolver.effective_strength(full, false, true) == 15.0
+    end
+
+    test "story 920: the third arg is the defense-only GATE — a nonzero fortified_turns with the gate false applies no bonus" do
+      full = unit(1, type: :warrior, hp: 100, max_hp: 100, fortified_turns: 2)
+      assert Resolver.effective_strength(full, false, false) == 10.0
+    end
+
+    test "story 920: the aura and the full fortify bonus stack — (base + aura + fortify) * wounded" do
+      full = unit(1, type: :warrior, hp: 100, max_hp: 100, fortified_turns: 2)
       # (10 + 2 + 5) * 1.0 = 17.0
       assert Resolver.effective_strength(full, true, true) == 17.0
     end
@@ -250,11 +270,11 @@ defmodule BrokenOaths.Combat.ResolverTest do
     end
   end
 
-  describe "resolve/3 — Fortify (story 920)" do
-    test "a fortified defender takes less damage than an unfortified one, same attacker/roll" do
+  describe "resolve/3 — Fortify (story 920, Civ 6 ramp)" do
+    test "a fortified defender (partial, fortified_turns 1) takes less damage than an unfortified one, same attacker/roll" do
       a = unit(1, type: :warrior, hp: 100, max_hp: 100)
       d = unit(2, type: :warrior, hp: 100, max_hp: 100)
-      fortified_d = %{d | fortified: true}
+      fortified_d = %{d | fortified_turns: 1}
 
       for seed <- 1..20 do
         plain = Resolver.resolve(a, d, seed: {:fortify, seed}).damage_to_defender
@@ -264,9 +284,22 @@ defmodule BrokenOaths.Combat.ResolverTest do
       end
     end
 
+    test "a fully-ramped (2+) fortified defender takes no more damage than a first-turn (1) one, same attacker/roll" do
+      a = unit(1, type: :warrior, hp: 100, max_hp: 100)
+      partial_d = unit(2, type: :warrior, hp: 100, max_hp: 100, fortified_turns: 1)
+      full_d = %{partial_d | fortified_turns: 2}
+
+      for seed <- 1..20 do
+        partial = Resolver.resolve(a, partial_d, seed: {:ramp, seed}).damage_to_defender
+        full = Resolver.resolve(a, full_d, seed: {:ramp, seed}).damage_to_defender
+
+        assert full <= partial
+      end
+    end
+
     test "fortify never boosts the ATTACKING side's own strength, even if the attacker itself is fortified" do
-      fortified_attacker = unit(1, type: :warrior, hp: 100, max_hp: 100, fortified: true)
-      plain_attacker = %{fortified_attacker | fortified: false}
+      fortified_attacker = unit(1, type: :warrior, hp: 100, max_hp: 100, fortified_turns: 2)
+      plain_attacker = %{fortified_attacker | fortified_turns: 0}
       d = unit(2, type: :warrior, hp: 100, max_hp: 100)
 
       for seed <- 1..20 do
@@ -577,32 +610,32 @@ defmodule BrokenOaths.Combat.ResolverTest do
   end
 
   describe "attack/4 and shoot/4 clear the attacker's own Fortify stance (story 920)" do
-    test "a melee attack drops the attacker's own fortify — the defender's is untouched" do
-      attacker = unit(1, type: :warrior, tile_id: 0, player_id: 1, fortified: true)
+    test "a melee attack drops the attacker's own fortify to 0 — the defender's is untouched" do
+      attacker = unit(1, type: :warrior, tile_id: 0, player_id: 1, fortified_turns: 2)
       target_tile = tile_at_distance(0, 1)
 
       defender =
-        unit(2, type: :warrior, tile_id: target_tile, player_id: nil, fortified: true)
+        unit(2, type: :warrior, tile_id: target_tile, player_id: nil, fortified_turns: 1)
 
       st = state(%{1 => attacker, 2 => defender})
 
       assert {:ok, _result, new_state} = Resolver.attack(st, %{id: 1}, 1, 2)
 
-      refute new_state.units[1].fortified
-      # Being attacked is not "acting" — a surviving defender keeps its
-      # own stance (see this module's own "Fortify" doc).
-      assert new_state.units[2].fortified
+      assert new_state.units[1].fortified_turns == 0
+      # Being attacked is not "acting" — a surviving defender keeps
+      # whatever level it held (see this module's own "Fortify" doc).
+      assert new_state.units[2].fortified_turns == 1
     end
 
     test "a ranged shot drops the Archer's own fortify the same way" do
-      archer = unit(1, type: :archer, tile_id: 0, player_id: 1, fortified: true)
+      archer = unit(1, type: :archer, tile_id: 0, player_id: 1, fortified_turns: 2)
       target_tile = tile_at_distance(0, 1)
       barbarian = unit(2, type: :barbarian_warrior, tile_id: target_tile, player_id: nil)
       st = state(%{1 => archer, 2 => barbarian})
 
       assert {:ok, _result, new_state} = Resolver.shoot(st, %{id: 1}, 1, 2)
 
-      refute new_state.units[1].fortified
+      assert new_state.units[1].fortified_turns == 0
     end
   end
 end

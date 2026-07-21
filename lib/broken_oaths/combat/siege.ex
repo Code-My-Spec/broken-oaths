@@ -402,12 +402,13 @@ defmodule BrokenOaths.Combat.Siege do
     new_city = take_damage(city, dealt)
 
     # Story 920 — a siege attack (melee or a ranged shot) drops the
-    # attacker's own Fortify stance too, same as unit-vs-unit
+    # attacker's own Fortify stance too (back to 0), same as unit-vs-unit
     # `Resolver.resolve_attack/4`. `Map.put/3`, not the strict `%{... |
     # ...}` syntax, so this never raises on a hand-built test unit map
-    # that predates the `fortified` field.
+    # that predates the `fortified_turns` field.
     new_attacker =
-      %{attacker | hp: max(attacker.hp - taken, 0), movement: 0} |> Map.put(:fortified, false)
+      %{attacker | hp: max(attacker.hp - taken, 0), movement: 0}
+      |> Map.put(:fortified_turns, 0)
 
     state =
       %{

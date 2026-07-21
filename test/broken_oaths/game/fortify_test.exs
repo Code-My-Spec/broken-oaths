@@ -35,22 +35,21 @@ defmodule BrokenOaths.Game.FortifyTest do
   end
 
   describe "fortify/3" do
-    test "sets the flag on the caller's own defend-capable unit", %{world: world, user: user} do
+    test "sets fortified_turns to 1 (the partial bonus) on the caller's own defend-capable unit",
+         %{world: world, user: user} do
       lord = lord_of(world, user)
-      refute lord.fortified
+      assert lord.fortified_turns == 0
 
       assert Game.fortify(world, user, lord.id) == :ok
-      assert unit_by_id(world, user, lord.id).fortified
+      assert unit_by_id(world, user, lord.id).fortified_turns == 1
     end
 
-    test "is idempotent — fortifying an already-fortified unit stays :ok", %{
-      world: world,
-      user: user
-    } do
+    test "is idempotent — fortifying an already-fortified unit stays :ok and doesn't reset the count",
+         %{world: world, user: user} do
       lord = lord_of(world, user)
       assert Game.fortify(world, user, lord.id) == :ok
       assert Game.fortify(world, user, lord.id) == :ok
-      assert unit_by_id(world, user, lord.id).fortified
+      assert unit_by_id(world, user, lord.id).fortified_turns == 1
     end
 
     test "refuses a unit_id the caller doesn't own", %{world: world, user: user} do
@@ -87,7 +86,7 @@ defmodule BrokenOaths.Game.FortifyTest do
 
       :ok = WorldServer.restart(world)
 
-      assert unit_by_id(world, user, lord.id).fortified
+      assert unit_by_id(world, user, lord.id).fortified_turns == 1
     end
   end
 
@@ -95,14 +94,14 @@ defmodule BrokenOaths.Game.FortifyTest do
     test "moving the unit drops its own fortify", %{world: world, user: user} do
       lord = lord_of(world, user)
       assert Game.fortify(world, user, lord.id) == :ok
-      assert unit_by_id(world, user, lord.id).fortified
+      assert unit_by_id(world, user, lord.id).fortified_turns == 1
 
       target_tile = adjacent_land_tile(world, lord.tile_id)
       assert {:ok, _result} = Game.queue_move(world, user, lord.id, target_tile)
 
       moved = unit_by_id(world, user, lord.id)
       assert moved.tile_id == target_tile
-      refute moved.fortified
+      assert moved.fortified_turns == 0
     end
 
     test "attacking drops the attacker's own fortify", %{world: world, user: user} do
@@ -114,7 +113,36 @@ defmodule BrokenOaths.Game.FortifyTest do
 
       assert {:ok, _result} = Game.attack(world, user, lord.id, barbarian.id)
 
-      refute unit_by_id(world, user, lord.id).fortified
+      assert unit_by_id(world, user, lord.id).fortified_turns == 0
+    end
+  end
+
+  describe "fortify/3 ramps at the turn boundary (story 920, Civ 6 ramp)" do
+    test "a unit that holds fortify across a turn boundary ramps from 1 (partial) to 2 (full)", %{
+      world: world,
+      user: user
+    } do
+      lord = lord_of(world, user)
+      assert Game.fortify(world, user, lord.id) == :ok
+      assert unit_by_id(world, user, lord.id).fortified_turns == 1
+
+      assert Game.advance_turn(world) == :ok
+
+      assert unit_by_id(world, user, lord.id).fortified_turns == 2
+    end
+
+    test "the ramp caps at 2 — a second held boundary doesn't push it further", %{
+      world: world,
+      user: user
+    } do
+      lord = lord_of(world, user)
+      assert Game.fortify(world, user, lord.id) == :ok
+
+      assert Game.advance_turn(world) == :ok
+      assert unit_by_id(world, user, lord.id).fortified_turns == 2
+
+      assert Game.advance_turn(world) == :ok
+      assert unit_by_id(world, user, lord.id).fortified_turns == 2
     end
   end
 end

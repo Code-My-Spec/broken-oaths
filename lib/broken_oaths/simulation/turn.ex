@@ -139,13 +139,15 @@ defmodule BrokenOaths.Simulation.Turn do
 
   ## Movement resolution
 
-  `BrokenOaths.Simulation.Turn.Movement` (`reset_movement/1`, `resolve_orders/1`)
-  — see that module's own moduledoc for the full lockstep-round
-  collision contract. At the start of a tick every unit's `movement`
-  resets to its `max_movement`; orders with `status: :pending` then
-  resolve in lockstep rounds, one step per round per still-active
-  mover, movers processed in ascending unit id each round for
-  determinism.
+  `BrokenOaths.Simulation.Turn.Movement` (`reset_movement/1`, `resolve_orders/1`,
+  `advance_fortify/1`) — see that module's own moduledoc for the full
+  lockstep-round collision contract. At the start of a tick every
+  unit's `movement` resets to its `max_movement`; orders with `status:
+  :pending` then resolve in lockstep rounds, one step per round per
+  still-active mover, movers processed in ascending unit id each round
+  for determinism. Right after, `advance_fortify/1` ramps the Fortify
+  stance (story 920) of every unit that stayed put and didn't fight
+  this tick.
 
   ## City loop phases
 
@@ -277,6 +279,7 @@ defmodule BrokenOaths.Simulation.Turn do
       state
       |> Movement.reset_movement()
       |> Movement.resolve_orders()
+      |> Movement.advance_fortify()
       |> Improvement.advance()
       |> Production.accrue_cities()
 

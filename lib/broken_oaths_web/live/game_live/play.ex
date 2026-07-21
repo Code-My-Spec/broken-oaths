@@ -858,9 +858,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # `"attack"`/`"shoot"` above already use (fortifying is itself a
   # combat-domain command), just no `"game:combat"` push — nothing was
   # struck. `:units_changed` (broadcast by `WorldServer`'s own
-  # `:fortify` handler) is what actually flips `@selected_unit.fortified`
-  # and reveals the badge, the same refresh path every other unit
-  # command already relies on.
+  # `:fortify` handler) is what actually bumps
+  # `@selected_unit.fortified_turns` and reveals the badge, the same
+  # refresh path every other unit command already relies on.
   def handle_event("fortify", %{"unit_id" => unit_id}, socket) do
     %{world: world, user: user} = socket.assigns
 

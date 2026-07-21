@@ -19,9 +19,12 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
       `:charges` (story 882 playtest update, issue 1caa87e9 — a
       worker's remaining build charges; every other unit type carries
       the same field but this panel only ever renders it for `:worker`),
-      `:fortified` (story 920 — the Fortify defensive stance; every
-      unit type carries the field, only a `:defend`-capable one is ever
-      offered the button that sets it)
+      `:fortified_turns` (story 920, ramped to match Civ 6 — the
+      Fortify defensive stance's own turns-held counter: `0` not
+      fortified, `1` the instant `fortify/3` fires (partial bonus),
+      `2`+ once it survives a whole turn boundary held (full bonus);
+      every unit type carries the field, only a `:defend`-capable one
+      is ever offered the button that sets it)
     * `:order` - the unit's queued order, or `nil`. Expected to carry
       `:target_tile` and `:status` (`:pending` | `:interrupted`)
     * `:allowed_improvements` - improvement kinds (`:farm` | `:mine` |
@@ -82,8 +85,8 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
       |> assign(:actions, Actions.available(assigns.unit))
       # Story 920 — same `Map.get/3` default the `:charges` readout
       # already uses: a hand-built unit map (a test fixture, an older
-      # cached assign) may predate the `fortified` field.
-      |> assign(:fortified, Map.get(assigns.unit, :fortified, false))
+      # cached assign) may predate the `fortified_turns` field.
+      |> assign(:fortified_turns, Map.get(assigns.unit, :fortified_turns, 0))
 
     ~H"""
     <div id={@id} data-test="unit-panel" class="card bg-base-200 shadow-sm w-64 relative">
@@ -115,10 +118,19 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
         </p>
         <%!-- Story 920 — the Fortify stance's own status readout: a
              fortified unit always shows this badge, whoever's looking
-             (the flag is public, see `Visibility.format_unit/3`), same
-             "always visible, never a secret" status `unit-crown` has. --%>
-        <div :if={@fortified} data-test="unit-fortified" class="badge badge-info gap-1 w-fit">
-          <.icon name="hero-shield-check" class="size-3" /> Fortified
+             (the counter is public, see `Visibility.format_unit/3`),
+             same "always visible, never a secret" status `unit-crown`
+             has. The label itself tracks the Civ 6 ramp — "Fortifying"
+             at the partial (1) level, "Fortified" once it's ramped to
+             the full (2+) one — but `data-test="unit-fortified"` stays
+             present at either level, so nothing downstream has to know
+             which. --%>
+        <div
+          :if={@fortified_turns > 0}
+          data-test="unit-fortified"
+          class="badge badge-info gap-1 w-fit"
+        >
+          <.icon name="hero-shield-check" class="size-3" /> {fortify_label(@fortified_turns)}
         </div>
         <.order_summary order={@order} />
 
@@ -139,7 +151,7 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
              both at once). Applies immediately — no confirmation, no
              movement spent. --%>
         <button
-          :if={:defend in @actions and not @fortified}
+          :if={:defend in @actions and @fortified_turns == 0}
           type="button"
           data-test="fortify"
           phx-click="fortify"
@@ -340,6 +352,12 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
   defp improvement_label(:mine), do: "Mine"
   defp improvement_label(:road), do: "Road"
   defp improvement_label(:pasture), do: "Pasture"
+
+  # Story 920 — the Fortify badge's own ramp-aware label: 1 is the
+  # partial bonus, still "digging in"; 2+ (capped there, see
+  # `Simulation.Turn.Movement.advance_fortify/1`) is the full one.
+  defp fortify_label(1), do: "Fortifying"
+  defp fortify_label(_), do: "Fortified"
 
   attr :order, :map, default: nil
 

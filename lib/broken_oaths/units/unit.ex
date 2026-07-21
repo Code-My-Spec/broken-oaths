@@ -30,17 +30,22 @@ defmodule BrokenOaths.Units.Unit do
   buildable catalog, not here — this schema only shapes and validates
   whatever stats it's given.
 
-  `fortified` (story 920) flags the Fortify defensive stance: any
-  `:defend`-capable type (`BrokenOaths.Units.Actions.available/1`) may
-  set it via `fortify/3` below for an immediate defensive combat bonus
-  (`BrokenOaths.Combat.Resolver.effective_strength/2`) that holds until
-  the unit itself moves (`BrokenOaths.Simulation.Turn.Movement.
-  apply_positions/3`) or attacks (`BrokenOaths.Combat.Resolver.
-  resolve_attack/4`, `BrokenOaths.Combat.Camps.resolve_camp_attack/3`,
-  `BrokenOaths.Combat.Siege`'s own `resolve_city_attack/4`) — being
-  attacked never clears it. Generic on the schema like `charges`/
-  `temporary` above; a barbarian or civilian-only type simply carries
-  the `false` default and is never read for it.
+  `fortified_turns` (story 920, reworked to ramp like Civ 6) counts how
+  many turn boundaries the Fortify defensive stance has held: `0` not
+  fortified; `1` the instant `fortify/3` below fires (any
+  `:defend`-capable type, `BrokenOaths.Units.Actions.available/1`) — the
+  PARTIAL bonus; `2` (capped there) once the unit survives a whole turn
+  boundary untouched (`BrokenOaths.Simulation.Turn.Movement.
+  advance_fortify/1`) — the FULL bonus
+  (`BrokenOaths.Combat.Resolver.effective_strength/3` reads the count
+  to pick the ratio). Holds until the unit itself moves
+  (`BrokenOaths.Simulation.Turn.Movement.apply_positions/3`, which resets
+  it to `0`) or attacks (`BrokenOaths.Combat.Resolver.resolve_attack/4`,
+  `BrokenOaths.Combat.Camps.resolve_camp_attack/3`,
+  `BrokenOaths.Combat.Siege`'s own `resolve_city_attack/4`, same reset)
+  — being attacked never clears it. Generic on the schema like
+  `charges`/`temporary` above; a barbarian or civilian-only type simply
+  carries the `0` default and is never read for it.
 
   `charges` (story 882 playtest update, issue 1caa87e9 — Civ 6 Builder
   convention) defaults to 3 and is generic on the schema, but only a
@@ -115,7 +120,7 @@ defmodule BrokenOaths.Units.Unit do
           player_id: integer() | nil,
           camp_id: integer() | nil,
           temporary: boolean(),
-          fortified: boolean(),
+          fortified_turns: non_neg_integer(),
           rebellion_id: integer() | nil,
           world: World.t() | Ecto.Association.NotLoaded.t(),
           player: Player.t() | Ecto.Association.NotLoaded.t() | nil,
@@ -153,8 +158,9 @@ defmodule BrokenOaths.Units.Unit do
     # at declare-independence time) — see this schema's own moduledoc.
     field :temporary, :boolean, default: false
 
-    # Story 920 — see this schema's own moduledoc "fortified" paragraph.
-    field :fortified, :boolean, default: false
+    # Story 920 — see this schema's own moduledoc "fortified_turns"
+    # paragraph.
+    field :fortified_turns, :integer, default: 0
 
     belongs_to :world, World
     belongs_to :player, Player
@@ -179,7 +185,7 @@ defmodule BrokenOaths.Units.Unit do
       :max_movement,
       :charges,
       :temporary,
-      :fortified,
+      :fortified_turns,
       :rebellion_id
     ])
     |> validate_required([
@@ -197,6 +203,7 @@ defmodule BrokenOaths.Units.Unit do
     |> validate_number(:movement, greater_than_or_equal_to: 0)
     |> validate_number(:max_movement, greater_than_or_equal_to: 0)
     |> validate_number(:charges, greater_than_or_equal_to: 0)
+    |> validate_number(:fortified_turns, greater_than_or_equal_to: 0)
     |> validate_hp_within_max()
     |> validate_movement_within_max()
     |> assoc_constraint(:world)
@@ -449,12 +456,21 @@ defmodule BrokenOaths.Units.Unit do
 
   @doc """
   Fortify `unit_id`: grants `user`'s own unit the defensive stance
-  (story 920) immediately — no dig-in turn, no movement spent. Legal
-  for any `:defend`-capable type (`Units.Actions.available/1` — every
-  player-commandable type except a barbarian) and idempotent (fortifying
-  an already-fortified unit is a harmless no-op). The bonus itself lives
-  in `Combat.Resolver.effective_strength/2`; this function only flips
-  the flag that bonus reads. Holds until the unit next moves
+  (story 920) immediately — no dig-in turn, no movement spent — at its
+  PARTIAL level (`fortified_turns` 1 of 2, see this module's own
+  moduledoc "fortified_turns" paragraph); it ramps to the full bonus on
+  its own at the next turn boundary if the unit holds
+  (`Simulation.Turn.Movement.advance_fortify/1`). Legal for any
+  `:defend`-capable type (`Units.Actions.available/1` — every
+  player-commandable type except a barbarian) and idempotent —
+  re-fortifying an already-fortified unit is a harmless no-op that
+  never DOWNGRADES an already-ramped (2) unit back to partial (1), via
+  `max(unit.fortified_turns, 1)` rather than a blind overwrite (a
+  judgment call: the UI itself never offers the button once
+  `fortified_turns > 0` — see `UnitPanel` — so this only guards a
+  direct/test caller). The bonus itself lives in
+  `Combat.Resolver.effective_strength/3`; this function only sets the
+  counter that bonus reads. Holds until the unit next moves
   (`Simulation.Turn.Movement.apply_positions/3`) or attacks
   (`Combat.Resolver.resolve_attack/4`, `Combat.Camps.
   resolve_camp_attack/3`, `Combat.Siege`'s own `resolve_city_attack/4`)
@@ -473,10 +489,22 @@ defmodule BrokenOaths.Units.Unit do
         {:error, :not_fortifiable}
 
       true ->
-        new_unit = Map.put(unit, :fortified, true)
+        fortified_turns = max(Map.get(unit, :fortified_turns, 0), 1)
+        new_unit = Map.put(unit, :fortified_turns, fortified_turns)
         {:ok, %{state | units: Map.put(state.units, unit_id, new_unit)}}
     end
   end
+
+  @doc """
+  Whether `unit` currently holds ANY level of the Fortify stance (story
+  920's ramp — see this module's own "fortified_turns" moduledoc
+  paragraph): true for both the partial (`fortified_turns == 1`) and
+  full (`fortified_turns >= 2`) bonus. `Map.get/3` defaults to `0` (not
+  fortified) so a hand-built unit map that predates the field — a test
+  fixture, an older cached assign — never raises.
+  """
+  @spec fortified?(map()) :: boolean()
+  def fortified?(unit), do: Map.get(unit, :fortified_turns, 0) > 0
 
   # -------------------------------------------------------------------
   # Healing (moved from `BrokenOaths.Simulation.Turn`'s own private

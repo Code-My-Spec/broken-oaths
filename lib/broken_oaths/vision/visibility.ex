@@ -190,11 +190,13 @@ defmodule BrokenOaths.Vision.Visibility do
       # just the owner's own view, since a temporary rebellion unit's
       # own flag is public knowledge (it's on the board).
       temporary: Map.get(unit, :temporary, false),
-      # Story 920 — the Fortify stance's own flag: public knowledge like
+      # Story 920 — the Fortify stance's own turns-held counter (0 not
+      # fortified, 1 partial, 2+ full — see `Units.Unit`'s own
+      # "fortified_turns" moduledoc paragraph): public knowledge like
       # `temporary` above (a fortified unit's brace is visible on the
       # board, not a fog-gated secret), so every viewer's own wire
       # format carries it, not just the owner's.
-      fortified: Map.get(unit, :fortified, false),
+      fortified_turns: Map.get(unit, :fortified_turns, 0),
       order: order
     }
   end

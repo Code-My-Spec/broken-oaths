@@ -4,7 +4,9 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
   `BrokenOaths.Simulation.Turn.tick/1` runs first, every tick: reset every
   unit's movement to its max, then resolve every `:pending` move order
   in lockstep rounds (one step per round per still-active mover,
-  movers processed in ascending unit id each round for determinism). A
+  movers processed in ascending unit id each round for determinism),
+  then (story 920) ramp every unit's still-held Fortify stance by one
+  turn (`advance_fortify/1` below). A
   step is blocked when its destination is occupied at that instant —
   either by a unit that never moves this round or by a unit that
   claimed the tile earlier in the same round. A blocked mover halts for
@@ -68,6 +70,37 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
       | units: apply_positions(state.units, movers, positions),
         orders: apply_orders(state.orders, movers)
     }
+  end
+
+  @doc """
+  Story 920 rework — ramp every held Fortify stance by one turn at the
+  boundary (Civ 6's own +3-after-1-turn/+6-after-2-turns shape, ratio-
+  mapped by `Combat.Resolver.effective_strength/3`): any unit whose own
+  `fortified_turns` is still >= 1 gets bumped by one, capped at 2. MUST
+  run AFTER `resolve_orders/1`, never before — that phase's own
+  `apply_positions/3` above already zeroed `fortified_turns` for anyone
+  who actually displaced this tick, and every clear-on-attack site
+  (`Combat.Resolver.resolve_attack/4`, `Combat.Camps.
+  resolve_camp_attack/3`, `Combat.Siege`'s own `resolve_city_attack/4`)
+  already zeroed anyone who fought, all BEFORE this tick boundary ever
+  runs (attacks resolve the instant they're requested, not queued) — so
+  by the time this runs, a nonzero `fortified_turns` is exactly a unit
+  that stayed put and didn't fight THIS tick. 1 (set the instant
+  `Units.Unit.fortify/3` was called, this turn or an earlier one)
+  becomes 2 the first time it survives a whole boundary untouched;
+  already-2 stays capped there.
+  """
+  @spec advance_fortify(map()) :: map()
+  def advance_fortify(state) do
+    units = Map.new(state.units, fn {id, unit} -> {id, bump_fortify(unit)} end)
+    %{state | units: units}
+  end
+
+  defp bump_fortify(unit) do
+    case Map.get(unit, :fortified_turns, 0) do
+      0 -> unit
+      n -> Map.put(unit, :fortified_turns, min(n + 1, 2))
+    end
   end
 
   @doc """
@@ -251,22 +284,28 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
   # its own tile (`attempt_step/5`'s degenerate/blocked branches — the
   # SAME tile before and after) hasn't actually "moved" in the sense
   # Fortify's own "clears when the unit acts" rule cares about, so its
-  # own stance (if any) survives; a unit that DID displace loses it, the
-  # same way attacking does (`Combat.Resolver.resolve_attack/4`).
-  # `Map.get/3` (not straight `unit.fortified`) so this never raises on
-  # a hand-built test unit map that predates the field.
+  # own stance (whatever level it's at) survives; a unit that DID
+  # displace loses it — back to 0, the same way attacking does
+  # (`Combat.Resolver.resolve_attack/4`). `Map.get/3` (not straight
+  # `unit.fortified_turns`) so this never raises on a hand-built test
+  # unit map that predates the field. This is also what makes
+  # `advance_fortify/1` below correct: it only ever runs AFTER this, so
+  # any unit that displaced this tick already reads 0 by the time it
+  # does.
   defp apply_positions(units, movers, positions) do
     Map.new(units, fn {id, unit} ->
       case Map.fetch(movers, id) do
         {:ok, mover} ->
           new_tile_id = Map.fetch!(positions, id)
-          fortified? = Map.get(unit, :fortified, false) and new_tile_id == unit.tile_id
+
+          fortified_turns =
+            if new_tile_id == unit.tile_id, do: Map.get(unit, :fortified_turns, 0), else: 0
 
           {id,
            unit
            |> Map.put(:tile_id, new_tile_id)
            |> Map.put(:movement, mover.movement_left)
-           |> Map.put(:fortified, fortified?)}
+           |> Map.put(:fortified_turns, fortified_turns)}
 
         :error ->
           {id, unit}
