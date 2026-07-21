@@ -2393,7 +2393,6 @@ defmodule BrokenOathsWeb.GameLive.Play do
             this.raf = null
             this.drawScheduled = false
             this.lowDetail = false
-            this.fullRenderMs = 0
             this.settleTimer = null
             this.arc = 0.02
 
@@ -2574,7 +2573,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
                 const mid = pinchMid()
                 if (this.midLast) panBy(mid.x - this.midLast.x, mid.y - this.midLast.y)
                 this.midLast = mid
-                this.interact()
+                this.interact(true)
                 return
               }
 
@@ -2585,7 +2584,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
               clearTimeout(this.lpTimer)
               this.last = {x: e.clientX, y: e.clientY}
               panBy(dx, dy)
-              this.interact()
+              this.interact(e.pointerType === "touch")
             })
 
             const removePointer = (e) => {
@@ -2616,7 +2615,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
             this.el.addEventListener("wheel", (e) => {
               e.preventDefault()
               this.scale = Math.max(200, Math.min(this.scale * (e.deltaY < 0 ? 1.1 : 0.9), 4000))
-              this.interact()
+              this.interact(false)
             }, {passive: false})
           },
 
@@ -2790,30 +2789,20 @@ defmodule BrokenOathsWeb.GameLive.Play do
           draw() {
             if (this.drawScheduled) return
             this.drawScheduled = true
-            requestAnimationFrame(() => {
-              this.drawScheduled = false
-              // Time full-detail renders so interact() can decide whether
-              // this machine can afford to keep the texture during a pan.
-              const wasLow = this.lowDetail
-              const t0 = performance.now()
-              this.render()
-              if (!wasLow) this.fullRenderMs = performance.now() - t0
-            })
+            requestAnimationFrame(() => { this.drawScheduled = false; this.render() })
           },
 
-          // While the camera is actively moving (pan / pinch / wheel),
-          // fall back to a cheaper frame ONLY IF this machine can't render
-          // the textured frame fast enough to stay smooth — flat terrain
-          // fills instead of the per-tile pattern setTransform, no hairline
-          // grid stroke, no cloud shells. A capable machine (most desktops)
-          // keeps the full texture through the pan; the terrain no longer
-          // "reverts to solid colors" mid-drag (issue 4ed25499). A slow
-          // device still drops to the cheap frame that keeps mobile smooth
-          // (issue 6f5e665b). The threshold (~22ms ≈ 45fps) is measured
-          // against the last full-detail render in draw() above; settling
-          // ~140ms after the gesture always restores full detail.
-          interact() {
-            this.lowDetail = this.fullRenderMs > 22
+          // While the camera is actively moving, optionally fall back to a
+          // cheaper frame — flat terrain fills instead of the per-tile pattern
+          // setTransform, no hairline grid stroke, no cloud shells. This is
+          // gated by the CALLER on input type: TOUCH gestures (mobile pinch/
+          // drag) pass true — the pattern fills genuinely janked there (issue
+          // 6f5e665b) — while a MOUSE pan or wheel zoom on desktop passes
+          // false and always keeps the full texture, so the terrain never
+          // "flashes to flat color" mid-drag (issue 4ed25499 + follow-up).
+          // Settling ~140ms after the gesture restores full detail either way.
+          interact(lowDetail) {
+            this.lowDetail = lowDetail
             clearTimeout(this.settleTimer)
             this.settleTimer = setTimeout(() => { this.lowDetail = false; this.render() }, 140)
             this.draw()
