@@ -908,6 +908,26 @@ defmodule BrokenOaths.Cities.Production do
     %{city | queue: [%{current | banked: current.banked + income} | rest]}
   end
 
+  @doc """
+  Credit a one-time production LUMP straight onto `city`'s current
+  (head) queue item's `banked` (story 927's Chop yield — see
+  `BrokenOaths.Cities.Improvement.chop/3`) — a no-op with an empty
+  queue, the same "nothing to receive it" posture `accrue/3` above
+  already has. Unlike `accrue/3` (THIS TURN's recurring flat +
+  worked-tile income), the caller supplies the raw amount directly, so
+  this never touches `worked_production/3`/the Barracks/Water Mill
+  bonuses. Overflow beyond the current item's own `cost` is never
+  resolved HERE — it simply sits banked past `cost` until the next turn
+  boundary's own `resolve_completions/1` cascades it into the NEXT item
+  via `carry_overflow/2`, the exact same path an ordinary turn's own
+  production income already relies on.
+  """
+  @spec credit(city(), non_neg_integer()) :: city()
+  def credit(%{queue: []} = city, _amount), do: city
+
+  def credit(%{queue: [current | rest]} = city, amount),
+    do: %{city | queue: [%{current | banked: current.banked + amount} | rest]}
+
   defp worked_production(city, world, improvements) do
     city
     |> Yields.worked_yields(world, improvements)
@@ -1265,7 +1285,10 @@ defmodule BrokenOaths.Cities.Production do
 
       base ->
         unit_completions = Enum.map(city_events, &Map.put(base, :type, &1.type))
-        building_completions = Enum.map(newly_completed_buildings(city, new_city), &Map.put(base, :type, &1))
+
+        building_completions =
+          Enum.map(newly_completed_buildings(city, new_city), &Map.put(base, :type, &1))
+
         unit_completions ++ building_completions
     end
   end

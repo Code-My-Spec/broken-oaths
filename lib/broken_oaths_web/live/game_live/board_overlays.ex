@@ -34,6 +34,10 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
   attr :combat_error, :any, required: true
   attr :city_error, :any, required: true
   attr :improvement_error, :any, required: true
+  # Story 927 "Workers chop woods and rainforest" — the Chop command's
+  # own transient error toast, same status `improvement_error` above
+  # already has.
+  attr :chop_error, :any, required: true
   attr :steward_error, :any, required: true
   attr :player_research, :any, required: true
   attr :cities, :list, required: true
@@ -49,6 +53,10 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
   attr :selected_order, :any, required: true
   attr :allowed_improvements, :list, required: true
   attr :current_dig, :any, required: true
+  # Story 927 — `Play`'s own precomputed Chop legality for the selected
+  # unit (`nil | :woods | :rainforest`), same "computed by `Play`, only
+  # rendered here" status `current_dig` above already has.
+  attr :choppable_feature, :any, required: true
   attr :attackable_cities, :list, required: true
   # QA issue 12bed1e4 — the "Shoot" affordance's own target list for a
   # selected Archer, the same "computed by `Play`, only rendered here"
@@ -154,6 +162,12 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
         data-test="improvement-error"
       >
         <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@improvement_error}
+      </div>
+
+      <%!-- Story 927 "Workers chop woods and rainforest" — same toast
+               pattern as `improvement-error` above. --%>
+      <div :if={@chop_error} class="alert alert-error w-auto shadow-lg" data-test="chop-error">
+        <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@chop_error}
       </div>
 
       <%!-- QA issue bd93cc0a: production-stewardship + emergency-
@@ -280,6 +294,7 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
         order={@selected_order}
         allowed_improvements={@allowed_improvements}
         current_dig={@current_dig}
+        choppable_feature={@choppable_feature}
         attackable_cities={@attackable_cities}
         shoot_targets={@shoot_targets}
       />

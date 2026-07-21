@@ -185,7 +185,9 @@ defmodule BrokenOaths.Cities.ProductionTest do
     end
 
     test "refused a second time once the city already has one" do
-      assert Production.can_queue?(city(buildings: [:library]), :library, library_available?: true) ==
+      assert Production.can_queue?(city(buildings: [:library]), :library,
+               library_available?: true
+             ) ==
                {:error, :already_built}
     end
 
@@ -342,14 +344,15 @@ defmodule BrokenOaths.Cities.ProductionTest do
     end
 
     test "dropped from the list entirely once claimed — unlike Copper/coastal's visible-but-disabled posture" do
-      refute :pyramids in
-               Production.available_items(pyramids_available?: true, pyramids_claimed?: true)
+      refute :pyramids in Production.available_items(
+               pyramids_available?: true,
+               pyramids_claimed?: true
+             )
 
-      refute :hanging_gardens in
-               Production.available_items(
-                 hanging_gardens_available?: true,
-                 hanging_gardens_claimed?: true
-               )
+      refute :hanging_gardens in Production.available_items(
+               hanging_gardens_available?: true,
+               hanging_gardens_claimed?: true
+             )
     end
   end
 
@@ -537,6 +540,44 @@ defmodule BrokenOaths.Cities.ProductionTest do
     test "the public accessors match what accrue/3 actually banks" do
       assert Production.barracks_production_bonus() == 1
       assert Production.water_mill_production_bonus() == 1
+    end
+  end
+
+  describe "credit/2 (story 927 — the Chop yield's own one-time lump)" do
+    test "adds straight onto the current (head) queue item's banked" do
+      c = city(queue: [Production.new_item(:warrior)])
+      credited = Production.credit(c, 28)
+      assert [%{type: :warrior, banked: 28, cost: 40}] = credited.queue
+    end
+
+    test "stacks with whatever the item already banked" do
+      c = city(queue: [%{type: :warrior, banked: 12, cost: 40}])
+      credited = Production.credit(c, 28)
+      assert [%{banked: 40}] = credited.queue
+    end
+
+    test "never clamps at cost — nothing is wasted, the overflow just sits banked until the next completion resolves it" do
+      c = city(queue: [%{type: :warrior, banked: 12, cost: 40}])
+      credited = Production.credit(c, 50)
+      assert [%{banked: 62}] = credited.queue
+    end
+
+    test "only ever touches the HEAD item — everything else in the queue is untouched" do
+      c =
+        city(
+          queue: [
+            %{type: :warrior, banked: 0, cost: 40},
+            %{type: :worker, banked: 0, cost: 60}
+          ]
+        )
+
+      credited = Production.credit(c, 28)
+      assert [%{type: :warrior, banked: 28}, %{type: :worker, banked: 0}] = credited.queue
+    end
+
+    test "a no-op with an empty queue — same posture accrue/3 already has" do
+      c = city(queue: [])
+      assert Production.credit(c, 28) == c
     end
   end
 

@@ -112,6 +112,7 @@ defmodule BrokenOaths.Cities.Improvement do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias BrokenOaths.Cities.Production
   alias BrokenOaths.Technology.Research
   alias BrokenOaths.Units.Unit
   alias BrokenOaths.Repo
@@ -325,7 +326,16 @@ defmodule BrokenOaths.Cities.Improvement do
   # removal path `BrokenOaths.Simulation.WorldServer.persist_unit_changes/2`
   # already sweeps a combat death through (diffs `state.units`, deletes
   # whatever's missing).
-  defp spend_charge(units, unit_id, kind) when kind in [:farm, :mine] do
+  defp spend_charge(units, unit_id, kind) when kind in [:farm, :mine],
+    do: spend_worker_charge(units, unit_id)
+
+  defp spend_charge(units, _unit_id, _kind), do: units
+
+  # The actual decrement-or-expend logic Farm/Mine completion (above)
+  # and Chop (`chop/3` below, story 927) both spend a worker charge
+  # through — one place, so the two can never quietly disagree on what
+  # "a worker's last charge" means.
+  defp spend_worker_charge(units, unit_id) do
     case Map.get(units, unit_id) do
       nil ->
         units
@@ -337,8 +347,6 @@ defmodule BrokenOaths.Cities.Improvement do
         end
     end
   end
-
-  defp spend_charge(units, _unit_id, _kind), do: units
 
   # `advance/1` (above) already clears a builder that's gone or walked
   # away — but only as of the START of this tick. Combat
@@ -477,6 +485,160 @@ defmodule BrokenOaths.Cities.Improvement do
   defp parse_kind("pasture"), do: {:ok, :pasture}
   defp parse_kind(_other), do: {:error, :invalid_improvement}
 
+  # -------------------------------------------------------------------
+  # Chop (story 927 "Workers chop woods and rainforest")
+  # -------------------------------------------------------------------
+
+  @type chop_feature :: :woods | :rainforest
+
+  @doc """
+  Chop the Woods/Rainforest feature `unit_id` (a worker) is standing ON,
+  right now — an immediate, one-shot action, unlike Farm/Mine/Road/
+  Pasture's multi-turn `start_improvement/4` above: there is no
+  `:building` row to track, just a permanent tile-clearing DELTA
+  (`state.cleared_features`, threaded into every terrain read via
+  `BrokenOaths.Worlds.Regions.terrain/3` — see that function's own doc
+  for why this has to be a stored delta rather than a mutation of the
+  seed-derived struct) plus a one-time production credit.
+
+  Legal only when EVERY one of these holds:
+
+    * the worker's own tile carries a Woods or Rainforest feature
+      right now (`Regions.terrain/3`'s cleared-aware read — an already-
+      chopped tile has nothing left to chop);
+    * the tile sits inside a city THIS WORKER'S OWNER OWNS (`tile_id in
+      city.territory`) — the lump credits whichever of the player's own
+      cities that is; no owned city in range refuses the chop outright
+      (`:not_territory`);
+    * the chopping player has researched the feature's own unlock —
+      Mining for Woods (`Research.chop_woods_enabled?/1`), Bronze
+      Working for Rainforest (`Research.chop_rainforest_enabled?/1`),
+      Civ 6's own chop-tech convention;
+    * the worker itself has a build charge left (`:no_charges` — unlike
+      Farm/Mine, which only ever spend a charge on COMPLETION and so
+      never need this precondition, Chop resolves immediately and so
+      must refuse UP FRONT rather than let a 0-charge worker chop once
+      more on its way out);
+    * no HOSTILE unit shares the worker's own tile (`:enemy_present`) —
+      since the worker itself must be standing on the target tile, only
+      a hostile CO-occupant matters (one-unit-per-hex already keeps a
+      foreign unit off a tile the worker peacefully occupies, except a
+      barbarian raider mid-tick).
+
+  On success: the tile joins `state.cleared_features` permanently (no
+  un-chop), the worker spends one build charge (expended outright at
+  zero, the SAME `spend_worker_charge/2` removal path Farm/Mine
+  completion already uses), and the owning city's current queue item is
+  credited a one-time production lump (`chop_yield/2` — Woods `20 + 8 *`
+  the chopping player's own completed-tech count, Rainforest 75% of
+  that, rounded down, PM decision) via `Production.credit/2`. Overflow
+  beyond that item's own `cost` is never resolved here — it simply sits
+  banked past `cost` until the next turn boundary's own
+  `Production.resolve_completions/1` cascades it into the NEXT item,
+  the exact same "nothing is ever wasted" path an ordinary turn's own
+  production income already relies on.
+  """
+  @spec chop(map(), map(), integer()) :: {:ok, map()} | {:error, atom()}
+  def chop(state, user, unit_id) do
+    with {:ok, unit} <- owned_worker(state, user, unit_id),
+         {:ok, feature} <- choppable_feature(state, unit),
+         {:ok, city_id} <- owning_city_id(state, unit),
+         :ok <- validate_chop_research(state, unit, feature),
+         :ok <- validate_chop_charges(unit),
+         :ok <- validate_chop_not_hostile_occupied(state, unit) do
+      lump = chop_yield(feature, player_research_for(state, unit.player_id))
+
+      new_state =
+        state
+        |> Map.update(
+          :cleared_features,
+          MapSet.new([unit.tile_id]),
+          &MapSet.put(&1, unit.tile_id)
+        )
+        |> credit_city_production(city_id, lump)
+        |> Map.update!(:units, &spend_worker_charge(&1, unit.id))
+
+      {:ok, new_state}
+    end
+  end
+
+  @doc """
+  The one-time production lump a Chop pays out (PM decision, story
+  927): Woods scales with the chopping player's own progress —
+  `20 + 8 * (completed tech count)`, Civ 6's own "chop yield grows with
+  the game" convention; Rainforest is 75% of that same figure, rounded
+  down.
+  """
+  @spec chop_yield(chop_feature(), Research.player_research()) :: pos_integer()
+  def chop_yield(:woods, player_research), do: 20 + 8 * length(player_research.completed_techs)
+
+  def chop_yield(:rainforest, player_research),
+    do: div(chop_yield(:woods, player_research) * 3, 4)
+
+  # The Woods/Rainforest feature `unit`'s own tile carries RIGHT NOW,
+  # cleared-aware (`Regions.terrain/3`) — an already-chopped tile (or
+  # one that never had a feature) has nothing left to chop.
+  defp choppable_feature(state, unit) do
+    if Regions.tile_class(state.world, unit.tile_id) == :land do
+      case Regions.terrain(state.world, unit.tile_id, cleared_features(state)).feature do
+        feature when feature in [:woods, :rainforest] -> {:ok, feature}
+        _other -> {:error, :not_choppable}
+      end
+    else
+      {:error, :not_choppable}
+    end
+  end
+
+  # The id of whichever of `unit`'s OWNER's own cities has `unit`'s tile
+  # in its territory — the city Chop's own production lump credits. No
+  # owned city in range (the tile isn't this player's own territory at
+  # all) refuses the chop outright, same `:not_territory` atom
+  # `BrokenOaths.Cities.City.assign_worked_tile/5`'s own territory gate
+  # already uses.
+  defp owning_city_id(state, unit) do
+    case Enum.find(state.cities, fn {_id, c} ->
+           c.player_id == unit.player_id and unit.tile_id in c.territory
+         end) do
+      {id, _city} -> {:ok, id}
+      nil -> {:error, :not_territory}
+    end
+  end
+
+  defp validate_chop_research(state, unit, :woods) do
+    if Research.chop_woods_enabled?(player_research_for(state, unit.player_id)),
+      do: :ok,
+      else: {:error, :tech_locked}
+  end
+
+  defp validate_chop_research(state, unit, :rainforest) do
+    if Research.chop_rainforest_enabled?(player_research_for(state, unit.player_id)),
+      do: :ok,
+      else: {:error, :tech_locked}
+  end
+
+  defp validate_chop_charges(unit) do
+    if Map.get(unit, :charges, 3) > 0, do: :ok, else: {:error, :no_charges}
+  end
+
+  # Only a DIFFERENT owner (a rival player, or `nil` — a barbarian)
+  # sharing the worker's own tile blocks a chop; the worker's own
+  # same-owner field-stack escort (if any) is never hostile.
+  defp validate_chop_not_hostile_occupied(state, unit) do
+    hostile? =
+      Enum.any?(state.units, fn {id, other} ->
+        id != unit.id and other.tile_id == unit.tile_id and other.player_id != unit.player_id
+      end)
+
+    if hostile?, do: {:error, :enemy_present}, else: :ok
+  end
+
+  defp credit_city_production(state, city_id, lump) do
+    city = Map.fetch!(state.cities, city_id)
+    %{state | cities: Map.put(state.cities, city_id, Production.credit(city, lump))}
+  end
+
+  defp cleared_features(state), do: Map.get(state, :cleared_features, MapSet.new())
+
   # Pasture (story 905) gates on the tile's RESOURCE
   # (`resource_allowed?/1` — Cattle/Sheep only) and the building
   # worker's OWNER having researched Animal Husbandry
@@ -508,7 +670,7 @@ defmodule BrokenOaths.Cities.Improvement do
         {:error, :invalid_terrain}
 
       not mine_allowed?(
-        Regions.terrain(state.world, tile_id),
+        Regions.terrain(state.world, tile_id, cleared_features(state)),
         Resources.at(state.world, tile_id)
       ) ->
         {:error, :invalid_terrain}
@@ -542,7 +704,11 @@ defmodule BrokenOaths.Cities.Improvement do
       Regions.tile_class(state.world, tile_id) != :land ->
         {:error, :invalid_terrain}
 
-      not allowed?(kind, Regions.terrain(state.world, tile_id)) ->
+      # Story 927 — a Farm-blocking Woods/Rainforest that a worker has
+      # since Chopped reads `feature: nil` here, same as bare terrain
+      # (`Regions.terrain/3`'s own overlay), so a chopped grassland/
+      # plains tile becomes Farm-able the instant it's cleared.
+      not allowed?(kind, Regions.terrain(state.world, tile_id, cleared_features(state))) ->
         {:error, :invalid_terrain}
 
       true ->

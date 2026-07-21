@@ -105,6 +105,37 @@ defmodule BrokenOaths.Cities do
   def cancel_improvement(world, user, unit_id),
     do: WorldServer.call(world, {:cancel_improvement, user, unit_id})
 
+  @doc """
+  Chop (story 927 "Workers chop woods and rainforest"): `unit_id` (a
+  worker owned by `user`) permanently clears the Woods/Rainforest
+  feature on its own tile and dumps a one-time production lump into
+  whichever of `user`'s own cities owns that tile. See
+  `BrokenOaths.Cities.Improvement.chop/3` for the full legality
+  contract and the yield formula.
+  """
+  @spec chop(map(), map(), term()) ::
+          :ok
+          | {:error,
+             :not_owner
+             | :not_worker
+             | :not_choppable
+             | :not_territory
+             | :tech_locked
+             | :no_charges
+             | :enemy_present}
+  def chop(world, user, unit_id), do: WorldServer.call(world, {:chop, user, unit_id})
+
+  @doc """
+  Every tile id a worker has permanently Chopped in `world` (story 927)
+  — a `MapSet`, world-wide (not fog-scoped to `user`; see
+  `BrokenOaths.Simulation.WorldServer`'s own `:cleared_features` handler
+  for why). Feeds `BrokenOaths.Worlds.Regions.terrain/3`'s cleared-aware
+  overlay wherever a caller needs the CURRENT (post-chop) terrain for a
+  tile, not the raw seed-derived one.
+  """
+  @spec cleared_features(map()) :: MapSet.t(term())
+  def cleared_features(world), do: WorldServer.call(world, :cleared_features)
+
   @doc "All of `user`'s cities in `world` (see `BrokenOaths.Simulation.WorldServer` for the shape)."
   def player_cities(world, user), do: WorldServer.call(world, {:player_cities, user})
 

@@ -255,6 +255,14 @@ defmodule BrokenOathsWeb.GameLive.Play do
             selected_order: nil,
             allowed_improvements: [],
             current_dig: nil,
+            # Story 927 "Workers chop woods and rainforest" — real values
+            # arrive via `refresh_board/1`'s own trailing `|> refresh_board()`
+            # below, the same "empty placeholder, filled by the first
+            # refresh" status `improvements`/`allowed_improvements` above
+            # already have.
+            cleared_features: MapSet.new(),
+            choppable_feature: nil,
+            chop_error: nil,
             order_error: nil,
             combat_error: nil,
             selected_city_id: nil,
@@ -419,8 +427,9 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # in the pushed window.
   def handle_event("select_tile", %{"tile_id" => tile_id}, socket) do
     %{world: world, improvements: improvements, player_research: player_research} = socket.assigns
+    cleared_features = Map.get(socket.assigns, :cleared_features, MapSet.new())
     tile_id = PlayView.parse_id(tile_id)
-    terrain = Regions.terrain(world, tile_id)
+    terrain = Regions.terrain(world, tile_id, cleared_features)
     resource = PlayView.visible_resource(world, tile_id, player_research)
     yields = Yields.tile_yield(terrain, resource)
     improvement = Enum.find(improvements, &(&1.tile_id == tile_id))
@@ -526,6 +535,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         selected_order: nil,
         allowed_improvements: [],
         current_dig: nil,
+        choppable_feature: nil,
         attackable_cities: [],
         shoot_targets: [],
         selected_city_id: nil,
@@ -673,6 +683,22 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
       {:error, reason} ->
         {:noreply, assign(socket, improvement_error: PlayView.improvement_error_message(reason))}
+    end
+  end
+
+  # Story 927 "Workers chop woods and rainforest" — resolves immediately
+  # and refreshes inline, same "the button's own effect must appear in
+  # the SAME render as the click" posture `start_improvement`/
+  # `cancel_improvement` above already have (issue b5cc4ae9).
+  def handle_event("chop", %{"unit_id" => unit_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.chop(world, user, PlayView.parse_id(unit_id)) do
+      :ok ->
+        {:noreply, socket |> assign(chop_error: nil) |> refresh_board()}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, chop_error: PlayView.chop_error_message(reason))}
     end
   end
 
@@ -1888,6 +1914,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
     # figure in the SAME refresh that already re-pulls `cities`, with no
     # turn boundary required (criterion 7639).
     player_research = Game.player_research(world, user)
+    # Story 927 — see this module's own mount/3 doc: re-pulled on every
+    # signal, the same "single source of truth" status `improvements`
+    # above already has, so a chop's effect (a Farm now offered, the
+    # Chop button itself disappearing) shows up in the SAME refresh that
+    # already re-pulls `improvements`/`cities`.
+    cleared_features = Game.cleared_features(world)
 
     socket
     |> assign(
@@ -1901,8 +1933,22 @@ defmodule BrokenOathsWeb.GameLive.Play do
       selected_unit: selected_unit,
       selected_order: selected_unit && selected_unit.order,
       allowed_improvements:
-        PlayView.worker_allowed_improvements(world, selected_unit, player_research),
+        PlayView.worker_allowed_improvements(
+          world,
+          selected_unit,
+          player_research,
+          cleared_features
+        ),
       current_dig: PlayView.worker_current_dig(improvements, selected_unit),
+      cleared_features: cleared_features,
+      choppable_feature:
+        PlayView.worker_choppable_feature(
+          world,
+          selected_unit,
+          cities,
+          player_research,
+          cleared_features
+        ),
       attackable_cities: PlayView.attackable_cities(world, selected_unit, enemy_cities),
       shoot_targets: PlayView.shoot_targets(world, selected_unit, units, camps, enemy_cities),
       enemy_cities: enemy_cities,
@@ -2018,6 +2064,13 @@ defmodule BrokenOathsWeb.GameLive.Play do
     improvements = Map.get(socket.assigns, :improvements, [])
     player_research = socket.assigns.player_research
     enemy_cities = Map.get(socket.assigns, :enemy_cities, [])
+    # Story 927 — a chopped tile's own Woods/Rainforest billboard/texture
+    # must stop rendering the instant it's cleared: see `PlayView.
+    # overlay_cleared_features/2`'s own doc for why THIS is the one map
+    # that needs the overlay applied by hand, unlike every server-side
+    # gameplay read (which calls `Regions.terrain/3` fresh, per tile).
+    cleared_features = Map.get(socket.assigns, :cleared_features, MapSet.new())
+    terrain_map = PlayView.overlay_cleared_features(terrain_map, cleared_features)
 
     known = Enum.uniq(visible ++ explored)
     tiles = Enum.map(known, &PlayView.tile_row(&1, mesh, terrain_map))
@@ -2239,9 +2292,18 @@ defmodule BrokenOathsWeb.GameLive.Play do
         PlayView.worker_allowed_improvements(
           socket.assigns.world,
           unit,
-          socket.assigns.player_research
+          socket.assigns.player_research,
+          Map.get(socket.assigns, :cleared_features, MapSet.new())
         ),
       current_dig: PlayView.worker_current_dig(socket.assigns.improvements, unit),
+      choppable_feature:
+        PlayView.worker_choppable_feature(
+          socket.assigns.world,
+          unit,
+          socket.assigns.cities,
+          socket.assigns.player_research,
+          Map.get(socket.assigns, :cleared_features, MapSet.new())
+        ),
       attackable_cities:
         PlayView.attackable_cities(socket.assigns.world, unit, socket.assigns.enemy_cities),
       shoot_targets:
@@ -2254,6 +2316,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         ),
       order_error: nil,
       improvement_error: nil,
+      chop_error: nil,
       selected_city_id: nil,
       selected_city: nil,
       selected_tile: nil,
@@ -2408,6 +2471,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
           combat_error={@combat_error}
           city_error={@city_error}
           improvement_error={@improvement_error}
+          chop_error={@chop_error}
           steward_error={@steward_error}
           player_research={@player_research}
           cities={@cities}
@@ -2419,6 +2483,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
           selected_order={@selected_order}
           allowed_improvements={@allowed_improvements}
           current_dig={@current_dig}
+          choppable_feature={@choppable_feature}
           attackable_cities={@attackable_cities}
           shoot_targets={@shoot_targets}
           selected_city={@selected_city}

@@ -150,6 +150,31 @@ defmodule BrokenOaths.Worlds.Regions do
     end)
   end
 
+  @doc """
+  `terrain/2`, with story 927's worker-cleared overlay applied: the same
+  seed-derived struct, but with `feature: nil` for any `tile_id` present
+  in `cleared_features` (`state.cleared_features` — a `MapSet` of tile
+  ids a worker's Chop action has permanently cleared, see
+  `BrokenOaths.Cities.Improvement.chop/3`). `terrain/2` itself stays the
+  single pure, seed-only source (the ADR's own "never store derived
+  terrain" contract, and still cached in `:persistent_term` exactly as
+  before) — this is the state-aware VIEW every reader that has
+  `cleared_features` on hand should call instead, so movement cost
+  (`Terrain.movement_cost/1`), improvement eligibility
+  (`BrokenOaths.Cities.Improvement.allowed?/2`), and every other
+  terrain-driven rule all agree the instant a tile is chopped.
+  """
+  @spec terrain(World.t(), tile_id, MapSet.t(tile_id)) :: Terrain.t()
+  def terrain(world, tile_id, cleared_features) do
+    base = terrain(world, tile_id)
+
+    if MapSet.member?(cleared_features, tile_id) do
+      %{base | feature: nil}
+    else
+      base
+    end
+  end
+
   # -------------------------------------------------------------------
   # Caching
   # -------------------------------------------------------------------

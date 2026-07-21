@@ -309,6 +309,22 @@ defmodule BrokenOaths.Technology.ResearchTest do
       assert Research.road_enabled?(pr)
     end
 
+    # Story 927 "Workers chop woods and rainforest" — Mining's OTHER
+    # unlock, alongside `mine_duration/1` above.
+    test "chop_woods_enabled?/1 flips on Mining" do
+      refute Research.chop_woods_enabled?(Research.new())
+      pr = %{Research.new() | completed_techs: [:mining]}
+      assert Research.chop_woods_enabled?(pr)
+    end
+
+    # Bronze Working's OTHER unlock, alongside `age/1`/`copper_revealed?/1`/
+    # `barracks_enabled?/1` above.
+    test "chop_rainforest_enabled?/1 flips on Bronze Working" do
+      refute Research.chop_rainforest_enabled?(Research.new())
+      pr = %{Research.new() | completed_techs: [:mining, :bronze_working]}
+      assert Research.chop_rainforest_enabled?(pr)
+    end
+
     # Story 921 — Sailing's own unlock, finally wired (see this
     # module's own moduledoc, "Unlocks").
     test "sailing_enabled?/1 flips on Sailing (the Galley's own gate)" do

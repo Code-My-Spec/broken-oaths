@@ -44,7 +44,7 @@ defmodule BrokenOaths.Units.Actions do
   """
 
   @type unit :: %{optional(atom()) => term(), type: atom()}
-  @type action :: :move | :found_city | :build_improvement | :attack | :shoot | :defend
+  @type action :: :move | :found_city | :build_improvement | :chop | :attack | :shoot | :defend
 
   @doc """
   The action kinds `unit`'s own TYPE ever carries — `nil` (nothing
@@ -55,7 +55,12 @@ defmodule BrokenOaths.Units.Actions do
 
   def available(%{type: :settler}), do: [:move, :found_city, :defend]
 
-  def available(%{type: :worker}), do: [:move, :build_improvement, :defend]
+  # Story 927 — `:chop` joins `:build_improvement` as a Worker-only
+  # coarse type gate: a worker standing on a Woods/Rainforest tile may
+  # Chop it (`BrokenOaths.Cities.Improvement.chop/3`'s own doc has the
+  # real, state-aware legality — tech gate, territory, a charge left,
+  # no hostile co-occupant).
+  def available(%{type: :worker}), do: [:move, :build_improvement, :chop, :defend]
 
   # QA issue 12bed1e4 — the Archer keeps its existing melee `:attack`
   # (the QA-issue-da39e50b first pass never took that away) AND gains

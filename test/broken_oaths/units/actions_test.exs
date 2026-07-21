@@ -12,11 +12,13 @@ defmodule BrokenOaths.Units.ActionsTest do
       assert Actions.available(%{type: :settler}) == [:move, :found_city, :defend]
     end
 
-    test "a worker can move, build improvements, and defend — no :attack, no :found_city" do
+    test "a worker can move, build improvements, chop, and defend — no :attack, no :found_city" do
       actions = Actions.available(%{type: :worker})
 
       assert :move in actions
       assert :build_improvement in actions
+      # Story 927 "Workers chop woods and rainforest".
+      assert :chop in actions
       assert :defend in actions
       refute :attack in actions
       refute :found_city in actions

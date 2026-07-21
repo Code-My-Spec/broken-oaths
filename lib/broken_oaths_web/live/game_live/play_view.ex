@@ -153,6 +153,24 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
 
   defp round4(f), do: Float.round(f, 4)
 
+  # Story 927 — the client board painter's own `terrain_map` (`Play`'s
+  # `mount/3` assign) is the raw, seed-derived
+  # `Generator.generate_terrain_map/2` output; unlike every server-side
+  # gameplay read (which calls `Regions.terrain/3` fresh, per tile),
+  # this one map is computed ONCE and reused across every `push_board_state/1`
+  # call, so the chop overlay has to be applied here instead — a chopped
+  # tile's own `%Terrain{}` entry loses its `feature` so `Terrain.color/1`/
+  # `decor/1`/`texture/1` (what `tile_row/3` below actually reads) stop
+  # rendering it as Woods/Rainforest the instant it's chopped.
+  @spec overlay_cleared_features(%{integer() => Terrain.t()}, MapSet.t()) :: %{
+          integer() => Terrain.t()
+        }
+  def overlay_cleared_features(terrain_map, cleared_features) do
+    Enum.reduce(cleared_features, terrain_map, fn tile_id, acc ->
+      Map.update(acc, tile_id, nil, &%{&1 | feature: nil})
+    end)
+  end
+
   # The mesh tile whose center is nearest the given unit-sphere point
   # (max dot product). Linear over the mesh — ~29k tiles at f=54, a few
   # ms once per right-click.
@@ -251,7 +269,7 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
 
   def worker_current_dig(_improvements, _unit), do: nil
 
-  def worker_allowed_improvements(_world, nil, _player_research), do: []
+  def worker_allowed_improvements(_world, nil, _player_research, _cleared_features), do: []
 
   # QA issue 12bed1e4's own "consult Units.Actions where it cleanly
   # can" refactor: the coarse "is this unit's TYPE even eligible for
@@ -261,18 +279,21 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
   # one fewer place that has to independently know which type builds.
   # The REAL, state-aware rule (which improvement KINDS this worker's
   # own tile supports right now) stays right here — `Units.Actions`
-  # only answers the type-level question.
-  def worker_allowed_improvements(world, unit, player_research) do
+  # only answers the type-level question. `cleared_features` (story
+  # 927) is `Game.cleared_features/1`'s own set — reading terrain
+  # cleared-aware (`Regions.terrain/3`) is what makes a chopped
+  # grassland/plains tile Farm-offerable the instant it's chopped.
+  def worker_allowed_improvements(world, unit, player_research, cleared_features) do
     if :build_improvement in Actions.available(unit) do
-      compute_allowed_improvements(world, unit, player_research)
+      compute_allowed_improvements(world, unit, player_research, cleared_features)
     else
       []
     end
   end
 
-  defp compute_allowed_improvements(world, %{tile_id: tile_id}, player_research) do
+  defp compute_allowed_improvements(world, %{tile_id: tile_id}, player_research, cleared_features) do
     if Regions.tile_class(world, tile_id) == :land do
-      terrain = Regions.terrain(world, tile_id)
+      terrain = Regions.terrain(world, tile_id, cleared_features)
       resource = Resources.at(world, tile_id)
 
       # `:mine` uses the resource-aware gate (QA issue 5a30ad3f — Copper
@@ -315,6 +336,53 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
   # above.
   defp road_enabled?(nil), do: false
   defp road_enabled?(player_research), do: Research.road_enabled?(player_research)
+
+  # Story 927 "Workers chop woods and rainforest" — whether `UnitPanel`
+  # should offer a "Chop" button for `unit` right now: `nil` (nothing to
+  # offer) unless the worker's own tile carries a Woods/Rainforest
+  # feature (cleared-aware — an already-chopped tile has nothing left),
+  # the tile sits inside one of `cities` (`Game.player_cities/2`'s own
+  # result — always the VIEWER's own, so a foreign unit's panel never
+  # offers this), the feature's own tech is researched, and the worker
+  # still has a build charge. Mirrors `worker_current_dig/2`'s own
+  # "compute the real, state-aware answer here so the button never lies"
+  # posture — the one legality check this deliberately leaves to the
+  # real `chop/3` command (rather than pre-filtering) is the hostile-
+  # co-occupant refusal, the same narrow edge case every other button in
+  # this panel leaves to its own command's error toast.
+  @spec worker_choppable_feature(map(), map() | nil, [map()], map() | nil, MapSet.t()) ::
+          Improvement.chop_feature() | nil
+  def worker_choppable_feature(_world, nil, _cities, _player_research, _cleared_features), do: nil
+
+  def worker_choppable_feature(world, unit, cities, player_research, cleared_features) do
+    if :chop in Actions.available(unit) and Regions.tile_class(world, unit.tile_id) == :land do
+      world
+      |> Regions.terrain(unit.tile_id, cleared_features)
+      |> Map.fetch!(:feature)
+      |> chop_offered(cities, unit, player_research)
+    else
+      nil
+    end
+  end
+
+  defp chop_offered(feature, cities, unit, player_research)
+       when feature in [:woods, :rainforest] do
+    if owns_tile?(cities, unit) and chop_research_enabled?(feature, player_research) and
+         Map.get(unit, :charges, 3) > 0 do
+      feature
+    else
+      nil
+    end
+  end
+
+  defp chop_offered(_feature, _cities, _unit, _player_research), do: nil
+
+  defp owns_tile?(cities, unit),
+    do: Enum.any?(cities, &(&1.player_id == unit.player_id and unit.tile_id in &1.territory))
+
+  defp chop_research_enabled?(_feature, nil), do: false
+  defp chop_research_enabled?(:woods, pr), do: Research.chop_woods_enabled?(pr)
+  defp chop_research_enabled?(:rainforest, pr), do: Research.chop_rainforest_enabled?(pr)
 
   # Territory tiles `CityPanel` may offer a "Work" action for: not the
   # always-free center, not already worked, and workable terrain — the
@@ -514,6 +582,16 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
     do: "There's no build in progress here to cancel."
 
   def improvement_error_message(_other), do: "That improvement can't be started."
+
+  # Story 927 "Workers chop woods and rainforest".
+  def chop_error_message(:not_owner), do: "You don't control that unit."
+  def chop_error_message(:not_worker), do: "Only a worker can chop."
+  def chop_error_message(:not_choppable), do: "There's nothing to chop here."
+  def chop_error_message(:not_territory), do: "That tile isn't inside your own borders."
+  def chop_error_message(:tech_locked), do: "You haven't researched the tech for that yet."
+  def chop_error_message(:no_charges), do: "This worker has no build charges left."
+  def chop_error_message(:enemy_present), do: "An enemy unit holds this tile."
+  def chop_error_message(_other), do: "That can't be chopped."
 
   def bank_error_message(:insufficient_gold), do: "You can't afford that upgrade yet."
   def bank_error_message(_other), do: "The bank refused that action."

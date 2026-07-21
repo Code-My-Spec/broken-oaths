@@ -78,7 +78,8 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
         garrisonable_tiles(state.cities),
         broken_city_tiles(state.cities),
         state.world,
-        Map.get(state, :roads, %{})
+        Map.get(state, :roads, %{}),
+        Map.get(state, :cleared_features, MapSet.new())
       )
 
     %{
@@ -151,7 +152,8 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
             garrisonable_tiles(state.cities),
             broken_city_tiles(state.cities),
             state.world,
-            Map.get(state, :roads, %{})
+            Map.get(state, :roads, %{}),
+            Map.get(state, :cleared_features, MapSet.new())
           )
 
         %{
@@ -171,12 +173,22 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
   # tiles); `garrisonable` is `player_id => MapSet.t(their own cities'
   # tile_ids)`, precomputed once via `garrisonable_tiles/1`; `broken_cities`
   # is `tile_id => owner_player_id`, precomputed once via
-  # `broken_city_tiles/1`. `world`/`roads` (story 925) are the same
-  # read-only pair `attempt_step/7`'s own `Unit.entry_cost/3` call needs
-  # to price each step. All five are read-only context for
-  # `attempt_step/7`'s story-895 garrison exception, story-906 broken-
-  # city exception, and story-925 terrain/road cost below.
-  defp run_rounds(movers, positions, units, garrisonable, broken_cities, world, roads) do
+  # `broken_city_tiles/1`. `world`/`roads`/`cleared_features` (story 925,
+  # story 927) are the same read-only trio `attempt_step/8`'s own
+  # `Unit.entry_cost/4` call needs to price each step. All six are
+  # read-only context for `attempt_step/8`'s story-895 garrison
+  # exception, story-906 broken-city exception, and story-925/927
+  # terrain/road/chop cost below.
+  defp run_rounds(
+         movers,
+         positions,
+         units,
+         garrisonable,
+         broken_cities,
+         world,
+         roads,
+         cleared_features
+       ) do
     case active_movers(movers) do
       [] ->
         {movers, positions}
@@ -186,10 +198,28 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
           Enum.reduce(
             ids,
             {movers, positions},
-            &attempt_step(&1, &2, units, garrisonable, broken_cities, world, roads)
+            &attempt_step(
+              &1,
+              &2,
+              units,
+              garrisonable,
+              broken_cities,
+              world,
+              roads,
+              cleared_features
+            )
           )
 
-        run_rounds(movers, positions, units, garrisonable, broken_cities, world, roads)
+        run_rounds(
+          movers,
+          positions,
+          units,
+          garrisonable,
+          broken_cities,
+          world,
+          roads,
+          cleared_features
+        )
     end
   end
 
@@ -242,7 +272,8 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
          garrisonable,
          broken_cities,
          world,
-         roads
+         roads,
+         cleared_features
        ) do
     mover = Map.fetch!(movers, unit_id)
     [target | rest] = mover.path
@@ -259,12 +290,13 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
          blocked?(target, positions, units, mover_unit, garrisonable, broken_cities) do
       {Map.put(movers, unit_id, %{mover | status: :interrupted}), positions}
     else
-      # Story 925: spend the tile's own cost (`Unit.entry_cost/3` —
-      # terrain, or 1 flat if a completed Road covers it), clamped at 0
-      # rather than going negative — the min-1 rule (`active_movers/1`
-      # above) already let a unit with less than the full cost left
-      # attempt this step; it simply can't go any further this round.
-      cost = Unit.entry_cost(world, roads, target)
+      # Story 925/927: spend the tile's own cost (`Unit.entry_cost/4` —
+      # terrain (with any Chop already applied), or 1 flat if a
+      # completed Road covers it), clamped at 0 rather than going
+      # negative — the min-1 rule (`active_movers/1` above) already let
+      # a unit with less than the full cost left attempt this step; it
+      # simply can't go any further this round.
+      cost = Unit.entry_cost(world, roads, target, cleared_features)
 
       moved = %{
         mover

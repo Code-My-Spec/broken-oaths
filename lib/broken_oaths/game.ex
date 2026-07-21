@@ -392,6 +392,23 @@ defmodule BrokenOaths.Game do
           :ok | {:error, :not_owner | :not_worker | :no_active_build}
   defdelegate cancel_improvement(world, user, unit_id), to: Cities
 
+  @doc "Chop the Woods/Rainforest feature `unit_id`'s own tile carries (story 927). See `Cities.chop/3`."
+  @spec chop(map(), map(), term()) ::
+          :ok
+          | {:error,
+             :not_owner
+             | :not_worker
+             | :not_choppable
+             | :not_territory
+             | :tech_locked
+             | :no_charges
+             | :enemy_present}
+  defdelegate chop(world, user, unit_id), to: Cities
+
+  @doc "Every tile id permanently Chopped in `world` (story 927). See `Cities.cleared_features/1`."
+  @spec cleared_features(map()) :: MapSet.t(term())
+  defdelegate cleared_features(world), to: Cities
+
   @doc "All of `user`'s cities in `world`. See `Cities.player_cities/2`."
   defdelegate player_cities(world, user), to: Cities
 

@@ -182,11 +182,19 @@ defmodule BrokenOaths.Technology.Research do
       prereqs: [],
       unlock: "Enables the Pasture improvement (+2 food on animal resources)"
     },
-    mining: %{cost: 110, prereqs: [], unlock: "Workers build mines in 3 turns instead of 5"},
+    mining: %{
+      cost: 110,
+      prereqs: [],
+      unlock: "Workers build mines in 3 turns instead of 5, and can chop Woods"
+    },
     sailing: %{cost: 150, prereqs: [], unlock: "Enables Galleys and coastal exploration"},
     astrology: %{cost: 150, prereqs: [], unlock: "Enables the Holy Site district"},
     # After Pottery.
-    writing: %{cost: 150, prereqs: [:pottery], unlock: "Enables the Library building (+2 science/turn)"},
+    writing: %{
+      cost: 150,
+      prereqs: [:pottery],
+      unlock: "Enables the Library building (+2 science/turn)"
+    },
     irrigation: %{
       cost: 150,
       prereqs: [:pottery],
@@ -204,12 +212,14 @@ defmodule BrokenOaths.Technology.Research do
     the_wheel: %{
       cost: 240,
       prereqs: [:mining],
-      unlock: "Enables roads, the Water Mill building (+1 food, +1 production), and the Heavy Chariot"
+      unlock:
+        "Enables roads, the Water Mill building (+1 food, +1 production), and the Heavy Chariot"
     },
     bronze_working: %{
       cost: 240,
       prereqs: [:mining],
-      unlock: "Advances your civilization to the Bronze Age and enables the Barracks building"
+      unlock:
+        "Advances your civilization to the Bronze Age, enables the Barracks building, and lets Workers chop Rainforest"
     }
   }
 
@@ -553,6 +563,25 @@ defmodule BrokenOaths.Technology.Research do
   """
   @spec road_enabled?(player_research()) :: boolean()
   def road_enabled?(player_research), do: completed?(player_research, :the_wheel)
+
+  @doc """
+  Mining's OTHER unlock (story 927 "Workers chop woods and rainforest"):
+  whether a worker may Chop a Woods feature. Mirrors `mine_duration/1`'s
+  own Mining gate — same tech, a second effect — and the same "research
+  check folds into the terrain gate" seam `road_enabled?/1`/
+  `pasture_enabled?/1` already established, read by
+  `BrokenOaths.Cities.Improvement.chop/3`.
+  """
+  @spec chop_woods_enabled?(player_research()) :: boolean()
+  def chop_woods_enabled?(player_research), do: completed?(player_research, :mining)
+
+  @doc """
+  Bronze Working's OTHER unlock (story 927, alongside `age/1`/
+  `copper_revealed?/1`/`barracks_enabled?/1`): whether a worker may Chop
+  a Rainforest feature — Civ 6's own Bronze Working chop convention.
+  """
+  @spec chop_rainforest_enabled?(player_research()) :: boolean()
+  def chop_rainforest_enabled?(player_research), do: completed?(player_research, :bronze_working)
 
   @doc """
   Archery's unlock (QA issue da39e50b "No archer"): whether the Archer

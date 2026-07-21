@@ -67,7 +67,10 @@ defmodule BrokenOaths.Cities.ImprovementTest do
 
   test "status defaults to building" do
     world = WorldsFixtures.world_fixture()
-    {:ok, improvement} = %Improvement{} |> Improvement.changeset(valid_attrs(world)) |> Repo.insert()
+
+    {:ok, improvement} =
+      %Improvement{} |> Improvement.changeset(valid_attrs(world)) |> Repo.insert()
+
     assert improvement.status == :building
     assert improvement.progress == 0
   end
@@ -83,7 +86,9 @@ defmodule BrokenOaths.Cities.ImprovementTest do
     world = WorldsFixtures.world_fixture()
     assert {:ok, _} = %Improvement{} |> Improvement.changeset(valid_attrs(world)) |> Repo.insert()
 
-    {:error, changeset} = %Improvement{} |> Improvement.changeset(valid_attrs(world)) |> Repo.insert()
+    {:error, changeset} =
+      %Improvement{} |> Improvement.changeset(valid_attrs(world)) |> Repo.insert()
+
     assert %{world_id: ["has already been taken"]} = errors_on(changeset)
   end
 
@@ -91,8 +96,11 @@ defmodule BrokenOaths.Cities.ImprovementTest do
     world1 = WorldsFixtures.world_fixture()
     world2 = WorldsFixtures.world_fixture()
 
-    assert {:ok, _} = %Improvement{} |> Improvement.changeset(valid_attrs(world1)) |> Repo.insert()
-    assert {:ok, _} = %Improvement{} |> Improvement.changeset(valid_attrs(world2)) |> Repo.insert()
+    assert {:ok, _} =
+             %Improvement{} |> Improvement.changeset(valid_attrs(world1)) |> Repo.insert()
+
+    assert {:ok, _} =
+             %Improvement{} |> Improvement.changeset(valid_attrs(world2)) |> Repo.insert()
   end
 
   test "builder_unit_id may reference a worker, or be nil while paused" do
@@ -134,7 +142,10 @@ defmodule BrokenOaths.Cities.ImprovementTest do
   describe "duration (story 902, Mining's 3-turn unlock)" do
     test "duration is nil by default — WorldServer resolves it explicitly at build-start" do
       world = WorldsFixtures.world_fixture()
-      {:ok, improvement} = %Improvement{} |> Improvement.changeset(valid_attrs(world)) |> Repo.insert()
+
+      {:ok, improvement} =
+        %Improvement{} |> Improvement.changeset(valid_attrs(world)) |> Repo.insert()
+
       assert improvement.duration == nil
     end
 
@@ -161,6 +172,24 @@ defmodule BrokenOaths.Cities.ImprovementTest do
     end
   end
 
+  describe "chop_yield/2 (story 927 — PM decision: yield scales with tech progress)" do
+    defp research(completed_techs), do: %{completed_techs: completed_techs}
+
+    test "Woods is 20 + 8 * the chopping player's own completed-tech count" do
+      assert Improvement.chop_yield(:woods, research([])) == 20
+      assert Improvement.chop_yield(:woods, research([:mining])) == 28
+      assert Improvement.chop_yield(:woods, research([:mining, :bronze_working])) == 36
+      assert Improvement.chop_yield(:woods, research([:a, :b, :c, :d, :e])) == 60
+    end
+
+    test "Rainforest is 75% of the Woods value at the same tech count, rounded down" do
+      assert Improvement.chop_yield(:rainforest, research([])) == 15
+      assert Improvement.chop_yield(:rainforest, research([:mining])) == 21
+      assert Improvement.chop_yield(:rainforest, research([:mining, :bronze_working])) == 27
+      assert Improvement.chop_yield(:rainforest, research([:a, :b, :c, :d, :e])) == 45
+    end
+  end
+
   describe "allowed?/2" do
     test "farm needs flat, featureless grassland or plains" do
       assert Improvement.allowed?(:farm, %Terrain{base: :grassland})
@@ -172,7 +201,13 @@ defmodule BrokenOaths.Cities.ImprovementTest do
 
     test "mine needs hills, regardless of base or feature" do
       assert Improvement.allowed?(:mine, %Terrain{base: :plains, relief: :hills})
-      assert Improvement.allowed?(:mine, %Terrain{base: :grassland, relief: :hills, feature: :woods})
+
+      assert Improvement.allowed?(:mine, %Terrain{
+               base: :grassland,
+               relief: :hills,
+               feature: :woods
+             })
+
       refute Improvement.allowed?(:mine, %Terrain{base: :plains, relief: :flat})
     end
 

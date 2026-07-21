@@ -79,6 +79,7 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
       assigns
       |> assign_new(:allowed_improvements, fn -> [] end)
       |> assign_new(:current_dig, fn -> nil end)
+      |> assign_new(:choppable_feature, fn -> nil end)
       |> assign_new(:attackable_cities, fn -> [] end)
       |> assign_new(:shoot_targets, fn -> [] end)
       |> assign_new(:unit_id, fn -> Map.get(assigns.unit, :id) end)
@@ -200,6 +201,25 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
             unit_id={@unit_id}
           />
         </div>
+
+        <%!-- Story 927 "Workers chop woods and rainforest" — the
+             discoverable "Chop" affordance: `Play` precomputes
+             `@choppable_feature` (`nil` unless the worker's own tile is
+             legally choppable right now — feature present, in-borders,
+             tech researched, a charge left), so this button never
+             offers an illegal chop the way `allowed_improvements`
+             already keeps Build honest. Resolves immediately — no
+             progress badge, unlike a multi-turn Build dig. --%>
+        <button
+          :if={:chop in @actions and @choppable_feature}
+          type="button"
+          data-test={"chop-#{@choppable_feature}"}
+          phx-click="chop"
+          phx-value-unit_id={@unit_id}
+          class="btn btn-sm btn-outline"
+        >
+          Chop {improvement_label(@choppable_feature)}
+        </button>
 
         <%!-- QA issue 56ee521a — the discoverable "Attack" affordance:
              one button per hostile city `Play`'s own `attackable_cities/2`
@@ -361,6 +381,10 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
   defp improvement_label(:mine), do: "Mine"
   defp improvement_label(:road), do: "Road"
   defp improvement_label(:pasture), do: "Pasture"
+  # Story 927 — `@choppable_feature`'s own two labels, reusing this same
+  # helper for the "Chop {label}" button above.
+  defp improvement_label(:woods), do: "Woods"
+  defp improvement_label(:rainforest), do: "Rainforest"
 
   # Story 920 — the Fortify badge's own ramp-aware label: 1 is the
   # partial bonus, still "digging in"; 2+ (capped there, see

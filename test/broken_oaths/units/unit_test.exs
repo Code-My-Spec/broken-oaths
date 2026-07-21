@@ -245,6 +245,41 @@ defmodule BrokenOaths.Units.UnitTest do
     end
   end
 
+  # Story 927 "Workers chop woods and rainforest" — `entry_cost/4`'s own
+  # worker-cleared overlay (`Regions.terrain/3`): a chopped Woods/
+  # Rainforest/Marsh tile prices like open terrain the instant it's
+  # cleared, but clearing a FEATURE never touches DIFFICULT *relief*
+  # (hills) — the two are independent difficulty sources.
+  describe "entry_cost/4 (story 927 — the worker-cleared overlay)" do
+    test "with no cleared_features, matches entry_cost/3 exactly" do
+      world = fixture_world()
+      assert Unit.entry_cost(world, %{}, 9, MapSet.new()) == Unit.entry_cost(world, %{}, 9)
+      assert Unit.entry_cost(world, %{}, 10, MapSet.new()) == Unit.entry_cost(world, %{}, 10)
+    end
+
+    test "clearing a feature tile drops its cost to 1" do
+      world = fixture_world()
+
+      feature_tile =
+        Enum.find(0..641, fn t ->
+          BrokenOaths.Worlds.Regions.tile_class(world, t) == :land and
+            BrokenOaths.Worlds.Regions.terrain(world, t).relief == :flat and
+            BrokenOaths.Worlds.Regions.terrain(world, t).feature in [:woods, :rainforest, :marsh]
+        end)
+
+      assert Unit.entry_cost(world, %{}, feature_tile) == 2
+      assert Unit.entry_cost(world, %{}, feature_tile, MapSet.new([feature_tile])) == 1
+    end
+
+    test "clearing a hills tile's own feature never drops relief-driven difficulty" do
+      world = fixture_world()
+      # Tile 10 (see this describe's own header comment) is DIFFICULT via
+      # `relief: :hills`, not a feature — clearing it (even though it
+      # carries no feature to clear at all) leaves it at cost 2.
+      assert Unit.entry_cost(world, %{}, 10, MapSet.new([10])) == 2
+    end
+  end
+
   describe "bfs_path/4 — weighted (story 925)" do
     test "routes along cheap terrain over a parallel DIFFICULT-terrain route, and the path's total cost is the cheaper one" do
       assert Unit.bfs_path(tick_state(), 1, 17, :warrior) == [9, 17]

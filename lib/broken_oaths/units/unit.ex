@@ -406,10 +406,12 @@ defmodule BrokenOaths.Units.Unit do
       for {_id, u} <- state.units, u.tile_id != from, into: MapSet.new(), do: u.tile_id
 
     roads = Map.get(state, :roads, %{})
+    cleared_features = Map.get(state, :cleared_features, MapSet.new())
 
     dijkstra(
       state.world,
       roads,
+      cleared_features,
       occupied,
       :gb_sets.singleton({0, from}),
       %{from => 0},
@@ -419,7 +421,7 @@ defmodule BrokenOaths.Units.Unit do
     )
   end
 
-  defp dijkstra(world, roads, occupied, frontier, dist, prev, to, unit_type) do
+  defp dijkstra(world, roads, cleared_features, occupied, frontier, dist, prev, to, unit_type) do
     if :gb_sets.is_empty(frontier) do
       nil
     else
@@ -432,7 +434,7 @@ defmodule BrokenOaths.Units.Unit do
         # A stale duplicate: a cheaper route to `tile` was already found
         # and popped (and expanded) earlier — nothing new to explore.
         cost > Map.get(dist, tile) ->
-          dijkstra(world, roads, occupied, frontier, dist, prev, to, unit_type)
+          dijkstra(world, roads, cleared_features, occupied, frontier, dist, prev, to, unit_type)
 
         true ->
           neighbors =
@@ -445,7 +447,7 @@ defmodule BrokenOaths.Units.Unit do
 
           {frontier, dist, prev} =
             Enum.reduce(neighbors, {frontier, dist, prev}, fn n, {f, d, p} ->
-              new_cost = cost + entry_cost(world, roads, n)
+              new_cost = cost + entry_cost(world, roads, n, cleared_features)
 
               if new_cost < Map.get(d, n, :infinity) do
                 {:gb_sets.add({new_cost, n}, f), Map.put(d, n, new_cost), Map.put(p, n, tile)}
@@ -454,7 +456,7 @@ defmodule BrokenOaths.Units.Unit do
               end
             end)
 
-          dijkstra(world, roads, occupied, frontier, dist, prev, to, unit_type)
+          dijkstra(world, roads, cleared_features, occupied, frontier, dist, prev, to, unit_type)
       end
     end
   end
@@ -493,11 +495,25 @@ defmodule BrokenOaths.Units.Unit do
   2).
   """
   @spec entry_cost(World.t(), map(), tile_id()) :: 1 | 2
-  def entry_cost(world, roads, tile_id) do
+  def entry_cost(world, roads, tile_id), do: entry_cost(world, roads, tile_id, MapSet.new())
+
+  @doc """
+  `entry_cost/3`, with story 927's worker-cleared overlay applied
+  (`cleared_features` — `state.cleared_features`, see `Regions.terrain/3`'s
+  own doc): a chopped Woods/Rainforest tile prices like open terrain (1)
+  the instant it's cleared, same as the movement-cost drop
+  `Terrain.movement_cost/1` already gives a featureless tile.
+  `BrokenOaths.Simulation.Turn.Movement.attempt_step/8` (the real tick-
+  time step) and `bfs_path/4` above both call this arity; the arity-3
+  sibling stays the "nothing cleared" default every existing caller
+  (and test) keeps using unchanged.
+  """
+  @spec entry_cost(World.t(), map(), tile_id(), MapSet.t(tile_id())) :: 1 | 2
+  def entry_cost(world, roads, tile_id, cleared_features) do
     if match?(%{status: :complete}, Map.get(roads, tile_id)) do
       1
     else
-      world |> Regions.terrain(tile_id) |> Terrain.movement_cost()
+      world |> Regions.terrain(tile_id, cleared_features) |> Terrain.movement_cost()
     end
   end
 

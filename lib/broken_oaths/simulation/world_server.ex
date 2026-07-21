@@ -74,6 +74,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
   alias BrokenOaths.Users.User
   alias BrokenOaths.Vision.{Exploration, Visibility}
   alias BrokenOaths.Worlds
+  alias BrokenOaths.Worlds.ClearedFeature
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
 
@@ -468,6 +469,44 @@ defmodule BrokenOaths.Simulation.WorldServer do
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
+  end
+
+  # Story 927 "Workers chop woods and rainforest" — resolves immediately,
+  # like `:start_improvement`/`:cancel_improvement`'s own tile-state
+  # writes, but through `persist_tick/2` (not a bare inline write) since
+  # a chop also touches `state.units` (a spent build charge, possibly
+  # expending the worker) and `state.cities` (the production credit) —
+  # both of which `persist_tick/2`'s own generic diff already knows how
+  # to reconcile. `:improvements_changed` doubles as "terrain changed"
+  # here: `BrokenOathsWeb.GameLive.Play`'s own board refresh re-derives
+  # the board's rendered terrain (and a selected worker's own Chop
+  # button) from `state.cleared_features` on every one of its handlers,
+  # `:improvements_changed` included.
+  def handle_call({:chop, user, unit_id}, _from, state) do
+    case Improvement.chop(state, user, unit_id) do
+      {:ok, new_state} ->
+        case persist_tick(state, new_state) do
+          :ok ->
+            broadcast(new_state.world.id, [:units_changed, :cities_changed, :improvements_changed])
+            {:reply, :ok, new_state}
+
+          :stale ->
+            {:reply, {:error, :stale}, resync(state)}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Story 927 — the tile ids a worker has permanently chopped, world-
+  # wide: not fog-filtered (same "cheap, derived, no separate secrecy"
+  # status `state.roads`/`state.improvements` themselves have before
+  # `visible_improvements/2` filters them for a client) — the ONE place
+  # this ever gets fog-gated is the `known` tile window the client's
+  # board painter already reads from.
+  def handle_call(:cleared_features, _from, state) do
+    {:reply, Map.get(state, :cleared_features, MapSet.new()), state}
   end
 
   def handle_call({:player_cities, user}, _from, state) do
@@ -2677,6 +2716,12 @@ defmodule BrokenOaths.Simulation.WorldServer do
             new_state.roads
           )
 
+          persist_cleared_feature_changes(
+            new_state.world.id,
+            Map.get(old_state, :cleared_features, MapSet.new()),
+            Map.get(new_state, :cleared_features, MapSet.new())
+          )
+
           persist_known_player_changes(
             new_state.world.id,
             Map.get(old_state, :known_players, MapSet.new()),
@@ -2927,6 +2972,21 @@ defmodule BrokenOaths.Simulation.WorldServer do
   # WorldServer instance for this world racing the same first-contact
   # (see `run_tick/1`'s `:stale` handling) is the one scenario where it
   # could.
+  # Story 927 — `state.cleared_features` is a `MapSet`, the same "insert
+  # once, never removed" shape `state.known_players` already has (see
+  # `BrokenOaths.Worlds.ClearedFeature`'s own moduledoc): only ever
+  # grows, so a plain set-difference against the pre-chop snapshot is
+  # every new row this tick needs to write. `on_conflict: :nothing`
+  # guards the same race `persist_known_player_changes/3` already guards
+  # against.
+  defp persist_cleared_feature_changes(world_id, old_cleared, new_cleared) do
+    for tile_id <- MapSet.difference(new_cleared, old_cleared) do
+      %ClearedFeature{}
+      |> ClearedFeature.changeset(%{world_id: world_id, tile_id: tile_id})
+      |> Repo.insert(on_conflict: :nothing, conflict_target: [:world_id, :tile_id])
+    end
+  end
+
   defp persist_known_player_changes(world_id, old_known, new_known) do
     for {viewer_id, discovered_id} <- MapSet.difference(new_known, old_known) do
       %KnownPlayer{}
@@ -3008,6 +3068,12 @@ defmodule BrokenOaths.Simulation.WorldServer do
       cities: load_cities(world.id),
       improvements: load_improvements(world.id),
       roads: load_roads(world.id),
+      # Story 927 — see `BrokenOaths.Worlds.ClearedFeature`'s own
+      # moduledoc: the stored delta over the seed-derived terrain a
+      # Chop leaves behind, rehydrated as a `MapSet` so
+      # `BrokenOaths.Worlds.Regions.terrain/3`'s own `MapSet.member?/2`
+      # check is O(1).
+      cleared_features: load_cleared_features(world.id),
       camps: load_camps(world.id),
       # Hydrated from game_players.heir_arrives_turn so a restart
       # mid-wait re-derives every pending heir (QA issue 0b7e82cd).
@@ -3116,6 +3182,12 @@ defmodule BrokenOaths.Simulation.WorldServer do
     from(i in Improvement, where: i.world_id == ^world_id and i.kind == :road)
     |> Repo.all()
     |> Map.new(&{&1.tile_id, improvement_map(&1)})
+  end
+
+  defp load_cleared_features(world_id) do
+    from(c in ClearedFeature, where: c.world_id == ^world_id, select: c.tile_id)
+    |> Repo.all()
+    |> MapSet.new()
   end
 
   defp load_camps(world_id) do

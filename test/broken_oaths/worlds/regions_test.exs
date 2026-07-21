@@ -177,6 +177,50 @@ defmodule BrokenOaths.Worlds.RegionsTest do
     end
   end
 
+  # Story 927 "Workers chop woods and rainforest" — `terrain/3`'s own
+  # worker-cleared overlay (`state.cleared_features`, see
+  # `BrokenOaths.Cities.Improvement.chop/3`).
+  describe "terrain/3 (story 927 — the worker-cleared overlay)" do
+    test "an uncleared tile is untouched — identical to terrain/2" do
+      w = world()
+      tile = a_land_tile(w)
+      assert Regions.terrain(w, tile, MapSet.new()) == Regions.terrain(w, tile)
+    end
+
+    test "a cleared tile loses its feature but keeps base/relief" do
+      w = world()
+      tile = a_land_tile(w)
+      raw = Regions.terrain(w, tile)
+
+      cleared = Regions.terrain(w, tile, MapSet.new([tile]))
+      assert cleared.feature == nil
+      assert cleared.base == raw.base
+      assert cleared.relief == raw.relief
+    end
+
+    test "only clears the tiles actually in cleared_features — a sibling tile is untouched" do
+      w = world()
+      [tile_a, tile_b] = Enum.take(land_tiles(w), 2)
+
+      assert Regions.terrain(w, tile_a, MapSet.new([tile_b])) == Regions.terrain(w, tile_a)
+    end
+
+    test "clearing an already-featureless tile is a no-op" do
+      w = world()
+
+      tile =
+        Enum.find(land_tiles(w), &(Regions.terrain(w, &1).feature == nil))
+
+      assert Regions.terrain(w, tile, MapSet.new([tile])) == Regions.terrain(w, tile)
+    end
+  end
+
+  defp land_tiles(w) do
+    for t <- 0..(@total_tiles - 1), Regions.tile_class(w, t) == :land, do: t
+  end
+
+  defp a_land_tile(w), do: w |> land_tiles() |> hd()
+
   # Flood-fills `tile_set` (mesh adjacency) starting from `start`, returning
   # the reached subset — used to assert a region is a single connected blob.
   defp flood_within(start, tile_set, w) do
