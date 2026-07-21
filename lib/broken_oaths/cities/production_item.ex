@@ -42,6 +42,7 @@ defmodule BrokenOaths.Cities.ProductionItem do
           | :bronze_spearman
           | :archer
           | :galley
+          | :scout
           | :library
           | :ancient_walls
           | :barracks
@@ -70,6 +71,7 @@ defmodule BrokenOaths.Cities.ProductionItem do
         :bronze_spearman,
         :archer,
         :galley,
+        :scout,
         :library,
         :ancient_walls,
         :barracks,

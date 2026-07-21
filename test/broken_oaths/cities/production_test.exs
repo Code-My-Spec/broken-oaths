@@ -32,6 +32,7 @@ defmodule BrokenOaths.Cities.ProductionTest do
                bronze_spearman: 60,
                archer: 40,
                galley: 50,
+               scout: 30,
                library: 90,
                ancient_walls: 80,
                barracks: 90,
@@ -47,6 +48,14 @@ defmodule BrokenOaths.Cities.ProductionTest do
       assert Production.cost(:bronze_spearman) == 60
       assert Production.cost(:archer) == 40
       assert Production.cost(:galley) == 50
+    end
+
+    # Story 931 — the Scout: the cheapest military buildable, below even
+    # the Warrior's own 40 (see this module's own moduledoc, "The
+    # Scout").
+    test "the Scout (story 931) costs 30 — cheaper than the Warrior" do
+      assert Production.cost(:scout) == 30
+      assert Production.cost(:scout) < Production.cost(:warrior)
     end
 
     # Story 930 — Library 90 (Writing), Ancient Walls 80 (Masonry),
@@ -94,6 +103,27 @@ defmodule BrokenOaths.Cities.ProductionTest do
     # "The Galley".
     test "the Galley (story 921): 100 HP, 2 movement — outpaces every land unit but the Settler/Lord" do
       assert Production.unit_stats(:galley) == %{hp: 100, movement: 2}
+    end
+
+    # Story 931 — the Scout: standard 100 HP, but movement 3 — the
+    # fastest unit in the game (see this module's own moduledoc, "The
+    # Scout").
+    test "the Scout (story 931): 100 HP, 3 movement — the fastest unit in the game" do
+      assert Production.unit_stats(:scout) == %{hp: 100, movement: 3}
+      assert Production.unit_stats(:scout).movement > Production.unit_stats(:warrior).movement
+      assert Production.unit_stats(:scout).movement > Production.unit_stats(:lord).movement
+    end
+  end
+
+  describe "can_queue?/2 and available_items/1 (story 931 — the Scout, no tech gate)" do
+    test "a Scout is always queueable, no research context needed" do
+      assert Production.can_queue?(city([]), :scout) == :ok
+      assert Production.can_queue?(city(size: 1), :scout) == :ok
+    end
+
+    test "a Scout is offered from turn 1, with no opts at all" do
+      assert :scout in Production.available_items([])
+      assert :scout in Production.available_items()
     end
   end
 
@@ -597,9 +627,10 @@ defmodule BrokenOaths.Cities.ProductionTest do
       assert Production.can_queue?(city(size: 2), :settler) == :ok
     end
 
-    test "Worker and Warrior are always queueable" do
+    test "Worker, Warrior, and Scout are always queueable" do
       assert Production.can_queue?(city(size: 1), :worker) == :ok
       assert Production.can_queue?(city(size: 1), :warrior) == :ok
+      assert Production.can_queue?(city(size: 1), :scout) == :ok
     end
 
     test "a Granary defaults to locked — arity-2 has no research context" do
@@ -718,6 +749,14 @@ defmodule BrokenOaths.Cities.ProductionTest do
 
       assert new_city.queue == []
       assert events == [%{player_id: 1, type: :bronze_spearman, tile_id: 1}]
+    end
+
+    test "a Scout completes and spawns exactly like a Warrior (story 931)" do
+      c = city(tile_id: 1, queue: [%{id: 1, type: :scout, banked: 30, cost: 30}])
+      {new_city, events} = Production.complete(c, %{}, world())
+
+      assert new_city.queue == []
+      assert events == [%{player_id: 1, type: :scout, tile_id: 1}]
     end
 
     test "a completed item lands on a free adjacent tile when the city tile is occupied" do

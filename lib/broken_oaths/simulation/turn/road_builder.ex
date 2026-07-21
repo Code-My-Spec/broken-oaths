@@ -227,7 +227,8 @@ defmodule BrokenOaths.Simulation.Turn.RoadBuilder do
         state.world,
         Map.get(state, :roads, %{}),
         next_tile,
-        Map.get(state, :cleared_features, MapSet.new())
+        Map.get(state, :cleared_features, MapSet.new()),
+        unit.type
       )
 
     new_unit = %{unit | tile_id: next_tile, movement: max(unit.movement - cost, 0)}

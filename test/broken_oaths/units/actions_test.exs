@@ -53,6 +53,13 @@ defmodule BrokenOaths.Units.ActionsTest do
       assert Actions.available(%{type: :bronze_spearman}) == [:move, :attack, :defend]
     end
 
+    # Story 931 — the Scout: melee-only (no :shoot), but a real combat
+    # type like the Warrior/Bronze Spearman/Lord — carries :attack and
+    # :defend the same way.
+    test "the scout carries the same melee action set too, no :shoot" do
+      assert Actions.available(%{type: :scout}) == [:move, :attack, :defend]
+    end
+
     test "a barbarian warrior can move and attack, but never :defend (never player-commanded)" do
       assert Actions.available(%{type: :barbarian_warrior}) == [:move, :attack]
     end

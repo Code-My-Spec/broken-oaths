@@ -227,6 +227,26 @@ defmodule BrokenOaths.Cities.Production do
   this pure module never performs itself (see `unit_stats/1`'s own
   doc: per-type starting stats live here, but `charges` isn't
   per-type, it's per-OWNER).
+
+  ## Story 931 — the Scout
+
+  Civ 6's earliest RECON unit, and the exemplar's own second entry in
+  `.code_my_spec/knowledge/unit_and_unlock_convention.md`: NO tech gate
+  at all (`@always_available` below, alongside Settler/Worker/Warrior —
+  buildable turn 1), the cheapest buildable at 30 production (below the
+  Warrior's own 40), 100 HP (the standard pool), movement 3 (the
+  fastest unit in the game — Warrior 1, Lord/Settler/Worker/Galley 2),
+  and combat strength 5 (`Combat.Resolver`'s own `@base_strength` —
+  exactly half the Warrior's 10: a Scout loses a head-on melee fight
+  and dies easily, MELEE ONLY, no ranged attack of its own). Its one
+  real mechanic is `BrokenOaths.Units.Unit.entry_cost/5`'s own
+  `:scout` clause: it ignores difficult-terrain movement cost
+  entirely (hills/woods/rainforest/marsh all price at 1, same as open
+  ground or a road), Civ 6's own recon trait — every other land unit
+  still pays 2 for the same tile. Vision radius is the default 2
+  (`BrokenOaths.Vision.Visibility.vision_radius/1`'s own explicit
+  `:scout` clause) — a Scout sees no farther than an ordinary unit,
+  it just gets there faster and through anything.
   """
 
   import Ecto.Query
@@ -243,7 +263,8 @@ defmodule BrokenOaths.Cities.Production do
   alias BrokenOaths.Worlds.World
 
   @type tile_id :: non_neg_integer()
-  @type unit_buildable :: :settler | :worker | :warrior | :bronze_spearman | :archer | :galley
+  @type unit_buildable ::
+          :settler | :worker | :warrior | :bronze_spearman | :archer | :galley | :scout
   # Story 930 — the four buildings that land in `City.buildings` (as
   # opposed to `:granary`, still its own lone boolean). Story 933 adds
   # the Pyramids/Hanging Gardens wonders to the same list — see this
@@ -260,6 +281,7 @@ defmodule BrokenOaths.Cities.Production do
           | :bronze_spearman
           | :archer
           | :galley
+          | :scout
 
   @type queue_item :: %{
           optional(:id) => term(),
@@ -301,6 +323,10 @@ defmodule BrokenOaths.Cities.Production do
     # the Warrior and the Bronze Spearman, matching a tier-2-tech unit
     # with no strategic-resource gate of its own.
     galley: 50,
+    # Story 931 — the Scout: the cheapest military buildable, below the
+    # Warrior's own 40 (Civ 6's own recon-is-cheap-and-early posture —
+    # see this module's own moduledoc, "The Scout").
+    scout: 30,
     # Story 930 — see this module's own moduledoc, "Library, Ancient
     # Walls, Barracks, Water Mill" — the Granary's own 60 as the
     # baseline, priced up slightly for a stronger flat effect.
@@ -330,7 +356,11 @@ defmodule BrokenOaths.Cities.Production do
     # Story 921 — the Galley: the Warrior's own HP, but 2 movement (a
     # ship outpaces a foot soldier) — see this module's own moduledoc,
     # "The Galley".
-    galley: %{hp: 100, movement: 2}
+    galley: %{hp: 100, movement: 2},
+    # Story 931 — the Scout: the standard 100 HP pool, but movement 3 —
+    # the fastest unit in the game (Warrior 1, Lord/Settler/Worker/
+    # Galley 2) — see this module's own moduledoc, "The Scout".
+    scout: %{hp: 100, movement: 3}
   }
 
   @doc "The buildable catalog: `%{settler: 100, worker: 60, warrior: 40}`."
@@ -361,6 +391,7 @@ defmodule BrokenOaths.Cities.Production do
   def buildable_label(:bronze_spearman), do: "Bronze Spearman"
   def buildable_label(:archer), do: "Archer"
   def buildable_label(:galley), do: "Galley"
+  def buildable_label(:scout), do: "Scout"
   def buildable_label(:library), do: "Library"
   def buildable_label(:ancient_walls), do: "Ancient Walls"
   def buildable_label(:barracks), do: "Barracks"
@@ -498,13 +529,16 @@ defmodule BrokenOaths.Cities.Production do
 
   def can_queue?(_city, _type, _opts), do: :ok
 
-  @always_available [:settler, :worker, :warrior]
+  # Story 931 — the Scout joins the always-available set: no tech gate,
+  # buildable turn 1 alongside the Settler/Worker/Warrior (see this
+  # module's own moduledoc, "The Scout").
+  @always_available [:settler, :worker, :warrior, :scout]
 
   @doc """
   The buildable TYPES worth offering in a Build UI right now, given the
   same `opts` `can_queue?/3` reads (`:granary_available?`,
   `:bronze_age?`) — the always-available `:settler`/`:worker`/
-  `:warrior` plus `:granary` once `opts[:granary_available?]` is true
+  `:warrior`/`:scout` plus `:granary` once `opts[:granary_available?]` is true
   (story 902), `:bronze_spearman` once `opts[:bronze_age?]` is true
   (story 903), and `:galley` once `opts[:sailing?]` is true (story
   921 — `opts[:coastal?]` is deliberately NOT checked here, same
@@ -669,6 +703,7 @@ defmodule BrokenOaths.Cities.Production do
              :bronze_spearman,
              :archer,
              :galley,
+             :scout,
              :library,
              :ancient_walls,
              :barracks,
@@ -689,6 +724,8 @@ defmodule BrokenOaths.Cities.Production do
   def parse_item_type("archer"), do: {:ok, :archer}
   # Story 921 — see this module's own moduledoc, "The Galley".
   def parse_item_type("galley"), do: {:ok, :galley}
+  # Story 931 — see this module's own moduledoc, "The Scout".
+  def parse_item_type("scout"), do: {:ok, :scout}
   # Story 930 — see this module's own moduledoc, "Library, Ancient
   # Walls, Barracks, Water Mill".
   def parse_item_type("library"), do: {:ok, :library}
@@ -1132,7 +1169,7 @@ defmodule BrokenOaths.Cities.Production do
   # that cost, so its settler item simply waits, exactly like a
   # blocked landing tile.
   defp spawnable?(_city, type)
-       when type in [:worker, :warrior, :bronze_spearman, :archer, :galley],
+       when type in [:worker, :warrior, :bronze_spearman, :archer, :galley, :scout],
        do: true
 
   defp spawnable?(%{size: size}, :settler), do: size > 1

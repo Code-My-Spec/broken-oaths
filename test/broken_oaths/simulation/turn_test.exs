@@ -268,6 +268,39 @@ defmodule BrokenOaths.Simulation.TurnTest do
       assert new_state.units[1].tile_id == 10
       assert new_state.units[1].movement == 0
     end
+
+    # Story 931 — the Scout ignores difficult-terrain movement cost
+    # entirely (Civ 6's recon trait): the SAME DIFFICULT tile 10 a
+    # Warrior pays 2 for (see the test above) costs a Scout only 1,
+    # letting it reach further on the same turn's movement.
+    test "a Scout pays only 1 to enter a DIFFICULT (hills) tile, where a Warrior pays 2" do
+      u = unit(1, tile: 1, type: :scout, max_movement: 3)
+      order = %{kind: :move, path: [10, 11], status: :pending}
+      state = base_state(%{1 => u}, %{1 => order})
+
+      {new_state, _events} = Turn.tick(state)
+
+      # Without the recon trait, entering DIFFICULT tile 10 (cost 2)
+      # then open tile 11 (cost 1) would spend 3 of 3 movement exactly
+      # like a Warrior would need 2 + 1 = 3 too — this instead confirms
+      # the SCOUT's own flat 1-per-tile cost by spending only 2 of 3 to
+      # cover the same two hexes, arriving with 1 left over.
+      assert new_state.units[1].tile_id == 11
+      assert new_state.units[1].movement == 1
+      refute Map.has_key?(new_state.orders, 1)
+    end
+
+    test "a Scout still pays 1 on open terrain, same as everyone else" do
+      u = unit(1, tile: 1, type: :scout, max_movement: 2)
+      order = %{kind: :move, path: [9], status: :pending}
+      state = base_state(%{1 => u}, %{1 => order})
+
+      {new_state, _events} = Turn.tick(state)
+
+      assert new_state.units[1].tile_id == 9
+      assert new_state.units[1].movement == 1
+      refute Map.has_key?(new_state.orders, 1)
+    end
   end
 
   # Story 920 rework — `Movement.advance_fortify/1` runs right after

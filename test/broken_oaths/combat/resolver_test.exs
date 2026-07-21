@@ -124,6 +124,13 @@ defmodule BrokenOaths.Combat.ResolverTest do
     test "the Galley (story 921) matches the Lord's own base strength" do
       assert Resolver.base_strength(:galley) == 12
     end
+
+    # Story 931 — the Scout: exactly half the Warrior's own 10 (PM
+    # decision) — weak on purpose, loses a head-on melee fight.
+    test "the Scout (story 931) is exactly half the Warrior's own strength" do
+      assert Resolver.base_strength(:scout) == 5
+      assert Resolver.base_strength(:scout) == div(Resolver.base_strength(:warrior), 2)
+    end
   end
 
   describe "ranged_strength/1" do
@@ -435,6 +442,39 @@ defmodule BrokenOaths.Combat.ResolverTest do
         end)
 
       assert taken_total > dealt_total
+    end
+  end
+
+  describe "resolve/3 — Warrior vs Scout, melee (story 931)" do
+    test "a Warrior (10) always lands within its own asymmetric band against a Scout (5) in melee" do
+      {lo, hi} = expected_band(10, 5)
+      {counter_lo, counter_hi} = expected_band(5, 10)
+
+      warrior = unit(1, type: :warrior, hp: 100, max_hp: 100)
+      scout = unit(2, type: :scout, hp: 100, max_hp: 100, player_id: 2)
+
+      for seed <- 1..100 do
+        %{damage_to_defender: dealt, damage_to_attacker: taken} =
+          Resolver.resolve(warrior, scout, seed: {:warrior_vs_scout_melee, seed})
+
+        assert dealt in lo..hi
+        assert taken in counter_lo..counter_hi
+      end
+    end
+
+    test "the Warrior's expected damage output exceeds the Scout's, on average — a Warrior wins a head-on fight against a Scout" do
+      warrior = unit(1, type: :warrior, hp: 100, max_hp: 100)
+      scout = unit(2, type: :scout, hp: 100, max_hp: 100, player_id: 2)
+
+      {dealt_total, taken_total} =
+        Enum.reduce(1..200, {0, 0}, fn seed, {dealt_acc, taken_acc} ->
+          %{damage_to_defender: dealt, damage_to_attacker: taken} =
+            Resolver.resolve(warrior, scout, seed: {:warrior_vs_scout_avg, seed})
+
+          {dealt_acc + dealt, taken_acc + taken}
+        end)
+
+      assert dealt_total > taken_total
     end
   end
 

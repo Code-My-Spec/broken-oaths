@@ -177,6 +177,16 @@ defmodule BrokenOaths.Units.UnitTest do
       refute Unit.passable_tile?(:galley, :mountain)
       refute Unit.passable_tile?(:galley, :deep_ocean)
     end
+
+    # Story 931 — the Scout is an ordinary land unit for passability
+    # purposes; its own trait is entry COST (`entry_cost/5` below), not
+    # which tiles it may enter at all.
+    test "the Scout is :land-only, same as every other land unit" do
+      assert Unit.passable_tile?(:scout, :land)
+      refute Unit.passable_tile?(:scout, :coastal_water)
+      refute Unit.passable_tile?(:scout, :mountain)
+      refute Unit.passable_tile?(:scout, :deep_ocean)
+    end
   end
 
   describe "bfs_path/4" do
@@ -277,6 +287,52 @@ defmodule BrokenOaths.Units.UnitTest do
       # `relief: :hills`, not a feature — clearing it (even though it
       # carries no feature to clear at all) leaves it at cost 2.
       assert Unit.entry_cost(world, %{}, 10, MapSet.new([10])) == 2
+    end
+  end
+
+  # Story 931 — the Scout's own terrain-ignore: `entry_cost/5` prices a
+  # `:scout` at a flat 1 on ANY passable land tile, difficult or not
+  # (Civ 6's recon trait). Same fixture tiles the `entry_cost/3`/`/4`
+  # describes above already document: tile 9 is OPEN (cost 1), tile 10
+  # is DIFFICULT (snow hills, cost 2 for every other type).
+  describe "entry_cost/5 (story 931 — the Scout's terrain-ignore)" do
+    test "a Scout pays 1 to enter a DIFFICULT tile, where a Warrior still pays 2" do
+      world = fixture_world()
+      assert Unit.entry_cost(world, %{}, 10, MapSet.new(), :scout) == 1
+      assert Unit.entry_cost(world, %{}, 10, MapSet.new(), :warrior) == 2
+    end
+
+    test "a Scout still pays 1 on open terrain, same as everyone else" do
+      world = fixture_world()
+      assert Unit.entry_cost(world, %{}, 9, MapSet.new(), :scout) == 1
+      assert Unit.entry_cost(world, %{}, 9, MapSet.new(), :warrior) == 1
+    end
+
+    test "a completed Road under a Scout is still 1 — no double discount" do
+      world = fixture_world()
+      roads = %{10 => %{tile_id: 10, kind: :road, progress: 4, status: :complete}}
+      assert Unit.entry_cost(world, roads, 10, MapSet.new(), :scout) == 1
+    end
+
+    test "no unit_type (nil) preserves the pre-931 default for every existing caller" do
+      world = fixture_world()
+      assert Unit.entry_cost(world, %{}, 10, MapSet.new(), nil) == Unit.entry_cost(world, %{}, 10)
+      assert Unit.entry_cost(world, %{}, 9, MapSet.new(), nil) == Unit.entry_cost(world, %{}, 9)
+    end
+  end
+
+  describe "bfs_path/4 — Scout terrain-ignore (story 931)" do
+    test "a Scout's own route through a DIFFICULT tile costs the same 1-per-hop as open ground — it never needs to detour around one" do
+      world = fixture_world()
+      # Tile 1 -> 10 is a single DIFFICULT hop; a Warrior pays 2 for it
+      # (see the "entry_cost/3" describe's own header comment), a Scout
+      # pays 1 — the same flat per-hop cost open terrain already has.
+      assert Unit.bfs_path(tick_state(), 1, 10, :scout) == [10]
+      assert Unit.entry_cost(world, %{}, 10, MapSet.new(), :scout) == 1
+    end
+
+    test "a Scout still routes to the correct destination through mixed terrain" do
+      assert Unit.bfs_path(tick_state(), 1, 17, :scout) == [9, 17]
     end
   end
 

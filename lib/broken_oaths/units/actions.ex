@@ -68,7 +68,7 @@ defmodule BrokenOaths.Units.Actions do
   # own "Ranged" doc for the mechanic `:shoot` actually drives.
   def available(%{type: :archer}), do: [:move, :attack, :shoot, :defend]
 
-  def available(%{type: type}) when type in [:lord, :warrior, :bronze_spearman],
+  def available(%{type: type}) when type in [:lord, :warrior, :bronze_spearman, :scout],
     do: [:move, :attack, :defend]
 
   # Story 921 — see this module's own moduledoc, "Vocabulary".

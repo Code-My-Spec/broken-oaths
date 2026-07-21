@@ -12,7 +12,8 @@ defmodule BrokenOaths.Units.MaintenanceTest do
                warrior: 0,
                archer: 1,
                bronze_spearman: 1,
-               galley: 1
+               galley: 1,
+               scout: 1
              }
     end
   end
@@ -29,6 +30,10 @@ defmodule BrokenOaths.Units.MaintenanceTest do
       assert Maintenance.upkeep(:archer) == 1
       assert Maintenance.upkeep(:bronze_spearman) == 1
       assert Maintenance.upkeep(:galley) == 1
+      # Story 931 — the Scout: a real, combat-capable buildable (unlike
+      # the free starter Warrior), so it follows the same "every OTHER
+      # military type costs 1" rule.
+      assert Maintenance.upkeep(:scout) == 1
     end
 
     test "a barbarian warrior (never player-owned) is 0, not a raise" do

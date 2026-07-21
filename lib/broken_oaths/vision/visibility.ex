@@ -49,6 +49,12 @@ defmodule BrokenOaths.Vision.Visibility do
   @spec vision_radius(unit_type()) :: pos_integer()
   def vision_radius(:lord), do: 3
   def vision_radius(:settler), do: 2
+  # Story 931 — the Scout sees no farther than an ordinary unit; its
+  # own edge is speed and terrain-ignoring movement
+  # (`BrokenOaths.Units.Unit.entry_cost/5`), not sight range — explicit
+  # here (rather than falling through to `@default_vision_radius`
+  # below) so this reads as a deliberate PM decision, not an omission.
+  def vision_radius(:scout), do: 2
   def vision_radius(_other), do: @default_vision_radius
 
   @doc """

@@ -20,6 +20,15 @@ defmodule BrokenOaths.Vision.VisibilityTest do
     test "an unrecognized unit type falls back to the default radius" do
       assert Visibility.vision_radius(:catapult) == 2
     end
+
+    # Story 931 — the Scout's own edge is speed and terrain, not sight:
+    # it sees no farther than the default (explicitly, not just by
+    # falling through to the `:catapult`-style default clause above —
+    # NOT above the Lord's own 3).
+    test "the Scout (story 931) sees at the default radius — not above the Lord's own 3" do
+      assert Visibility.vision_radius(:scout) == 2
+      assert Visibility.vision_radius(:scout) < Visibility.vision_radius(:lord)
+    end
   end
 
   describe "visible_tiles/2" do

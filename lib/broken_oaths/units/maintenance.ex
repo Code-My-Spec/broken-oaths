@@ -6,7 +6,7 @@ defmodule BrokenOaths.Units.Maintenance do
   of these cost per turn." Numbers are Civ-6-grounded (leader, civilian,
   and the free starter warrior cost nothing; every OTHER military unit
   costs 1): `:lord`/`:settler`/`:worker`/`:warrior` are `0`,
-  `:archer`/`:bronze_spearman`/`:galley` are `1`.
+  `:archer`/`:bronze_spearman`/`:galley`/`:scout` (story 931) are `1`.
 
   `:barbarian_warrior` is never player-owned (`BrokenOaths.Units.Unit`'s
   own moduledoc: it carries `camp_id`, never `player_id`), so it has no
@@ -31,7 +31,8 @@ defmodule BrokenOaths.Units.Maintenance do
     warrior: 0,
     archer: 1,
     bronze_spearman: 1,
-    galley: 1
+    galley: 1,
+    scout: 1
   }
 
   @doc "The full per-type upkeep catalog — every player-owned unit type declares its own entry (this module's own guardrail: 0 is allowed, but never an omission)."

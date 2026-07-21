@@ -107,6 +107,7 @@ defmodule BrokenOaths.Units.Unit do
           | :bronze_spearman
           | :archer
           | :galley
+          | :scout
   @type tile_id :: non_neg_integer()
 
   @type t :: %__MODULE__{
@@ -145,7 +146,12 @@ defmodule BrokenOaths.Units.Unit do
         # Story 921 — the Galley, the first naval unit (see this
         # module's own `passable_tile?/2` for the water-domain
         # movement rule it introduces).
-        :galley
+        :galley,
+        # Story 931 — the Scout: no tech gate, the fastest land unit
+        # (movement 3), and the one unit type `entry_cost/5` ever
+        # special-cases to ignore difficult terrain (see that
+        # function's own doc below).
+        :scout
       ]
 
     field :tile_id, :integer
@@ -604,7 +610,7 @@ defmodule BrokenOaths.Units.Unit do
 
           {frontier, dist, prev} =
             Enum.reduce(neighbors, {frontier, dist, prev}, fn n, {f, d, p} ->
-              new_cost = cost + entry_cost(world, roads, n, cleared_features)
+              new_cost = cost + entry_cost(world, roads, n, cleared_features, unit_type)
 
               if new_cost < Map.get(d, n, :infinity) do
                 {:gb_sets.add({new_cost, n}, f), Map.put(d, n, new_cost), Map.put(p, n, tile)}
@@ -670,14 +676,32 @@ defmodule BrokenOaths.Units.Unit do
   (`cleared_features` — `state.cleared_features`, see `Regions.terrain/3`'s
   own doc): a chopped Woods/Rainforest tile prices like open terrain (1)
   the instant it's cleared, same as the movement-cost drop
-  `Terrain.movement_cost/1` already gives a featureless tile.
-  `BrokenOaths.Simulation.Turn.Movement.attempt_step/8` (the real tick-
-  time step) and `bfs_path/4` above both call this arity; the arity-3
-  sibling stays the "nothing cleared" default every existing caller
-  (and test) keeps using unchanged.
+  `Terrain.movement_cost/1` already gives a featureless tile. Delegates
+  to `entry_cost/5` with no `unit_type` (`nil` — every non-Scout unit's
+  own behavior, unchanged); the arity-4 sibling stays this "nothing
+  cleared" default every existing caller (and test) keeps using
+  unchanged.
   """
   @spec entry_cost(World.t(), map(), tile_id(), MapSet.t(tile_id())) :: 1 | 2
-  def entry_cost(world, roads, tile_id, cleared_features) do
+  def entry_cost(world, roads, tile_id, cleared_features),
+    do: entry_cost(world, roads, tile_id, cleared_features, nil)
+
+  @doc """
+  `entry_cost/4`, with story 931's Scout terrain-ignore layered on top:
+  a `:scout` pays 1 to enter ANY passable land tile, difficult or not —
+  Civ 6's own recon trait — where every other `unit_type` (and the
+  default `nil`, every existing caller's behavior unchanged) still
+  falls through to the ordinary road/terrain pricing above. `bfs_path/4`
+  above threads its own `unit_type` argument straight into this;
+  `Simulation.Turn.Movement.attempt_step/8` and `Simulation.Turn.
+  RoadBuilder.move_to/3` are its other two real-move-time callers (a
+  worker is never a Scout, so that second call site is a no-op today,
+  but stays correct rather than silently wrong once threaded).
+  """
+  @spec entry_cost(World.t(), map(), tile_id(), MapSet.t(tile_id()), unit_type() | nil) :: 1 | 2
+  def entry_cost(_world, _roads, _tile_id, _cleared_features, :scout), do: 1
+
+  def entry_cost(world, roads, tile_id, cleared_features, _unit_type) do
     if match?(%{status: :complete}, Map.get(roads, tile_id)) do
       1
     else

@@ -175,6 +175,7 @@ defmodule BrokenOaths.Combat.Resolver do
           | :bronze_spearman
           | :archer
           | :galley
+          | :scout
 
   @type unit :: %{
           id: term(),
@@ -233,7 +234,13 @@ defmodule BrokenOaths.Combat.Resolver do
     # this module has no notion of terrain, so a naval exchange
     # resolves through the exact same `resolve/3`/`resolve_attack/4`
     # pipeline land combat already does.
-    galley: 12
+    galley: 12,
+    # Story 931 — the Scout: exactly half the Warrior's own 10 (PM
+    # decision, `Cities.Production`'s own moduledoc "The Scout") — weak
+    # on purpose, loses a head-on melee fight and dies easily. Melee
+    # only, no entry in `@ranged_strength` below: nothing but an Archer
+    # can shoot (`shoot/4`'s own `:not_archer` gate).
+    scout: 5
   }
   # Playtest issue 0edd8679 — the Archer's OLD single strength (14),
   # repurposed as its ranged-only figure now that `@base_strength`'s own

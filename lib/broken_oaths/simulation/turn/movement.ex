@@ -20,9 +20,10 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
   arrival: the order is removed entirely.
 
   Story 925: one step per round no longer means one movement point per
-  round — each step spends whatever `BrokenOaths.Units.Unit.entry_cost/3`
+  round — each step spends whatever `BrokenOaths.Units.Unit.entry_cost/5`
   prices the target tile at (1 for open terrain or a completed Road, 2
-  for DIFFICULT terrain — hills/woods/rainforest/marsh — with no Road),
+  for DIFFICULT terrain — hills/woods/rainforest/marsh — with no Road,
+  or 1 regardless of terrain for a Scout, story 931's recon trait),
   clamped at 0 rather than going negative. `active_movers/1`'s own gate
   (`movement_left > 0`, not `>= cost`) preserves Civ 6's "a unit with
   any movement may always move at least one tile" rule, so a
@@ -290,13 +291,16 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
          blocked?(target, positions, units, mover_unit, garrisonable, broken_cities) do
       {Map.put(movers, unit_id, %{mover | status: :interrupted}), positions}
     else
-      # Story 925/927: spend the tile's own cost (`Unit.entry_cost/4` —
-      # terrain (with any Chop already applied), or 1 flat if a
-      # completed Road covers it), clamped at 0 rather than going
-      # negative — the min-1 rule (`active_movers/1` above) already let
-      # a unit with less than the full cost left attempt this step; it
-      # simply can't go any further this round.
-      cost = Unit.entry_cost(world, roads, target, cleared_features)
+      # Story 925/927/931: spend the tile's own cost (`Unit.entry_cost/5`
+      # — terrain (with any Chop already applied), 1 flat if a completed
+      # Road covers it, or 1 flat regardless of terrain for a Scout —
+      # `mover_unit.type` threaded through so its own recon trait
+      # applies at real move time, not just in `bfs_path/4`'s own
+      # pathfinding), clamped at 0 rather than going negative — the
+      # min-1 rule (`active_movers/1` above) already let a unit with
+      # less than the full cost left attempt this step; it simply can't
+      # go any further this round.
+      cost = Unit.entry_cost(world, roads, target, cleared_features, mover_unit.type)
 
       moved = %{
         mover
