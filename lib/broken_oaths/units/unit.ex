@@ -513,31 +513,43 @@ defmodule BrokenOaths.Units.Unit do
   # -------------------------------------------------------------------
 
   @doc """
-  Heal every unit in `state.units` that spent no movement this tick.
-  "Unmoved" is read straight off this tick's own movement ledger: a
-  unit that spent zero movement points still holds `movement ==
-  max_movement` after `BrokenOaths.Simulation.Turn.Movement.resolve_orders/1`
-  ran, whether that's because it had no order or because its order was
-  blocked before its first step. Heals 15 HP garrisoned on its own
-  city's own tile, 10 HP anywhere else in its owner's territory, 0
-  outside it. `state` is the canonical tick-state described in
+  Heal every unit that DID NOT MOVE this tick — its `tile_id` is unchanged from
+  `tiles_before`, the positions snapshot the tick takes before the movement
+  phase. Deliberately tile-based, not `movement == max_movement`: story 924's
+  split recharge only refills movement every N turns, so the movement proxy
+  would starve a stationary-but-not-yet-recharged unit of healing. Heals 15 HP
+  garrisoned on its own city's tile, 10 HP elsewhere in its owner's territory,
+  and 5 HP anywhere else (open field, neutral, or enemy land); barbarians never
+  heal here. `state` is the canonical tick-state described in
   `BrokenOaths.Simulation.Turn`.
   """
-  @spec heal_all(map()) :: map()
-  def heal_all(state) do
-    units = Map.new(state.units, fn {id, unit} -> {id, heal(unit, state.cities)} end)
+  @spec heal_all(map(), map()) :: map()
+  def heal_all(state, tiles_before) do
+    units =
+      Map.new(state.units, fn {id, unit} -> {id, heal(id, unit, state.cities, tiles_before)} end)
+
     %{state | units: units}
   end
 
-  defp heal(%{hp: hp, max_hp: max_hp} = unit, _cities) when hp >= max_hp, do: unit
+  defp heal(_id, %{hp: hp, max_hp: max_hp} = unit, _cities, _tiles_before) when hp >= max_hp,
+    do: unit
 
-  defp heal(unit, cities) do
-    if unit.movement == unit.max_movement do
+  defp heal(id, unit, cities, tiles_before) do
+    # "Didn't move this tick" = the unit's tile is unchanged from before the
+    # movement phase (`tiles_before`, captured at the top of the tick). This is
+    # deliberately NOT read off `movement == max_movement` anymore: story 924's
+    # split recharge only refills movement every N turns, so that proxy would
+    # deny healing to a unit that's sitting still but simply hasn't recharged.
+    if unit.tile_id == Map.get(tiles_before, id) do
       %{unit | hp: min(unit.max_hp, unit.hp + heal_rate(unit, cities))}
     else
       unit
     end
   end
+
+  # Barbarians have no cities and never heal from this player-territory logic —
+  # keep them at 0 rather than letting the "anywhere else" rate buff them.
+  defp heal_rate(%{type: :barbarian_warrior}, _cities), do: 0
 
   defp heal_rate(unit, cities) do
     owned = for {_id, city} <- cities, city.player_id == unit.player_id, do: city
@@ -545,7 +557,9 @@ defmodule BrokenOaths.Units.Unit do
     cond do
       Enum.any?(owned, &(&1.tile_id == unit.tile_id)) -> 15
       Enum.any?(owned, &(unit.tile_id in &1.territory)) -> 10
-      true -> 0
+      # Some slow healing anywhere (open field, neutral, enemy land) so a unit
+      # wounded out on campaign isn't stuck at low HP with no way home.
+      true -> 5
     end
   end
 

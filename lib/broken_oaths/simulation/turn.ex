@@ -275,6 +275,11 @@ defmodule BrokenOaths.Simulation.Turn do
   def tick(state) do
     new_turn = state.turn + 1
 
+    # Snapshot each unit's tile before the movement phase so Unit.heal_all/2 can
+    # tell who actually moved this tick — healing is gated on "didn't move",
+    # decoupled from the split-recharge movement points (story 924).
+    tiles_before = Map.new(state.units, fn {id, u} -> {id, u.tile_id} end)
+
     state =
       state
       |> maybe_reset_movement(new_turn)
@@ -295,7 +300,7 @@ defmodule BrokenOaths.Simulation.Turn do
       |> CityDefense.regen_cities(attacked_cities)
       |> Yields.accrue_food_all()
       |> Yields.grow_cities(settled_this_tick)
-      |> Unit.heal_all()
+      |> Unit.heal_all(tiles_before)
       |> Visibility.refresh_explored()
       |> Map.put(:turn, new_turn)
 

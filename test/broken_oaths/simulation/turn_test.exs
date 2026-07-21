@@ -781,7 +781,7 @@ defmodule BrokenOaths.Simulation.TurnTest do
   end
 
   describe "tick/1 healing" do
-    test "unmoved-at-home heals 10, garrisoned-on-the-city-tile heals 15, abroad heals 0" do
+    test "unmoved-at-home heals 10, garrisoned-on-the-city-tile heals 15, abroad heals 5" do
       neighbors = Regions.adjacent_tiles(world(), 1)
       [home_tile | _] = neighbors
 
@@ -804,7 +804,8 @@ defmodule BrokenOaths.Simulation.TurnTest do
 
       assert new_state.units[1].hp == 60
       assert new_state.units[2].hp == 65
-      assert new_state.units[3].hp == 50
+      # Story: abroad now heals 5 (was 0) — some slow healing anywhere.
+      assert new_state.units[3].hp == 55
     end
 
     test "a unit that moved this tick does not heal, even in home territory" do
