@@ -94,6 +94,7 @@ defmodule BrokenOaths.Units.Unit do
   alias BrokenOaths.Feudal.Vassalization
   alias BrokenOaths.Repo
   alias BrokenOaths.Technology.Research
+  alias BrokenOaths.Worlds.Globe
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.Terrain
   alias BrokenOaths.Worlds.World
@@ -298,7 +299,7 @@ defmodule BrokenOaths.Units.Unit do
         {:error, :not_owner}
 
       not is_integer(to_tile) or to_tile < 0 or
-          to_tile >= 10 * state.world.frequency * state.world.frequency + 2 ->
+          to_tile >= Globe.tile_count(state.world.frequency) ->
         {:error, :invalid_tile}
 
       not passable_tile?(unit.type, Regions.tile_class(state.world, to_tile)) ->
@@ -493,7 +494,7 @@ defmodule BrokenOaths.Units.Unit do
         {:error, :tech_locked}
 
       not is_integer(destination) or destination < 0 or
-          destination >= 10 * state.world.frequency * state.world.frequency + 2 ->
+          destination >= Globe.tile_count(state.world.frequency) ->
         {:error, :invalid_tile}
 
       true ->

@@ -109,6 +109,7 @@ defmodule BrokenOaths.Combat.CityDefense do
   have to walk to arrive.
   """
 
+  alias BrokenOaths.Cities.Buildings
   alias BrokenOaths.Combat.Resolver
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
@@ -169,7 +170,7 @@ defmodule BrokenOaths.Combat.CityDefense do
 
   @doc "Whether `city` has completed the Ancient Walls building (story 930)."
   @spec has_walls?(city()) :: boolean()
-  def has_walls?(city), do: :ancient_walls in Map.get(city, :buildings, [])
+  def has_walls?(city), do: Buildings.has?(city, :ancient_walls)
 
   @doc "HP a pillaged city resets to — never 0 (pillage, not destruction)."
   @spec pillage_hp() :: pos_integer()

@@ -428,73 +428,63 @@ defmodule BrokenOaths.Cities.Production do
   the city's own territory) — see this module's own moduledoc, "The
   Bronze Spearman's Copper gate."
   """
+  # Story 930/933 — the standard buildings all gate identically (built
+  # once per city, behind a single tech opt) and the two wonders gate
+  # identically (one per WORLD, refused once claimed anywhere), so
+  # data-driven clauses off these maps replace the near-identical
+  # per-type copies — the same altitude the completion side already
+  # chose with `@passive_buildings` below.
+  @standard_building_gates %{
+    library: :library_available?,
+    ancient_walls: :walls_available?,
+    barracks: :barracks_available?,
+    water_mill: :water_mill_available?
+  }
+
+  @wonder_gates %{
+    pyramids: {:pyramids_available?, :pyramids_claimed?},
+    hanging_gardens: {:hanging_gardens_available?, :hanging_gardens_claimed?}
+  }
+
   @spec can_queue?(city(), buildable(), keyword()) :: :ok | {:error, can_queue_error()}
   def can_queue?(%{size: 1}, :settler, _opts), do: {:error, :size_one}
 
   def can_queue?(city, :granary, opts) do
     cond do
-      Map.get(city, :has_granary, false) -> {:error, :already_built}
+      Buildings.has?(city, :granary) -> {:error, :already_built}
       not Keyword.get(opts, :granary_available?, false) -> {:error, :locked}
       true -> :ok
     end
   end
 
-  # Story 930 — Library/Ancient Walls/Barracks/Water Mill: the exact
-  # same shape as `:granary` above (a single tech-gate opt, refused a
-  # second time once already built), just reading `buildings` instead
-  # of `has_granary` — see this module's own moduledoc.
-  def can_queue?(city, :library, opts) do
+  # Story 930 — Library/Ancient Walls/Barracks/Water Mill: same shape as
+  # `:granary` (a single tech-gate opt, refused a second time once built),
+  # one data-driven clause off `@standard_building_gates`.
+  def can_queue?(city, type, opts) when is_map_key(@standard_building_gates, type) do
     cond do
-      :library in Map.get(city, :buildings, []) -> {:error, :already_built}
-      not Keyword.get(opts, :library_available?, false) -> {:error, :locked}
-      true -> :ok
+      Buildings.has?(city, type) ->
+        {:error, :already_built}
+
+      not Keyword.get(opts, Map.fetch!(@standard_building_gates, type), false) ->
+        {:error, :locked}
+
+      true ->
+        :ok
     end
   end
 
-  def can_queue?(city, :ancient_walls, opts) do
-    cond do
-      :ancient_walls in Map.get(city, :buildings, []) -> {:error, :already_built}
-      not Keyword.get(opts, :walls_available?, false) -> {:error, :locked}
-      true -> :ok
-    end
-  end
+  # Story 933 — Pyramids/Hanging Gardens: ONE per WORLD, so this never
+  # looks at `city`'s own `:buildings`. Each gates the same way —
+  # `:wonder_taken` once claimed anywhere (a WORLD-wide read resolved in
+  # `queue_production/4` via `Buildings.wonder_built_or_building?/2`),
+  # else `:locked` without its tech. One data-driven clause off
+  # `@wonder_gates`.
+  def can_queue?(_city, type, opts) when is_map_key(@wonder_gates, type) do
+    {available_opt, claimed_opt} = Map.fetch!(@wonder_gates, type)
 
-  def can_queue?(city, :barracks, opts) do
     cond do
-      :barracks in Map.get(city, :buildings, []) -> {:error, :already_built}
-      not Keyword.get(opts, :barracks_available?, false) -> {:error, :locked}
-      true -> :ok
-    end
-  end
-
-  def can_queue?(city, :water_mill, opts) do
-    cond do
-      :water_mill in Map.get(city, :buildings, []) -> {:error, :already_built}
-      not Keyword.get(opts, :water_mill_available?, false) -> {:error, :locked}
-      true -> :ok
-    end
-  end
-
-  # Story 933 — the Pyramids/Hanging Gardens world wonders: ONE per
-  # WORLD, not one per city, so — unlike every `can_queue?/3` clause
-  # above — this never even looks at `city`'s own `:buildings`. The
-  # single opt (`opts[:pyramids_claimed?]`/`opts[:hanging_gardens_claimed?]`)
-  # is a WORLD-wide read, resolved one level up in `queue_production/4`
-  # via `Buildings.wonder_built_or_building?/2` (see this module's own
-  # moduledoc, "Story 933"): true the instant ANY city anywhere — this
-  # one included — has it built or queued.
-  def can_queue?(_city, :pyramids, opts) do
-    cond do
-      Keyword.get(opts, :pyramids_claimed?, false) -> {:error, :wonder_taken}
-      not Keyword.get(opts, :pyramids_available?, false) -> {:error, :locked}
-      true -> :ok
-    end
-  end
-
-  def can_queue?(_city, :hanging_gardens, opts) do
-    cond do
-      Keyword.get(opts, :hanging_gardens_claimed?, false) -> {:error, :wonder_taken}
-      not Keyword.get(opts, :hanging_gardens_available?, false) -> {:error, :locked}
+      Keyword.get(opts, claimed_opt, false) -> {:error, :wonder_taken}
+      not Keyword.get(opts, available_opt, false) -> {:error, :locked}
       true -> :ok
     end
   end
@@ -984,7 +974,7 @@ defmodule BrokenOaths.Cities.Production do
   def barracks_production_bonus, do: @barracks_production_bonus
 
   defp barracks_bonus(city, type) do
-    if type in @military_types and :barracks in Map.get(city, :buildings, []) do
+    if type in @military_types and Buildings.has?(city, :barracks) do
       @barracks_production_bonus
     else
       0
@@ -1002,7 +992,7 @@ defmodule BrokenOaths.Cities.Production do
   def water_mill_production_bonus, do: @water_mill_production_bonus
 
   defp water_mill_production_bonus(city) do
-    if :water_mill in Map.get(city, :buildings, []), do: @water_mill_production_bonus, else: 0
+    if Buildings.has?(city, :water_mill), do: @water_mill_production_bonus, else: 0
   end
 
   # -------------------------------------------------------------------
@@ -1336,7 +1326,7 @@ defmodule BrokenOaths.Cities.Production do
   # `MapSet` diff rather than one `if` per building, same generalization
   # `complete_loop/4`'s own `@passive_buildings` clause already made).
   defp newly_completed_buildings(city, new_city) do
-    had_granary = Map.get(city, :has_granary, false)
+    had_granary = Buildings.has?(city, :granary)
     has_granary = Map.get(new_city, :has_granary, false)
     granary = if !had_granary and has_granary, do: [:granary], else: []
 

@@ -327,7 +327,7 @@ defmodule BrokenOaths.Technology.Research do
   end
 
   defp library_bonus(city) do
-    if :library in Map.get(city, :buildings, []), do: @library_science_bonus, else: 0
+    if BrokenOaths.Cities.Buildings.has?(city, :library), do: @library_science_bonus, else: 0
   end
 
   # -------------------------------------------------------------------

@@ -76,6 +76,8 @@ defmodule BrokenOaths.Cities.Buildings do
 
   @doc "The full per-building maintenance catalog."
   @spec catalog() :: %{building() => non_neg_integer()}
+  @catalog_keys Map.keys(@catalog)
+
   def catalog, do: @catalog
 
   @doc "Gold upkeep/turn for `building` — raises for an undeclared building rather than silently defaulting, per this module's own guardrail."
@@ -101,8 +103,7 @@ defmodule BrokenOaths.Cities.Buildings do
   """
   @spec city_upkeep(city()) :: non_neg_integer()
   def city_upkeep(city) do
-    @catalog
-    |> Map.keys()
+    @catalog_keys
     |> Enum.filter(&has?(city, &1))
     |> Enum.map(&maintenance/1)
     |> Enum.sum()

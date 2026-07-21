@@ -329,7 +329,7 @@ defmodule BrokenOaths.Cities.Yields do
   def water_mill_food_bonus, do: @water_mill_food_bonus
 
   defp water_mill_bonus(city) do
-    if :water_mill in Map.get(city, :buildings, []), do: @water_mill_food_bonus, else: 0
+    if Buildings.has?(city, :water_mill), do: @water_mill_food_bonus, else: 0
   end
 
   # -------------------------------------------------------------------
@@ -541,6 +541,13 @@ defmodule BrokenOaths.Cities.Yields do
     ids = state.cities |> Map.keys() |> Enum.sort()
     player_research = Map.get(state, :player_research, %{})
 
+    # Story 933 — Hanging Gardens ownership is invariant across this phase
+    # (wonders complete in the earlier production phase; growth never
+    # builds one), so resolve the owning players ONCE up front instead of
+    # re-scanning every city per city (was O(N^2)).
+    hg_players =
+      for {_id, c} <- state.cities, Buildings.has?(c, :hanging_gardens), into: MapSet.new(), do: c.player_id
+
     cities =
       Enum.reduce(ids, state.cities, fn id, cities ->
         city = Map.fetch!(cities, id)
@@ -549,13 +556,7 @@ defmodule BrokenOaths.Cities.Yields do
           cities
         else
           pr = Map.get(player_research, city.player_id, Research.new())
-          # Story 933 — read against `cities` (this reduce's OWN running
-          # accumulator, not the stale `state.cities` snapshot), the
-          # same "current, not original" territory rule this reduce
-          # already keeps for `claim_growth_tile/3`'s own sibling reads
-          # — a wonder built THIS same tick already counts for every
-          # city that grows after it.
-          hanging_gardens? = Buildings.player_has?(Map.values(cities), city.player_id, :hanging_gardens)
+          hanging_gardens? = MapSet.member?(hg_players, city.player_id)
           grown = grow(city, Map.values(cities), state.world, Research.age(pr), hanging_gardens?)
           Map.put(cities, id, grown)
         end
