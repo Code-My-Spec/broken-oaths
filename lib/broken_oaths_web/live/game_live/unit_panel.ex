@@ -153,7 +153,33 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
         >
           <.icon name="hero-shield-check" class="size-3" /> {fortify_label(@fortified_turns)}
         </div>
+        <%!-- Playtest issue 50a0c866 "all unit actions cancellable from the
+             units pane" — the badge above has no way to back OUT of the
+             stance; this is that gesture, applying immediately like
+             Fortify itself does (no movement spent, no confirmation). --%>
+        <button
+          :if={@fortified_turns > 0}
+          type="button"
+          data-test="unfortify"
+          phx-click="unfortify"
+          phx-value-unit_id={@unit_id}
+          class="btn btn-sm btn-outline"
+        >
+          Cancel Fortify
+        </button>
         <.order_summary order={@order} />
+
+        <%!-- Playtest issue 50a0c866 "all unit actions cancellable from the
+             units pane" — the last real gap: a queued `:move` order had no
+             cancel affordance at all, and an in-flight `:road_to` order
+             (story 929) could only be re-armed/disarmed via "Build Road
+             To…" BEFORE issue, never actually cancelled once issued. One
+             button covers both — `state.orders` only ever holds one order
+             per unit at a time, whichever kind (`Units.Order`'s own
+             moduledoc), so there's nothing to disambiguate — with the
+             label matching whichever `order_summary/1` above is already
+             showing. --%>
+        <.cancel_order_button :if={@order} order={@order} unit_id={@unit_id} />
 
         <button
           :if={:found_city in @actions}
@@ -425,6 +451,44 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
   # `Simulation.Turn.Movement.advance_fortify/1`) is the full one.
   defp fortify_label(1), do: "Fortifying"
   defp fortify_label(_), do: "Fortified"
+
+  attr :order, :map, required: true
+  attr :unit_id, :any, required: true
+
+  # Playtest issue 50a0c866 — one shared `"cancel_move"` event (see
+  # `Play`'s own handler doc) behind two labels, matching `order_summary/1`
+  # above's own kind split: a `:road_to` order (story 929) reads "Cancel
+  # Road Build" (mid-build, not merely armed-but-not-yet-issued — that's
+  # the SEPARATE "Cancel Road Target" gesture on the "Build Road To…"
+  # button); a `:move` order (any status, `:pending` or `:interrupted`)
+  # reads "Cancel Move".
+  defp cancel_order_button(%{order: %{kind: :road_to}} = assigns) do
+    ~H"""
+    <button
+      type="button"
+      data-test="cancel-road-build"
+      phx-click="cancel_move"
+      phx-value-unit_id={@unit_id}
+      class="btn btn-sm btn-outline btn-error"
+    >
+      Cancel Road Build
+    </button>
+    """
+  end
+
+  defp cancel_order_button(assigns) do
+    ~H"""
+    <button
+      type="button"
+      data-test="cancel-move"
+      phx-click="cancel_move"
+      phx-value-unit_id={@unit_id}
+      class="btn btn-sm btn-outline btn-error"
+    >
+      Cancel Move
+    </button>
+    """
+  end
 
   attr :order, :map, default: nil
 

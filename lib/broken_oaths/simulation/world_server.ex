@@ -259,6 +259,30 @@ defmodule BrokenOaths.Simulation.WorldServer do
     end
   end
 
+  # Playtest issue 50a0c866 "all unit actions cancellable from the units
+  # pane" — the move/road-to sibling of `:cancel_improvement` below:
+  # drops whichever order `unit_id` currently holds
+  # (`Unit.cancel_order/3`) from `state.orders`; `persist_tick/2`'s own
+  # generic `persist_order_changes/2` diff is what actually deletes the
+  # DB row — the same path `:queue_move`/`:build_road_to` above already
+  # lean on to WRITE one.
+  def handle_call({:cancel_move, user, unit_id}, _from, state) do
+    case Unit.cancel_order(state, user, unit_id) do
+      {:ok, new_state} ->
+        case persist_tick(state, new_state) do
+          :ok ->
+            broadcast(new_state.world.id, [:units_changed])
+            {:reply, :ok, new_state}
+
+          :stale ->
+            {:reply, {:error, :stale}, resync(state)}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   def handle_call({:attack, user, unit_id, target_unit_id}, _from, state) do
     case Resolver.attack(state, user, unit_id, target_unit_id) do
       {:ok, result, new_state} ->
@@ -383,6 +407,26 @@ defmodule BrokenOaths.Simulation.WorldServer do
   # `fortified_turns` field).
   def handle_call({:fortify, user, unit_id}, _from, state) do
     case Unit.fortify(state, user, unit_id) do
+      {:ok, new_state} ->
+        case persist_tick(state, new_state) do
+          :ok ->
+            broadcast(new_state.world.id, [:units_changed])
+            {:reply, :ok, new_state}
+
+          :stale ->
+            {:reply, {:error, :stale}, resync(state)}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Playtest issue 50a0c866 — the un-fortify sibling of `:fortify`
+  # above: same immediate-resolution, persist+broadcast shape, just
+  # resetting `fortified_turns` back to 0 instead of setting it.
+  def handle_call({:unfortify, user, unit_id}, _from, state) do
+    case Unit.unfortify(state, user, unit_id) do
       {:ok, new_state} ->
         case persist_tick(state, new_state) do
           :ok ->

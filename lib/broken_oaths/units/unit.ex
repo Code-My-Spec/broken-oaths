@@ -387,6 +387,51 @@ defmodule BrokenOaths.Units.Unit do
   end
 
   # -------------------------------------------------------------------
+  # Cancel order (playtest issue 50a0c866 "all unit actions cancellable
+  # from the units pane") — the sibling `WorldServer`'s own
+  # `:cancel_move` `handle_call` delegates into, same thin-delegation
+  # shape `queue_move/4` above already has.
+  # -------------------------------------------------------------------
+
+  @doc """
+  Cancel `unit_id`'s own currently queued order — playtest issue
+  50a0c866: there was previously no way to back out of a pending
+  `:move` order once issued (`Cities.Improvement.cancel_improvement/3`
+  already covers a worker's own dig, `fortify/3`/`unfortify/3` below
+  the Fortify stance — this closes the last real gap). Works for
+  EITHER order kind: `state.orders` only ever holds one order per unit
+  at a time, whichever kind (`Units.Order`'s own moduledoc — the DB
+  enforces it with a unique index on `unit_id`), so there's nothing to
+  disambiguate. A `:road_to` order (story 929) drops the exact same way
+  `Simulation.Turn.RoadBuilder`'s own `drop_order/2` already does for
+  its own collision/damage-triggered auto-cancel: the worker simply
+  stops walking/building any FURTHER segment, but whatever's mid-build
+  on its own CURRENT tile right now is left alone — that progress
+  lives on the TILE, not the order, same as `RoadBuilder`'s own
+  moduledoc documents for its own auto-cancel. `UnitPanel`'s own
+  separate "Cancel Build" button (`Cities.Improvement.
+  cancel_improvement/3`) is what backs THAT out, if the player wants
+  to. Refuses an unowned unit (`:not_owner`) or one with nothing
+  queued at all (`:no_order`).
+  """
+  @spec cancel_order(map(), map(), term()) :: {:ok, map()} | {:error, :not_owner | :no_order}
+  def cancel_order(state, user, unit_id) do
+    player = find_player(state, user.id)
+    unit = Map.get(state.units, unit_id)
+
+    cond do
+      is_nil(player) or is_nil(unit) or unit.player_id != player.id ->
+        {:error, :not_owner}
+
+      not Map.has_key?(state.orders, unit_id) ->
+        {:error, :no_order}
+
+      true ->
+        {:ok, %{state | orders: Map.delete(state.orders, unit_id)}}
+    end
+  end
+
+  # -------------------------------------------------------------------
   # Build road to (story 929) — issues a `:road_to` order on a worker:
   # walk the cheapest owned-territory route to `destination`, laying
   # road tile-by-tile as it arrives. Resolution (the walk-vs-build state
@@ -753,6 +798,39 @@ defmodule BrokenOaths.Units.Unit do
       true ->
         fortified_turns = max(Map.get(unit, :fortified_turns, 0), 1)
         new_unit = Map.put(unit, :fortified_turns, fortified_turns)
+        {:ok, %{state | units: Map.put(state.units, unit_id, new_unit)}}
+    end
+  end
+
+  @doc """
+  Un-fortify `unit_id` (playtest issue 50a0c866 "all unit actions
+  cancellable from the units pane"): clears `user`'s own unit's Fortify
+  stance back to `fortified_turns: 0` immediately — the counter-reset
+  sibling of `fortify/3` above. The stance already clears itself on the
+  unit's own next move (`Simulation.Turn.Movement.apply_positions/3`)
+  or attack (`Combat.Resolver.resolve_attack/4` and its siblings — see
+  this module's own moduledoc "fortified_turns" paragraph), but until
+  now there was no way to back OUT of it deliberately, without
+  spending movement or attacking something. Refuses an unowned unit
+  (`:not_owner`) or one that isn't currently fortified at all
+  (`:not_fortified` — the panel itself never offers the button
+  otherwise, see `UnitPanel`, so this only guards a direct/test
+  caller, same posture `fortify/3`'s own idempotence guard has).
+  """
+  @spec unfortify(map(), map(), term()) :: {:ok, map()} | {:error, :not_owner | :not_fortified}
+  def unfortify(state, user, unit_id) do
+    player = find_player(state, user.id)
+    unit = Map.get(state.units, unit_id)
+
+    cond do
+      is_nil(player) or is_nil(unit) or unit.player_id != player.id ->
+        {:error, :not_owner}
+
+      Map.get(unit, :fortified_turns, 0) == 0 ->
+        {:error, :not_fortified}
+
+      true ->
+        new_unit = Map.put(unit, :fortified_turns, 0)
         {:ok, %{state | units: Map.put(state.units, unit_id, new_unit)}}
     end
   end

@@ -214,9 +214,17 @@ defmodule BrokenOaths.Game do
           {:ok, %{route: [term()]}} | {:error, atom()}
   defdelegate build_road_to(world, user, unit_id, destination), to: Units
 
+  @doc "Cancel `unit_id`'s own currently queued order (move or road-to). See `Units.cancel_move/3`."
+  @spec cancel_move(map(), map(), term()) :: :ok | {:error, :not_owner | :no_order}
+  defdelegate cancel_move(world, user, unit_id), to: Units
+
   @doc "Fortify `unit_id` (story 920): the defensive stance. See `Units.fortify/3`."
   @spec fortify(map(), map(), term()) :: :ok | {:error, :not_owner | :not_fortifiable}
   defdelegate fortify(world, user, unit_id), to: Units
+
+  @doc "Un-fortify `unit_id`: clears the Fortify stance immediately. See `Units.unfortify/3`."
+  @spec unfortify(map(), map(), term()) :: :ok | {:error, :not_owner | :not_fortified}
+  defdelegate unfortify(world, user, unit_id), to: Units
 
   @doc "Test-only: set a unit's HP directly. See `Units.set_unit_hp_for_test/3`."
   @spec set_unit_hp_for_test(map(), term(), non_neg_integer()) :: :ok

@@ -805,6 +805,26 @@ defmodule BrokenOathsWeb.GameLive.Play do
     end
   end
 
+  # Playtest issue 50a0c866 "all unit actions cancellable from the
+  # units pane" — the queued-order sibling of `"cancel_improvement"`
+  # below, dropping whichever order (`:move` or story 929's
+  # `:road_to`) the unit currently holds. Refreshes inline (not just
+  # via the async `:units_changed` broadcast) so the ghost route
+  # (`push_selected_path/1`, part of `refresh_board/1`) disappears in
+  # the SAME render as the click — same "same render as the click"
+  # posture `cancel_improvement` below already has (issue b5cc4ae9).
+  def handle_event("cancel_move", %{"unit_id" => unit_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.cancel_move(world, user, PlayView.parse_id(unit_id)) do
+      :ok ->
+        {:noreply, socket |> assign(order_error: nil) |> refresh_board()}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, order_error: PlayView.order_error_message(reason))}
+    end
+  end
+
   # Resolves immediately, like queue_move — the result carries this
   # turn's damage_dealt/damage_taken (story 891, criterion 7540), which
   # this handler pushes straight back to the attacker's own view rather
@@ -963,6 +983,22 @@ defmodule BrokenOathsWeb.GameLive.Play do
     %{world: world, user: user} = socket.assigns
 
     case Game.fortify(world, user, PlayView.parse_id(unit_id)) do
+      :ok ->
+        {:noreply, assign(socket, combat_error: nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, combat_error: PlayView.combat_error_message(reason))}
+    end
+  end
+
+  # Playtest issue 50a0c866 "all unit actions cancellable from the
+  # units pane" — the un-fortify sibling of `"fortify"` above: same
+  # `combat_error`-flash shape, clearing the stance back to 0 instead
+  # of setting it.
+  def handle_event("unfortify", %{"unit_id" => unit_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.unfortify(world, user, PlayView.parse_id(unit_id)) do
       :ok ->
         {:noreply, assign(socket, combat_error: nil)}
 

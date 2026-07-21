@@ -188,6 +188,11 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
   def order_error_message(:occupied), do: "Another unit already holds that tile."
   def order_error_message(:impassable), do: "That terrain can't be crossed."
   def order_error_message(:unreachable), do: "There's no path there."
+
+  # Playtest issue 50a0c866 — `"cancel_move"`'s own refusal when the
+  # unit has nothing queued to cancel.
+  def order_error_message(:no_order), do: "That unit has no order to cancel."
+
   def order_error_message(_other), do: "That order can't be queued."
 
   def combat_error_message(:not_owner), do: "You don't control that unit."
@@ -212,6 +217,10 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
   # `:defend`-capable unit (every player-commandable type — never a
   # barbarian) can brace.
   def combat_error_message(:not_fortifiable), do: "That unit can't fortify."
+
+  # Playtest issue 50a0c866 — `"unfortify"`'s own refusal when the unit
+  # isn't currently fortified at all.
+  def combat_error_message(:not_fortified), do: "That unit isn't fortified."
 
   def combat_error_message(_other), do: "That attack can't be ordered."
 

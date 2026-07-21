@@ -117,6 +117,57 @@ defmodule BrokenOaths.Game.FortifyTest do
     end
   end
 
+  describe "unfortify/3 (playtest issue 50a0c866 'all unit actions cancellable')" do
+    test "clears fortified_turns back to 0 on the caller's own fortified unit", %{
+      world: world,
+      user: user
+    } do
+      lord = lord_of(world, user)
+      assert Game.fortify(world, user, lord.id) == :ok
+      assert unit_by_id(world, user, lord.id).fortified_turns == 1
+
+      assert Game.unfortify(world, user, lord.id) == :ok
+      assert unit_by_id(world, user, lord.id).fortified_turns == 0
+    end
+
+    test "clears the full, ramped bonus too", %{world: world, user: user} do
+      lord = lord_of(world, user)
+      assert Game.fortify(world, user, lord.id) == :ok
+      assert Game.advance_turn(world) == :ok
+      assert unit_by_id(world, user, lord.id).fortified_turns == 2
+
+      assert Game.unfortify(world, user, lord.id) == :ok
+      assert unit_by_id(world, user, lord.id).fortified_turns == 0
+    end
+
+    test "refuses a unit that isn't currently fortified", %{world: world, user: user} do
+      lord = lord_of(world, user)
+      assert unit_by_id(world, user, lord.id).fortified_turns == 0
+
+      assert Game.unfortify(world, user, lord.id) == {:error, :not_fortified}
+    end
+
+    test "refuses a unit_id the caller doesn't own", %{world: world, user: user} do
+      lord = lord_of(world, user)
+      assert Game.fortify(world, user, lord.id) == :ok
+
+      stranger = UsersFixtures.user_fixture()
+      {:ok, _player} = Game.join_world(world, stranger)
+
+      assert Game.unfortify(world, stranger, lord.id) == {:error, :not_owner}
+    end
+
+    test "survives a WorldServer restart", %{world: world, user: user} do
+      lord = lord_of(world, user)
+      assert Game.fortify(world, user, lord.id) == :ok
+      assert Game.unfortify(world, user, lord.id) == :ok
+
+      :ok = WorldServer.restart(world)
+
+      assert unit_by_id(world, user, lord.id).fortified_turns == 0
+    end
+  end
+
   describe "fortify/3 ramps at the turn boundary (story 920, Civ 6 ramp)" do
     test "a unit that holds fortify across a turn boundary ramps from 1 (partial) to 2 (full)", %{
       world: world,

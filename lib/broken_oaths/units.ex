@@ -42,6 +42,16 @@ defmodule BrokenOaths.Units do
     do: WorldServer.call(world, {:build_road_to, user, unit_id, destination})
 
   @doc """
+  Cancel `unit_id`'s own currently queued order (playtest issue
+  50a0c866 "all unit actions cancellable from the units pane") —
+  whichever kind it holds, `:move` or story 929's `:road_to`. See
+  `BrokenOaths.Units.Unit.cancel_order/3` for the full contract.
+  """
+  @spec cancel_move(map(), map(), term()) :: :ok | {:error, :not_owner | :no_order}
+  def cancel_move(world, user, unit_id),
+    do: WorldServer.call(world, {:cancel_move, user, unit_id})
+
+  @doc """
   Fortify `unit_id` (story 920): grants the caller's own unit the
   defensive stance immediately, no dig-in turn. Legal for any
   `:defend`-capable type; idempotent. See `BrokenOaths.Units.Unit.
@@ -51,6 +61,15 @@ defmodule BrokenOaths.Units do
   @spec fortify(map(), map(), term()) :: :ok | {:error, :not_owner | :not_fortifiable}
   def fortify(world, user, unit_id),
     do: WorldServer.call(world, {:fortify, user, unit_id})
+
+  @doc """
+  Un-fortify `unit_id` (playtest issue 50a0c866): clears the caller's
+  own unit's Fortify stance immediately, back to `fortified_turns: 0`.
+  See `BrokenOaths.Units.Unit.unfortify/3` for the full contract.
+  """
+  @spec unfortify(map(), map(), term()) :: :ok | {:error, :not_owner | :not_fortified}
+  def unfortify(world, user, unit_id),
+    do: WorldServer.call(world, {:unfortify, user, unit_id})
 
   @doc """
   Test-only: set a unit's HP directly. Story 881's healing rules need a

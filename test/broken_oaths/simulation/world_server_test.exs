@@ -896,6 +896,108 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
     end
   end
 
+  # Playtest issue 50a0c866 "all unit actions cancellable from the units
+  # pane" — before this, a pending `:move` order (and an in-flight
+  # `:road_to` order, story 929) had no cancel affordance at all; only
+  # `cancel_improvement/3` above (a worker's own dig) already existed.
+  describe "cancel_move/3 (playtest issue 50a0c866)" do
+    test "cancels a pending :move order — the unit stops advancing at the next tick" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, _player} = Game.join_world(world, user)
+
+      [lord] = for u <- Game.player_units(world, user), u.type == :lord, do: u
+      target = far_land_tile(world, lord.tile_id, 3)
+
+      assert {:ok, _result} = Game.queue_move(world, user, lord.id, target)
+
+      # A Lord's 2 movement points can't cover a 3-hex path in one go —
+      # the order still has a remaining step queued, the exact "not
+      # there yet" state a cancel needs to interrupt.
+      [mid_move] = for u <- Game.player_units(world, user), u.id == lord.id, do: u
+      refute is_nil(mid_move.order)
+      stopped_at = mid_move.tile_id
+
+      assert :ok = Game.cancel_move(world, user, lord.id)
+
+      [cancelled] = for u <- Game.player_units(world, user), u.id == lord.id, do: u
+      assert cancelled.order == nil
+      assert cancelled.tile_id == stopped_at
+
+      :ok = Game.advance_turn(world)
+
+      [after_tick] = for u <- Game.player_units(world, user), u.id == lord.id, do: u
+      assert after_tick.tile_id == stopped_at
+      assert after_tick.order == nil
+
+      WorldServer.restart(world)
+    end
+
+    test "cancels an in-flight :road_to order — the worker never walks toward or builds the destination" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+      :ok = Game.isolate_camp_for_test(world, -1)
+      research_the_wheel(world, user)
+
+      [city] = Game.player_cities(world, user)
+      worker = Game.spawn_unit_for_test(world, player.id, :worker, city.tile_id)
+      destination = hd(Regions.adjacent_tiles(world, city.tile_id))
+
+      assert {:ok, %{route: [^destination]}} =
+               Game.build_road_to(world, user, worker.id, destination)
+
+      assert :ok = Game.cancel_move(world, user, worker.id)
+
+      [cancelled] = for u <- Game.player_units(world, user), u.id == worker.id, do: u
+      assert cancelled.order == nil
+
+      # Advancing many turns proves the order (not just the arm/target
+      # UI mode) is what got cleared — before this fix, the ONLY
+      # affordance ("Cancel Road Target") merely disarmed the
+      # click-to-target mode, and the already-issued order kept driving
+      # `RoadBuilder.resolve/1` every tick regardless.
+      for _ <- 1..15, do: :ok = Game.advance_turn(world)
+
+      [after_ticks] = for u <- Game.player_units(world, user), u.id == worker.id, do: u
+      assert after_ticks.tile_id == city.tile_id
+      refute Enum.any?(Game.improvements_visible_to(world, user), &(&1.tile_id == destination))
+
+      WorldServer.restart(world)
+    end
+
+    test "refuses a unit the caller doesn't own" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      other_user = UsersFixtures.user_fixture()
+      {:ok, _player} = Game.join_world(world, user)
+      {:ok, _other_player} = Game.join_world(world, other_user)
+
+      [lord] = for u <- Game.player_units(world, user), u.type == :lord, do: u
+      target = far_land_tile(world, lord.tile_id, 3)
+      assert {:ok, _result} = Game.queue_move(world, user, lord.id, target)
+
+      assert {:error, :not_owner} = Game.cancel_move(world, other_user, lord.id)
+
+      WorldServer.restart(world)
+    end
+
+    test "refuses when the unit has no order queued" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, _player} = Game.join_world(world, user)
+
+      [lord] = for u <- Game.player_units(world, user), u.type == :lord, do: u
+
+      assert {:error, :no_order} = Game.cancel_move(world, user, lord.id)
+
+      WorldServer.restart(world)
+    end
+  end
+
   # Story 882 playtest update (issue 1caa87e9 — worker build charges):
   # a worker is created with 3 build charges, spends one per completed
   # Farm/Mine, is expended on its last one, and Roads are charge-exempt.
@@ -1270,6 +1372,32 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
     Enum.find(0..641, fn t ->
       Regions.tile_class(world, t) == :land and not MapSet.member?(territory, t)
     end)
+  end
+
+  # Playtest issue 50a0c866 — same "BFS levels over land" technique
+  # `BrokenOathsSpex.Story875.Criterion7425Spex` already uses to find a
+  # destination exactly `hops` hexes away, so a queued order there is
+  # guaranteed to leave SOME remaining path after `queue_move/4`'s own
+  # immediate resolution (every unit's own `movement`, per
+  # `Production.unit_stats/1`, is at most 2 points per tick).
+  defp far_land_tile(world, from_tile, hops) do
+    grow = fn frontier, seen ->
+      next =
+        frontier
+        |> Enum.flat_map(&Regions.adjacent_tiles(world, &1))
+        |> Enum.uniq()
+        |> Enum.reject(&MapSet.member?(seen, &1))
+        |> Enum.filter(&(Regions.tile_class(world, &1) == :land))
+
+      {next, MapSet.union(seen, MapSet.new(next))}
+    end
+
+    {frontier, _seen} =
+      Enum.reduce(1..hops, {[from_tile], MapSet.new([from_tile])}, fn _, {frontier, seen} ->
+        grow.(frontier, seen)
+      end)
+
+    hd(frontier)
   end
 
   defp hills_tile(world) do

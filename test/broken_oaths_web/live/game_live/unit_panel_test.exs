@@ -103,6 +103,50 @@ defmodule BrokenOathsWeb.GameLive.UnitPanelTest do
     end
   end
 
+  # Playtest issue 50a0c866 "all unit actions cancellable from the units
+  # pane" — a queued order had no cancel affordance at all before this;
+  # one shared "cancel_move" event behind two labels, matching
+  # `order_summary/1`'s own kind split.
+  describe "cancelling a queued order (playtest issue 50a0c866)" do
+    test "shows a Cancel Move button for a pending :move order, wired to cancel_move" do
+      order = %{target_tile: 42, status: :pending, kind: :move}
+
+      html = render_component(UnitPanel, id: "unit-panel", unit: @settler, order: order)
+
+      assert html =~ ~s(data-test="cancel-move")
+      assert html =~ ~s(phx-click="cancel_move")
+      assert html =~ "Cancel Move"
+      refute html =~ ~s(data-test="cancel-road-build")
+    end
+
+    test "still offers Cancel Move for an interrupted :move order" do
+      order = %{target_tile: 42, status: :interrupted, kind: :move}
+
+      html = render_component(UnitPanel, id: "unit-panel", unit: @settler, order: order)
+
+      assert html =~ ~s(data-test="cancel-move")
+    end
+
+    test "shows a Cancel Road Build button for an in-flight :road_to order" do
+      order = %{target_tile: 42, status: :pending, kind: :road_to}
+      worker = %{type: :worker, hp: 6, max_hp: 6, movement: 2, max_movement: 2}
+
+      html = render_component(UnitPanel, id: "unit-panel", unit: worker, order: order)
+
+      assert html =~ ~s(data-test="cancel-road-build")
+      assert html =~ ~s(phx-click="cancel_move")
+      assert html =~ "Cancel Road Build"
+      refute html =~ ~s(data-test="cancel-move")
+    end
+
+    test "hides the cancel button when there's no order" do
+      html = render_component(UnitPanel, id: "unit-panel", unit: @lord, order: nil)
+
+      refute html =~ ~s(data-test="cancel-move")
+      refute html =~ ~s(data-test="cancel-road-build")
+    end
+  end
+
   # QA issue 8aa2c571: a worker mid-dig had no way to back out of it —
   # the Cancel Build button sits beside the dig-progress badge and only
   # ever renders alongside it.
@@ -278,6 +322,25 @@ defmodule BrokenOathsWeb.GameLive.UnitPanelTest do
       html = render_component(UnitPanel, id: "unit-panel", unit: @lord, order: nil)
 
       refute html =~ ~s(data-test="unit-fortified")
+    end
+
+    # Playtest issue 50a0c866 "all unit actions cancellable from the
+    # units pane" — the badge above previously had no way BACK out of
+    # the stance.
+    test "shows a Cancel Fortify button once fortified, wired to unfortify" do
+      fortified_lord = Map.put(@lord, :fortified_turns, 1)
+
+      html = render_component(UnitPanel, id: "unit-panel", unit: fortified_lord, order: nil)
+
+      assert html =~ ~s(data-test="unfortify")
+      assert html =~ ~s(phx-click="unfortify")
+      assert html =~ "Cancel Fortify"
+    end
+
+    test "hides Cancel Fortify when the unit isn't fortified" do
+      html = render_component(UnitPanel, id: "unit-panel", unit: @lord, order: nil)
+
+      refute html =~ ~s(data-test="unfortify")
     end
   end
 end
