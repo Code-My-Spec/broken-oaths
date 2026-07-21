@@ -12,9 +12,12 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
   claimed the tile earlier in the same round. A blocked mover halts for
   the rest of the tick: its order becomes `:interrupted` and its
   remaining path (including the blocked step) is preserved untouched.
-  `:interrupted` orders are not retried until something re-queues
-  them — that is outside this module. A path fully consumed within the
-  tick is an arrival: the order is removed entirely.
+  `:interrupted` orders AUTO-RESUME on the next tick — `resolve_orders/1`
+  re-picks any order still `:pending` OR `:interrupted` with a non-empty
+  path, so a mover blocked this tick keeps retrying its preserved path
+  each turn until the tile clears (or the player cancels it), the Civ 6
+  keep-pathing behavior. A path fully consumed within the tick is an
+  arrival: the order is removed entirely.
 
   Story 925: one step per round no longer means one movement point per
   round — each step spends whatever `BrokenOaths.Units.Unit.entry_cost/3`
@@ -55,7 +58,8 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
   @spec resolve_orders(map()) :: map()
   def resolve_orders(state) do
     movers =
-      for {unit_id, %{kind: :move, status: :pending, path: path}} <- state.orders,
+      for {unit_id, %{kind: :move, status: status, path: path}} <- state.orders,
+          status in [:pending, :interrupted],
           path != [],
           into: %{} do
         unit = Map.fetch!(state.units, unit_id)

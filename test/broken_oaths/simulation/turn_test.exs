@@ -394,15 +394,35 @@ defmodule BrokenOaths.Simulation.TurnTest do
       assert new_state.orders[1] == %{kind: :move, path: [20, 30], status: :interrupted}
     end
 
-    test "an already-interrupted order is never retried this tick" do
+    test "an interrupted order auto-resumes and completes when the tile is clear (task 16)" do
       mover = unit(1, tile: 5, max_movement: 2)
       order = %{kind: :move, path: [20], status: :interrupted}
       state = base_state(%{1 => mover}, %{1 => order})
 
       {new_state, _events} = Turn.tick(state)
 
-      assert new_state.units[1].tile_id == 5
-      assert new_state.orders[1] == order
+      # Nothing blocks tile 20 now, so the retried interrupted order runs:
+      # the mover advances and the finished order is dropped.
+      assert new_state.units[1].tile_id == 20
+      refute Map.has_key?(new_state.orders, 1)
+    end
+
+    test "a blocked order stays interrupted, then resumes once the blocker leaves (task 16)" do
+      mover = unit(1, tile: 5, max_movement: 1)
+      blocker = unit(2, tile: 20, max_movement: 0)
+      order = %{kind: :move, path: [20], status: :pending}
+      blocked_state = base_state(%{1 => mover, 2 => blocker}, %{1 => order})
+
+      # Tick 1: tile 20 is occupied -> mover halts, order interrupted.
+      {interrupted, _} = Turn.tick(blocked_state)
+      assert interrupted.units[1].tile_id == 5
+      assert interrupted.orders[1].status == :interrupted
+
+      # The blocker leaves; tick 2 retries the interrupted order and it moves.
+      cleared = %{interrupted | units: Map.delete(interrupted.units, 2)}
+      {resumed, _} = Turn.tick(cleared)
+      assert resumed.units[1].tile_id == 20
+      refute Map.has_key?(resumed.orders, 1)
     end
   end
 
