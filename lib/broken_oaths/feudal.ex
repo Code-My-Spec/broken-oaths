@@ -367,6 +367,10 @@ defmodule BrokenOaths.Feudal do
           :ok | {:error, :not_a_player | :insufficient_gold | :feudal_disabled}
   def upgrade_bank(world, user), do: WorldServer.call(world, {:upgrade_bank, user})
 
+  @doc "Stories 922/923 — `user`'s own live `%{income:, upkeep:, net:}` gold/turn readout (`BrokenOaths.Feudal.Bank.maintenance_by_player/1` netted against gross city income), the figure `GameLive.ProgressPanel`'s own \"Gold/turn\" line renders."
+  @spec gold_per_turn(map(), map()) :: %{income: non_neg_integer(), upkeep: non_neg_integer(), net: integer()}
+  def gold_per_turn(world, user), do: WorldServer.call(world, {:gold_per_turn, user})
+
   # -------------------------------------------------------------------
   # Feudal Stewardship (story 910)
   # -------------------------------------------------------------------

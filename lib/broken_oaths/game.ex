@@ -619,6 +619,10 @@ defmodule BrokenOaths.Game do
           :ok | {:error, :not_a_player | :insufficient_gold | :feudal_disabled}
   defdelegate upgrade_bank(world, user), to: Feudal
 
+  @doc "`user`'s own live `%{income:, upkeep:, net:}` gold/turn readout (stories 922/923). See `Feudal.gold_per_turn/2`."
+  @spec gold_per_turn(map(), map()) :: %{income: non_neg_integer(), upkeep: non_neg_integer(), net: integer()}
+  defdelegate gold_per_turn(world, user), to: Feudal
+
   # -------------------------------------------------------------------
   # Feudal Stewardship (story 910) — delegated to BrokenOaths.Feudal
   # -------------------------------------------------------------------

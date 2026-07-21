@@ -1864,7 +1864,13 @@ defmodule BrokenOathsWeb.GameLive.Play do
       # reconnect or turn boundary.
       bank: Game.bank(world, user),
       honor: Game.honor(world, user),
-      steward_log: Game.steward_log(world, user)
+      steward_log: Game.steward_log(world, user),
+      # Stories 922/923: `GameLive.ProgressPanel`'s own "Gold/turn"
+      # line — same "single source of truth, re-fetched on every
+      # signal" status `bank` above already has, so a queued unit's
+      # upkeep (or a completed Granary's) shows up the instant it
+      # changes `cities`/`units`, not just at the next turn boundary.
+      gold_per_turn: Game.gold_per_turn(world, user)
     )
     |> push_board_state()
     |> push_selected_path()
@@ -2345,6 +2351,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
           player_research={@player_research}
           cities={@cities}
           player_stats={@player_stats}
+          gold_per_turn={@gold_per_turn}
           selected_tile={@selected_tile}
           selected_camp={@selected_camp}
           selected_unit={@selected_unit}

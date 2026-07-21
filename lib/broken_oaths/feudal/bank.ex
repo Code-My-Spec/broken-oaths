@@ -45,14 +45,45 @@ defmodule BrokenOaths.Feudal.Bank do
   `:collect_bank`/`:upgrade_bank` — both gated on `Game.feudal_enabled?/0`
   the same belt-and-suspenders way `apply_income/3`'s own caller already
   is.
+
+  ## Upkeep and disband-when-broke (stories 922/923)
+
+  `apply_upkeep/2` is the SWEEP `WorldServer.run_tick/1`'s own
+  `apply_bank/1` phase now calls instead of `apply_income/3` directly —
+  it nets every player's own gross city income against their own
+  maintenance bill (`maintenance_by_player/1`: every owned unit's
+  `BrokenOaths.Units.Maintenance.upkeep/1` plus every owned city's
+  `BrokenOaths.Cities.Buildings.city_upkeep/1`), then settles the NET
+  figure. A surplus (net >= 0) is handed straight to `apply_income/3`
+  UNCHANGED — the exact same function, called with a net rather than a
+  gross figure, so a world with no upkeep-bearing units/buildings (net
+  always equals gross) ticks identically to before this story. A deficit
+  is a new path (`settle_deficit/4`): paid out of the TREASURY regardless
+  of online status (`player.gold + net`, `net` negative) — a shortfall is
+  never the offline "not around to collect" case `settle_income/3`'s own
+  `false` branch models, so it never touches `banked_gold`. Clamped at
+  `0` when the treasury itself can't cover it, and that clamp is exactly
+  the BROKE signal that triggers `disband_broke/2`: one unit gone this
+  tick, freeing up next turn's upkeep, same "shed units until you can
+  afford your army" consequence Civ 6 itself has.
   """
 
+  alias BrokenOaths.Cities.Buildings
   alias BrokenOaths.Game
   alias BrokenOaths.Players.Player
   alias BrokenOaths.Players.Presence
+  alias BrokenOaths.Units.Maintenance
   alias BrokenOaths.Worlds.World
 
   @type player :: %{gold: integer(), banked_gold: integer(), bank_cap: integer()}
+  @type alert_event :: {:city_alert, term(), String.t()}
+
+  # Story 923's disband-victim ordering: military over civilian, the
+  # Lord never eligible at all (filtered before this split — see
+  # `disband_target/2`). `:barbarian_warrior` never appears here; a
+  # barbarian carries no `player_id`, so it's never among `owned`.
+  @military_disband_types [:warrior, :bronze_spearman, :archer, :galley]
+  @civilian_disband_types [:settler, :worker]
 
   @starting_cap 100
   @cap_increment 100
@@ -192,6 +223,133 @@ defmodule BrokenOaths.Feudal.Bank do
         Map.put(players, player_id, settle_income(player, income, online?))
     end
   end
+
+  # -------------------------------------------------------------------
+  # Upkeep and disband-when-broke (stories 922/923) — see this module's
+  # own moduledoc "Upkeep and disband-when-broke" section.
+  # -------------------------------------------------------------------
+
+  @doc """
+  Every player's own total gold upkeep this turn: every unit they own
+  (`Maintenance.upkeep/1`) plus every city they own
+  (`Buildings.city_upkeep/1`), grouped by `player_id` and summed. A unit
+  with no owner (`:barbarian_warrior`, `player_id: nil`) is filtered out
+  first — nobody ever owes for a unit nobody owns. Public (unlike
+  `WorldServer.gold_income_by_player/1`, its sibling on the income side)
+  because `WorldServer`'s own `:gold_per_turn` read needs the SAME figure
+  `apply_upkeep/2` settles with, outside any tick.
+  """
+  @spec maintenance_by_player(map()) :: %{term() => non_neg_integer()}
+  def maintenance_by_player(state) do
+    unit_upkeep = sum_by_owner(state.units, &Maintenance.upkeep/1)
+    building_upkeep = sum_by_owner(state.cities, &Buildings.city_upkeep/1)
+    Map.merge(unit_upkeep, building_upkeep, fn _player_id, u, b -> u + b end)
+  end
+
+  defp sum_by_owner(entities, upkeep_fun) do
+    entities
+    |> Map.values()
+    |> Enum.filter(&(&1.player_id != nil))
+    |> Enum.group_by(& &1.player_id)
+    |> Map.new(fn {player_id, owned} -> {player_id, owned |> Enum.map(upkeep_fun) |> Enum.sum()} end)
+  end
+
+  @doc """
+  The turn-boundary NET settlement `WorldServer.apply_bank/1` calls
+  instead of `apply_income/3` directly (see this module's own moduledoc)
+  — nets `income_by_player` (gross, `WorldServer.gold_income_by_player/1`)
+  against `maintenance_by_player/1`, hands every player with a surplus
+  (net >= 0, INCLUDING a player who owes nothing at all) to `apply_income/3`
+  unchanged, and settles every deficit via `settle_deficit/4`, disbanding
+  a unit for whichever players that clamps to broke. Returns
+  `{new_state, alert_events}` — `alert_events` the same `{:city_alert,
+  user_id, message}` shape `WorldServer`'s own `approach_alert_events/2`
+  already pushes, one per player who lost a unit this tick, for
+  `run_tick/1`'s own end-of-tick broadcast to fold in alongside every
+  other tick alert.
+  """
+  @spec apply_upkeep(map(), %{term() => integer()}) :: {map(), [alert_event()]}
+  def apply_upkeep(state, income_by_player) do
+    maintenance_by_player = maintenance_by_player(state)
+
+    net_by_player =
+      (Map.keys(income_by_player) ++ Map.keys(maintenance_by_player))
+      |> Enum.uniq()
+      |> Map.new(fn player_id ->
+        net = Map.get(income_by_player, player_id, 0) - Map.get(maintenance_by_player, player_id, 0)
+        {player_id, net}
+      end)
+
+    {surplus, deficit} = Enum.split_with(net_by_player, fn {_id, net} -> net >= 0 end)
+
+    state = %{state | players: apply_income(state.players, Map.new(surplus), state.world)}
+
+    Enum.reduce(deficit, {state, []}, fn {player_id, net}, {acc_state, alerts} ->
+      settle_deficit(acc_state, player_id, net, alerts)
+    end)
+  end
+
+  # A deficit is paid from the TREASURY regardless of online status —
+  # see this module's own moduledoc for why it never touches
+  # `banked_gold`. A player id missing from `players` is skipped, same
+  # "missing means untouched" contract `settle_player_income/3` keeps.
+  defp settle_deficit(state, player_id, net, alerts) do
+    case Map.get(state.players, player_id) do
+      nil ->
+        {state, alerts}
+
+      player ->
+        paid_gold = player.gold + net
+
+        if paid_gold >= 0 do
+          new_player = %{player | gold: paid_gold}
+          {%{state | players: Map.put(state.players, player_id, new_player)}, alerts}
+        else
+          broke_player = %{player | gold: 0}
+          state = %{state | players: Map.put(state.players, player_id, broke_player)}
+          disband_broke(state, broke_player, alerts)
+        end
+    end
+  end
+
+  # One unit, this tick, for `player` — the NEWEST (highest id),
+  # non-Lord unit, preferring military over civilian
+  # (`disband_target/2`). No eligible unit (only a Lord, or nothing at
+  # all) leaves the player clamped at 0 with no further consequence —
+  # losing the Lord would wrongly trigger the heir mechanic, so it's
+  # never a candidate.
+  defp disband_broke(state, player, alerts) do
+    case disband_target(state, player.id) do
+      nil ->
+        {state, alerts}
+
+      {unit_id, unit} ->
+        new_state = %{state | units: Map.delete(state.units, unit_id)}
+        message = "Couldn't pay upkeep — disbanded your #{unit_label(unit.type)}."
+        {new_state, [{:city_alert, player.user_id, message} | alerts]}
+    end
+  end
+
+  defp disband_target(state, player_id) do
+    owned =
+      for {id, unit} <- state.units,
+          unit.player_id == player_id,
+          unit.type != :lord,
+          do: {id, unit}
+
+    military = Enum.filter(owned, fn {_id, u} -> u.type in @military_disband_types end)
+    civilian = Enum.filter(owned, fn {_id, u} -> u.type in @civilian_disband_types end)
+
+    cond do
+      military != [] -> newest(military)
+      civilian != [] -> newest(civilian)
+      true -> nil
+    end
+  end
+
+  defp newest(units), do: Enum.max_by(units, fn {id, _unit} -> id end)
+
+  defp unit_label(type), do: type |> Atom.to_string() |> String.replace("_", " ")
 
   # Shared gate every direct Bank command checks first — a no-op
   # (`{:error, :feudal_disabled}`) while `Game.feudal_enabled?/0` reads

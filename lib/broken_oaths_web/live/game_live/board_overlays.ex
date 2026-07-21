@@ -38,6 +38,11 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
   attr :player_research, :any, required: true
   attr :cities, :list, required: true
   attr :player_stats, :map, required: true
+  # Stories 922/923 — `GameLive.ProgressPanel`'s own "Gold/turn" line
+  # (`%{income:, upkeep:, net:}`, `BrokenOaths.Game.gold_per_turn/2`),
+  # the same "computed by `Play`, only rendered here" status
+  # `player_stats` above already has.
+  attr :gold_per_turn, :map, required: true
   attr :selected_tile, :any, required: true
   attr :selected_camp, :any, required: true
   attr :selected_unit, :any, required: true
@@ -189,6 +194,7 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
           camps_destroyed={@player_stats.camps_destroyed}
           barbarians_killed={@player_stats.barbarians_killed}
           players_discovered={length(@known_players)}
+          gold_per_turn={@gold_per_turn}
         />
       </div>
     </div>

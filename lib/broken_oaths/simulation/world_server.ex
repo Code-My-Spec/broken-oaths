@@ -916,6 +916,28 @@ defmodule BrokenOaths.Simulation.WorldServer do
     {:reply, Bank.status_for(state, user), state}
   end
 
+  # Stories 922/923 — `user`'s own live `%{income:, upkeep:, net:}`
+  # readout: gross REAL city income (`gold_income_by_player/1`, the same
+  # figure `apply_tribute/1`/`apply_bank/1` already use) against total
+  # unit+building upkeep (`Bank.maintenance_by_player/1`) — the figure
+  # `GameLive.ProgressPanel`'s own "Gold/turn" line renders. A pure read,
+  # never gated on `Game.feudal_enabled?/0` — unlike `apply_bank/1`'s own
+  # tick-time SWEEP, a player can see what their economy would net
+  # before the flag ever turns the sweep itself on, same "reads stay
+  # live, only writes gate" status `Bank.status_for/2` already has
+  # relative to `collect_for/2`/`upgrade_for/2`.
+  def handle_call({:gold_per_turn, user}, _from, state) do
+    case find_player(state, user.id) do
+      nil ->
+        {:reply, %{income: 0, upkeep: 0, net: 0}, state}
+
+      player ->
+        income = state |> gold_income_by_player() |> Map.get(player.id, 0)
+        upkeep = state |> Bank.maintenance_by_player() |> Map.get(player.id, 0)
+        {:reply, %{income: income, upkeep: upkeep, net: income - upkeep}, state}
+    end
+  end
+
   # The deliberate engagement tap: sweep the ENTIRE bank into the
   # treasury (`Bank.collect/1`) — a no-op (empties nothing, moves
   # nothing) against an already-empty bank, never refused outright.
@@ -1662,7 +1684,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
     {ticked, tribute_logs} = apply_tribute(ticked)
     ticked = Ledger.apply_oath_strain_drift(ticked)
     ticked = ProtectionPact.apply_protection_pact_ticks(ticked)
-    ticked = apply_bank(ticked)
+    {ticked, upkeep_alerts} = apply_bank(ticked)
     ticked = War.process_rebellion_endings(ticked)
     ticked = reconcile_heir_vassals(ticked, events)
     ticked = Conspiracy.apply_rebellion_pact_strikes(ticked)
@@ -1676,7 +1698,8 @@ defmodule BrokenOaths.Simulation.WorldServer do
           new_state.world.id,
           [:vassals_changed] ++
             events ++
-            discovery_events ++ approach_alert_events(state, new_state) ++ capture_events
+            discovery_events ++
+            approach_alert_events(state, new_state) ++ capture_events ++ upkeep_alerts
         )
 
         new_state
@@ -2140,12 +2163,17 @@ defmodule BrokenOaths.Simulation.WorldServer do
   # Runs every turn boundary, alongside `apply_tribute/1` — settles
   # EVERY player's own per-turn gold income (story 912: every REAL
   # city gold income, `gold_income_by_player/1`, the SAME figure
-  # `apply_tribute/1` taxes) via `Bank.apply_income/3` (pragdave
-  # decomposition, slice 6: the settle-and-write iteration itself moved
-  # home to `Bank`; `gold_income_by_player/1` stays here since
-  # `apply_tribute/1`'s own tribute phase reads the exact same figure).
-  # A no-op while `Game.feudal_enabled?/0` reads `false` — same
-  # belt-and-suspenders status `Vassalization.apply_captures/1`/
+  # `apply_tribute/1` taxes) NET of upkeep (stories 922/923: every owned
+  # unit's/city's own gold maintenance) via `Bank.apply_upkeep/2`
+  # (pragdave decomposition, slice 6: the settle-and-write iteration
+  # itself moved home to `Bank`; `gold_income_by_player/1` stays here
+  # since `apply_tribute/1`'s own tribute phase reads the exact same
+  # figure). Returns `{state, alert_events}` now — `alert_events` one
+  # `{:city_alert, user_id, message}` per player who got a unit
+  # disbanded for missing upkeep this tick, threaded into `run_tick/1`'s
+  # own end-of-tick broadcast alongside every other tick alert. A no-op
+  # (empty alert list) while `Game.feudal_enabled?/0` reads `false` —
+  # same belt-and-suspenders status `Vassalization.apply_captures/1`/
   # `apply_tribute/1` already carry, so prod's own gold economy (bounty
   # kills, camp rewards — the only things that ever moved `gold` before
   # this story) stays exactly as it was until the flag flips on for
@@ -2153,9 +2181,9 @@ defmodule BrokenOaths.Simulation.WorldServer do
   defp apply_bank(state) do
     if Game.feudal_enabled?() do
       income_by_player = gold_income_by_player(state)
-      %{state | players: Bank.apply_income(state.players, income_by_player, state.world)}
+      Bank.apply_upkeep(state, income_by_player)
     else
-      state
+      {state, []}
     end
   end
 

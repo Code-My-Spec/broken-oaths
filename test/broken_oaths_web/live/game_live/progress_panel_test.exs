@@ -18,21 +18,27 @@ defmodule BrokenOathsWeb.GameLive.ProgressPanelTest do
     cities_founded: 0,
     camps_destroyed: 0,
     barbarians_killed: 0,
-    players_discovered: 0
+    players_discovered: 0,
+    gold_per_turn: %{income: 0, upkeep: 0, net: 0}
   }
 
   defp render_panel(overrides),
     do: render_component(ProgressPanel, Map.merge(@base_assigns, overrides))
 
   # Isolates a single `data-test="ID"` `<span>`'s own text out of the
-  # full rendered HTML — robust to whatever whitespace HEEx renders
-  # around an interpolation, unlike matching a raw substring against
-  # the whole document (which risks colliding with an unrelated span
-  # that happens to carry the same digit).
+  # full rendered HTML — robust to a trailing attribute after
+  # `data-test` (stories 922/923's own `class={...}` on the gold/turn
+  # span, split on the FIRST `>` after `data-test="ID"` rather than
+  # requiring it to close the tag immediately) and to whatever
+  # whitespace HEEx renders around a multi-line interpolation
+  # (trimmed), unlike matching a raw substring against the whole
+  # document (which risks colliding with an unrelated span that
+  # happens to carry the same digit).
   defp span(html, test_id) do
-    [_, fragment] = String.split(html, ~s(data-test="#{test_id}">), parts: 2)
-    [text | _] = String.split(fragment, "</span>", parts: 2)
-    text
+    [_, fragment] = String.split(html, ~s(data-test="#{test_id}"), parts: 2)
+    [_, opened] = String.split(fragment, ">", parts: 2)
+    [text | _] = String.split(opened, "</span>", parts: 2)
+    String.trim(text)
   end
 
   # Same idea as `span/2`, for a milestone row's own `<div>`.
@@ -111,6 +117,23 @@ defmodule BrokenOathsWeb.GameLive.ProgressPanelTest do
       assert span(html, "progress-cities") == "3"
       assert span(html, "progress-camps") == "2"
       assert span(html, "progress-barbarians") == "5"
+    end
+  end
+
+  describe "Gold/turn (stories 922/923)" do
+    test "a surplus renders signed positive" do
+      html = render_panel(%{gold_per_turn: %{income: 5, upkeep: 2, net: 3}})
+      assert span(html, "progress-gold-per-turn") == "+3"
+    end
+
+    test "a deficit renders signed negative" do
+      html = render_panel(%{gold_per_turn: %{income: 1, upkeep: 4, net: -3}})
+      assert span(html, "progress-gold-per-turn") == "-3"
+    end
+
+    test "no income and no upkeep renders a signed zero, not a bare number" do
+      html = render_panel(%{gold_per_turn: %{income: 0, upkeep: 0, net: 0}})
+      assert span(html, "progress-gold-per-turn") == "+0"
     end
   end
 

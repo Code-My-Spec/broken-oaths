@@ -2,6 +2,7 @@ defmodule BrokenOaths.Feudal.BankTest do
   use ExUnit.Case, async: true
 
   alias BrokenOaths.Feudal.Bank
+  alias BrokenOaths.Players.Presence
 
   describe "starting_cap/0 and upgrade_cost/1" do
     test "starting_cap is a fixed, positive figure" do
@@ -125,4 +126,156 @@ defmodule BrokenOaths.Feudal.BankTest do
       assert Bank.status(%{banked_gold: 7, bank_cap: 100}) == %{gold: 7, cap: 100}
     end
   end
+
+  # -------------------------------------------------------------------
+  # Upkeep and disband-when-broke (stories 922/923)
+  # -------------------------------------------------------------------
+
+  describe "maintenance_by_player/1" do
+    test "sums unit upkeep and building upkeep per owning player" do
+      state = %{
+        units: %{
+          1 => unit(1, 10, :archer),
+          2 => unit(2, 10, :bronze_spearman),
+          3 => unit(3, 20, :warrior)
+        },
+        cities: %{1 => city(1, 10, has_granary: true), 2 => city(2, 20, has_granary: false)}
+      }
+
+      # Player 10: archer (1) + bronze_spearman (1) + granary (1) == 3.
+      # Player 20: warrior (0), no granary == 0.
+      assert Bank.maintenance_by_player(state) == %{10 => 3, 20 => 0}
+    end
+
+    test "a unit with no owner (a barbarian) never counts toward anyone's bill" do
+      state = %{
+        units: %{1 => %{id: 1, type: :barbarian_warrior, player_id: nil}},
+        cities: %{}
+      }
+
+      assert Bank.maintenance_by_player(state) == %{}
+    end
+  end
+
+  describe "apply_upkeep/2" do
+    test "a surplus flows to the treasury exactly like apply_income/3" do
+      player = player(1, gold: 50)
+      # `Presence.online?/2` reads live off the registry — connect this
+      # test process as `player.user_id`'s own live session, same as
+      # `settle_income/3`'s own `true` branch requires, so the surplus
+      # lands in `gold`, not the offline `banked_gold` accrual.
+      Presence.connect(%{id: 1}, %{id: player.user_id})
+      # One archer (upkeep 1); income of 5 nets to +4.
+      state = state_with([player], [unit(1, 1, :archer)], [])
+
+      {new_state, alerts} = Bank.apply_upkeep(state, %{1 => 5})
+
+      assert new_state.players[1].gold == 54
+      assert new_state.players[1].banked_gold == 0
+      assert alerts == []
+    end
+
+    test "a deficit smaller than savings deducts straight from the treasury" do
+      player = player(1, gold: 10)
+      # Two archers, upkeep 2; zero income nets to -2, well within savings.
+      state = state_with([player], [unit(1, 1, :archer), unit(2, 1, :archer)], [])
+
+      {new_state, alerts} = Bank.apply_upkeep(state, %{})
+
+      assert new_state.players[1].gold == 8
+      assert alerts == []
+      assert map_size(new_state.units) == 2
+    end
+
+    test "a deficit larger than savings clamps gold to 0 and disbands the newest non-Lord military unit" do
+      player = player(1, gold: 0)
+      # lord (0 upkeep, never eligible), an old settler, a newer warrior
+      # (0 upkeep but IS military-eligible), and a bronze_spearman (id 4,
+      # the newest military unit, upkeep 1) — with no gold saved at all,
+      # the -1 deficit can't be covered.
+      units = [
+        %{id: 1, type: :lord, player_id: 1},
+        %{id: 2, type: :settler, player_id: 1},
+        %{id: 3, type: :warrior, player_id: 1},
+        unit(4, 1, :bronze_spearman)
+      ]
+
+      state = state_with([player], units, [])
+
+      {new_state, alerts} = Bank.apply_upkeep(state, %{})
+
+      assert new_state.players[1].gold == 0
+      refute Map.has_key?(new_state.units, 4)
+      assert Map.has_key?(new_state.units, 1)
+      assert Map.has_key?(new_state.units, 2)
+      assert Map.has_key?(new_state.units, 3)
+      assert [{:city_alert, 999, message}] = alerts
+      assert message =~ "bronze spearman"
+    end
+
+    test "military is preferred over civilian regardless of which is newer" do
+      player = player(1, gold: 0)
+      # settler (id 9, newest overall, but civilian) vs. archer (id 2,
+      # older, but military) — the archer must go.
+      units = [unit(2, 1, :archer), %{id: 9, type: :settler, player_id: 1}]
+      state = state_with([player], units, [])
+
+      {new_state, _alerts} = Bank.apply_upkeep(state, %{})
+
+      refute Map.has_key?(new_state.units, 2)
+      assert Map.has_key?(new_state.units, 9)
+    end
+
+    test "the newest unit within the preferred pool is the one disbanded" do
+      player = player(1, gold: 0)
+      units = [unit(2, 1, :archer), unit(5, 1, :galley)]
+      state = state_with([player], units, [])
+
+      {new_state, _alerts} = Bank.apply_upkeep(state, %{})
+
+      refute Map.has_key?(new_state.units, 5)
+      assert Map.has_key?(new_state.units, 2)
+    end
+
+    test "a broke player with only a Lord stays clamped at 0 with no disband" do
+      player = player(1, gold: 0)
+      state = state_with([player], [%{id: 1, type: :lord, player_id: 1}], [%{id: 1, player_id: 1, has_granary: true}])
+
+      {new_state, alerts} = Bank.apply_upkeep(state, %{})
+
+      assert new_state.players[1].gold == 0
+      assert Map.has_key?(new_state.units, 1)
+      assert alerts == []
+    end
+
+    test "a zero-upkeep world ticks identically to plain apply_income/3" do
+      player = player(1, gold: 50)
+      units = [%{id: 1, type: :lord, player_id: 1}, %{id: 2, type: :warrior, player_id: 1}]
+      state = state_with([player], units, [])
+
+      {upkeep_state, alerts} = Bank.apply_upkeep(state, %{1 => 7})
+      plain_players = Bank.apply_income(state.players, %{1 => 7}, state.world)
+
+      assert upkeep_state.players == plain_players
+      assert alerts == []
+      assert map_size(upkeep_state.units) == 2
+    end
+  end
+
+  defp state_with(players, units, cities) do
+    %{
+      world: %{id: 1},
+      players: Map.new(players, &{&1.id, &1}),
+      units: Map.new(units, &{&1.id, &1}),
+      cities: Map.new(cities, &{&1.id, &1})
+    }
+  end
+
+  defp player(id, overrides),
+    do: Map.merge(%{id: id, user_id: 999, gold: 0, banked_gold: 0, bank_cap: 100}, Map.new(overrides))
+
+  defp unit(id, player_id, type), do: %{id: id, type: type, player_id: player_id}
+
+  defp city(id, player_id, overrides),
+    do: Map.merge(%{id: id, player_id: player_id}, Map.new(overrides))
 end

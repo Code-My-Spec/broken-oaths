@@ -36,6 +36,15 @@ defmodule BrokenOathsWeb.GameLive.ProgressPanel do
       pay)
     * `:players_discovered` - `length(Game.known_players(world, user))`
       — the same list `GameLive.KnownPlayersPanel` already renders
+    * `:gold_per_turn` - `BrokenOaths.Game.gold_per_turn/2`'s own
+      `%{income:, upkeep:, net:}` (stories 922/923's gold-maintenance
+      economy — every unit's/building's own upkeep,
+      `BrokenOaths.Feudal.Bank.maintenance_by_player/1`, netted against
+      gross city income) — rendered as the one figure that matters to a
+      player, "Gold/turn: +N"/"Gold/turn: -N", so it's legible WHY gold
+      isn't climbing even before the flag ever turns the actual sweep
+      on (`BrokenOaths.Game.gold_per_turn/2`'s own doc: a pure read,
+      never gated on `Game.feudal_enabled?/0`).
 
   ## Turns-to-Bronze projection
 
@@ -99,6 +108,13 @@ defmodule BrokenOathsWeb.GameLive.ProgressPanel do
           <span data-test="progress-turns-to-bronze">{@turns_to_bronze || "—"}</span>
         </div>
 
+        <div class="text-sm flex justify-between">
+          <span class="opacity-70">Gold/turn</span>
+          <span data-test="progress-gold-per-turn" class={gold_per_turn_class(@gold_per_turn.net)}>
+            {gold_per_turn_text(@gold_per_turn.net)}
+          </span>
+        </div>
+
         <div class="divider my-0"></div>
 
         <div class="text-sm flex justify-between">
@@ -160,6 +176,16 @@ defmodule BrokenOathsWeb.GameLive.ProgressPanel do
 
   defp age_label(:stone_age), do: "Stone Age"
   defp age_label(:bronze_age), do: "Bronze Age"
+
+  # Stories 922/923 — the one figure that makes the gold-maintenance
+  # drain legible: a signed "+N"/"-N" (never a bare "N", so a surplus
+  # and a deficit are never confused at a glance), colored the same
+  # success/error pair `milestone_class/1` above already uses.
+  defp gold_per_turn_text(net) when net >= 0, do: "+#{net}"
+  defp gold_per_turn_text(net), do: "#{net}"
+
+  defp gold_per_turn_class(net) when net >= 0, do: "text-success font-semibold"
+  defp gold_per_turn_class(_net), do: "text-error font-semibold"
 
   # A forward projection at the CURRENT science/turn rate — `nil` (no
   # meaningful answer) with zero science income. `remaining` floors at
