@@ -5,3 +5,15 @@ The Ancient-era tech tree: eleven Civ-6-accurate techs with prerequisite edges (
 ## Type
 
 module
+
+## Rules
+
+- **No dead unlocks.** Every tech's `unlock` string (and any player-facing
+  description of it) must correspond to a delivered capability, OR be explicitly
+  marked deferred and linked to the story that will deliver it (e.g. "(deferred
+  — story 921)"). A tech may never advertise an effect the game does not deliver.
+  A "structure-only" tech that researches but does nothing is only acceptable
+  when its unlock is delivered by a tracked, linked story. The thing a tech
+  unlocks is owned by ITS OWN story (a unit story owns its build + tech gate),
+  never as a promise living only in this module. See
+  `.code_my_spec/knowledge/unit_and_unlock_convention.md`.
