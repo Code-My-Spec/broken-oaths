@@ -40,6 +40,13 @@ config :broken_oaths, :game_auto_tick, true
 # for every entry point this single flag gates.
 config :broken_oaths, :feudal_enabled, false
 
+# Weather cloud shells on the globe (game board, world builder, and the
+# airspace preview texture). Off by default — players found the drifting
+# clouds confusing (they read as terrain/fog). Flip to `true` to bring them
+# back. Read via `BrokenOaths.Worlds.Weather.enabled?/0`, which gates
+# `Weather.map/3` to return no cloud levels when off.
+config :broken_oaths, :weather_enabled, false
+
 # Configure the endpoint
 config :broken_oaths, BrokenOathsWeb.Endpoint,
   url: [host: "localhost"],

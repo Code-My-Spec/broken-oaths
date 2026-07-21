@@ -7,6 +7,11 @@ config :bcrypt_elixir, :log_rounds, 1
 # deterministic in tests regardless of wall clock.
 config :broken_oaths, :weather_epoch, 0
 
+# Clouds ship OFF (config/config.exs — players found them confusing), but the
+# weather mechanic still needs coverage: keep them ON in test so the weather/
+# airspace/texture tests and the story-876 cloud spex exercise real cloud maps.
+config :broken_oaths, :weather_enabled, true
+
 # Configure your database
 #
 # The MIX_TEST_PARTITION environment variable can be used

@@ -53,10 +53,28 @@ defmodule BrokenOaths.Worlds.Weather do
   end
 
   @doc """
+  Whether weather cloud shells are enabled. Off by default (players found the
+  drifting clouds confusing); `config :broken_oaths, :weather_enabled`.
+  """
+  @spec enabled?() :: boolean()
+  def enabled?, do: Application.get_env(:broken_oaths, :weather_enabled, false)
+
+  @doc """
   Sparse cloud map for a world at an epoch: `%{tile_id => level}` with
-  level 1..3. Clear tiles are absent. Defaults to the current epoch.
+  level 1..3. Clear tiles are absent. Defaults to the current epoch. Returns
+  an empty map (no clouds) when weather is disabled.
   """
   def map(seed, mesh, epoch \\ nil) do
+    if enabled?() do
+      cloud_map(seed, mesh, epoch)
+    else
+      # Clouds disabled: no airspace levels anywhere, so nothing renders and no
+      # airspace texture is drawn. Callers already treat an empty map as "clear".
+      %{}
+    end
+  end
+
+  defp cloud_map(seed, mesh, epoch) do
     epoch = epoch || current_epoch()
     key = {__MODULE__, @cache_version, seed, mesh.frequency, epoch}
 
