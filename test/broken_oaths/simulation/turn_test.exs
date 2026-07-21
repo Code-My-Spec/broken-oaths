@@ -10,7 +10,10 @@ defmodule BrokenOaths.Simulation.TurnTest do
   @frequency 8
   @seed 424_242
 
-  defp world, do: %World{seed: @seed, frequency: @frequency}
+  # Story 924 default is recharge_turns 2, but these tests assume movement
+  # recharges every turn — pin to 1 (behavior-preserving); the tick-split
+  # describe below builds its own world with recharge_turns: 2.
+  defp world, do: %World{seed: @seed, frequency: @frequency, recharge_turns: 1}
 
   defp unit(id, opts) do
     max_movement = Keyword.get(opts, :max_movement, 2)
@@ -77,6 +80,31 @@ defmodule BrokenOaths.Simulation.TurnTest do
 
       assert new_state.turn == 42
       assert {:turn_advanced, 42} in events
+    end
+  end
+
+  describe "tick/1 movement recharge cadence (story 924)" do
+    test "recharge_turns: 2 refills movement every 2nd turn, not every turn" do
+      u = unit(1, tile: 5, movement: 0, max_movement: 2)
+      world2 = %World{seed: @seed, frequency: @frequency, recharge_turns: 2}
+      state = %{base_state(%{1 => u}) | world: world2}
+
+      # Turn 1 (rem 1,2 != 0): no recharge — movement stays spent.
+      {after_t1, _} = Turn.tick(state)
+      assert after_t1.units[1].movement == 0
+
+      # Turn 2 (rem 2,2 == 0): recharge — back to max.
+      {after_t2, _} = Turn.tick(after_t1)
+      assert after_t2.units[1].movement == 2
+    end
+
+    test "recharge_turns: 1 refills every turn (behavior-preserving)" do
+      u = unit(1, tile: 5, movement: 0, max_movement: 2)
+      world1 = %World{seed: @seed, frequency: @frequency, recharge_turns: 1}
+      state = %{base_state(%{1 => u}) | world: world1}
+
+      {after_t1, _} = Turn.tick(state)
+      assert after_t1.units[1].movement == 2
     end
   end
 

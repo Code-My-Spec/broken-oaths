@@ -11,7 +11,11 @@ defmodule BrokenOaths.WorldsFixtures do
         name: "Test World #{System.unique_integer([:positive])}",
         seed: unique_world_seed(),
         # Small globe (642 tiles) keeps LiveView tests fast
-        frequency: 8
+        frequency: 8,
+        # Story 924 ships recharge_turns default 2, but existing tests assume
+        # movement recharges EVERY turn — keep fixtures at 1 (behavior-
+        # preserving); the tick-split tests pass recharge_turns: 2 explicitly.
+        recharge_turns: 1
       })
       |> Worlds.create_world()
 

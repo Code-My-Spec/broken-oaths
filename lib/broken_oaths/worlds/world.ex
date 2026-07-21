@@ -43,6 +43,9 @@ defmodule BrokenOaths.Worlds.World do
     field :turn_seconds, :integer, default: 60
     field :paused, :boolean, default: false
     field :resource_density, Ecto.Enum, values: [:sparse, :standard, :dense], default: :standard
+    # Story 924 — unit movement recharges every N economy ticks (2 = every 2
+    # minutes on a 60s tick). A per-world balance lever; 1 = recharge every turn.
+    field :recharge_turns, :integer, default: 2
 
     timestamps()
   end
@@ -60,7 +63,8 @@ defmodule BrokenOaths.Worlds.World do
   def creation_changeset(world, attrs) do
     world
     |> changeset(attrs)
-    |> cast(attrs, [:turn_seconds, :resource_density])
+    |> cast(attrs, [:turn_seconds, :resource_density, :recharge_turns])
     |> validate_number(:turn_seconds, greater_than: 0)
+    |> validate_number(:recharge_turns, greater_than_or_equal_to: 1)
   end
 end

@@ -277,7 +277,7 @@ defmodule BrokenOaths.Simulation.Turn do
 
     state =
       state
-      |> Movement.reset_movement()
+      |> maybe_reset_movement(new_turn)
       |> Movement.resolve_orders()
       |> Movement.advance_fortify()
       |> Improvement.advance()
@@ -306,6 +306,18 @@ defmodule BrokenOaths.Simulation.Turn do
       ] ++ heir_events ++ tech_events
 
     {new_state, events}
+  end
+
+  # Story 924 — unit movement recharges every `recharge_turns` economy ticks
+  # (default 2), not every one, so movement feels less frantic than the economy
+  # pace. On non-recharge ticks movement is left as-is (a unit that held its
+  # points can still act; a unit that spent them waits for the refill), and
+  # every other phase — resources, build, income/upkeep, barbarian AI — still
+  # runs each tick. recharge_turns == 1 restores every-turn recharge; a stray
+  # missing value falls back to every-turn.
+  defp maybe_reset_movement(state, new_turn) do
+    n = Map.get(state.world, :recharge_turns, 1) || 1
+    if rem(new_turn, n) == 0, do: Movement.reset_movement(state), else: state
   end
 
   @doc """
