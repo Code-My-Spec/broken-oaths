@@ -110,6 +110,65 @@ defmodule BrokenOaths.Worlds.GeneratorTest do
     end
   end
 
+  describe "coast is the land-adjacent water ring (Civ 6 model)" do
+    # A water tile is COAST when it touches at least one land tile,
+    # otherwise it stays OCEAN. Coast can never form a standalone blob away
+    # from a coastline. These assertions run over real generator output and
+    # find tiles from that output rather than hand-guessing ids.
+    setup do
+      mesh = Globe.build(16)
+      %{mesh: mesh, terrain_map: Generator.generate_terrain_map(@test_seed, mesh)}
+    end
+
+    defp land?(%Terrain{} = t), do: not Terrain.water?(t)
+
+    defp neighbor_bases(mesh, terrain_map, id) do
+      mesh.tiles[id].neighbors |> Enum.map(&terrain_map[&1])
+    end
+
+    test "every coast tile has at least one land neighbour (anti-blob invariant)",
+         %{mesh: mesh, terrain_map: tm} do
+      coast_ids = for {id, %Terrain{base: :coast}} <- tm, do: id
+      assert coast_ids != [], "expected the generated world to have some coast"
+
+      for id <- coast_ids do
+        neighbours = neighbor_bases(mesh, tm, id)
+
+        assert Enum.any?(neighbours, &land?/1),
+               "coast tile #{id} has no land neighbour (a coast blob) — " <>
+                 "neighbour bases: #{inspect(Enum.map(neighbours, & &1.base))}"
+      end
+    end
+
+    test "a water tile adjacent to land is classified coast", %{mesh: mesh, terrain_map: tm} do
+      # Pick a real ocean-or-coast tile that touches land, straight from output.
+      land_adjacent_water =
+        Enum.find(tm, fn {id, t} ->
+          Terrain.water?(t) and Enum.any?(neighbor_bases(mesh, tm, id), &land?/1)
+        end)
+
+      assert {id, _} = land_adjacent_water,
+             "expected at least one water tile touching land in the generated world"
+
+      assert tm[id].base == :coast,
+             "water tile #{id} touches land but is #{tm[id].base}, not coast"
+    end
+
+    test "a water tile with only water neighbours stays ocean", %{mesh: mesh, terrain_map: tm} do
+      # Deep-ocean tile: water, and every neighbour is water too.
+      deep_water =
+        Enum.find(tm, fn {id, t} ->
+          Terrain.water?(t) and Enum.all?(neighbor_bases(mesh, tm, id), &Terrain.water?/1)
+        end)
+
+      assert {id, _} = deep_water,
+             "expected at least one fully water-surrounded tile in the generated world"
+
+      assert tm[id].base == :ocean,
+             "water tile #{id} has only water neighbours but is #{tm[id].base}, not ocean"
+    end
+  end
+
   describe "generate_maps/2" do
     setup do
       %{mesh: Globe.build(8)}

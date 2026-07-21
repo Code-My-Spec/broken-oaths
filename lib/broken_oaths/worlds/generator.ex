@@ -11,6 +11,12 @@ defmodule BrokenOaths.Worlds.Generator do
   from elevation; features (woods, rainforest, marsh, sea ice) layer on
   top per climate.
 
+  Coast is not a noise band — it is DERIVED from adjacency (Civ 6 model):
+  every below-sea-level tile starts as ocean, then a single neighbor pass
+  reclassifies to `:coast` any water tile touching land. Deep water with no
+  land neighbor stays ocean, so coast can only ever be the shallow ring
+  hugging a coastline, never a free-floating blob.
+
   The 12 pentagons are always mountains relief with a peak elevation
   (non-traversable); their base still follows climate, so polar pentagons
   are snowy peaks.
@@ -39,7 +45,7 @@ defmodule BrokenOaths.Worlds.Generator do
         {Map.put(t_acc, id, terrain), Map.put(e_acc, id, elev)}
       end)
 
-    %{terrain: terrain, elevation: elevation}
+    %{terrain: derive_coast(terrain, mesh), elevation: elevation}
   end
 
   @doc """
@@ -68,12 +74,11 @@ defmodule BrokenOaths.Worlds.Generator do
   # then features layered on top.
   # -------------------------------------------------------------------
 
-  defp classify(elevation, warmth, _moisture, _pentagon?) when elevation < 0.30 do
-    %Terrain{base: :ocean, feature: if(warmth < 0.06, do: :ice)}
-  end
-
+  # Everything below sea level (0.37) starts as ocean; `derive_coast/2`
+  # promotes the land-adjacent ones to coast in a post-pass. Coast is
+  # never assigned from a noise band, so it cannot form standalone blobs.
   defp classify(elevation, warmth, _moisture, _pentagon?) when elevation < 0.37 do
-    %Terrain{base: :coast, feature: if(warmth < 0.06, do: :ice)}
+    %Terrain{base: :ocean, feature: if(warmth < 0.06, do: :ice)}
   end
 
   defp classify(elevation, warmth, moisture, pentagon?) do
@@ -103,6 +108,32 @@ defmodule BrokenOaths.Worlds.Generator do
       relief: relief,
       feature: feature(base, relief, elevation, warmth, moisture)
     }
+  end
+
+  # Post-pass: reclassify ocean tiles that touch land into coast. Reads
+  # only the pre-coast bases (every water tile is still :ocean here) and
+  # the mesh topology, so it stays deterministic and never chains — a tile
+  # promoted to coast can't in turn drag its own ocean neighbor along.
+  defp derive_coast(terrain, mesh) do
+    Map.new(terrain, fn
+      {id, %Terrain{base: :ocean} = t} ->
+        if land_adjacent?(id, terrain, mesh), do: {id, %{t | base: :coast}}, else: {id, t}
+
+      {id, t} ->
+        {id, t}
+    end)
+  end
+
+  defp land_adjacent?(id, terrain, mesh) do
+    mesh.tiles
+    |> Map.fetch!(id)
+    |> Map.fetch!(:neighbors)
+    |> Enum.any?(fn nid ->
+      case terrain do
+        %{^nid => %Terrain{} = n} -> not Terrain.water?(n)
+        _ -> false
+      end
+    end)
   end
 
   defp feature(base, relief, elevation, warmth, moisture) do
