@@ -43,7 +43,18 @@ defmodule BrokenOathsWeb.GameLive.Play do
                            `queue_move` (walk in and occupy — Civ-style, no
                            range-flip) instead of another `attack`, and
                            `UnitPanel`'s own button swaps from "Attack" to
-                           "Move In" the same way
+                           "Move In" the same way. Playtest issue cee40da6 —
+                           an OWN-city entry also carries `progress:`, the
+                           banked/cost fraction (0.0–1.0) of the city's own
+                           production queue head, `0.0` with nothing
+                           queued (`PlayView.city_marker/1`); a hostile
+                           entry never carries it — a rival's build queue
+                           stays fogged the same as everything else
+                           `enemy_city_marker/1` already leaves out. The
+                           `.Board` hook's own draw loop renders every
+                           city's `name:` centered just below its marker,
+                           with a thin fill bar under the name for
+                           whichever entries carry `progress:`.
     * `game:resources`  — `%{resources: [%{tile_id:, kind:}]}` (story 905),
                            bonus-resource billboards for every currently
                            known (visible ∪ explored) tile — resources are
@@ -3292,6 +3303,47 @@ defmodule BrokenOathsWeb.GameLive.Play do
                   ctx.strokeStyle = "#dc2626"
                   ctx.lineWidth = 2
                   ctx.stroke()
+                }
+
+                // Playtest issue cee40da6 — the city's own name, centered
+                // just below its marker (below the billboard's own feet,
+                // `drawBillboard`'s default 0.62 footBias), plus a thin
+                // build-progress fill underneath. Same "skip below
+                // readability size" rule the decor billboards above
+                // already follow — a label crowding a marker too small to
+                // read is worse than no label. A dark stroke behind the
+                // white fill keeps the text legible over any terrain
+                // color, not just a fixed light/dark backdrop.
+                if (citySize >= 24) {
+                  const labelY = py + citySize * 0.44
+                  ctx.font = "bold 11px ui-monospace, monospace"
+                  ctx.textAlign = "center"
+                  ctx.lineWidth = 3
+                  ctx.strokeStyle = "rgba(10, 12, 18, 0.8)"
+                  ctx.strokeText(c.name, px, labelY)
+                  ctx.fillStyle = "#ffffff"
+                  ctx.fillText(c.name, px, labelY)
+                  ctx.textAlign = "start"
+
+                  // `c.progress` is omitted for a fogged rival — a
+                  // hostile city's own build queue stays hidden the same
+                  // way its production TYPE always has, so hostile
+                  // markers draw no bar at all rather than a fake empty
+                  // one (`PlayView.city_marker/1` is the one entry that
+                  // ever carries this field).
+                  if (c.progress != null) {
+                    const barW = citySize * 0.85
+                    const barH = 4
+                    const barX = px - barW / 2
+                    const barY = labelY + 4
+                    ctx.fillStyle = "rgba(10, 12, 18, 0.55)"
+                    ctx.fillRect(barX, barY, barW, barH)
+                    ctx.fillStyle = "#facc15"
+                    ctx.fillRect(barX, barY, barW * Math.min(1, Math.max(0, c.progress)), barH)
+                    ctx.strokeStyle = "rgba(10, 12, 18, 0.8)"
+                    ctx.lineWidth = 1
+                    ctx.strokeRect(barX, barY, barW, barH)
+                  }
                 }
               }
             }

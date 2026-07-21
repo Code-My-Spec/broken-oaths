@@ -105,6 +105,41 @@ defmodule BrokenOathsWeb.GameLive.BoardHookSourceTest do
     end
   end
 
+  describe "playtest issue cee40da6 — city name + build-progress fill" do
+    test "the city draw loop labels each city with its own name, stroked for legibility", %{
+      play_source: source
+    } do
+      [_before, city_loop] = String.split(source, "for (const c of this.cities) {", parts: 2)
+      [city_loop_body, _rest] = String.split(city_loop, "// Story 759d02c8", parts: 2)
+
+      assert city_loop_body =~ "ctx.fillText(c.name, px, labelY)"
+      # A dark outline behind the fill keeps the label legible over any
+      # terrain color underneath it, not just a fixed background.
+      assert city_loop_body =~ "ctx.strokeText(c.name, px, labelY)"
+      assert city_loop_body =~ ~s{ctx.textAlign = "center"}
+    end
+
+    test "the city draw loop fills a bar sized off the banked/cost fraction, clamped both ways",
+         %{play_source: source} do
+      [_before, city_loop] = String.split(source, "for (const c of this.cities) {", parts: 2)
+      [city_loop_body, _rest] = String.split(city_loop, "// Story 759d02c8", parts: 2)
+
+      assert city_loop_body =~ "ctx.fillRect("
+      # Clamped both directions before it ever reaches the canvas — an
+      # overflow-banked head item (past 1.0) never draws past the
+      # track's own width, and never a negative one either.
+      assert city_loop_body =~ "Math.min(1, Math.max(0, c.progress))"
+    end
+
+    test "a hostile (fogged) city draws no bar at all — gated on the field its own marker never carries",
+         %{play_source: source} do
+      [_before, city_loop] = String.split(source, "for (const c of this.cities) {", parts: 2)
+      [city_loop_body, _rest] = String.split(city_loop, "// Story 759d02c8", parts: 2)
+
+      assert city_loop_body =~ "if (c.progress != null)"
+    end
+  end
+
   describe "QA issue 46047ea6 — hexes not super obvious" do
     test "every drawn tile gets its own faint edge stroke", %{play_source: source} do
       [_before, terrain_loop] =

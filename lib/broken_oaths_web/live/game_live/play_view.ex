@@ -105,12 +105,31 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
   end
 
   # The board only needs enough to place and label a billboard —
-  # territory/queue/food stay in the CityPanel assign, not the client.
-  # `hostile: false` — the client's `.Board` hook uses this to decide
-  # left-click select-vs-ignore and right-click move-vs-attack (QA
-  # issue 56ee521a).
-  def city_marker(city),
-    do: city |> Map.take([:id, :name, :tile_id, :size]) |> Map.put(:hostile, false)
+  # territory/food stay in the CityPanel assign, not the client; the raw
+  # `queue` itself doesn't ride along either (a build's own TYPE stays
+  # off the board same as everything else CityPanel already owns) —
+  # only the FRACTION playtest issue cee40da6 asked for for the board's
+  # own name-label fill, `build_progress/1`'s banked/cost read of the
+  # queue's head (current) item. `hostile: false` — the client's
+  # `.Board` hook uses this to decide left-click select-vs-ignore and
+  # right-click move-vs-attack (QA issue 56ee521a).
+  def city_marker(city) do
+    city
+    |> Map.take([:id, :name, :tile_id, :size])
+    |> Map.put(:hostile, false)
+    |> Map.put(:progress, build_progress(city))
+  end
+
+  # `0.0` with an empty queue (nothing building) — the `.Board` hook's
+  # own fill bar reads as flat/empty, same "nothing lost" posture the
+  # rest of the production system already has for an idle city.
+  # Clamped to `1.0` so a banked-past-cost head item (a turn's worth of
+  # overflow production sitting on an about-to-complete build) never
+  # draws a bar past full.
+  defp build_progress(%{queue: [%{banked: banked, cost: cost} | _]}) when cost > 0,
+    do: min(1.0, banked / cost)
+
+  defp build_progress(_city), do: 0.0
 
   # QA issue 56ee521a — the enemy-city sibling of `city_marker/1`,
   # `hostile: true`. `:broken` (QA issue 7f91cff2) rides straight
