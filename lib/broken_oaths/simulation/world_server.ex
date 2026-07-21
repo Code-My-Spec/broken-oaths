@@ -2692,7 +2692,9 @@ defmodule BrokenOaths.Simulation.WorldServer do
   # `production_halted_until` (city combat — see `CityDefense`),
   # (story 902) `has_granary` — `Production.complete/3`'s own Granary
   # branch flips it the same tick a Granary item finishes banking —
-  # and (story 906) `occupied_by_player_id`, set the instant `Siege.
+  # (story 930) `buildings` — the same `Production.complete/3`'s own
+  # `@passive_buildings` branch, for the other four buildings — and
+  # (story 906) `occupied_by_player_id`, set the instant `Siege.
   # materialize_captures/2` captures a broken city.
   defp persist_city_changes(old_cities, new_cities) do
     for {id, city} <- new_cities, Map.get(old_cities, id) != city do
@@ -2705,6 +2707,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
           hp: city.hp,
           production_halted_until: city.production_halted_until,
           has_granary: Map.get(city, :has_granary, false),
+          buildings: Map.get(city, :buildings, []),
           occupied_by_player_id: Map.get(city, :occupied_by_player_id)
         ]
       )
@@ -3136,6 +3139,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
       hp: c.hp,
       production_halted_until: c.production_halted_until,
       has_granary: c.has_granary,
+      buildings: c.buildings,
       occupied_by_player_id: c.occupied_by_player_id,
       queue: Enum.map(c.production_items, &queue_item_map/1)
     }

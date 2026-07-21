@@ -20,6 +20,20 @@ defmodule BrokenOaths.Combat.CityDefense do
   but `military_garrison/2` (and therefore the defense total) only
   ever counts `:lord`/`:warrior`/`:bronze_spearman` (story 903).
 
+  ## Ancient Walls (story 930)
+
+  A city with `:ancient_walls` in its own `buildings` list
+  (`BrokenOaths.Cities.Production`'s `:ancient_walls` buildable, gated
+  on the owner having completed Masonry) gets `wall_hp_bonus/0` (+50)
+  more max HP and `wall_defense_bonus/0` (+5) more defensive strength,
+  same "no new city-combat model, just two bonuses folded into the
+  existing formulas" scope every other building's effect in this story
+  keeps. `max_hp/1` (city-aware, unlike the arity-0 `max_hp/0` every
+  OTHER caller in this codebase still uses for the flat 100 baseline —
+  city founding, `Siege`, `Camp`) is the one place that reads it;
+  `regen/1` is the one caller that NEEDS it, since a walled city's own
+  HP now caps above 100.
+
   ## Garrison stacking (the one stacking exception in the game)
 
   Everywhere else, a player's own second unit is refused onto a tile
@@ -103,6 +117,7 @@ defmodule BrokenOaths.Combat.CityDefense do
   @type unit :: Resolver.unit()
   @type city :: %{
           optional(atom()) => term(),
+          optional(:buildings) => [atom()],
           id: term(),
           player_id: term(),
           name: String.t(),
@@ -132,10 +147,29 @@ defmodule BrokenOaths.Combat.CityDefense do
   @pillage_hp 50
   @pillage_halt_boundaries 3
   @approach_range 3
+  # Story 930 — Ancient Walls, see this module's own moduledoc.
+  @wall_hp_bonus 50
+  @wall_defense_bonus 5
 
   @doc "A city's max HP — every city is founded at this value."
   @spec max_hp() :: pos_integer()
   def max_hp, do: @max_hp
+
+  @doc "`city`'s own current max HP: `max_hp/0` (100), plus `wall_hp_bonus/0` (50) once it has completed Ancient Walls (story 930)."
+  @spec max_hp(city()) :: pos_integer()
+  def max_hp(city), do: @max_hp + if(has_walls?(city), do: @wall_hp_bonus, else: 0)
+
+  @doc "How much max HP Ancient Walls adds once built (story 930)."
+  @spec wall_hp_bonus() :: pos_integer()
+  def wall_hp_bonus, do: @wall_hp_bonus
+
+  @doc "How much defensive strength Ancient Walls adds once built (story 930)."
+  @spec wall_defense_bonus() :: pos_integer()
+  def wall_defense_bonus, do: @wall_defense_bonus
+
+  @doc "Whether `city` has completed the Ancient Walls building (story 930)."
+  @spec has_walls?(city()) :: boolean()
+  def has_walls?(city), do: :ancient_walls in Map.get(city, :buildings, [])
 
   @doc "HP a pillaged city resets to — never 0 (pillage, not destruction)."
   @spec pillage_hp() :: pos_integer()
@@ -205,13 +239,15 @@ defmodule BrokenOaths.Combat.CityDefense do
   # Defensive strength
   # -------------------------------------------------------------------
 
-  @doc "City defensive strength: `20 + 5 × size` plus the summed base defense of its military garrison."
+  @doc "City defensive strength: `20 + 5 × size` plus the summed base defense of its military garrison, plus `wall_defense_bonus/0` (+5) once it has Ancient Walls (story 930)."
   @spec defensive_strength(city(), [unit()]) :: non_neg_integer()
   def defensive_strength(city, units) do
     garrison_defense =
       city |> military_garrison(units) |> Enum.map(&Resolver.base_strength(&1.type)) |> Enum.sum()
 
-    @base_defense + @size_defense * city.size + garrison_defense
+    wall_bonus = if has_walls?(city), do: @wall_defense_bonus, else: 0
+
+    @base_defense + @size_defense * city.size + garrison_defense + wall_bonus
   end
 
   # -------------------------------------------------------------------
@@ -356,7 +392,10 @@ defmodule BrokenOaths.Combat.CityDefense do
   end
 
   @doc """
-  Heal `city` `regen_per_boundary/0` HP, capped at `max_hp/0` — a no-op
+  Heal `city` `regen_per_boundary/0` HP, capped at `max_hp/1` (story
+  930: 100, or 150 once the city has Ancient Walls — a guard can't call
+  a user function, so the cap-aware clause is a plain `min/2` rather
+  than a `when hp >= max_hp(city)` guard clause) — effectively a no-op
   already at full HP. Also a no-op at exactly 0 HP: a barbarian assault
   never actually leaves a city sitting at 0 by the time this phase runs
   (`take_damage/3` folds `pillage/2` in the SAME calculation, resetting
@@ -367,9 +406,8 @@ defmodule BrokenOaths.Combat.CityDefense do
   it's captured, not healed back onto its feet by a passive boundary.
   """
   @spec regen(city()) :: city()
-  def regen(%{hp: hp} = city) when hp >= @max_hp, do: city
   def regen(%{hp: 0} = city), do: city
-  def regen(city), do: %{city | hp: min(@max_hp, city.hp + @regen_per_boundary)}
+  def regen(city), do: %{city | hp: min(max_hp(city), city.hp + @regen_per_boundary)}
 
   # -------------------------------------------------------------------
   # Tick-loop regen (story 895 -- moved from `BrokenOaths.Simulation.Turn`'s

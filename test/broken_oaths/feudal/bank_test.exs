@@ -147,6 +147,23 @@ defmodule BrokenOaths.Feudal.BankTest do
       assert Bank.maintenance_by_player(state) == %{10 => 3, 20 => 0}
     end
 
+    # Story 930 — the four newer buildings owe upkeep exactly like the
+    # Granary, read off the SAME `Buildings.city_upkeep/1` this test's
+    # sibling above already exercises for `has_granary`.
+    test "the four newer buildings owe their own maintenance too" do
+      state = %{
+        units: %{},
+        cities: %{
+          1 => city(1, 10, buildings: [:library, :barracks, :water_mill]),
+          2 => city(2, 20, buildings: [:ancient_walls])
+        }
+      }
+
+      # Player 10: library (1) + barracks (1) + water_mill (1) == 3.
+      # Player 20: ancient_walls (0) == 0.
+      assert Bank.maintenance_by_player(state) == %{10 => 3, 20 => 0}
+    end
+
     test "a unit with no owner (a barbarian) never counts toward anyone's bill" do
       state = %{
         units: %{1 => %{id: 1, type: :barbarian_warrior, player_id: nil}},

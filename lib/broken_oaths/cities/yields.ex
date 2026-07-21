@@ -44,6 +44,17 @@ defmodule BrokenOaths.Cities.Yields do
   city, :has_granary, false)`, the same defensive-default idiom
   `worked_yields/3` already uses for `improvements`.
 
+  ## The Water Mill bonus (story 930)
+
+  A city with `:water_mill` in its `buildings` list
+  (`BrokenOaths.Cities.Production`'s `:water_mill` buildable, gated on
+  the owner having completed The Wheel) banks a flat +1 food every turn
+  — `accrue_food/3`'s own read of `Map.get(city, :buildings, [])`, the
+  same defensive-default idiom the Granary's own `has_granary` read
+  already uses. The building's other half, +1 production, is
+  `BrokenOaths.Cities.Production.water_mill_production_bonus/0`'s own
+  concern, not this module's.
+
   ## Bonus resources (story 905)
 
   `resource_bonus/1` is the resource layer's own additive term —
@@ -254,15 +265,21 @@ defmodule BrokenOaths.Cities.Yields do
 
   @doc """
   Bank this turn's food income: the center's floor, every worked
-  tile's food, plus the Granary's flat +2 (story 902) if `city` has
-  one. Production income is a separate concern —
-  `BrokenOaths.Cities.Production.accrue/3`.
+  tile's food, plus the Granary's flat +2 (story 902) and the Water
+  Mill's flat +1 (story 930) if `city` has either. Production income
+  is a separate concern — `BrokenOaths.Cities.Production.accrue/3`
+  (which reads its own `water_mill_production_bonus/0` for that
+  building's other half).
   """
   @spec accrue_food(city(), World.t(), %{tile_id() => improvement()}) :: city()
   def accrue_food(city, world, improvements) do
     center = center_yield(city, world)
     worked_food = worked_yields(city, world, improvements) |> Enum.map(& &1.food) |> Enum.sum()
-    %{city | food: city.food + center.food + worked_food + granary_bonus(city)}
+
+    %{
+      city
+      | food: city.food + center.food + worked_food + granary_bonus(city) + water_mill_bonus(city)
+    }
   end
 
   @granary_food_bonus 2
@@ -279,6 +296,21 @@ defmodule BrokenOaths.Cities.Yields do
 
   defp granary_bonus(city) do
     if Map.get(city, :has_granary, false), do: @granary_food_bonus, else: 0
+  end
+
+  @water_mill_food_bonus 1
+
+  @doc """
+  The Water Mill's flat per-turn food bonus (story 930) — the food half
+  of that building's effect; `Production.water_mill_production_bonus/0`
+  is the other half. A public accessor for the same "no hardcoded copy"
+  reason `granary_food_bonus/0` is.
+  """
+  @spec water_mill_food_bonus() :: pos_integer()
+  def water_mill_food_bonus, do: @water_mill_food_bonus
+
+  defp water_mill_bonus(city) do
+    if :water_mill in Map.get(city, :buildings, []), do: @water_mill_food_bonus, else: 0
   end
 
   # -------------------------------------------------------------------

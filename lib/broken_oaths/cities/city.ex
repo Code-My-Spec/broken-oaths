@@ -64,6 +64,13 @@ defmodule BrokenOaths.Cities.City do
 
   @max_hp 100
 
+  # Story 930 — the four new buildings (see `BrokenOaths.Cities.Buildings`'s
+  # own moduledoc for why they land in a LIST rather than four more
+  # `has_*` booleans). `has_granary` itself is untouched.
+  @buildings [:library, :ancient_walls, :barracks, :water_mill]
+
+  @type building :: :library | :ancient_walls | :barracks | :water_mill
+
   @type t :: %__MODULE__{
           id: integer() | nil,
           name: String.t() | nil,
@@ -75,6 +82,7 @@ defmodule BrokenOaths.Cities.City do
           hp: non_neg_integer(),
           production_halted_until: integer() | nil,
           has_granary: boolean(),
+          buildings: [building()],
           occupied_by_player_id: integer() | nil,
           world_id: integer() | nil,
           player_id: integer() | nil,
@@ -104,6 +112,12 @@ defmodule BrokenOaths.Cities.City do
     # catalog entry); read back by `BrokenOaths.Cities.Yields.accrue_food/3`
     # for its +2 food/turn bonus.
     field :has_granary, :boolean, default: false
+    # Story 930 — every OTHER building a city has completed (Library,
+    # Ancient Walls, Barracks, Water Mill): see `BrokenOaths.Cities.
+    # Buildings`'s own moduledoc for why these four land in a list
+    # rather than four more `has_*` booleans alongside `has_granary`
+    # above.
+    field :buildings, {:array, Ecto.Enum}, values: @buildings, default: []
     # Story 906 — the siege capture flow (`BrokenOaths.Combat.Siege`):
     # `nil` while free (the owner's own, unoccupied by anyone else);
     # set to the captor's player once a broken (0 HP) city is walked
@@ -135,13 +149,22 @@ defmodule BrokenOaths.Cities.City do
       :hp,
       :production_halted_until,
       :has_granary,
+      :buildings,
       :occupied_by_player_id
     ])
     |> validate_required([:world_id, :player_id, :tile_id, :name, :size, :food])
     |> validate_length(:name, min: 1, max: 100)
     |> validate_number(:size, greater_than_or_equal_to: 1, less_than_or_equal_to: 6)
     |> validate_number(:food, greater_than_or_equal_to: 0)
-    |> validate_number(:hp, greater_than_or_equal_to: 0, less_than_or_equal_to: @max_hp)
+    |> validate_number(:hp,
+      greater_than_or_equal_to: 0,
+      # Story 930 — Ancient Walls raise a city's max HP above the base
+      # 100 (`CityDefense.wall_hp_bonus/0`); the bound has to widen to
+      # match, or a walled city's own regen (which persists via raw
+      # `Repo.update_all`, never this changeset) would be the only path
+      # that could ever legally push `hp` past this ceiling.
+      less_than_or_equal_to: @max_hp + CityDefense.wall_hp_bonus()
+    )
     |> validate_worked_tiles_within_size()
     |> assoc_constraint(:world)
     |> assoc_constraint(:player)
@@ -442,6 +465,9 @@ defmodule BrokenOaths.Cities.City do
       # `Game.player_cities/2` actually hands to `GameLive.CityPanel` —
       # so a built Granary had no way to ever show up in the UI at all.
       has_granary: city.has_granary,
+      # Story 930 — the other four buildings (Library, Ancient Walls,
+      # Barracks, Water Mill); see `Buildings`'s own moduledoc.
+      buildings: Map.get(city, :buildings, []),
       # Story 906 — `:free` (no badge), `:broken` (0 HP, not yet
       # entered), or `:occupied` (captured) — `Siege.status/1`'s own
       # single source of truth for `GameLive.CityPanel`'s `city-status`
@@ -494,6 +520,7 @@ defmodule BrokenOaths.Cities.City do
       hp: c.hp,
       production_halted_until: c.production_halted_until,
       has_granary: c.has_granary,
+      buildings: c.buildings,
       occupied_by_player_id: c.occupied_by_player_id,
       queue: Enum.map(c.production_items, &queue_item_map/1)
     }

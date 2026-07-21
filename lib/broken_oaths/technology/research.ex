@@ -15,10 +15,14 @@ defmodule BrokenOaths.Technology.Research do
   ## Science generation
 
   Every city generates `2 * size` science per turn (`science_per_turn/1`)
-  — population is the only science lever in this MVP (see
-  `.code_my_spec/knowledge/civ6_tech_tree.md`), so `size` (a city's
-  population, same field `BrokenOaths.Cities.Yields.threshold/1` grows
-  against) stands in for Civ's Palace + Campus + Library stack.
+  — population was the only science lever in this MVP (see
+  `.code_my_spec/knowledge/civ6_tech_tree.md`) until story 930's real
+  Library building: `size` (a city's population, same field
+  `BrokenOaths.Cities.Yields.threshold/1` grows against) still stands in
+  for Civ's Palace + Campus stack, but a completed Library now adds a
+  flat `library_science_bonus/0` (+2) on top, per city, additive —
+  never per-pop, so a size-1 city with a Library gains the same +2 a
+  size-4 city with one does.
 
   ## Tech costs — the Civ-6-proportional curve (rebalanced, QA issue
   d95ea179 "Research rebalance")
@@ -110,23 +114,25 @@ defmodule BrokenOaths.Technology.Research do
   player unlocked X" and no separate flag can ever drift out of sync
   with it.
 
-  Seven techs have a real, wired unlock today: Pottery (Granary),
+  Nine techs have a real, wired unlock today: Pottery (Granary),
   Animal Husbandry (Pasture), Mining (faster mines), Archery (the
   Archer, QA issue da39e50b), Bronze Working (the Bronze Age itself,
-  plus Bronze units and — story 911 — revealing the Copper strategic
-  resource), Sailing (the Galley, story 921 — see `.code_my_spec/
+  plus Bronze units, story 911's Copper reveal, and — story 930 — the
+  Barracks), Sailing (the Galley, story 921 — see `.code_my_spec/
   knowledge/unit_and_unlock_convention.md`, written after Sailing
   itself shipped as the convention doc's own cautionary example:
   researchable, its `unlock:` string already reading "Enables
   Galleys," but no Galley anywhere in the codebase to deliver on it),
-  and — playtest issue eb5ec4f9 — The Wheel (the Road worker-
-  improvement, `road_enabled?/1`; the Heavy Chariot it also names
-  remains unwired). The other four (Astrology, Writing, Irrigation,
-  Masonry) are STRUCTURE-ONLY for this story: they research, bank
-  science, complete, and gate their own dependents exactly like every
-  other tech, but the content they name (the Holy Site, Library,
-  Plantation, Walls/Quarry) doesn't exist in this codebase yet and
-  ships in later stories.
+  The Wheel (the Road worker-improvement, `road_enabled?/1`, playtest
+  issue eb5ec4f9 — plus, story 930, the Water Mill; the Heavy Chariot
+  it also names remains unwired), Writing (the Library, story 930 —
+  `library_enabled?/1`), and Masonry (Ancient Walls, story 930 —
+  `walls_enabled?/1`; the Quarry improvement it also names remains
+  unwired). The other two (Astrology, Irrigation) are STRUCTURE-ONLY
+  for this story: they research, bank science, complete, and gate
+  their own dependents exactly like every other tech, but the content
+  they name (the Holy Site, Plantation) doesn't exist in this codebase
+  yet and ships in later stories.
   """
 
   @type tech ::
@@ -151,7 +157,11 @@ defmodule BrokenOaths.Technology.Research do
           banked_science: %{tech() => non_neg_integer()}
         }
 
-  @type city :: %{required(:size) => pos_integer(), optional(atom()) => term()}
+  @type city :: %{
+          required(:size) => pos_integer(),
+          optional(:buildings) => [atom()],
+          optional(atom()) => term()
+        }
 
   @type set_research_error :: :invalid_tech | :already_completed | :prereqs_not_met
 
@@ -173,7 +183,7 @@ defmodule BrokenOaths.Technology.Research do
     sailing: %{cost: 150, prereqs: [], unlock: "Enables Galleys and coastal exploration"},
     astrology: %{cost: 150, prereqs: [], unlock: "Enables the Holy Site district"},
     # After Pottery.
-    writing: %{cost: 150, prereqs: [:pottery], unlock: "Enables the Library building"},
+    writing: %{cost: 150, prereqs: [:pottery], unlock: "Enables the Library building (+2 science/turn)"},
     irrigation: %{cost: 150, prereqs: [:pottery], unlock: "Enables farming irrigated resources"},
     # After Animal Husbandry.
     archery: %{cost: 150, prereqs: [:animal_husbandry], unlock: "Enables the Archer unit"},
@@ -181,13 +191,17 @@ defmodule BrokenOaths.Technology.Research do
     masonry: %{
       cost: 240,
       prereqs: [:mining],
-      unlock: "Enables Walls and the Quarry improvement"
+      unlock: "Enables the Ancient Walls building (+50 HP, +5 defense) and the Quarry improvement"
     },
-    the_wheel: %{cost: 240, prereqs: [:mining], unlock: "Enables roads and the Heavy Chariot"},
+    the_wheel: %{
+      cost: 240,
+      prereqs: [:mining],
+      unlock: "Enables roads, the Water Mill building (+1 food, +1 production), and the Heavy Chariot"
+    },
     bronze_working: %{
       cost: 240,
       prereqs: [:mining],
-      unlock: "Advances your civilization to the Bronze Age"
+      unlock: "Advances your civilization to the Bronze Age and enables the Barracks building"
     }
   }
 
@@ -277,10 +291,25 @@ defmodule BrokenOaths.Technology.Research do
   # Science generation
   # -------------------------------------------------------------------
 
-  @doc "A player's total science income this turn: `2 * size` summed over every one of their cities."
+  @library_science_bonus 2
+
+  @doc "How much science the Library adds flat, per turn, once built (story 930) — additive, never per-pop."
+  @spec library_science_bonus() :: pos_integer()
+  def library_science_bonus, do: @library_science_bonus
+
+  @doc """
+  A player's total science income this turn: `2 * size` summed over
+  every one of their cities, plus `library_science_bonus/0` (+2) flat
+  for every one of those cities that has completed a Library (story
+  930).
+  """
   @spec science_per_turn([city()]) :: non_neg_integer()
   def science_per_turn(cities) do
-    cities |> Enum.map(&(&1.size * @science_per_pop)) |> Enum.sum()
+    cities |> Enum.map(&(&1.size * @science_per_pop + library_bonus(&1))) |> Enum.sum()
+  end
+
+  defp library_bonus(city) do
+    if :library in Map.get(city, :buildings, []), do: @library_science_bonus, else: 0
   end
 
   # -------------------------------------------------------------------
@@ -570,4 +599,23 @@ defmodule BrokenOaths.Technology.Research do
   """
   @spec sailing_enabled?(player_research()) :: boolean()
   def sailing_enabled?(player_research), do: completed?(player_research, :sailing)
+
+  # Story 930 — see this module's own moduledoc, "Unlocks": four more
+  # `_enabled?` accessors, the exact same `completed?/2` one-liner
+  # shape every unlock above already uses.
+  @doc "Writing's unlock: whether the Library building is available."
+  @spec library_enabled?(player_research()) :: boolean()
+  def library_enabled?(player_research), do: completed?(player_research, :writing)
+
+  @doc "Masonry's unlock: whether the Ancient Walls building is available."
+  @spec walls_enabled?(player_research()) :: boolean()
+  def walls_enabled?(player_research), do: completed?(player_research, :masonry)
+
+  @doc "Bronze Working's OTHER unlock (alongside age/1 and copper_revealed?/1): whether the Barracks building is available."
+  @spec barracks_enabled?(player_research()) :: boolean()
+  def barracks_enabled?(player_research), do: completed?(player_research, :bronze_working)
+
+  @doc "The Wheel's OTHER unlock (alongside road_enabled?/1): whether the Water Mill building is available."
+  @spec water_mill_enabled?(player_research()) :: boolean()
+  def water_mill_enabled?(player_research), do: completed?(player_research, :the_wheel)
 end

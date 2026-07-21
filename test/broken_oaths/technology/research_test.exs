@@ -82,6 +82,29 @@ defmodule BrokenOaths.Technology.ResearchTest do
     test "no cities yields zero science" do
       assert Research.science_per_turn([]) == 0
     end
+
+    # Story 930 — the Library's own +2 flat science bonus, additive on
+    # top of the per-pop formula, never per-pop itself.
+    test "a Library adds a flat +2 on top of the per-pop figure, regardless of size" do
+      assert Research.science_per_turn([%{size: 1, buildings: [:library]}]) == 4
+      assert Research.science_per_turn([%{size: 4, buildings: [:library]}]) == 10
+    end
+
+    test "a city with no buildings key accrues exactly as before (defensive default)" do
+      assert Research.science_per_turn([%{size: 2}]) == 4
+    end
+
+    test "only cities with a Library get the bonus in a mixed empire" do
+      cities = [%{size: 2, buildings: [:library]}, %{size: 2, buildings: []}]
+      # (2*2 + 2) + (2*2 + 0) == 6 + 4 == 10.
+      assert Research.science_per_turn(cities) == 10
+    end
+  end
+
+  describe "library_science_bonus/0" do
+    test "the public accessor matches what science_per_turn/1 actually banks" do
+      assert Research.library_science_bonus() == 2
+    end
   end
 
   describe "prereqs_met?/2" do
@@ -292,6 +315,31 @@ defmodule BrokenOaths.Technology.ResearchTest do
       refute Research.sailing_enabled?(Research.new())
       pr = %{Research.new() | completed_techs: [:sailing]}
       assert Research.sailing_enabled?(pr)
+    end
+
+    # Story 930 — Library/Ancient Walls/Barracks/Water Mill's own gates.
+    test "library_enabled?/1 flips on Writing" do
+      refute Research.library_enabled?(Research.new())
+      pr = %{Research.new() | completed_techs: [:writing]}
+      assert Research.library_enabled?(pr)
+    end
+
+    test "walls_enabled?/1 flips on Masonry" do
+      refute Research.walls_enabled?(Research.new())
+      pr = %{Research.new() | completed_techs: [:masonry]}
+      assert Research.walls_enabled?(pr)
+    end
+
+    test "barracks_enabled?/1 flips on Bronze Working" do
+      refute Research.barracks_enabled?(Research.new())
+      pr = %{Research.new() | completed_techs: [:bronze_working]}
+      assert Research.barracks_enabled?(pr)
+    end
+
+    test "water_mill_enabled?/1 flips on The Wheel" do
+      refute Research.water_mill_enabled?(Research.new())
+      pr = %{Research.new() | completed_techs: [:the_wheel]}
+      assert Research.water_mill_enabled?(pr)
     end
 
     test "age/1 flips to :bronze_age on Bronze Working, otherwise :stone_age" do

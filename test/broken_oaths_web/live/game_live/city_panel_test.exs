@@ -23,6 +23,10 @@ defmodule BrokenOathsWeb.GameLive.CityPanelTest do
   @stone_age %{completed_techs: [], current_research: nil, banked_science: %{}}
   @pottery_done %{completed_techs: [:pottery], current_research: nil, banked_science: %{}}
   @bronze_age %{completed_techs: [:bronze_working], current_research: nil, banked_science: %{}}
+  # Story 930 — Library/Ancient Walls/Water Mill's own gates.
+  @writing_done %{completed_techs: [:writing], current_research: nil, banked_science: %{}}
+  @masonry_done %{completed_techs: [:masonry], current_research: nil, banked_science: %{}}
+  @the_wheel_done %{completed_techs: [:the_wheel], current_research: nil, banked_science: %{}}
 
   defp render_panel(assigns_overrides) do
     assigns =
@@ -167,6 +171,107 @@ defmodule BrokenOathsWeb.GameLive.CityPanelTest do
       refute html =~ ~s(data-test="production-requirement-settler")
       refute html =~ ~s(data-test="production-requirement-worker")
       refute html =~ ~s(data-test="production-requirement-warrior")
+    end
+  end
+
+  # Story 930 — Library, Ancient Walls, Barracks, Water Mill: each is
+  # hidden until its own tech, offered (and enabled) once it is —
+  # mirrors the Granary's own "Pottery completed" describe block above.
+  describe "story 930 — Library (Writing)" do
+    test "hidden in the Stone Age" do
+      html = render_panel(player_research: @stone_age)
+      refute html =~ ~s(data-test="production-option-library")
+    end
+
+    test "offered and enabled once Writing is researched" do
+      html = render_panel(player_research: @writing_done)
+      assert html =~ ~s(data-test="production-option-library" data-disabled="false")
+      assert html =~ "Library"
+    end
+
+    test "renders disabled once the city already has one" do
+      city = Map.put(@city, :buildings, [:library])
+      html = render_panel(city: city, player_research: @writing_done)
+      assert html =~ ~s(data-test="production-option-library" data-disabled="true")
+    end
+  end
+
+  describe "story 930 — Ancient Walls (Masonry)" do
+    test "hidden in the Stone Age" do
+      html = render_panel(player_research: @stone_age)
+      refute html =~ ~s(data-test="production-option-ancient_walls")
+    end
+
+    test "offered and enabled once Masonry is researched" do
+      html = render_panel(player_research: @masonry_done)
+      assert html =~ ~s(data-test="production-option-ancient_walls" data-disabled="false")
+      assert html =~ "Ancient Walls"
+    end
+  end
+
+  describe "story 930 — Barracks (Bronze Working)" do
+    test "hidden before the Bronze Age" do
+      html = render_panel(player_research: @stone_age)
+      refute html =~ ~s(data-test="production-option-barracks")
+    end
+
+    test "offered and enabled once the Bronze Age is reached" do
+      html = render_panel(player_research: @bronze_age)
+      assert html =~ ~s(data-test="production-option-barracks" data-disabled="false")
+      assert html =~ "Barracks"
+    end
+  end
+
+  describe "story 930 — Water Mill (The Wheel)" do
+    test "hidden in the Stone Age" do
+      html = render_panel(player_research: @stone_age)
+      refute html =~ ~s(data-test="production-option-water_mill")
+    end
+
+    test "offered and enabled once The Wheel is researched" do
+      html = render_panel(player_research: @the_wheel_done)
+      assert html =~ ~s(data-test="production-option-water_mill" data-disabled="false")
+      assert html =~ "Water Mill"
+    end
+  end
+
+  describe "story 930 — building indicators" do
+    test "each built building renders its own badge with its real effect numbers" do
+      city = Map.put(@city, :buildings, [:library, :ancient_walls, :barracks, :water_mill])
+      html = render_panel(city: city, player_research: @writing_done)
+
+      assert html =~ ~s(data-test="city-building-library")
+      assert html =~ "+#{BrokenOaths.Technology.Research.library_science_bonus()} science"
+
+      assert html =~ ~s(data-test="city-building-ancient_walls")
+      assert html =~ "+#{BrokenOaths.Combat.CityDefense.wall_hp_bonus()} HP"
+
+      assert html =~ ~s(data-test="city-building-barracks")
+      assert html =~ ~s(data-test="city-building-water_mill")
+    end
+
+    test "no badges render for a city with none of the four built" do
+      html = render_panel(player_research: @writing_done)
+
+      refute html =~ ~s(data-test="city-building-library")
+      refute html =~ ~s(data-test="city-building-ancient_walls")
+      refute html =~ ~s(data-test="city-building-barracks")
+      refute html =~ ~s(data-test="city-building-water_mill")
+    end
+
+    # Story 930 — Ancient Walls raises a city's own max HP; the "N/max"
+    # readout has to reflect that per-city, not the flat 100 every
+    # unwalled city still shows.
+    test "the HP readout reflects a walled city's own higher max" do
+      city = @city |> Map.put(:buildings, [:ancient_walls]) |> Map.put(:hp, 140)
+      html = render_panel(city: city, player_research: @masonry_done)
+
+      assert html =~ "140/150"
+    end
+
+    test "an unwalled city still shows the plain 100 max" do
+      html = render_panel(player_research: @stone_age)
+      assert html =~ "100/100"
     end
   end
 end

@@ -594,7 +594,13 @@ defmodule BrokenOaths.Feudal.Stewardship do
     opts = [
       granary_available?: Production.granary_available?(state, city),
       bronze_age?: Production.bronze_age?(state, city),
-      copper_access?: Production.copper_access?(state, city)
+      copper_access?: Production.copper_access?(state, city),
+      # Story 930 — the same four opts `GameLive.CityPanel`'s own
+      # `production_opts/3` resolves for the owner themselves.
+      library_available?: Production.library_available?(state, city),
+      walls_available?: Production.walls_available?(state, city),
+      barracks_available?: Production.barracks_available?(state, city),
+      water_mill_available?: Production.water_mill_available?(state, city)
     ]
 
     catalog =

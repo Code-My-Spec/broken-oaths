@@ -292,6 +292,45 @@ defmodule BrokenOaths.Cities.YieldsTest do
       center_food = Yields.city_center_yield(Regions.terrain(world(), city_tile)).food
       assert Yields.accrue_food(city, world(), %{}).food == center_food
     end
+
+    # Story 930 — the Water Mill's own flat +1 food, additive alongside
+    # (and independent of) the Granary's own +2.
+    test "a Water Mill adds a flat +1 food on top of everything else" do
+      city_tile = 0
+      city = %{tile_id: city_tile, food: 0, worked_tiles: [], buildings: [:water_mill]}
+
+      center_food = Yields.city_center_yield(Regions.terrain(world(), city_tile)).food
+      assert Yields.accrue_food(city, world(), %{}).food == center_food + 1
+    end
+
+    test "a city with no buildings key accrues exactly as before (defensive default)" do
+      city_tile = 0
+      city = %{tile_id: city_tile, food: 0, worked_tiles: []}
+
+      center_food = Yields.city_center_yield(Regions.terrain(world(), city_tile)).food
+      assert Yields.accrue_food(city, world(), %{}).food == center_food
+    end
+
+    test "the Granary and Water Mill bonuses stack" do
+      city_tile = 0
+
+      city = %{
+        tile_id: city_tile,
+        food: 0,
+        worked_tiles: [],
+        has_granary: true,
+        buildings: [:water_mill]
+      }
+
+      center_food = Yields.city_center_yield(Regions.terrain(world(), city_tile)).food
+      assert Yields.accrue_food(city, world(), %{}).food == center_food + 2 + 1
+    end
+  end
+
+  describe "water_mill_food_bonus/0" do
+    test "the public accessor matches what accrue_food/3 actually banks" do
+      assert Yields.water_mill_food_bonus() == 1
+    end
   end
 
   # -------------------------------------------------------------------

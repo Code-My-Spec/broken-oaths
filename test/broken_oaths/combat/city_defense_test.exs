@@ -35,7 +35,8 @@ defmodule BrokenOaths.Combat.CityDefenseTest do
       size: Keyword.get(opts, :size, 1),
       hp: Keyword.get(opts, :hp, CityDefense.max_hp()),
       worked_tiles: Keyword.get(opts, :worked_tiles, []),
-      production_halted_until: Keyword.get(opts, :production_halted_until)
+      production_halted_until: Keyword.get(opts, :production_halted_until),
+      buildings: Keyword.get(opts, :buildings, [])
     }
   end
 
@@ -47,6 +48,31 @@ defmodule BrokenOaths.Combat.CityDefenseTest do
       assert CityDefense.regen_per_boundary() == 5
       assert CityDefense.garrison_cap() == 3
       assert CityDefense.approach_range() == 3
+    end
+
+    # Story 930 — Ancient Walls' own numbers.
+    test "wall_hp_bonus/0 and wall_defense_bonus/0" do
+      assert CityDefense.wall_hp_bonus() == 50
+      assert CityDefense.wall_defense_bonus() == 5
+    end
+  end
+
+  describe "has_walls?/1 and max_hp/1 (story 930 — Ancient Walls)" do
+    test "an unwalled city reads false and caps at the plain max_hp/0" do
+      c = city(1, tile: 10)
+      refute CityDefense.has_walls?(c)
+      assert CityDefense.max_hp(c) == CityDefense.max_hp()
+    end
+
+    test "a walled city reads true and caps 50 higher" do
+      c = city(1, tile: 10, buildings: [:ancient_walls])
+      assert CityDefense.has_walls?(c)
+      assert CityDefense.max_hp(c) == CityDefense.max_hp() + CityDefense.wall_hp_bonus()
+    end
+
+    test "a city with no buildings key defaults to unwalled (defensive default)" do
+      c = city(1, tile: 10) |> Map.delete(:buildings)
+      refute CityDefense.has_walls?(c)
     end
   end
 
@@ -165,6 +191,20 @@ defmodule BrokenOaths.Combat.CityDefenseTest do
 
       assert CityDefense.defensive_strength(c, [warrior, worker]) ==
                CityDefense.defensive_strength(c, [warrior])
+    end
+
+    # Story 930 — Ancient Walls: +5 defense on top of everything else.
+    test "Ancient Walls adds +5 defense on top of the base + size + garrison" do
+      c = city(1, size: 1, tile: 10, buildings: [:ancient_walls])
+      warrior = unit(1, type: :warrior, tile: 10)
+      # criterion 7562's 35, +5 for the walls == 40.
+      assert CityDefense.defensive_strength(c, [warrior]) == 40
+    end
+
+    test "an unwalled city gets no such bonus" do
+      c = city(1, size: 1, tile: 10)
+      warrior = unit(1, type: :warrior, tile: 10)
+      assert CityDefense.defensive_strength(c, [warrior]) == 35
     end
   end
 
@@ -370,6 +410,18 @@ defmodule BrokenOaths.Combat.CityDefenseTest do
     test "a full-HP city is a no-op" do
       c = city(1, tile: 10, hp: CityDefense.max_hp())
       assert CityDefense.regen(c) == c
+    end
+
+    # Story 930 — a walled city regens past the plain 100 cap, up to
+    # its own (150) cap.
+    test "a walled city regens past the plain max_hp/0, capped at max_hp/1 instead" do
+      c = city(1, tile: 10, hp: 148, buildings: [:ancient_walls])
+      assert CityDefense.regen(c).hp == 150
+    end
+
+    test "a walled city already above the plain 100 cap keeps regenerating" do
+      c = city(1, tile: 10, hp: 120, buildings: [:ancient_walls])
+      assert CityDefense.regen(c).hp == 125
     end
   end
 

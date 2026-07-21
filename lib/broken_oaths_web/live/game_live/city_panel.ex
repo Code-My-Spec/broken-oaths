@@ -26,17 +26,24 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
       (story 902's Pottery-gated Granary buildable — QA issue
       `1c47edff`: this flag reached `Game.player_cities/2`'s map late,
       after the Granary itself already shipped, which is exactly why a
-      built one had no way to show up here before this fix), `status`
+      built one had no way to show up here before this fix), `buildings`
+      (story 930 — the OTHER four buildings the city has completed:
+      Library, Ancient Walls, Barracks, Water Mill; see
+      `BrokenOaths.Cities.Buildings`'s own moduledoc for why these four
+      live in a list rather than four more `has_*` flags alongside
+      `has_granary`), `status`
       (story 906 — `:free | :broken | :occupied`, `Game.Siege.status/1`)
     * `:assignable_tiles` - territory tiles Play has already filtered
       to "not the center, not already worked, workable terrain" — this
       component has no world/terrain access to compute that itself
     * `:player_research` - the city owner's research state (`Game.
       player_research/2`'s shape), used ONLY to gate the Build
-      catalog — `Research.granary_enabled?/1` (story 902) and
-      `Research.age/1 == :bronze_age` (story 903). `nil`/missing reads
-      as "nothing unlocked yet", the same posture a fresh player's
-      `Research.new/0` would produce.
+      catalog — `Research.granary_enabled?/1` (story 902),
+      `Research.age/1 == :bronze_age` (story 903), and (story 930)
+      `Research.library_enabled?/1`, `walls_enabled?/1`,
+      `barracks_enabled?/1`, `water_mill_enabled?/1`. `nil`/missing
+      reads as "nothing unlocked yet", the same posture a fresh
+      player's `Research.new/0` would produce.
     * `:copper_access?` - story 911, reworked for QA issue 3e6c124c
       "Copper availability wrong": whether the SELECTED CITY'S OWNER
       (not `city` itself) currently has Copper access — PLAYER-WIDE,
@@ -153,7 +160,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
 
         <div class="flex items-center gap-3 text-sm">
           <span class="badge badge-error badge-outline" data-test="city-hp">
-            {@city.hp}/{CityDefense.max_hp()}
+            {@city.hp}/{CityDefense.max_hp(@city)}
           </span>
           <span class="badge badge-outline" data-test="city-defense">{@city.defense}</span>
           <%!-- Story 906 — `@city.status` (`Siege.status/1`, computed by
@@ -183,6 +190,15 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
           <.icon name="hero-check-circle" class="size-3" />
           Granary (+{Yields.granary_food_bonus()} food/turn)
         </div>
+
+        <%!-- Story 930 — the other four buildings; each renders once
+             it's in `@city.buildings`, same "only ever appears once
+             actually built" posture the Granary badge above already
+             has. --%>
+        <.building_badge
+          :for={building <- Map.get(@city, :buildings, [])}
+          building={building}
+        />
 
         <.current_production queue={@city.queue} city_id={@city.id} />
 
@@ -237,6 +253,37 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
     </form>
     """
   end
+
+  # Story 930 — one badge component for all four newer buildings
+  # (Library, Ancient Walls, Barracks, Water Mill), mirroring the
+  # Granary's own hand-written badge above but generalized since these
+  # four all render off the same `@city.buildings` list rather than
+  # four separate `has_*` flags.
+  attr :building, :atom, required: true
+
+  defp building_badge(assigns) do
+    ~H"""
+    <div
+      data-test={"city-building-#{@building}"}
+      class="badge badge-success badge-outline gap-1 text-xs"
+    >
+      <.icon name="hero-check-circle" class="size-3" />
+      {Production.buildable_label(@building)} ({building_effect_label(@building)})
+    </div>
+    """
+  end
+
+  defp building_effect_label(:library), do: "+#{Research.library_science_bonus()} science/turn"
+
+  defp building_effect_label(:ancient_walls),
+    do: "+#{CityDefense.wall_hp_bonus()} HP, +#{CityDefense.wall_defense_bonus()} defense"
+
+  defp building_effect_label(:barracks),
+    do: "+#{Production.barracks_production_bonus()} production, military"
+
+  defp building_effect_label(:water_mill),
+    do:
+      "+#{Yields.water_mill_food_bonus()} food, +#{Production.water_mill_production_bonus()} production"
 
   attr :queue, :list, required: true
   attr :city_id, :any, required: true
@@ -457,7 +504,13 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
       copper_access?: copper_access?,
       archery?: Research.archery_enabled?(player_research),
       sailing?: Research.sailing_enabled?(player_research),
-      coastal?: coastal?
+      coastal?: coastal?,
+      # Story 930 — Library/Ancient Walls/Barracks/Water Mill, the same
+      # single-opt gate shape `granary_available?` above already has.
+      library_available?: Research.library_enabled?(player_research),
+      walls_available?: Research.walls_enabled?(player_research),
+      barracks_available?: Research.barracks_enabled?(player_research),
+      water_mill_available?: Research.water_mill_enabled?(player_research)
     ]
   end
 end

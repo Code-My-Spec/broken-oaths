@@ -123,6 +123,37 @@ defmodule BrokenOaths.Cities.CityTest do
     end
   end
 
+  describe "buildings (story 930)" do
+    test "defaults to an empty list" do
+      {:ok, city} = %City{} |> City.changeset(valid_attrs()) |> Repo.insert()
+      assert city.buildings == []
+    end
+
+    test "can carry any of the four newer buildings once completed" do
+      attrs = Map.put(valid_attrs(), :buildings, [:library, :ancient_walls])
+      changeset = City.changeset(%City{}, attrs)
+      assert changeset.valid?
+      {:ok, city} = Repo.insert(changeset)
+      assert Enum.sort(city.buildings) == [:ancient_walls, :library]
+    end
+
+    test "rejects an unknown building atom" do
+      attrs = Map.put(valid_attrs(), :buildings, [:temple])
+      changeset = City.changeset(%City{}, attrs)
+      refute changeset.valid?
+    end
+
+    # Story 930 — Ancient Walls raise a city's own max HP above the base
+    # 100; the changeset's own `hp` bound has to widen to match.
+    test "hp is valid up to the walled-city ceiling (100 + wall_hp_bonus/0)" do
+      attrs = Map.put(valid_attrs(), :hp, 150)
+      assert City.changeset(%City{}, attrs).valid?
+
+      attrs = Map.put(valid_attrs(), :hp, 151)
+      refute City.changeset(%City{}, attrs).valid?
+    end
+  end
+
   test "a city's production_items preload as an empty list until items are queued" do
     {:ok, city} = %City{} |> City.changeset(valid_attrs()) |> Repo.insert()
     city = Repo.preload(city, :production_items)

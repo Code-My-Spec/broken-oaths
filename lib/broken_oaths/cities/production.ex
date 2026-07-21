@@ -156,6 +156,25 @@ defmodule BrokenOaths.Cities.Production do
   melee follows the identical adjacency/PvP rules land combat already
   enforces, nothing naval-specific about the fight itself.
 
+  ## Story 930 — Library, Ancient Walls, Barracks, Water Mill
+
+  Four more buildings, following the exact Granary/`building_convention.md`
+  shape (own tech gate, own `_available?` opt, own `can_queue?/3`
+  clause with the same `:already_built` refusal, own `available_items/1`
+  offer): Library (Writing, +2 science/turn flat —
+  `BrokenOaths.Technology.Research.science_per_turn/1`), Ancient Walls
+  (Masonry, +50 max HP / +5 defense —
+  `BrokenOaths.Combat.CityDefense`), Barracks (Bronze Working, +1
+  production toward MILITARY queue items only — `accrue/3` below), and
+  Water Mill (The Wheel, +1 food / +1 production flat, no river
+  requirement modeled). Unlike the Granary, these four are never their
+  own `has_*` boolean — see `BrokenOaths.Cities.City`'s own `buildings`
+  field doc for why a FIFTH boolean (and a sixth, and a seventh) would
+  have been exactly the scattered-flag growth the building convention
+  warns about. `complete_loop/4`'s own `@passive_buildings` clause below
+  handles all four (and any future addition to that list) with the same
+  ONE clause, rather than four near-identical copies of the Granary's.
+
   `landing_tile/4`'s own `:galley` clause is why this module took on a
   4th arg there: a finished Galley can never land on the city's own
   (land) tile the way every other unit does, so it needs its OWN
@@ -183,7 +202,10 @@ defmodule BrokenOaths.Cities.Production do
 
   @type tile_id :: non_neg_integer()
   @type unit_buildable :: :settler | :worker | :warrior | :bronze_spearman | :archer | :galley
-  @type buildable :: unit_buildable() | :granary
+  # Story 930 — the four buildings that land in `City.buildings` (as
+  # opposed to `:granary`, still its own lone boolean).
+  @type building :: :library | :ancient_walls | :barracks | :water_mill
+  @type buildable :: unit_buildable() | :granary | building()
   @type unit_type ::
           :lord
           | :settler
@@ -209,6 +231,7 @@ defmodule BrokenOaths.Cities.Production do
           required(:worked_tiles) => [tile_id()],
           required(:queue) => [queue_item()],
           optional(:has_granary) => boolean(),
+          optional(:buildings) => [building()],
           optional(atom()) => term()
         }
 
@@ -232,7 +255,14 @@ defmodule BrokenOaths.Cities.Production do
     # Story 921 — see this module's own moduledoc, "The Galley": between
     # the Warrior and the Bronze Spearman, matching a tier-2-tech unit
     # with no strategic-resource gate of its own.
-    galley: 50
+    galley: 50,
+    # Story 930 — see this module's own moduledoc, "Library, Ancient
+    # Walls, Barracks, Water Mill" — the Granary's own 60 as the
+    # baseline, priced up slightly for a stronger flat effect.
+    library: 90,
+    ancient_walls: 80,
+    barracks: 90,
+    water_mill: 90
   }
 
   @unit_stats %{
@@ -280,6 +310,10 @@ defmodule BrokenOaths.Cities.Production do
   def buildable_label(:bronze_spearman), do: "Bronze Spearman"
   def buildable_label(:archer), do: "Archer"
   def buildable_label(:galley), do: "Galley"
+  def buildable_label(:library), do: "Library"
+  def buildable_label(:ancient_walls), do: "Ancient Walls"
+  def buildable_label(:barracks), do: "Barracks"
+  def buildable_label(:water_mill), do: "Water Mill"
 
   @doc "Starting `%{hp:, movement:}` for any unit type — Lord and Settler included."
   @spec unit_stats(unit_type()) :: %{hp: pos_integer(), movement: pos_integer()}
@@ -317,6 +351,42 @@ defmodule BrokenOaths.Cities.Production do
     cond do
       Map.get(city, :has_granary, false) -> {:error, :already_built}
       not Keyword.get(opts, :granary_available?, false) -> {:error, :locked}
+      true -> :ok
+    end
+  end
+
+  # Story 930 — Library/Ancient Walls/Barracks/Water Mill: the exact
+  # same shape as `:granary` above (a single tech-gate opt, refused a
+  # second time once already built), just reading `buildings` instead
+  # of `has_granary` — see this module's own moduledoc.
+  def can_queue?(city, :library, opts) do
+    cond do
+      :library in Map.get(city, :buildings, []) -> {:error, :already_built}
+      not Keyword.get(opts, :library_available?, false) -> {:error, :locked}
+      true -> :ok
+    end
+  end
+
+  def can_queue?(city, :ancient_walls, opts) do
+    cond do
+      :ancient_walls in Map.get(city, :buildings, []) -> {:error, :already_built}
+      not Keyword.get(opts, :walls_available?, false) -> {:error, :locked}
+      true -> :ok
+    end
+  end
+
+  def can_queue?(city, :barracks, opts) do
+    cond do
+      :barracks in Map.get(city, :buildings, []) -> {:error, :already_built}
+      not Keyword.get(opts, :barracks_available?, false) -> {:error, :locked}
+      true -> :ok
+    end
+  end
+
+  def can_queue?(city, :water_mill, opts) do
+    cond do
+      :water_mill in Map.get(city, :buildings, []) -> {:error, :already_built}
+      not Keyword.get(opts, :water_mill_available?, false) -> {:error, :locked}
       true -> :ok
     end
   end
@@ -381,6 +451,10 @@ defmodule BrokenOaths.Cities.Production do
     |> maybe_offer(:bronze_spearman, Keyword.get(opts, :bronze_age?, false))
     |> maybe_offer(:archer, Keyword.get(opts, :archery?, false))
     |> maybe_offer(:galley, Keyword.get(opts, :sailing?, false))
+    |> maybe_offer(:library, Keyword.get(opts, :library_available?, false))
+    |> maybe_offer(:ancient_walls, Keyword.get(opts, :walls_available?, false))
+    |> maybe_offer(:barracks, Keyword.get(opts, :barracks_available?, false))
+    |> maybe_offer(:water_mill, Keyword.get(opts, :water_mill_available?, false))
   end
 
   defp maybe_offer(types, type, true), do: types ++ [type]
@@ -409,7 +483,11 @@ defmodule BrokenOaths.Cities.Production do
              copper_access?: copper_access?(state, city),
              archery?: archery?(state, city),
              sailing?: sailing?(state, city),
-             coastal?: coastal?(state, city)
+             coastal?: coastal?(state, city),
+             library_available?: library_available?(state, city),
+             walls_available?: walls_available?(state, city),
+             barracks_available?: barracks_available?(state, city),
+             water_mill_available?: water_mill_available?(state, city)
            ) do
       next_position =
         city.queue |> Enum.map(&Map.get(&1, :position, 0)) |> Enum.max(fn -> 0 end) |> Kernel.+(1)
@@ -487,7 +565,19 @@ defmodule BrokenOaths.Cities.Production do
   @doc "Parses a build-type param (atom or string) into a known `buildable()`."
   @spec parse_item_type(term()) :: {:ok, buildable()} | {:error, :invalid_item}
   def parse_item_type(type)
-      when type in [:settler, :worker, :warrior, :granary, :bronze_spearman, :archer, :galley],
+      when type in [
+             :settler,
+             :worker,
+             :warrior,
+             :granary,
+             :bronze_spearman,
+             :archer,
+             :galley,
+             :library,
+             :ancient_walls,
+             :barracks,
+             :water_mill
+           ],
       do: {:ok, type}
 
   def parse_item_type("settler"), do: {:ok, :settler}
@@ -501,6 +591,12 @@ defmodule BrokenOaths.Cities.Production do
   def parse_item_type("archer"), do: {:ok, :archer}
   # Story 921 — see this module's own moduledoc, "The Galley".
   def parse_item_type("galley"), do: {:ok, :galley}
+  # Story 930 — see this module's own moduledoc, "Library, Ancient
+  # Walls, Barracks, Water Mill".
+  def parse_item_type("library"), do: {:ok, :library}
+  def parse_item_type("ancient_walls"), do: {:ok, :ancient_walls}
+  def parse_item_type("barracks"), do: {:ok, :barracks}
+  def parse_item_type("water_mill"), do: {:ok, :water_mill}
   def parse_item_type(_other), do: {:error, :invalid_item}
 
   # Story 902, criterion 7629 — whether `city`'s OWNER has completed
@@ -530,6 +626,29 @@ defmodule BrokenOaths.Cities.Production do
   @spec sailing?(map(), city()) :: boolean()
   def sailing?(state, city),
     do: Research.sailing_enabled?(player_research_for(state, city.player_id))
+
+  # Story 930 — see this module's own moduledoc, "Library, Ancient
+  # Walls, Barracks, Water Mill": four `_available?` accessors, the
+  # exact same one-opt shape `granary_available?/2` above already uses.
+  @doc "Whether `city`'s OWNER has completed Writing — the `:library_available?` opt `can_queue?/3` needs."
+  @spec library_available?(map(), city()) :: boolean()
+  def library_available?(state, city),
+    do: Research.library_enabled?(player_research_for(state, city.player_id))
+
+  @doc "Whether `city`'s OWNER has completed Masonry — the `:walls_available?` opt `can_queue?/3` needs."
+  @spec walls_available?(map(), city()) :: boolean()
+  def walls_available?(state, city),
+    do: Research.walls_enabled?(player_research_for(state, city.player_id))
+
+  @doc "Whether `city`'s OWNER has completed Bronze Working — the `:barracks_available?` opt `can_queue?/3` needs."
+  @spec barracks_available?(map(), city()) :: boolean()
+  def barracks_available?(state, city),
+    do: Research.barracks_enabled?(player_research_for(state, city.player_id))
+
+  @doc "Whether `city`'s OWNER has completed The Wheel — the `:water_mill_available?` opt `can_queue?/3` needs."
+  @spec water_mill_available?(map(), city()) :: boolean()
+  def water_mill_available?(state, city),
+    do: Research.water_mill_enabled?(player_research_for(state, city.player_id))
 
   @doc """
   Whether `city` itself has at least one adjacent `:coastal_water` tile
@@ -640,15 +759,19 @@ defmodule BrokenOaths.Cities.Production do
   # -------------------------------------------------------------------
 
   @doc """
-  Bank this turn's production (flat base + worked-tile production) into
-  the current (head) queue item. A no-op with an empty queue — nothing
-  is queued to receive it.
+  Bank this turn's production (flat base + worked-tile production +
+  the Barracks'/Water Mill's own bonuses, story 930) into the current
+  (head) queue item. A no-op with an empty queue — nothing is queued
+  to receive it.
   """
   @spec accrue(city(), World.t(), map()) :: city()
   def accrue(%{queue: []} = city, _world, _improvements), do: city
 
   def accrue(%{queue: [current | rest]} = city, world, improvements) do
-    income = @flat_production + worked_production(city, world, improvements)
+    income =
+      @flat_production + worked_production(city, world, improvements) +
+        barracks_bonus(city, current.type) + water_mill_production_bonus(city)
+
     %{city | queue: [%{current | banked: current.banked + income} | rest]}
   end
 
@@ -657,6 +780,39 @@ defmodule BrokenOaths.Cities.Production do
     |> Yields.worked_yields(world, improvements)
     |> Enum.map(& &1.production)
     |> Enum.sum()
+  end
+
+  # Story 930 — the Barracks: +1 production, but ONLY toward a MILITARY
+  # queue item (see this module's own moduledoc) — a Settler, Worker, or
+  # another building banks the flat base and worked-tile production
+  # alone, same as an unbarracked city.
+  @military_types [:warrior, :archer, :bronze_spearman, :galley, :lord]
+  @barracks_production_bonus 1
+
+  @doc "How much production the Barracks adds toward a military queue item, once built."
+  @spec barracks_production_bonus() :: pos_integer()
+  def barracks_production_bonus, do: @barracks_production_bonus
+
+  defp barracks_bonus(city, type) do
+    if type in @military_types and :barracks in Map.get(city, :buildings, []) do
+      @barracks_production_bonus
+    else
+      0
+    end
+  end
+
+  # Story 930 — the Water Mill: +1 production flat, on top of whatever
+  # else the city already banks (no river requirement modeled — see
+  # this module's own moduledoc). `Yields.water_mill_food_bonus/0` is
+  # the food half of this same building's effect.
+  @water_mill_production_bonus 1
+
+  @doc "How much production the Water Mill adds flat, once built."
+  @spec water_mill_production_bonus() :: pos_integer()
+  def water_mill_production_bonus, do: @water_mill_production_bonus
+
+  defp water_mill_production_bonus(city) do
+    if :water_mill in Map.get(city, :buildings, []), do: @water_mill_production_bonus, else: 0
   end
 
   # -------------------------------------------------------------------
@@ -725,6 +881,29 @@ defmodule BrokenOaths.Cities.Production do
 
     city
     |> Map.put(:has_granary, true)
+    |> Map.put(:queue, carry_overflow(rest, overflow))
+    |> complete_loop(occupied, world, events)
+  end
+
+  # Story 930 — Library/Ancient Walls/Barracks/Water Mill: the exact
+  # same "no landing tile, no spawn event, just flip storage" shape the
+  # Granary clause above uses, generalized to one clause for all four
+  # (and any future addition to `@passive_buildings`) via the
+  # `buildings` LIST rather than four near-identical copies of the
+  # Granary's own boolean-flip clause.
+  @passive_buildings [:library, :ancient_walls, :barracks, :water_mill]
+
+  defp complete_loop(
+         %{queue: [%{type: type} = current | rest]} = city,
+         occupied,
+         world,
+         events
+       )
+       when type in @passive_buildings and current.banked >= current.cost do
+    overflow = current.banked - current.cost
+
+    city
+    |> Map.update(:buildings, [type], &Enum.uniq([type | &1]))
     |> Map.put(:queue, carry_overflow(rest, overflow))
     |> complete_loop(occupied, world, events)
   end
@@ -911,16 +1090,25 @@ defmodule BrokenOaths.Cities.Production do
 
       base ->
         unit_completions = Enum.map(city_events, &Map.put(base, :type, &1.type))
-
-        had_granary = Map.get(city, :has_granary, false)
-        has_granary = Map.get(new_city, :has_granary, false)
-
-        if !had_granary and has_granary do
-          unit_completions ++ [Map.put(base, :type, :granary)]
-        else
-          unit_completions
-        end
+        building_completions = Enum.map(newly_completed_buildings(city, new_city), &Map.put(base, :type, &1))
+        unit_completions ++ building_completions
     end
+  end
+
+  # Story 930 — every completion `city_events` above doesn't already
+  # cover: the Granary's own `has_granary` flip (story 902, unchanged)
+  # plus a diff of the `buildings` list for the four newer ones (a
+  # `MapSet` diff rather than one `if` per building, same generalization
+  # `complete_loop/4`'s own `@passive_buildings` clause already made).
+  defp newly_completed_buildings(city, new_city) do
+    had_granary = Map.get(city, :has_granary, false)
+    has_granary = Map.get(new_city, :has_granary, false)
+    granary = if !had_granary and has_granary, do: [:granary], else: []
+
+    had = MapSet.new(Map.get(city, :buildings, []))
+    has = MapSet.new(Map.get(new_city, :buildings, []))
+
+    granary ++ MapSet.to_list(MapSet.difference(has, had))
   end
 
   defp completion_base(players, city) do

@@ -31,7 +31,11 @@ defmodule BrokenOaths.Cities.ProductionTest do
                granary: 60,
                bronze_spearman: 60,
                archer: 40,
-               galley: 50
+               galley: 50,
+               library: 90,
+               ancient_walls: 80,
+               barracks: 90,
+               water_mill: 90
              }
 
       assert Production.cost(:settler) == 100
@@ -41,6 +45,17 @@ defmodule BrokenOaths.Cities.ProductionTest do
       assert Production.cost(:bronze_spearman) == 60
       assert Production.cost(:archer) == 40
       assert Production.cost(:galley) == 50
+    end
+
+    # Story 930 — Library 90 (Writing), Ancient Walls 80 (Masonry),
+    # Barracks 90 (Bronze Working), Water Mill 90 (The Wheel): the
+    # Granary's own 60 as the baseline, priced up for a stronger flat
+    # effect than the Granary's own +2 food alone.
+    test "Library 90, Ancient Walls 80, Barracks 90, Water Mill 90" do
+      assert Production.cost(:library) == 90
+      assert Production.cost(:ancient_walls) == 80
+      assert Production.cost(:barracks) == 90
+      assert Production.cost(:water_mill) == 90
     end
   end
 
@@ -138,6 +153,220 @@ defmodule BrokenOaths.Cities.ProductionTest do
       refute :galley in Production.available_items(sailing?: false)
       assert :galley in Production.available_items(sailing?: true)
       assert :galley in Production.available_items(sailing?: true, coastal?: false)
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Story 930 — Library, Ancient Walls, Barracks, Water Mill
+  # -------------------------------------------------------------------
+
+  describe "can_queue?/3 (story 930 — Library)" do
+    test "a Library defaults to locked — arity-2 has no research context" do
+      assert Production.can_queue?(city([]), :library) == {:error, :locked}
+    end
+
+    test "refused before Writing is researched" do
+      assert Production.can_queue?(city([]), :library, library_available?: false) ==
+               {:error, :locked}
+    end
+
+    test "allowed once Writing is researched" do
+      assert Production.can_queue?(city([]), :library, library_available?: true) == :ok
+    end
+
+    test "refused a second time once the city already has one" do
+      assert Production.can_queue?(city(buildings: [:library]), :library, library_available?: true) ==
+               {:error, :already_built}
+    end
+
+    test "every other buildable ignores the option entirely" do
+      assert Production.can_queue?(city(size: 2), :settler, library_available?: false) == :ok
+    end
+  end
+
+  describe "can_queue?/3 (story 930 — Ancient Walls)" do
+    test "refused before Masonry is researched" do
+      assert Production.can_queue?(city([]), :ancient_walls, walls_available?: false) ==
+               {:error, :locked}
+    end
+
+    test "allowed once Masonry is researched" do
+      assert Production.can_queue?(city([]), :ancient_walls, walls_available?: true) == :ok
+    end
+
+    test "refused a second time once the city already has one" do
+      assert Production.can_queue?(city(buildings: [:ancient_walls]), :ancient_walls,
+               walls_available?: true
+             ) == {:error, :already_built}
+    end
+  end
+
+  describe "can_queue?/3 (story 930 — Barracks)" do
+    test "refused before Bronze Working is researched" do
+      assert Production.can_queue?(city([]), :barracks, barracks_available?: false) ==
+               {:error, :locked}
+    end
+
+    test "allowed once Bronze Working is researched" do
+      assert Production.can_queue?(city([]), :barracks, barracks_available?: true) == :ok
+    end
+
+    test "refused a second time once the city already has one" do
+      assert Production.can_queue?(city(buildings: [:barracks]), :barracks,
+               barracks_available?: true
+             ) == {:error, :already_built}
+    end
+  end
+
+  describe "can_queue?/3 (story 930 — Water Mill)" do
+    test "refused before The Wheel is researched" do
+      assert Production.can_queue?(city([]), :water_mill, water_mill_available?: false) ==
+               {:error, :locked}
+    end
+
+    test "allowed once The Wheel is researched" do
+      assert Production.can_queue?(city([]), :water_mill, water_mill_available?: true) == :ok
+    end
+
+    test "refused a second time once the city already has one" do
+      assert Production.can_queue?(city(buildings: [:water_mill]), :water_mill,
+               water_mill_available?: true
+             ) == {:error, :already_built}
+    end
+  end
+
+  describe "available_items/1 (story 930)" do
+    test "each building is hidden until its own tech is researched, offered once it is" do
+      refute :library in Production.available_items([])
+      assert :library in Production.available_items(library_available?: true)
+
+      refute :ancient_walls in Production.available_items([])
+      assert :ancient_walls in Production.available_items(walls_available?: true)
+
+      refute :barracks in Production.available_items([])
+      assert :barracks in Production.available_items(barracks_available?: true)
+
+      refute :water_mill in Production.available_items([])
+      assert :water_mill in Production.available_items(water_mill_available?: true)
+    end
+  end
+
+  describe "complete/3 (story 930)" do
+    test "a Library completes into buildings: [:library] — no spawn event, no landing tile needed" do
+      c = city(tile_id: 1, queue: [%{id: 1, type: :library, banked: 90, cost: 90}])
+      occupied_everywhere = %{1 => true}
+
+      {new_city, events} = Production.complete(c, occupied_everywhere, world())
+
+      assert new_city.buildings == [:library]
+      assert new_city.queue == []
+      assert events == []
+    end
+
+    test "an Ancient Walls completes into buildings: [:ancient_walls]" do
+      c = city(tile_id: 1, queue: [%{id: 1, type: :ancient_walls, banked: 80, cost: 80}])
+      {new_city, events} = Production.complete(c, %{}, world())
+
+      assert new_city.buildings == [:ancient_walls]
+      assert events == []
+    end
+
+    test "a Barracks completes into buildings: [:barracks]" do
+      c = city(tile_id: 1, queue: [%{id: 1, type: :barracks, banked: 90, cost: 90}])
+      {new_city, events} = Production.complete(c, %{}, world())
+
+      assert new_city.buildings == [:barracks]
+      assert events == []
+    end
+
+    test "a Water Mill completes into buildings: [:water_mill]" do
+      c = city(tile_id: 1, queue: [%{id: 1, type: :water_mill, banked: 90, cost: 90}])
+      {new_city, events} = Production.complete(c, %{}, world())
+
+      assert new_city.buildings == [:water_mill]
+      assert events == []
+    end
+
+    test "a second, different building stacks onto an existing buildings list" do
+      c =
+        city(
+          tile_id: 1,
+          buildings: [:library],
+          queue: [%{id: 1, type: :barracks, banked: 90, cost: 90}]
+        )
+
+      {new_city, _events} = Production.complete(c, %{}, world())
+      assert Enum.sort(new_city.buildings) == [:barracks, :library]
+    end
+
+    test "a building's overflow still carries into the next queued item" do
+      c =
+        city(
+          tile_id: 1,
+          queue: [
+            %{id: 1, type: :library, banked: 95, cost: 90},
+            %{id: 2, type: :worker, banked: 0, cost: 60}
+          ]
+        )
+
+      {new_city, _events} = Production.complete(c, %{}, world())
+      assert new_city.buildings == [:library]
+      assert [%{id: 2, banked: 5}] = new_city.queue
+    end
+
+    test "a below-cost building item does not complete" do
+      c = city(tile_id: 1, queue: [%{id: 1, type: :water_mill, banked: 89, cost: 90}])
+      assert Production.complete(c, %{}, world()) == {c, []}
+    end
+  end
+
+  describe "accrue/3 (story 930 — the Barracks: +1 production, military queue items only)" do
+    test "a military item in a Barracks city banks the extra production" do
+      c = city(buildings: [:barracks], queue: [Production.new_item(:warrior)])
+      accrued = Production.accrue(c, world(), %{})
+      # flat base 5 + barracks 1 == 6.
+      assert [%{banked: 6}] = accrued.queue
+    end
+
+    test "a Settler in the SAME Barracks city gets no bonus — the gate is on the queue item's own type" do
+      c = city(buildings: [:barracks], queue: [Production.new_item(:settler)])
+      accrued = Production.accrue(c, world(), %{})
+      assert [%{banked: 5}] = accrued.queue
+    end
+
+    test "a building (Granary) in a Barracks city gets no bonus either" do
+      c = city(buildings: [:barracks], queue: [Production.new_item(:granary)])
+      accrued = Production.accrue(c, world(), %{})
+      assert [%{banked: 5}] = accrued.queue
+    end
+
+    test "a military item with no Barracks gets no bonus" do
+      c = city(queue: [Production.new_item(:warrior)])
+      accrued = Production.accrue(c, world(), %{})
+      assert [%{banked: 5}] = accrued.queue
+    end
+  end
+
+  describe "accrue/3 (story 930 — the Water Mill: +1 production flat)" do
+    test "every queue item in a Water Mill city banks the extra production" do
+      c = city(buildings: [:water_mill], queue: [Production.new_item(:settler)])
+      accrued = Production.accrue(c, world(), %{})
+      # flat base 5 + water mill 1 == 6.
+      assert [%{banked: 6}] = accrued.queue
+    end
+
+    test "the Barracks and Water Mill bonuses stack for a military item" do
+      c = city(buildings: [:barracks, :water_mill], queue: [Production.new_item(:warrior)])
+      accrued = Production.accrue(c, world(), %{})
+      # flat base 5 + barracks 1 + water mill 1 == 7.
+      assert [%{banked: 7}] = accrued.queue
+    end
+  end
+
+  describe "barracks_production_bonus/0 and water_mill_production_bonus/0" do
+    test "the public accessors match what accrue/3 actually banks" do
+      assert Production.barracks_production_bonus() == 1
+      assert Production.water_mill_production_bonus() == 1
     end
   end
 
