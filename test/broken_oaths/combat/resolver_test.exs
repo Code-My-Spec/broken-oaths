@@ -112,6 +112,11 @@ defmodule BrokenOaths.Combat.ResolverTest do
     test "the Archer (QA issue da39e50b) sits between the Warrior and the Bronze Spearman" do
       assert Resolver.base_strength(:archer) == 14
     end
+
+    # Story 921 — the Galley: same as the Lord's own 12.
+    test "the Galley (story 921) matches the Lord's own base strength" do
+      assert Resolver.base_strength(:galley) == 12
+    end
   end
 
   describe "effective_strength/2" do
@@ -332,6 +337,48 @@ defmodule BrokenOaths.Combat.ResolverTest do
 
       assert dealt > 0
       assert taken > 0
+    end
+  end
+
+  describe "resolve/3 — Galley vs Galley (story 921)" do
+    test "two equal-strength Galleys trade blows within the symmetric band" do
+      {lo, hi} = expected_band(12, 12)
+
+      attacker = unit(1, type: :galley, hp: 100, max_hp: 100)
+      defender = unit(2, type: :galley, hp: 100, max_hp: 100, player_id: nil)
+
+      for seed <- 1..100 do
+        %{damage_to_defender: dealt, damage_to_attacker: taken} =
+          Resolver.resolve(attacker, defender, seed: {:galley, seed})
+
+        assert dealt in lo..hi
+        assert taken in lo..hi
+      end
+    end
+  end
+
+  # Story 921 — proves the full `attack/4` orchestration (adjacency,
+  # target legality, damage, state update) works over WATER tiles
+  # exactly like it already does over land: `Resolver` itself has no
+  # notion of terrain, only `Units.Unit`'s own move validation does
+  # (see `unit_test.exs`), so this is really confirming nothing here
+  # silently assumed `:land`. Tiles 32/33 are adjacent `:coastal_water`
+  # at this seed/frequency (verified against `Regions` directly, same
+  # convention `production_test.exs` uses for its own water fixtures).
+  describe "attack/4 — Galley vs Galley over coastal water (story 921)" do
+    test "a Galley resolves an attack against an adjacent Galley on coastal water" do
+      assert Regions.tile_class(world(), 32) == :coastal_water
+      assert Regions.tile_class(world(), 33) == :coastal_water
+      assert 33 in Regions.adjacent_tiles(world(), 32)
+
+      attacker = unit(1, type: :galley, tile_id: 32, hp: 100, max_hp: 100, player_id: 1)
+      defender = unit(2, type: :galley, tile_id: 33, hp: 100, max_hp: 100, player_id: nil)
+
+      st = state(%{1 => attacker, 2 => defender})
+
+      assert {:ok, result, new_state} = Resolver.attack(st, %{id: 1}, 1, 2)
+      assert result.damage_dealt > 0
+      assert new_state.units[2].hp < 100
     end
   end
 

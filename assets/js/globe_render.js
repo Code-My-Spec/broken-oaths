@@ -97,6 +97,12 @@ const GlobeRender = {
     // itself used); flag real bespoke Archer art as a follow-up.
     archer: "/images/game/units/archer.png",
     worker: "/images/game/units/worker.png",
+    // Story 921 — the Galley, the first naval unit. Placeholder art (a
+    // straight copy of the Warrior sprite, same stopgap the Copper
+    // decor billboard below already used) until a bespoke Galley
+    // billboard exists.
+    // TODO real galley art
+    galley: "/images/game/units/galley.png",
     barbarian: "/images/game/units/barbarian.png",
     mountain: "/images/game/decor/mountain.png",
     hills: "/images/game/decor/hills.png",

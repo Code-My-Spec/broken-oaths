@@ -33,6 +33,14 @@ defmodule BrokenOaths.Units.Actions do
   (barbarians are never player-commanded, so "choosing" a stance is
   meaningless for one) and no civilian/settler actions (a barbarian
   warrior never founds cities or builds improvements).
+
+  `:galley` (story 921, the first naval unit) ALSO carries `:move`/
+  `:attack` only, same as a barbarian — but for a different reason: V1
+  naval scope is deliberately narrow (the story's own locked design
+  decisions), so a Galley gets none of a land combat unit's `:defend`
+  Fortify stance yet, and obviously none of a civilian's `:found_city`/
+  `:build_improvement` (a Galley carries no settler or worker
+  actions).
   """
 
   @type unit :: %{optional(atom()) => term(), type: atom()}
@@ -57,6 +65,9 @@ defmodule BrokenOaths.Units.Actions do
 
   def available(%{type: type}) when type in [:lord, :warrior, :bronze_spearman],
     do: [:move, :attack, :defend]
+
+  # Story 921 — see this module's own moduledoc, "Vocabulary".
+  def available(%{type: :galley}), do: [:move, :attack]
 
   def available(%{type: :barbarian_warrior}), do: [:move, :attack]
 

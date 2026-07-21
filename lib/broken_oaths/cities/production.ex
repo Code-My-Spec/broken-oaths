@@ -127,6 +127,46 @@ defmodule BrokenOaths.Cities.Production do
   (strike without retaliation, from 2 tiles away) is flagged here as a
   follow-up design item for the product owner** — this comment is that
   flag; see the QA issue's resolution for the full writeup.
+
+  ## The Galley (story 921 — the unit-and-unlock convention's own
+  exemplar, see `.code_my_spec/knowledge/unit_and_unlock_convention.md`)
+
+  Sailing shipped as a dead tech (researchable, its own `unlock:` string
+  reading "Enables Galleys and coastal exploration") with no Galley
+  anywhere in the codebase — exactly the "structure-only tech advertises
+  an effect it never delivers" failure that convention doc's guardrail
+  exists to catch. The Galley is the fix: a real, buildable, water-only
+  unit, gated on `opts[:sailing?]` (the owner has completed Sailing)
+  AND `opts[:coastal?]` (THIS city has at least one adjacent
+  `:coastal_water` tile — a landlocked city can never launch one, no
+  matter how far along its owner's tech tree is) — the SAME two-opt
+  compound-gate shape `:bronze_spearman`'s `bronze_age?`/`copper_access?`
+  gate already established: `available_items/1` offers `:galley` once
+  `sailing?` alone is true (so a landlocked city's owner still SEES the
+  option, same "requirement legible whether or not it's met" posture
+  the Copper note gives Bronze Spearman), while `can_queue?/3` refuses
+  the more specific `{:error, :not_coastal}` once Sailing is done but
+  this particular city isn't coastal.
+
+  V1 is deliberately narrow (locked design decisions from story 921's
+  own parked questions): water-only (no land-unit embarkation — that's
+  a later story), `:coastal_water`-only (no deep-ocean sailing yet —
+  another later story), no naval barbarians, no city bombardment.
+  Combat is the existing `Combat.Resolver` unchanged — galley-vs-galley
+  melee follows the identical adjacency/PvP rules land combat already
+  enforces, nothing naval-specific about the fight itself.
+
+  `landing_tile/4`'s own `:galley` clause is why this module took on a
+  4th arg there: a finished Galley can never land on the city's own
+  (land) tile the way every other unit does, so it needs its OWN
+  candidate list — the lowest-id adjacent `:coastal_water` tile that
+  isn't already occupied, `Enum.sort/1`'d for determinism the way no
+  other landing rule needed to care about (every land unit's own
+  candidate order was already `[city.tile_id | adjacent land tiles]`,
+  never sorted). No adjacent water free (or, per `available_items/1`'s
+  own visible-but-refused posture, no water at all) means the item
+  simply waits, same "nothing lost" posture every other blocked landing
+  already has.
   """
 
   import Ecto.Query
@@ -142,10 +182,17 @@ defmodule BrokenOaths.Cities.Production do
   alias BrokenOaths.Worlds.World
 
   @type tile_id :: non_neg_integer()
-  @type unit_buildable :: :settler | :worker | :warrior | :bronze_spearman | :archer
+  @type unit_buildable :: :settler | :worker | :warrior | :bronze_spearman | :archer | :galley
   @type buildable :: unit_buildable() | :granary
   @type unit_type ::
-          :lord | :settler | :warrior | :worker | :barbarian_warrior | :bronze_spearman | :archer
+          :lord
+          | :settler
+          | :warrior
+          | :worker
+          | :barbarian_warrior
+          | :bronze_spearman
+          | :archer
+          | :galley
 
   @type queue_item :: %{
           optional(:id) => term(),
@@ -166,12 +213,24 @@ defmodule BrokenOaths.Cities.Production do
         }
 
   @type spawn_event :: %{player_id: term(), type: unit_buildable(), tile_id: tile_id()}
-  @type can_queue_error :: :size_one | :locked | :already_built | :copper_required
+  @type can_queue_error ::
+          :size_one | :locked | :already_built | :copper_required | :not_coastal
 
   @flat_production 5
   @min_founding_spacing 4
 
-  @catalog %{settler: 100, worker: 60, warrior: 40, granary: 60, bronze_spearman: 60, archer: 40}
+  @catalog %{
+    settler: 100,
+    worker: 60,
+    warrior: 40,
+    granary: 60,
+    bronze_spearman: 60,
+    archer: 40,
+    # Story 921 — see this module's own moduledoc, "The Galley": between
+    # the Warrior and the Bronze Spearman, matching a tier-2-tech unit
+    # with no strategic-resource gate of its own.
+    galley: 50
+  }
 
   @unit_stats %{
     lord: %{hp: 150, movement: 2},
@@ -183,7 +242,11 @@ defmodule BrokenOaths.Cities.Production do
     bronze_spearman: %{hp: 120, movement: 1},
     # QA issue da39e50b — see this module's own moduledoc, "The Archer",
     # for the melee-for-now stats rationale and the ranged-attack flag.
-    archer: %{hp: 100, movement: 1}
+    archer: %{hp: 100, movement: 1},
+    # Story 921 — the Galley: the Warrior's own HP, but 2 movement (a
+    # ship outpaces a foot soldier) — see this module's own moduledoc,
+    # "The Galley".
+    galley: %{hp: 100, movement: 2}
   }
 
   @doc "The buildable catalog: `%{settler: 100, worker: 60, warrior: 40}`."
@@ -251,6 +314,21 @@ defmodule BrokenOaths.Cities.Production do
     if Keyword.get(opts, :archery?, false), do: :ok, else: {:error, :locked}
   end
 
+  # Story 921 — see this module's own moduledoc, "The Galley": the SAME
+  # two-independent-opts shape `:bronze_spearman` above already uses.
+  # Missing Sailing reports the generic `:locked` (and, per
+  # `available_items/1` below, the option never appears at all yet);
+  # Sailing done but this city not coastal reports the more specific
+  # `:not_coastal`, so a caller can render "Requires a coastal city"
+  # rather than a bare disabled button.
+  def can_queue?(_city, :galley, opts) do
+    cond do
+      not Keyword.get(opts, :sailing?, false) -> {:error, :locked}
+      not Keyword.get(opts, :coastal?, false) -> {:error, :not_coastal}
+      true -> :ok
+    end
+  end
+
   def can_queue?(_city, _type, _opts), do: :ok
 
   @always_available [:settler, :worker, :warrior]
@@ -260,13 +338,17 @@ defmodule BrokenOaths.Cities.Production do
   same `opts` `can_queue?/3` reads (`:granary_available?`,
   `:bronze_age?`) — the always-available `:settler`/`:worker`/
   `:warrior` plus `:granary` once `opts[:granary_available?]` is true
-  (story 902) and `:bronze_spearman` once `opts[:bronze_age?]` is true
-  (story 903). Deliberately narrower than `catalog/0` (never `:lord`)
-  but NOT the same question as `can_queue?/3`: an item stays in this
-  list even when `can_queue?/3` would still refuse it for another
-  reason (a size-1 city's Settler, an already-built city's Granary, or
-  — story 911 — a Bronze Age city with no Copper access) — those
-  refusals are `disabled` states in the UI, not list exclusions.
+  (story 902), `:bronze_spearman` once `opts[:bronze_age?]` is true
+  (story 903), and `:galley` once `opts[:sailing?]` is true (story
+  921 — `opts[:coastal?]` is deliberately NOT checked here, same
+  "visible whether or not the second gate is met" posture
+  `:bronze_spearman` already has for Copper). Deliberately narrower
+  than `catalog/0` (never `:lord`) but NOT the same question as
+  `can_queue?/3`: an item stays in this list even when `can_queue?/3`
+  would still refuse it for another reason (a size-1 city's Settler, an
+  already-built city's Granary, a Bronze Age city with no Copper access
+  — story 911 — or a landlocked city with Sailing done — story 921) —
+  those refusals are `disabled` states in the UI, not list exclusions.
   This is the one gate a caller (`BrokenOathsWeb.GameLive.CityPanel`)
   must apply to avoid offering — or hiding — anything
   `can_queue?/3`/`WorldServer`'s `queue_production` command wouldn't
@@ -278,6 +360,7 @@ defmodule BrokenOaths.Cities.Production do
     |> maybe_offer(:granary, Keyword.get(opts, :granary_available?, false))
     |> maybe_offer(:bronze_spearman, Keyword.get(opts, :bronze_age?, false))
     |> maybe_offer(:archer, Keyword.get(opts, :archery?, false))
+    |> maybe_offer(:galley, Keyword.get(opts, :sailing?, false))
   end
 
   defp maybe_offer(types, type, true), do: types ++ [type]
@@ -289,9 +372,10 @@ defmodule BrokenOaths.Cities.Production do
 
   @doc """
   Queue a new `type` item at the tail of `city_id`'s own build queue —
-  resolves the Granary/Bronze Spearman/Archer gates itself
+  resolves the Granary/Bronze Spearman/Archer/Galley gates itself
   (`granary_available?/2`/`bronze_age?/2`/`copper_access?/2`/
-  `archery?/2`) before handing them to the pure `can_queue?/3`.
+  `archery?/2`/`sailing?/2`/`coastal?/2`) before handing them to the
+  pure `can_queue?/3`.
   """
   @spec queue_production(map(), map(), integer(), atom() | String.t()) ::
           {:ok, map()} | {:error, atom()}
@@ -303,7 +387,9 @@ defmodule BrokenOaths.Cities.Production do
              granary_available?: granary_available?(state, city),
              bronze_age?: bronze_age?(state, city),
              copper_access?: copper_access?(state, city),
-             archery?: archery?(state, city)
+             archery?: archery?(state, city),
+             sailing?: sailing?(state, city),
+             coastal?: coastal?(state, city)
            ) do
       next_position =
         city.queue |> Enum.map(&Map.get(&1, :position, 0)) |> Enum.max(fn -> 0 end) |> Kernel.+(1)
@@ -381,7 +467,7 @@ defmodule BrokenOaths.Cities.Production do
   @doc "Parses a build-type param (atom or string) into a known `buildable()`."
   @spec parse_item_type(term()) :: {:ok, buildable()} | {:error, :invalid_item}
   def parse_item_type(type)
-      when type in [:settler, :worker, :warrior, :granary, :bronze_spearman, :archer],
+      when type in [:settler, :worker, :warrior, :granary, :bronze_spearman, :archer, :galley],
       do: {:ok, type}
 
   def parse_item_type("settler"), do: {:ok, :settler}
@@ -393,6 +479,8 @@ defmodule BrokenOaths.Cities.Production do
   # Archer (melee-for-now — see this module's own moduledoc) buildable
   # once the city's owner has completed Archery.
   def parse_item_type("archer"), do: {:ok, :archer}
+  # Story 921 — see this module's own moduledoc, "The Galley".
+  def parse_item_type("galley"), do: {:ok, :galley}
   def parse_item_type(_other), do: {:error, :invalid_item}
 
   # Story 902, criterion 7629 — whether `city`'s OWNER has completed
@@ -416,6 +504,28 @@ defmodule BrokenOaths.Cities.Production do
   @spec archery?(map(), city()) :: boolean()
   def archery?(state, city),
     do: Research.archery_enabled?(player_research_for(state, city.player_id))
+
+  # Story 921 — see this module's own moduledoc, "The Galley".
+  @doc "Whether `city`'s OWNER has completed Sailing — the `:sailing?` opt `can_queue?/3` needs."
+  @spec sailing?(map(), city()) :: boolean()
+  def sailing?(state, city),
+    do: Research.sailing_enabled?(player_research_for(state, city.player_id))
+
+  @doc """
+  Whether `city` itself has at least one adjacent `:coastal_water` tile
+  — the `:coastal?` opt `can_queue?/3` needs (story 921): a
+  Galley can only ever be built in a city that actually touches water
+  (`landing_tile/4`'s own `:galley` clause is where that adjacent water
+  tile gets used). Terrain-only, unlike `sailing?/2` above — no
+  `Research` involved, no per-player state, just this ONE city's own
+  territory.
+  """
+  @spec coastal?(map(), city()) :: boolean()
+  def coastal?(state, city) do
+    state.world
+    |> Regions.adjacent_tiles(city.tile_id)
+    |> Enum.any?(&(Regions.tile_class(state.world, &1) == :coastal_water))
+  end
 
   # Story 911 rework (QA issue 3e6c124c "Copper availability wrong") —
   # whether PLAYER `player_id` has Copper access anywhere: a completed
@@ -608,7 +718,7 @@ defmodule BrokenOaths.Cities.Production do
   end
 
   defp resolve_completion(city, current, rest, occupied, world, events) do
-    case landing_tile(city, occupied, world) do
+    case landing_tile(city, current.type, occupied, world) do
       nil ->
         {city, Enum.reverse(events)}
 
@@ -627,12 +737,28 @@ defmodule BrokenOaths.Cities.Production do
   # not while merely banked (story 883). A size-1 city can never pay
   # that cost, so its settler item simply waits, exactly like a
   # blocked landing tile.
-  defp spawnable?(_city, type) when type in [:worker, :warrior, :bronze_spearman, :archer],
-    do: true
+  defp spawnable?(_city, type)
+       when type in [:worker, :warrior, :bronze_spearman, :archer, :galley],
+       do: true
 
   defp spawnable?(%{size: size}, :settler), do: size > 1
 
-  defp landing_tile(city, occupied, world) do
+  # Story 921 — see this module's own moduledoc, "The Galley": a Galley
+  # can never land on the city's own (land) tile the way every other
+  # unit does — its own candidate list is the lowest-id adjacent
+  # `:coastal_water` tile that isn't already occupied. `Enum.sort/1`
+  # gives the "lowest id" a deterministic meaning; no other landing
+  # rule needed to care about ordering since `[city.tile_id | ...]`
+  # already puts the city tile first.
+  defp landing_tile(city, :galley, occupied, world) do
+    world
+    |> Regions.adjacent_tiles(city.tile_id)
+    |> Enum.filter(&(Regions.tile_class(world, &1) == :coastal_water))
+    |> Enum.sort()
+    |> Enum.find(&(not Map.has_key?(occupied, &1)))
+  end
+
+  defp landing_tile(city, _type, occupied, world) do
     candidates = [
       city.tile_id
       | world |> Regions.adjacent_tiles(city.tile_id) |> Enum.filter(&land?(world, &1))

@@ -55,6 +55,13 @@ defmodule BrokenOaths.Units.ActionsTest do
       assert Actions.available(%{type: :barbarian_warrior}) == [:move, :attack]
     end
 
+    # Story 921 — the Galley: melee :attack like every other combat
+    # type, but V1's naval scope deliberately leaves out :defend
+    # (no Fortify stance yet) and every civilian action.
+    test "a galley can move and attack, but has no Fortify stance or civilian actions yet" do
+      assert Actions.available(%{type: :galley}) == [:move, :attack]
+    end
+
     test "an unrecognized future type degrades to :move only, never crashes" do
       assert Actions.available(%{type: :catapult}) == [:move]
     end

@@ -141,7 +141,14 @@ defmodule BrokenOaths.Combat.Resolver do
 
   @type tile_id :: non_neg_integer()
   @type unit_type ::
-          :lord | :settler | :warrior | :worker | :barbarian_warrior | :bronze_spearman | :archer
+          :lord
+          | :settler
+          | :warrior
+          | :worker
+          | :barbarian_warrior
+          | :bronze_spearman
+          | :archer
+          | :galley
 
   @type unit :: %{
           id: term(),
@@ -191,7 +198,15 @@ defmodule BrokenOaths.Combat.Resolver do
     # (16). Unchanged by the ranged-attack fix: `shoot/4` reads this
     # SAME base strength, `resolve_attack/4`'s `ranged?: true` opt only
     # zeroes the counter-blow, never the archer's own damage curve.
-    archer: 14
+    archer: 14,
+    # Story 921 — the Galley: same as the Lord's own 12, below the
+    # Bronze Spearman (16) — see `Cities.Production`'s own moduledoc,
+    # "The Galley", for the rest of the unit's stats. Galley-vs-galley
+    # (or galley-vs-anything-adjacent) combat is otherwise unchanged:
+    # this module has no notion of terrain, so a naval exchange
+    # resolves through the exact same `resolve/3`/`resolve_attack/4`
+    # pipeline land combat already does.
+    galley: 12
   }
   @lord_aura_bonus 2
   # Story 920 — the Fortify stance's own defensive bonus: half the

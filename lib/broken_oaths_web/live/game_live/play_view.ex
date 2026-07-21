@@ -321,6 +321,21 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
     |> Enum.filter(&Yields.workable?(Regions.terrain(world, &1)))
   end
 
+  # Story 921 — the Galley's own `:coastal?` opt, mirroring
+  # `assignable_tiles/2`'s own "this component has no world/terrain
+  # access of its own" reason for arriving pre-computed:
+  # `GameLive.CityPanel` reads this straight off `BrokenOaths.Cities.
+  # Production.coastal?/2`'s same rule (at least one adjacent
+  # `:coastal_water` tile), just without that module's own full
+  # tick-`state` — `Play` only ever has `world` + the selected `city`.
+  def coastal?(_world, nil), do: false
+
+  def coastal?(world, city) do
+    world
+    |> Regions.adjacent_tiles(city.tile_id)
+    |> Enum.any?(&(Regions.tile_class(world, &1) == :coastal_water))
+  end
+
   # QA issue 56ee521a — the "surface an attack affordance" half of the
   # fix: enemy cities adjacent to the CURRENTLY SELECTED unit, but only
   # once that unit is a military type (`CityDefense.military?/1` — a

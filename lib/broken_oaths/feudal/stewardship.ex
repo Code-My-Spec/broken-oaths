@@ -86,7 +86,7 @@ defmodule BrokenOaths.Feudal.Stewardship do
       absence" discipline production cancel/disband has above).
       `defend/5` is the state-taking command behind `WorldServer`'s own
       `:steward_defend` — on the genuinely-defensive path it calls
-      `BrokenOaths.Units.Unit.bfs_path/3` +
+      `BrokenOaths.Units.Unit.bfs_path/4` +
       `BrokenOaths.Units.Unit.persist_order!/2` +
       `BrokenOaths.Simulation.Turn.move_now/2`, the exact same "orders
       execute immediately" sequence `Unit.queue_move/4` already
@@ -367,7 +367,7 @@ defmodule BrokenOaths.Feudal.Stewardship do
   destination IS provable sabotage — logged AND dinged on the
   steward's own Honor, even though the move itself is still refused.
   Only every gate clearing actually queues and immediately resolves
-  the move (`Unit.bfs_path/3` + `Unit.persist_order!/2` +
+  the move (`Unit.bfs_path/4` + `Unit.persist_order!/2` +
   `Turn.move_now/2`, the same "orders execute immediately" pattern
   `Unit.queue_move/4` already establishes).
   """
@@ -407,7 +407,7 @@ defmodule BrokenOaths.Feudal.Stewardship do
         {:ok, new_state}
 
       true ->
-        case Unit.bfs_path(state, unit.tile_id, to_tile) do
+        case Unit.bfs_path(state, unit.tile_id, to_tile, unit.type) do
           path when path in [nil, []] ->
             {:error, :unreachable}
 

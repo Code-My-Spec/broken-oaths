@@ -276,6 +276,14 @@ defmodule BrokenOaths.Technology.ResearchTest do
       assert Research.pasture_enabled?(pr)
     end
 
+    # Story 921 — Sailing's own unlock, finally wired (see this
+    # module's own moduledoc, "Unlocks").
+    test "sailing_enabled?/1 flips on Sailing (the Galley's own gate)" do
+      refute Research.sailing_enabled?(Research.new())
+      pr = %{Research.new() | completed_techs: [:sailing]}
+      assert Research.sailing_enabled?(pr)
+    end
+
     test "age/1 flips to :bronze_age on Bronze Working, otherwise :stone_age" do
       assert Research.age(Research.new()) == :stone_age
       pr = %{Research.new() | completed_techs: [:bronze_working]}

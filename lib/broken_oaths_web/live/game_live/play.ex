@@ -250,6 +250,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
             selected_city: nil,
             assignable_tiles: [],
             copper_access?: false,
+            coastal?: false,
             selected_camp_id: nil,
             selected_camp: nil,
             city_error: nil,
@@ -451,6 +452,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         selected_city: city,
         assignable_tiles: PlayView.assignable_tiles(world, city),
         copper_access?: Game.copper_access?(world, user),
+        coastal?: PlayView.coastal?(world, city),
         city_error: nil,
         selected_unit_id: nil,
         selected_unit: nil,
@@ -1849,6 +1851,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
       selected_city: selected_city,
       assignable_tiles: PlayView.assignable_tiles(world, selected_city),
       copper_access?: Game.copper_access?(world, user),
+      coastal?: PlayView.coastal?(world, selected_city),
       selected_camp: selected_camp,
       known_players: Game.known_players(world, user),
       player_stats: Game.player_stats(world, user),
@@ -2206,6 +2209,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
       selected_city: city,
       assignable_tiles: PlayView.assignable_tiles(socket.assigns.world, city),
       copper_access?: Game.copper_access?(socket.assigns.world, socket.assigns.user),
+      coastal?: PlayView.coastal?(socket.assigns.world, city),
       city_error: nil,
       selected_unit_id: nil,
       selected_unit: nil,
@@ -2352,6 +2356,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
           selected_city={@selected_city}
           assignable_tiles={@assignable_tiles}
           copper_access?={@copper_access?}
+          coastal?={@coastal?}
         />
       </div>
 

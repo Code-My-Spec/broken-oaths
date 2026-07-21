@@ -92,7 +92,14 @@ defmodule BrokenOaths.Units.Unit do
   alias BrokenOaths.Worlds.World
 
   @type unit_type ::
-          :lord | :settler | :warrior | :worker | :barbarian_warrior | :bronze_spearman | :archer
+          :lord
+          | :settler
+          | :warrior
+          | :worker
+          | :barbarian_warrior
+          | :bronze_spearman
+          | :archer
+          | :galley
   @type tile_id :: non_neg_integer()
 
   @type t :: %__MODULE__{
@@ -120,7 +127,19 @@ defmodule BrokenOaths.Units.Unit do
 
   schema "game_units" do
     field :type, Ecto.Enum,
-      values: [:lord, :settler, :warrior, :worker, :barbarian_warrior, :bronze_spearman, :archer]
+      values: [
+        :lord,
+        :settler,
+        :warrior,
+        :worker,
+        :barbarian_warrior,
+        :bronze_spearman,
+        :archer,
+        # Story 921 — the Galley, the first naval unit (see this
+        # module's own `passable_tile?/2` for the water-domain
+        # movement rule it introduces).
+        :galley
+      ]
 
     field :tile_id, :integer
     field :hp, :integer
@@ -213,9 +232,11 @@ defmodule BrokenOaths.Units.Unit do
 
   @doc """
   Queue (and immediately execute) a move order: `user`'s own `unit_id`
-  paths toward `to_tile` over `:land` tiles, avoiding currently-occupied
+  paths toward `to_tile` over whichever tiles its own TYPE may occupy
+  (`passable_tile?/2` — `:land` for every unit before story 921, now
+  `:coastal_water` for the Galley), avoiding currently-occupied
   intermediate tiles (the destination itself may be occupied — see
-  `bfs_path/3` below), persists the order, then resolves as much of it
+  `bfs_path/4` below), persists the order, then resolves as much of it
   as the unit's remaining movement allows this instant
   (`Turn.move_now/2`), applying any resulting capture/vassalization and
   rebellion-ending fallout.
@@ -265,14 +286,14 @@ defmodule BrokenOaths.Units.Unit do
           to_tile >= 10 * state.world.frequency * state.world.frequency + 2 ->
         {:error, :invalid_tile}
 
-      Regions.tile_class(state.world, to_tile) != :land ->
+      not passable_tile?(unit.type, Regions.tile_class(state.world, to_tile)) ->
         {:error, :impassable}
 
       occupied_by_own?(state, to_tile, player.id, unit) ->
         {:error, :occupied}
 
       true ->
-        case bfs_path(state, unit.tile_id, to_tile) do
+        case bfs_path(state, unit.tile_id, to_tile, unit.type) do
           [] ->
             {:error, :unreachable}
 
@@ -351,26 +372,34 @@ defmodule BrokenOaths.Units.Unit do
   end
 
   @doc """
-  Shortest path over `:land` tiles, excluding `from`, including `to`.
-  Plan around units that are on the board RIGHT NOW: occupied tiles are
-  impassable as intermediate steps (an equally short free path must be
-  preferred; a knowingly-blocked plan would interrupt on step one). The
-  DESTINATION may be occupied — approaching another player's tile is
-  legal; `BrokenOaths.Simulation.Turn`'s dynamic collision check is what stops
-  the mover adjacent to it. Public (pragdave decomposition, slice 6) —
-  the same "shared, real" reason `persist_order!/2` above is public: 
-  `BrokenOaths.Feudal.Stewardship`'s own emergency-defense move calls this
-  directly rather than WorldServer keeping a duplicate copy.
+  Shortest path over tiles `unit_type` may occupy (`passable_tile?/2`),
+  excluding `from`, including `to`. Plan around units that are on the
+  board RIGHT NOW: occupied tiles are impassable as intermediate steps
+  (an equally short free path must be preferred; a knowingly-blocked
+  plan would interrupt on step one). The DESTINATION may be occupied —
+  approaching another player's tile is legal; `BrokenOaths.Simulation.Turn`'s
+  dynamic collision check is what stops the mover adjacent to it.
+  Public (pragdave decomposition, slice 6) — the same "shared, real"
+  reason `persist_order!/2` above is public: `BrokenOaths.Feudal.
+  Stewardship`'s own emergency-defense move calls this directly rather
+  than WorldServer keeping a duplicate copy.
   """
-  @spec bfs_path(map(), tile_id(), tile_id()) :: [tile_id()] | nil
-  def bfs_path(state, from, to) do
+  @spec bfs_path(map(), tile_id(), tile_id(), unit_type()) :: [tile_id()] | nil
+  def bfs_path(state, from, to, unit_type) do
     occupied =
       for {_id, u} <- state.units, u.tile_id != from, into: MapSet.new(), do: u.tile_id
 
-    bfs_loop(state.world, occupied, :queue.from_list([{from, []}]), MapSet.new([from]), to)
+    bfs_loop(
+      state.world,
+      occupied,
+      :queue.from_list([{from, []}]),
+      MapSet.new([from]),
+      to,
+      unit_type
+    )
   end
 
-  defp bfs_loop(world, occupied, queue, visited, to) do
+  defp bfs_loop(world, occupied, queue, visited, to, unit_type) do
     case :queue.out(queue) do
       {:empty, _} ->
         nil
@@ -383,7 +412,8 @@ defmodule BrokenOaths.Units.Unit do
           world
           |> Regions.adjacent_tiles(tile)
           |> Enum.filter(
-            &(Regions.tile_class(world, &1) == :land and not MapSet.member?(visited, &1) and
+            &(passable_tile?(unit_type, Regions.tile_class(world, &1)) and
+                not MapSet.member?(visited, &1) and
                 (&1 == to or not MapSet.member?(occupied, &1)))
           )
 
@@ -392,9 +422,23 @@ defmodule BrokenOaths.Units.Unit do
             {:queue.in({n, [n | path]}, q), MapSet.put(v, n)}
           end)
 
-        bfs_loop(world, occupied, queue, visited, to)
+        bfs_loop(world, occupied, queue, visited, to, unit_type)
     end
   end
+
+  @doc """
+  Whether a unit of `unit_type` may occupy/traverse a tile classified
+  `tile_class` (`Regions.tile_class/2`) — the single domain-aware seam
+  story 921's Galley needed: `queue_move/4`'s own destination check and
+  `bfs_path/4`'s pathfinding both read this SAME predicate, so the two
+  can never quietly drift apart on which tiles a given unit type may
+  step on. Every unit type before the Galley is `:land`-only, unchanged;
+  `:galley` is `:coastal_water`-only (V1's locked scope — no deep-ocean
+  sailing yet, no land unit ever boards a Galley).
+  """
+  @spec passable_tile?(unit_type(), Regions.tile_class()) :: boolean()
+  def passable_tile?(:galley, tile_class), do: tile_class == :coastal_water
+  def passable_tile?(_land_unit, tile_class), do: tile_class == :land
 
   # -------------------------------------------------------------------
   # Fortify (story 920) — mirrors `Combat.Resolver.shoot/4`'s own shape

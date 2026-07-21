@@ -7,6 +7,13 @@ defmodule BrokenOaths.Units.UnitTest do
   alias BrokenOaths.Worlds.World
   alias BrokenOaths.WorldsFixtures
 
+  # Same fixture seed/frequency `production_test.exs`/`resolver_test.exs`
+  # already use — real terrain, not a stub, so `bfs_path/4`'s own tests
+  # below exercise the actual `Regions` classification.
+  defp fixture_world, do: %World{seed: 424_242, frequency: 8}
+
+  defp tick_state(units \\ %{}), do: %{world: fixture_world(), units: units}
+
   defp player_fixture(attrs \\ %{}) do
     world = attrs[:world] || WorldsFixtures.world_fixture()
     user = UsersFixtures.user_fixture()
@@ -141,5 +148,57 @@ defmodule BrokenOaths.Units.UnitTest do
     dup_attrs = %{attrs | world_id: world.id, player_id: other_player.id}
 
     assert {:ok, _other_unit} = Unit.changeset(%Unit{}, dup_attrs) |> Repo.insert()
+  end
+
+  # -------------------------------------------------------------------
+  # passable_tile?/2 + bfs_path/4 (story 921 — the Galley's own
+  # domain-aware terrain check). Same fixture seed/frequency
+  # `production_test.exs`/`resolver_test.exs` already use: tile 26
+  # (land) has adjacent `:coastal_water` tiles 19 and 32; 32 and 33 are
+  # themselves adjacent `:coastal_water` tiles (verified against
+  # `Regions` directly, never hardcoded blind).
+  # -------------------------------------------------------------------
+
+  describe "passable_tile?/2" do
+    test "every unit type before the Galley is :land-only, unchanged" do
+      assert Unit.passable_tile?(:warrior, :land)
+      refute Unit.passable_tile?(:warrior, :coastal_water)
+      refute Unit.passable_tile?(:warrior, :mountain)
+      refute Unit.passable_tile?(:warrior, :deep_ocean)
+
+      assert Unit.passable_tile?(:lord, :land)
+      assert Unit.passable_tile?(:settler, :land)
+      assert Unit.passable_tile?(:barbarian_warrior, :land)
+    end
+
+    test "the Galley is :coastal_water-only — no land, no deep ocean (V1's locked scope)" do
+      assert Unit.passable_tile?(:galley, :coastal_water)
+      refute Unit.passable_tile?(:galley, :land)
+      refute Unit.passable_tile?(:galley, :mountain)
+      refute Unit.passable_tile?(:galley, :deep_ocean)
+    end
+  end
+
+  describe "bfs_path/4" do
+    test "a land unit paths across land tiles exactly as before" do
+      assert Unit.bfs_path(tick_state(), 26, 27, :warrior) == [27]
+    end
+
+    test "a Galley paths across adjacent coastal_water tiles" do
+      assert Unit.bfs_path(tick_state(), 32, 33, :galley) == [33]
+    end
+
+    test "a Galley cannot reach a land destination — no path through water-only tiles" do
+      assert Unit.bfs_path(tick_state(), 32, 26, :galley) == nil
+    end
+
+    test "a land unit cannot reach a coastal_water destination — no path through land-only tiles" do
+      assert Unit.bfs_path(tick_state(), 26, 19, :warrior) == nil
+    end
+
+    test "the destination may be occupied — approaching it is legal (Turn's own dynamic collision check is what halts the mover, not queue-time pathing)" do
+      other_galley = %{id: 99, tile_id: 33, type: :galley}
+      assert Unit.bfs_path(tick_state(%{99 => other_galley}), 32, 33, :galley) == [33]
+    end
   end
 end

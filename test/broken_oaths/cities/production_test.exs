@@ -23,14 +23,15 @@ defmodule BrokenOaths.Cities.ProductionTest do
   end
 
   describe "catalog/0 and cost/1" do
-    test "Settler 100, Worker 60, Warrior 40, Granary 60, Bronze Spearman 60, Archer 40 (stories 902/903, QA issue da39e50b) — no Monument, no Swordsman" do
+    test "Settler 100, Worker 60, Warrior 40, Granary 60, Bronze Spearman 60, Archer 40, Galley 50 (stories 902/903/921, QA issue da39e50b) — no Monument, no Swordsman" do
       assert Production.catalog() == %{
                settler: 100,
                worker: 60,
                warrior: 40,
                granary: 60,
                bronze_spearman: 60,
-               archer: 40
+               archer: 40,
+               galley: 50
              }
 
       assert Production.cost(:settler) == 100
@@ -39,6 +40,7 @@ defmodule BrokenOaths.Cities.ProductionTest do
       assert Production.cost(:granary) == 60
       assert Production.cost(:bronze_spearman) == 60
       assert Production.cost(:archer) == 40
+      assert Production.cost(:galley) == 50
     end
   end
 
@@ -60,6 +62,13 @@ defmodule BrokenOaths.Cities.ProductionTest do
     # movement, same mobility as every other Ancient-era melee unit.
     test "the Archer (QA issue da39e50b): 100 HP, 1 movement — melee-for-now, ranged attack flagged as a follow-up" do
       assert Production.unit_stats(:archer) == %{hp: 100, movement: 1}
+    end
+
+    # Story 921 — the Galley: the Warrior's own HP, but 2 movement (a
+    # ship outpaces a foot soldier) — see this module's own moduledoc,
+    # "The Galley".
+    test "the Galley (story 921): 100 HP, 2 movement — outpaces every land unit but the Settler/Lord" do
+      assert Production.unit_stats(:galley) == %{hp: 100, movement: 2}
     end
   end
 
@@ -86,6 +95,49 @@ defmodule BrokenOaths.Cities.ProductionTest do
       refute :archer in Production.available_items([])
       refute :archer in Production.available_items(archery?: false)
       assert :archer in Production.available_items(archery?: true)
+    end
+  end
+
+  describe "can_queue?/3 (story 921 — the Galley)" do
+    test "a Galley defaults to locked — arity-2 has no research context" do
+      assert Production.can_queue?(city(size: 1), :galley) == {:error, :locked}
+    end
+
+    test "refused before Sailing is researched, even in a coastal city" do
+      assert Production.can_queue?(city([]), :galley, sailing?: false, coastal?: true) ==
+               {:error, :locked}
+    end
+
+    test "refused for lack of coastal water, even once Sailing is researched" do
+      assert Production.can_queue?(city([]), :galley, sailing?: true, coastal?: false) ==
+               {:error, :not_coastal}
+    end
+
+    test "arity-2 (no opts at all) also refuses on the coastal? default" do
+      # sailing? is checked first, so the arity-2 shorthand — with
+      # NEITHER option supplied — still reports the tech lock, not the
+      # coastal one; the coastal-specific refusal only ever surfaces
+      # once sailing? is separately satisfied (mirrors the Bronze
+      # Spearman's own Copper-gate test above).
+      assert Production.can_queue?(city([]), :galley) == {:error, :locked}
+    end
+
+    test "allowed once Sailing is researched AND the city is coastal" do
+      assert Production.can_queue?(city([]), :galley, sailing?: true, coastal?: true) == :ok
+    end
+
+    test "every other buildable ignores the sailing?/coastal? options entirely" do
+      assert Production.can_queue?(city(size: 2), :settler, sailing?: false, coastal?: false) ==
+               :ok
+    end
+  end
+
+  describe "available_items/1 (story 921 — the Galley)" do
+    test "hidden until Sailing is researched, offered once it is — regardless of coastal? (mirrors the Bronze Spearman's own Copper posture)" do
+      refute :galley in Production.available_items([])
+      refute :galley in Production.available_items(sailing?: false)
+      assert :galley in Production.available_items(sailing?: true)
+      assert :galley in Production.available_items(sailing?: true, coastal?: false)
     end
   end
 
@@ -345,6 +397,52 @@ defmodule BrokenOaths.Cities.ProductionTest do
 
     test "a below-cost Granary item does not complete" do
       c = city(tile_id: 1, queue: [%{id: 1, type: :granary, banked: 59, cost: 60}])
+      assert Production.complete(c, %{}, world()) == {c, []}
+    end
+
+    # Story 921 — the Galley: tile 26 (land, this seed/frequency) has
+    # two adjacent `:coastal_water` tiles, 19 and 32 — verified against
+    # `Regions` directly rather than hardcoded blind, same "real world,
+    # real terrain" convention this describe block already uses.
+    test "a Galley completes and lands on the lowest-id adjacent coastal_water tile — never the city's own (land) tile" do
+      water =
+        Regions.adjacent_tiles(world(), 26)
+        |> Enum.filter(&(Regions.tile_class(world(), &1) == :coastal_water))
+        |> Enum.sort()
+
+      assert water == [19, 32]
+
+      c = city(tile_id: 26, queue: [%{id: 1, type: :galley, banked: 50, cost: 50}])
+      {new_city, events} = Production.complete(c, %{}, world())
+
+      assert new_city.queue == []
+      assert events == [%{player_id: 1, type: :galley, tile_id: 19}]
+    end
+
+    test "a Galley lands on the next free coastal_water tile once the lowest-id one is occupied" do
+      c = city(tile_id: 26, queue: [%{id: 1, type: :galley, banked: 50, cost: 50}])
+      occupied = %{19 => true}
+
+      {_new_city, events} = Production.complete(c, occupied, world())
+      assert events == [%{player_id: 1, type: :galley, tile_id: 32}]
+    end
+
+    test "a Galley item waits when every adjacent coastal_water tile is occupied — the city's own land tile is never used as a fallback" do
+      c = city(tile_id: 26, queue: [%{id: 1, type: :galley, banked: 50, cost: 50}])
+      occupied = %{19 => true, 32 => true}
+
+      assert Production.complete(c, occupied, world()) == {c, []}
+    end
+
+    test "a landlocked city (no adjacent coastal_water) never completes a Galley" do
+      # Tile 1 (the fixture's usual city tile) has no adjacent
+      # coastal_water at this seed/frequency.
+      refute Enum.any?(
+               Regions.adjacent_tiles(world(), 1),
+               &(Regions.tile_class(world(), &1) == :coastal_water)
+             )
+
+      c = city(tile_id: 1, queue: [%{id: 1, type: :galley, banked: 50, cost: 50}])
       assert Production.complete(c, %{}, world()) == {c, []}
     end
   end

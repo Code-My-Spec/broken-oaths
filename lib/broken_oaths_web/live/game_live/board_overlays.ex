@@ -52,6 +52,8 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
   attr :selected_city, :any, required: true
   attr :assignable_tiles, :list, required: true
   attr :copper_access?, :boolean, required: true
+  # Story 921 (the Galley) — see `GameLive.CityPanel`'s own moduledoc.
+  attr :coastal?, :boolean, required: true
 
   def overlays(assigns) do
     ~H"""
@@ -281,6 +283,7 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
         assignable_tiles={@assignable_tiles}
         player_research={@player_research}
         copper_access?={@copper_access?}
+        coastal?={@coastal?}
       />
     </div>
     """

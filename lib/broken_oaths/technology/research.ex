@@ -110,19 +110,23 @@ defmodule BrokenOaths.Technology.Research do
   player unlocked X" and no separate flag can ever drift out of sync
   with it.
 
-  Four techs have a real, wired unlock today: Pottery (Granary),
-  Animal Husbandry (Pasture), Mining (faster mines), and Bronze
-  Working (the Bronze Age itself, plus Bronze units and — story 911 —
-  revealing the Copper strategic resource). The other seven
-  (Sailing, Astrology, Writing, Irrigation, Archery, Masonry, The
-  Wheel) are STRUCTURE-ONLY for this story: they research, bank
-  science, complete, and gate their own dependents exactly like every
-  other tech, but the content they name (Galleys, the Holy Site,
-  Library, Plantation, Archer, Walls/Quarry, roads/Heavy Chariot)
-  doesn't exist in this codebase yet and ships in later stories. The
-  Wheel in particular is the intended future gate for the deferred
-  Road worker-improvement (story 882) — it is NOT wired to anything
-  yet, on purpose.
+  Six techs have a real, wired unlock today: Pottery (Granary), Animal
+  Husbandry (Pasture), Mining (faster mines), Archery (the Archer, QA
+  issue da39e50b), Bronze Working (the Bronze Age itself, plus Bronze
+  units and — story 911 — revealing the Copper strategic resource),
+  and Sailing (the Galley, story 921 — see `.code_my_spec/knowledge/
+  unit_and_unlock_convention.md`, written after Sailing itself shipped
+  as the convention doc's own cautionary example: researchable, its
+  `unlock:` string already reading "Enables Galleys," but no Galley
+  anywhere in the codebase to deliver on it). The other five
+  (Astrology, Writing, Irrigation, Masonry, The Wheel) are
+  STRUCTURE-ONLY for this story: they research, bank science, complete,
+  and gate their own dependents exactly like every other tech, but the
+  content they name (the Holy Site, Library, Plantation, Walls/Quarry,
+  roads/Heavy Chariot) doesn't exist in this codebase yet and ships in
+  later stories. The Wheel in particular is the intended future gate
+  for the deferred Road worker-improvement (story 882) — it is NOT
+  wired to anything yet, on purpose.
   """
 
   @type tech ::
@@ -526,4 +530,14 @@ defmodule BrokenOaths.Technology.Research do
   """
   @spec copper_revealed?(player_research()) :: boolean()
   def copper_revealed?(player_research), do: completed?(player_research, :bronze_working)
+
+  @doc """
+  Sailing's unlock (story 921 — see this module's own moduledoc,
+  "Unlocks"): whether the Galley is buildable. `Production.can_queue?/3`'s
+  `:galley` clause reads this the same way `archery_enabled?/1` is read
+  for the Archer — the caller (`Production.sailing?/2`) resolves the
+  flag and passes it in as `opts[:sailing?]`.
+  """
+  @spec sailing_enabled?(player_research()) :: boolean()
+  def sailing_enabled?(player_research), do: completed?(player_research, :sailing)
 end

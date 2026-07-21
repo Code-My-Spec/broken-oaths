@@ -51,6 +51,16 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
       `assignable_tiles` arrives pre-computed. Defaults to `false` when
       omitted (no city selected yet), the same "missing reads as not
       unlocked" posture `player_research` already has.
+    * `:coastal?` - story 921 (the Galley): whether the SELECTED CITY
+      itself has at least one adjacent `:coastal_water` tile
+      (`BrokenOaths.Cities.Production.coastal?/2`'s own rule). Per-CITY,
+      unlike `:copper_access?` above (which is player-wide) — two of
+      the same player's own cities can disagree on this. Play computes
+      it via `BrokenOathsWeb.GameLive.PlayView.coastal?/2`, the same
+      "this component has no world/terrain access of its own" reason
+      `assignable_tiles` arrives pre-computed for. Defaults to `false`
+      when omitted, same "missing reads as not met" posture every
+      other opt here has.
 
   The production catalog is dynamic, not a fixed compile-time list
   (QA issue 846e0c96 — Bronze Spearman never appeared in the Build UI
@@ -107,7 +117,8 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
     production_opts =
       production_opts(
         Map.get(assigns, :player_research),
-        Map.get(assigns, :copper_access?, false)
+        Map.get(assigns, :copper_access?, false),
+        Map.get(assigns, :coastal?, false)
       )
 
     assigns =
@@ -280,12 +291,14 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
     result = Production.can_queue?(assigns.city, assigns.type, assigns.production_opts)
     disabled? = result != :ok
     copper_access? = Keyword.get(assigns.production_opts, :copper_access?, false)
+    coastal? = Keyword.get(assigns.production_opts, :coastal?, false)
 
     assigns =
       assign(assigns,
         disabled?: disabled?,
         cost: Production.cost(assigns.type),
-        copper_access?: copper_access?
+        copper_access?: copper_access?,
+        coastal?: coastal?
       )
 
     ~H"""
@@ -325,6 +338,18 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
         class={["text-xs", if(@copper_access?, do: "text-success", else: "text-warning")]}
       >
         Requires Copper{if @copper_access?, do: " ✓", else: ""}
+      </p>
+      <%!-- Story 921 — the Galley's own coastal-water requirement,
+           mirroring the Bronze Spearman's Copper note above: legible
+           whenever Galley is offered at all (once Sailing is done),
+           whether or not THIS city itself has adjacent coastal water. --%>
+      <p
+        :if={@type == :galley}
+        data-test="production-requirement-galley"
+        data-coastal-met={to_string(@coastal?)}
+        class={["text-xs", if(@coastal?, do: "text-success", else: "text-warning")]}
+      >
+        Requires a coastal city{if @coastal?, do: " ✓", else: ""}
       </p>
     </div>
     """
@@ -422,14 +447,17 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
   # already refuses `:bronze_spearman` on `bronze_age?` alone whenever
   # research is unknown, so a stray `copper_access?: true` with no
   # research can never enable it early.
-  defp production_opts(nil, copper_access?), do: [copper_access?: copper_access?]
+  defp production_opts(nil, copper_access?, coastal?),
+    do: [copper_access?: copper_access?, coastal?: coastal?]
 
-  defp production_opts(player_research, copper_access?) do
+  defp production_opts(player_research, copper_access?, coastal?) do
     [
       granary_available?: Research.granary_enabled?(player_research),
       bronze_age?: Research.age(player_research) == :bronze_age,
       copper_access?: copper_access?,
-      archery?: Research.archery_enabled?(player_research)
+      archery?: Research.archery_enabled?(player_research),
+      sailing?: Research.sailing_enabled?(player_research),
+      coastal?: coastal?
     ]
   end
 
@@ -441,4 +469,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
   # QA issue da39e50b — see `BrokenOaths.Cities.Production`'s own
   # moduledoc, "The Archer".
   defp catalog_label(:archer), do: "Archer"
+  # Story 921 — see `BrokenOaths.Cities.Production`'s own moduledoc,
+  # "The Galley".
+  defp catalog_label(:galley), do: "Galley"
 end
