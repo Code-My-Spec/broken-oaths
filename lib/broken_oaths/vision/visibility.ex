@@ -179,6 +179,16 @@ defmodule BrokenOaths.Vision.Visibility do
       id: unit.id,
       type: unit.type,
       tile_id: unit.tile_id,
+      # Owner identity on every visible unit (playtest: "can't tell
+      # another player's unit apart from mine"). A unit on the board is
+      # public knowledge already — same "not a fog-gated secret" read as
+      # `temporary`/`fortified_turns` below — so the wire format carries
+      # its `player_id` (game_players id, an opaque integer, never a
+      # user/email) plus an `own` flag for the viewer. The board hook
+      # draws an owner-colored ring off these; `UnitPanel` reads them
+      # for its owner readout. `player_id` is nil for a barbarian.
+      player_id: unit.player_id,
+      own: unit.player_id == viewer_player_id,
       hp: unit.hp,
       max_hp: unit.max_hp,
       movement: unit.movement,

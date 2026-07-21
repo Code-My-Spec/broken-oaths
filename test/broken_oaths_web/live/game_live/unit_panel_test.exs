@@ -52,6 +52,38 @@ defmodule BrokenOathsWeb.GameLive.UnitPanelTest do
       assert html =~ "No orders queued"
     end
 
+    # Playtest: "can't tell whose unit this is." The panel doubles as the
+    # inspect readout, so it names the owner off the same owner fields
+    # (`Visibility.format_unit/3`) the board's rings read: `own` for the
+    # viewer's own, `player_id` for a rival, null for barbarians.
+    test "names the viewer's own unit" do
+      own = Map.merge(@lord, %{own: true, player_id: 3})
+
+      html = render_component(UnitPanel, id: "unit-panel", unit: own, order: nil)
+
+      assert html =~ ~s(data-test="unit-owner")
+      assert html =~ "You"
+    end
+
+    test "names a rival unit by a short player label, never an email" do
+      rival = Map.merge(@lord, %{own: false, player_id: 7})
+
+      html = render_component(UnitPanel, id: "unit-panel", unit: rival, order: nil)
+
+      assert html =~ ~s(data-test="unit-owner")
+      assert html =~ "Player #7"
+    end
+
+    test "names a barbarian's units the Barbarians" do
+      barbarian =
+        %{type: :barbarian_warrior, hp: 10, max_hp: 10, movement: 1, max_movement: 1, player_id: nil}
+
+      html = render_component(UnitPanel, id: "unit-panel", unit: barbarian, order: nil)
+
+      assert html =~ ~s(data-test="unit-owner")
+      assert html =~ "Barbarians"
+    end
+
     test "shows the queued order's destination" do
       order = %{target_tile: 42, status: :pending}
 

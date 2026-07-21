@@ -67,6 +67,44 @@ defmodule BrokenOathsWeb.GameLive.BoardHookSourceTest do
     end
   end
 
+  describe "owner rings — telling one player's units from another" do
+    test "the owner color helper reserves one color for the viewer's own units", %{
+      play_source: source
+    } do
+      [_before, owner_color] = String.split(source, "ownerColor(u) {", parts: 2)
+      [owner_color_body, _rest] = String.split(owner_color, "},", parts: 2)
+
+      # Own units get a reserved color; an unowned (barbarian) unit reads
+      # neutral; everyone else indexes the deterministic palette.
+      assert owner_color_body =~ "if (u.own) return"
+      assert owner_color_body =~ "u.player_id == null"
+      assert owner_color_body =~ "this.OWNER_COLORS["
+    end
+
+    test "the palette holds several distinct colors so two rivals stay apart", %{
+      play_source: source
+    } do
+      [_before, palette] = String.split(source, "OWNER_COLORS: [", parts: 2)
+      [entries, _rest] = String.split(palette, "]", parts: 2)
+
+      colors = Regex.scan(~r/#[0-9a-fA-F]{6}/, entries) |> List.flatten()
+      assert length(colors) >= 4
+      assert length(Enum.uniq(colors)) == length(colors)
+    end
+
+    test "the unit draw loop strokes an owner-colored ring around each unit", %{
+      play_source: source
+    } do
+      [_before, unit_loop] = String.split(source, "for (const u of this.units) {", parts: 2)
+      [unit_loop_body, _rest] = String.split(unit_loop, "if (this.path", parts: 2)
+
+      assert unit_loop_body =~ "this.ownerColor(u)"
+      # The ring is a stroked circle, not a sprite tint.
+      assert unit_loop_body =~ "ctx.strokeStyle = oc"
+      assert unit_loop_body =~ "ctx.arc("
+    end
+  end
+
   describe "QA issue 46047ea6 — hexes not super obvious" do
     test "every drawn tile gets its own faint edge stroke", %{play_source: source} do
       [_before, terrain_loop] =

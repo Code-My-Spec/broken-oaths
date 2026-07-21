@@ -2807,6 +2807,23 @@ defmodule BrokenOathsWeb.GameLive.Play do
             return window.GlobeRender.ready(key && this.sprites[key])
           },
 
+          // Owner ring color (playtest: "can't tell another player's
+          // unit apart from mine"). The viewer's own units always get
+          // one reserved color; every other player gets a stable color
+          // indexed off their `player_id` (server-pushed, see
+          // `Visibility.format_unit/3`), so two rivals stay distinct
+          // too. A barbarian / unowned unit (`player_id` null) reads as
+          // neutral slate. Deterministic — the same player is the same
+          // color every frame and across reconnects.
+          OWNER_COLORS: ["#3b82f6", "#ef4444", "#a855f7", "#f97316", "#06b6d4", "#ec4899", "#eab308", "#14b8a6"],
+
+          ownerColor(u) {
+            if (u.own) return "#22c55e"
+            if (u.player_id == null) return "#94a3b8"
+            const n = this.OWNER_COLORS.length
+            return this.OWNER_COLORS[((u.player_id % n) + n) % n]
+          },
+
           // Fallback dot colors (story 905) — food resources warm, the
           // one production resource (Stone) cool, so the two families
           // read apart even before real icon art exists.
@@ -3183,6 +3200,29 @@ defmodule BrokenOathsWeb.GameLive.Play do
                 ctx.lineWidth = 2
                 ctx.stroke()
                 ctx.globalAlpha = 1
+              }
+
+              // Owner ring — a persistent colored circle framing every
+              // unit so a rival's is never mistaken for one of yours
+              // (playtest issue). Drawn UNDER the sprite/selection (same
+              // as the selection ellipse) so neither is obscured; a dark
+              // halo keeps it crisp over any terrain. Centered on the
+              // sprite body (feet for the fallback dot) and sized to
+              // enclose the sprite.
+              {
+                const oc = this.ownerColor(u)
+                const ringCy = img ? py - unitSize * 0.18 : py
+                const ringRad = img ? unitSize * 0.5 : 8
+                ctx.beginPath()
+                ctx.arc(px, ringCy, ringRad, 0, 2 * Math.PI)
+                ctx.lineWidth = (img ? 2.5 : 2) + 1.5
+                ctx.strokeStyle = "rgba(10,12,18,0.5)"
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.arc(px, ringCy, ringRad, 0, 2 * Math.PI)
+                ctx.lineWidth = img ? 2.5 : 2
+                ctx.strokeStyle = oc
+                ctx.stroke()
               }
 
               if (img) {

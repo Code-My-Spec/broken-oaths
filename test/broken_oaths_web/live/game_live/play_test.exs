@@ -314,6 +314,75 @@ defmodule BrokenOathsWeb.GameLive.PlayTest do
   end
 
   # -------------------------------------------------------------------
+  # Owner rings + click-to-inspect — telling one player's units apart
+  # from another's, and reading a unit's stats on click.
+  # -------------------------------------------------------------------
+
+  describe "unit owner identity + inspect" do
+    test "the units payload carries an owner identity that differs between two players", %{
+      conn: conn,
+      world: world,
+      user: user
+    } do
+      other_user = BrokenOathsSpex.Fixtures.user_fixture()
+
+      other_conn =
+        Phoenix.ConnTest.build_conn() |> BrokenOathsTest.ConnCase.log_in_user(other_user)
+
+      {:ok, _play_live, _html} = join_and_mount(conn, world)
+
+      {:ok, other_join_live, _html} = live(other_conn, ~p"/play")
+      other_join_live |> element("[data-test='join-world-#{world.id}']") |> render_click()
+      {:ok, _other_play_live, _html} = live(other_conn, ~p"/play/#{world.id}")
+
+      {:ok, player_a} = Game.join_world(world, user)
+      {:ok, player_b} = Game.join_world(world, other_user)
+      assert player_a.id != player_b.id
+
+      units_a = Game.units_visible_to(world, user)
+      units_b = Game.units_visible_to(world, other_user)
+
+      # Each player's OWN units carry `own: true` and that player's own
+      # `player_id` — the board hook draws its owner ring off exactly
+      # these, so two different players never render the same color.
+      assert units_a != []
+      assert Enum.all?(units_a, &(&1.own and &1.player_id == player_a.id))
+
+      assert units_b != []
+      assert Enum.all?(units_b, &(&1.own and &1.player_id == player_b.id))
+    end
+
+    test "clicking a unit surfaces its inspect readout and keeps it selected for orders", %{
+      conn: conn,
+      world: world,
+      user: user
+    } do
+      {:ok, play_live, _html} = join_and_mount(conn, world)
+
+      [lord | _] = for u <- Game.player_units(world, user), u.type == :lord, do: u
+      lord_id = lord.id
+
+      render_hook(play_live, "select_unit", %{
+        "unit_id" => to_string(lord.id),
+        "tile_id" => to_string(lord.tile_id)
+      })
+
+      # The inspect readout: type, owner, HP, and movement all show.
+      html = render(play_live)
+      assert html =~ ~s(data-test="unit-panel")
+      assert html =~ ~s(data-test="unit-type")
+      assert html =~ ~s(data-test="unit-owner")
+      assert html =~ "You"
+      assert html =~ ~s(data-test="unit-hp")
+      assert html =~ ~s(data-test="unit-movement")
+
+      # Inspect must not break move orders — the selection is still live,
+      # so the board can right-click a destination for this same unit.
+      assert_push_event(play_live, "game:selected", %{unit_id: ^lord_id})
+    end
+  end
+
+  # -------------------------------------------------------------------
   # Issue 937ea82b — a first-pass in-game Help panel
   # -------------------------------------------------------------------
 

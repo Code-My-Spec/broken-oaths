@@ -87,6 +87,12 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
       # already uses: a hand-built unit map (a test fixture, an older
       # cached assign) may predate the `fortified_turns` field.
       |> assign(:fortified_turns, Map.get(assigns.unit, :fortified_turns, 0))
+      # Owner readout (playtest: "can't tell whose unit this is"). Reads
+      # the same owner fields the board's rings do (`Visibility.
+      # format_unit/3`): `own` for the viewer's own, `player_id` for a
+      # rival, null for barbarians. No email — a short "Player #<id>"
+      # label until the display-name story lands globally.
+      |> assign(:owner_label, owner_label(assigns.unit))
 
     ~H"""
     <div id={@id} data-test="unit-panel" class="card bg-base-200 shadow-sm w-64 relative">
@@ -107,6 +113,9 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
             <.icon name="hero-trophy-solid" class="size-4 text-warning" />
           </span>
         </h3>
+        <p data-test="unit-owner" class="text-sm text-base-content/70">
+          {@owner_label}
+        </p>
         <p data-test="unit-hp" class="text-sm">
           HP {@unit.hp}/{@unit.max_hp}
         </p>
@@ -386,6 +395,20 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
       Moving to tile {@order.target_tile}
     </p>
     """
+  end
+
+  # Owner readout label. A null `player_id` is a barbarian (see
+  # `Units.Unit`'s moduledoc — barbarians alone carry no owner); `own`
+  # is the viewer's own unit (defaulting true covers the one non-map
+  # input path, `Play.apply_unit_panel/3`'s owned-stack `%Unit{}`, which
+  # is always the viewer's). Everything else is a rival, shown as a
+  # short "Player #<id>" — no email, matching the board rings' rule.
+  defp owner_label(unit) do
+    cond do
+      is_nil(Map.get(unit, :player_id)) -> "Barbarians"
+      Map.get(unit, :own, true) -> "You"
+      true -> "Player ##{Map.get(unit, :player_id)}"
+    end
   end
 
   defp unit_type_label(:lord), do: "Lord"
