@@ -2,4 +2,15 @@
 set -eu
 
 cd -P -- "$(dirname -- "$0")"
+
+# Run pending migrations BEFORE the server starts, so new schema and new code
+# always come up together. This closes the deploy-then-migrate window that took
+# the game down on 2026-07-21: the new release queried a `recharge_turns` column
+# that didn't exist until a separate `bin/migrate` ran a minute later. With
+# `set -eu`, a failed migration aborts boot — the container never turns healthy,
+# so kamal's health check blocks/rolls back the deploy instead of serving a
+# broken app. Idempotent (already-applied migrations are skipped), so every
+# restart and scale-up is safe too.
+./broken_oaths eval BrokenOaths.Release.migrate
+
 PHX_SERVER=true exec ./broken_oaths start
