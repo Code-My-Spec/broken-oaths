@@ -55,6 +55,24 @@ defmodule BrokenOaths.Cities.Yields do
   `BrokenOaths.Cities.Production.water_mill_production_bonus/0`'s own
   concern, not this module's.
 
+  ## The Hanging Gardens bonus (story 933)
+
+  A player who holds the Hanging Gardens wonder (`BrokenOaths.Cities.
+  Production`'s `:hanging_gardens` buildable, gated on Irrigation, ONE
+  PER WORLD — see `BrokenOaths.Cities.Buildings`'s own moduledoc,
+  "Wonders") grows every one of THEIR OWN cities ~15% faster —
+  empire-wide, not scoped to the one city that built it, the same
+  player-wide reach `Production.player_copper_access?/2` established
+  for Copper. `grow_cities/2` is where this lives, not `accrue_food/3`
+  above: rather than inflate the FOOD a city banks each turn (which
+  would leave `city.food` sitting above the raw threshold after a
+  growth, an awkward number to explain on the next turn's readout),
+  `effective_threshold/2` shrinks the FOOD REQUIRED to cross it —
+  `div(threshold * 100, 115)` (integer division, no floats: a size-1
+  city needs 17 food to grow instead of 20) — so a Hanging-Gardens
+  city's own `food` value always reads exactly like an ordinary
+  city's, just crossing its next growth line sooner.
+
   ## Bonus resources (story 905)
 
   `resource_bonus/1` is the resource layer's own additive term —
@@ -104,6 +122,7 @@ defmodule BrokenOaths.Cities.Yields do
   bank-while-offline split this feeds.
   """
 
+  alias BrokenOaths.Cities.Buildings
   alias BrokenOaths.Technology.Research
   alias BrokenOaths.Worlds.Globe
   alias BrokenOaths.Worlds.Regions
@@ -448,24 +467,49 @@ defmodule BrokenOaths.Cities.Yields do
   advance; territory/worked_tiles simply don't gain anything that
   turn). `age` (story 903) decides whether the cap is 4 (Stone Age) or
   6 (Bronze Age) — `Research.age/1` over the city's OWNER, not the city
-  itself, since a city has no age of its own.
+  itself, since a city has no age of its own. Arity-4 shorthand for
+  `grow/5` with `hanging_gardens?: false` — every existing caller keeps
+  working unchanged.
   """
   @spec grow(city(), [city()], World.t(), age()) :: city()
-  def grow(city, all_cities, world, age) do
+  def grow(city, all_cities, world, age), do: grow(city, all_cities, world, age, false)
+
+  @doc """
+  `grow/4`, plus the Hanging Gardens' own growth bonus (story 933):
+  when `hanging_gardens?` is true, the food required to cross THIS
+  growth threshold shrinks by `effective_threshold/2` — see this
+  module's own moduledoc, "The Hanging Gardens bonus", for why the
+  threshold shrinks rather than the banked food being inflated.
+  """
+  @spec grow(city(), [city()], World.t(), age(), boolean()) :: city()
+  def grow(city, all_cities, world, age, hanging_gardens?) do
     case threshold(city.size, age) do
       nil ->
         city
 
-      thresh when city.food < thresh ->
-        city
+      raw_thresh ->
+        thresh = effective_threshold(raw_thresh, hanging_gardens?)
 
-      thresh ->
-        city
-        |> claim_growth_tile(all_cities, world)
-        |> settle_growth(thresh)
-        |> assign_new_citizen(world)
+        if city.food < thresh do
+          city
+        else
+          city
+          |> claim_growth_tile(all_cities, world)
+          |> settle_growth(thresh)
+          |> assign_new_citizen(world)
+        end
     end
   end
+
+  # Story 933 — the Hanging Gardens' "+15% growth": integer division,
+  # no floats, so the result is always a whole, deterministic food
+  # amount (`div(20 * 100, 115) == 17`). A no-op (returns `thresh`
+  # unchanged) without the wonder — every existing caller's own math is
+  # untouched.
+  @hanging_gardens_growth_pct 115
+
+  defp effective_threshold(thresh, false), do: thresh
+  defp effective_threshold(thresh, true), do: div(thresh * 100, @hanging_gardens_growth_pct)
 
   @doc """
   Apply at most one growth (`grow/4`) to every city in `state.cities`,
@@ -505,7 +549,14 @@ defmodule BrokenOaths.Cities.Yields do
           cities
         else
           pr = Map.get(player_research, city.player_id, Research.new())
-          grown = grow(city, Map.values(cities), state.world, Research.age(pr))
+          # Story 933 — read against `cities` (this reduce's OWN running
+          # accumulator, not the stale `state.cities` snapshot), the
+          # same "current, not original" territory rule this reduce
+          # already keeps for `claim_growth_tile/3`'s own sibling reads
+          # — a wonder built THIS same tick already counts for every
+          # city that grows after it.
+          hanging_gardens? = Buildings.player_has?(Map.values(cities), city.player_id, :hanging_gardens)
+          grown = grow(city, Map.values(cities), state.world, Research.age(pr), hanging_gardens?)
           Map.put(cities, id, grown)
         end
       end)

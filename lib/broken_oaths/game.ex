@@ -399,6 +399,10 @@ defmodule BrokenOaths.Game do
   @spec copper_access?(map(), map()) :: boolean()
   defdelegate copper_access?(world, user), to: Cities
 
+  @doc "Whether the Pyramids/Hanging Gardens has been claimed anywhere in `world`. See `Cities.wonders_claimed/1`."
+  @spec wonders_claimed(map()) :: %{pyramids: boolean(), hanging_gardens: boolean()}
+  defdelegate wonders_claimed(world), to: Cities
+
   @doc "A tile's completed improvement (`nil | :farm | :mine | :road`). See `Cities.tile_improvement/2`."
   defdelegate tile_improvement(world, tile_id), to: Cities
 

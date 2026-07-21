@@ -186,10 +186,52 @@ defmodule BrokenOaths.Cities.Production do
   own visible-but-refused posture, no water at all) means the item
   simply waits, same "nothing lost" posture every other blocked landing
   already has.
+
+  ## Story 933 — the Pyramids and Hanging Gardens world wonders
+
+  Two more buildables, but a different SHAPE from every one above:
+  world-UNIQUE, not per-city. `can_queue?/3`'s `:pyramids`/
+  `:hanging_gardens` clauses drop the standard buildings' own
+  per-city `:already_built` refusal entirely and read a single
+  `opts[:pyramids_claimed?]`/`opts[:hanging_gardens_claimed?]`
+  boolean instead — `{:error, :wonder_taken}` once EITHER is true,
+  resolved one level up in `queue_production/4` via
+  `Buildings.wonder_built_or_building?/2` scanning every city in the
+  WORLD (not just this player's own), the same "opts arrive
+  pre-resolved" split every other gate here already keeps.
+  `available_items/1` mirrors that same claimed-check (unlike
+  `:bronze_spearman`'s Copper/`:galley`'s coastal gates, which stay
+  VISIBLE-but-disabled once their own tech is done): a wonder drops
+  off the list entirely, everywhere, the instant anyone claims it —
+  there's no "requirement not yet met" state worth showing once a
+  wonder is gone for good.
+
+  The Hanging Gardens is otherwise an ordinary passive building —
+  `@passive_buildings` below, no landing tile, no spawn event, just a
+  `buildings` flip on completion, exactly like Library/Ancient
+  Walls/Barracks/Water Mill. `BrokenOaths.Cities.Yields.grow_cities/2`
+  is where its real effect (+15% growth, empire-wide) lives.
+
+  The Pyramids is NOT passive: on top of the same `buildings` flip, it
+  grants its owner a free Worker — `complete_loop/4`'s own `:pyramids`
+  clause reuses the exact landing-tile machinery every ordinary unit
+  completion already uses (`landing_tile/4`, blocked-tile-waits-a-turn
+  and all), just with the SPAWNED unit's type (`:worker`) deliberately
+  different from the QUEUE item's own type (`:pyramids`) — the wonder
+  itself never becomes a placed unit; the free Worker it hands out
+  does. The OTHER half of the Pyramids' effect — every Worker its
+  owner ever builds afterward starts with 4 charges instead of 3, Civ
+  6's own "+1 Builder charge" — lives in
+  `BrokenOaths.Simulation.WorldServer`'s own `worker_charges/3`, since
+  a unit's starting `charges` is set at the real-id-allocation step
+  this pure module never performs itself (see `unit_stats/1`'s own
+  doc: per-type starting stats live here, but `charges` isn't
+  per-type, it's per-OWNER).
   """
 
   import Ecto.Query
 
+  alias BrokenOaths.Cities.Buildings
   alias BrokenOaths.Combat.CityDefense
   alias BrokenOaths.Cities.ProductionItem
   alias BrokenOaths.Technology.Research
@@ -203,8 +245,11 @@ defmodule BrokenOaths.Cities.Production do
   @type tile_id :: non_neg_integer()
   @type unit_buildable :: :settler | :worker | :warrior | :bronze_spearman | :archer | :galley
   # Story 930 — the four buildings that land in `City.buildings` (as
-  # opposed to `:granary`, still its own lone boolean).
-  @type building :: :library | :ancient_walls | :barracks | :water_mill
+  # opposed to `:granary`, still its own lone boolean). Story 933 adds
+  # the Pyramids/Hanging Gardens wonders to the same list — see this
+  # module's own moduledoc, "Story 933".
+  @type building ::
+          :library | :ancient_walls | :barracks | :water_mill | :pyramids | :hanging_gardens
   @type buildable :: unit_buildable() | :granary | building()
   @type unit_type ::
           :lord
@@ -240,7 +285,7 @@ defmodule BrokenOaths.Cities.Production do
   # this is a separate shape from `spawn_event()` above.
   @type completion_event :: %{user_id: term(), city_name: String.t(), type: buildable()}
   @type can_queue_error ::
-          :size_one | :locked | :already_built | :copper_required | :not_coastal
+          :size_one | :locked | :already_built | :copper_required | :not_coastal | :wonder_taken
 
   @flat_production 5
   @min_founding_spacing 4
@@ -262,7 +307,13 @@ defmodule BrokenOaths.Cities.Production do
     library: 90,
     ancient_walls: 80,
     barracks: 90,
-    water_mill: 90
+    water_mill: 90,
+    # Story 933 — the Pyramids/Hanging Gardens world wonders: a wonder
+    # is a bigger empire-wide commitment than any standard building
+    # above, priced accordingly (PM decision, see this module's own
+    # moduledoc "Story 933").
+    pyramids: 220,
+    hanging_gardens: 220
   }
 
   @unit_stats %{
@@ -314,6 +365,8 @@ defmodule BrokenOaths.Cities.Production do
   def buildable_label(:ancient_walls), do: "Ancient Walls"
   def buildable_label(:barracks), do: "Barracks"
   def buildable_label(:water_mill), do: "Water Mill"
+  def buildable_label(:pyramids), do: "Pyramids"
+  def buildable_label(:hanging_gardens), do: "Hanging Gardens"
 
   @doc "Starting `%{hp:, movement:}` for any unit type — Lord and Settler included."
   @spec unit_stats(unit_type()) :: %{hp: pos_integer(), movement: pos_integer()}
@@ -391,6 +444,30 @@ defmodule BrokenOaths.Cities.Production do
     end
   end
 
+  # Story 933 — the Pyramids/Hanging Gardens world wonders: ONE per
+  # WORLD, not one per city, so — unlike every `can_queue?/3` clause
+  # above — this never even looks at `city`'s own `:buildings`. The
+  # single opt (`opts[:pyramids_claimed?]`/`opts[:hanging_gardens_claimed?]`)
+  # is a WORLD-wide read, resolved one level up in `queue_production/4`
+  # via `Buildings.wonder_built_or_building?/2` (see this module's own
+  # moduledoc, "Story 933"): true the instant ANY city anywhere — this
+  # one included — has it built or queued.
+  def can_queue?(_city, :pyramids, opts) do
+    cond do
+      Keyword.get(opts, :pyramids_claimed?, false) -> {:error, :wonder_taken}
+      not Keyword.get(opts, :pyramids_available?, false) -> {:error, :locked}
+      true -> :ok
+    end
+  end
+
+  def can_queue?(_city, :hanging_gardens, opts) do
+    cond do
+      Keyword.get(opts, :hanging_gardens_claimed?, false) -> {:error, :wonder_taken}
+      not Keyword.get(opts, :hanging_gardens_available?, false) -> {:error, :locked}
+      true -> :ok
+    end
+  end
+
   def can_queue?(_city, :bronze_spearman, opts) do
     cond do
       not Keyword.get(opts, :bronze_age?, false) -> {:error, :locked}
@@ -455,10 +532,25 @@ defmodule BrokenOaths.Cities.Production do
     |> maybe_offer(:ancient_walls, Keyword.get(opts, :walls_available?, false))
     |> maybe_offer(:barracks, Keyword.get(opts, :barracks_available?, false))
     |> maybe_offer(:water_mill, Keyword.get(opts, :water_mill_available?, false))
+    |> maybe_offer(:pyramids, wonder_offerable?(opts, :pyramids_available?, :pyramids_claimed?))
+    |> maybe_offer(
+      :hanging_gardens,
+      wonder_offerable?(opts, :hanging_gardens_available?, :hanging_gardens_claimed?)
+    )
   end
 
   defp maybe_offer(types, type, true), do: types ++ [type]
   defp maybe_offer(types, _type, false), do: types
+
+  # Story 933 — unlike `:bronze_spearman`'s Copper gate or `:galley`'s
+  # coastal gate (both stay VISIBLE-but-disabled once their own tech is
+  # done, so the second requirement is legible), a wonder drops off the
+  # list ENTIRELY, everywhere, once `claimed_key` is true — see this
+  # module's own moduledoc, "Story 933", for why: there's no
+  # "requirement not yet met" state worth showing for something that's
+  # gone for good.
+  defp wonder_offerable?(opts, available_key, claimed_key),
+    do: Keyword.get(opts, available_key, false) and not Keyword.get(opts, claimed_key, false)
 
   # -------------------------------------------------------------------
   # Queue commands (moved from WorldServer, story 879)
@@ -487,7 +579,11 @@ defmodule BrokenOaths.Cities.Production do
              library_available?: library_available?(state, city),
              walls_available?: walls_available?(state, city),
              barracks_available?: barracks_available?(state, city),
-             water_mill_available?: water_mill_available?(state, city)
+             water_mill_available?: water_mill_available?(state, city),
+             pyramids_available?: pyramids_available?(state, city),
+             pyramids_claimed?: pyramids_claimed?(state),
+             hanging_gardens_available?: hanging_gardens_available?(state, city),
+             hanging_gardens_claimed?: hanging_gardens_claimed?(state)
            ) do
       next_position =
         city.queue |> Enum.map(&Map.get(&1, :position, 0)) |> Enum.max(fn -> 0 end) |> Kernel.+(1)
@@ -576,7 +672,9 @@ defmodule BrokenOaths.Cities.Production do
              :library,
              :ancient_walls,
              :barracks,
-             :water_mill
+             :water_mill,
+             :pyramids,
+             :hanging_gardens
            ],
       do: {:ok, type}
 
@@ -597,6 +695,9 @@ defmodule BrokenOaths.Cities.Production do
   def parse_item_type("ancient_walls"), do: {:ok, :ancient_walls}
   def parse_item_type("barracks"), do: {:ok, :barracks}
   def parse_item_type("water_mill"), do: {:ok, :water_mill}
+  # Story 933 — see this module's own moduledoc, "Story 933".
+  def parse_item_type("pyramids"), do: {:ok, :pyramids}
+  def parse_item_type("hanging_gardens"), do: {:ok, :hanging_gardens}
   def parse_item_type(_other), do: {:error, :invalid_item}
 
   # Story 902, criterion 7629 — whether `city`'s OWNER has completed
@@ -649,6 +750,38 @@ defmodule BrokenOaths.Cities.Production do
   @spec water_mill_available?(map(), city()) :: boolean()
   def water_mill_available?(state, city),
     do: Research.water_mill_enabled?(player_research_for(state, city.player_id))
+
+  # Story 933 — the Pyramids/Hanging Gardens world wonders: their own
+  # tech gates read exactly like every `_available?` accessor above
+  # (city's OWNER, single tech). Their `_claimed?` siblings below are
+  # the new, WORLD-wide half `can_queue?/3`'s one-per-world gate needs
+  # — see this module's own moduledoc, "Story 933".
+  @doc "Whether `city`'s OWNER has completed Masonry — the `:pyramids_available?` opt `can_queue?/3` needs."
+  @spec pyramids_available?(map(), city()) :: boolean()
+  def pyramids_available?(state, city),
+    do: Research.pyramids_enabled?(player_research_for(state, city.player_id))
+
+  @doc "Whether `city`'s OWNER has completed Irrigation — the `:hanging_gardens_available?` opt `can_queue?/3` needs."
+  @spec hanging_gardens_available?(map(), city()) :: boolean()
+  def hanging_gardens_available?(state, city),
+    do: Research.hanging_gardens_enabled?(player_research_for(state, city.player_id))
+
+  @doc """
+  Whether the Pyramids has already been completed, or is currently
+  queued (not yet complete), in ANY city anywhere in `state` — the
+  `:pyramids_claimed?` opt `can_queue?/3` needs for its one-per-world
+  gate. WORLD-level, unlike every `_available?` accessor above (each
+  of which only ever reads ONE city's own owner) — a wonder has no
+  single owner to check until someone actually claims it.
+  """
+  @spec pyramids_claimed?(map()) :: boolean()
+  def pyramids_claimed?(state),
+    do: Buildings.wonder_built_or_building?(Map.values(state.cities), :pyramids)
+
+  @doc "The Hanging Gardens' own `pyramids_claimed?/1` sibling."
+  @spec hanging_gardens_claimed?(map()) :: boolean()
+  def hanging_gardens_claimed?(state),
+    do: Buildings.wonder_built_or_building?(Map.values(state.cities), :hanging_gardens)
 
   @doc """
   Whether `city` itself has at least one adjacent `:coastal_water` tile
@@ -890,8 +1023,15 @@ defmodule BrokenOaths.Cities.Production do
   # Granary clause above uses, generalized to one clause for all four
   # (and any future addition to `@passive_buildings`) via the
   # `buildings` LIST rather than four near-identical copies of the
-  # Granary's own boolean-flip clause.
-  @passive_buildings [:library, :ancient_walls, :barracks, :water_mill]
+  # Granary's own boolean-flip clause. Story 933 — the Hanging Gardens
+  # wonder joins this same list: its own effect (`Yields.grow_cities/2`)
+  # only ever needs the `buildings` flip, exactly like every standard
+  # passive building above; ONLY its cap (one per world, not one per
+  # city) works differently, and that's already handled a level up in
+  # `can_queue?/3`/`available_items/1` before an item ever reaches this
+  # queue at all. The Pyramids is NOT on this list — see its own
+  # dedicated clause below.
+  @passive_buildings [:library, :ancient_walls, :barracks, :water_mill, :hanging_gardens]
 
   defp complete_loop(
          %{queue: [%{type: type} = current | rest]} = city,
@@ -906,6 +1046,41 @@ defmodule BrokenOaths.Cities.Production do
     |> Map.update(:buildings, [type], &Enum.uniq([type | &1]))
     |> Map.put(:queue, carry_overflow(rest, overflow))
     |> complete_loop(occupied, world, events)
+  end
+
+  # Story 933 — the Pyramids wonder: unlike every passive building
+  # above, completing it ALSO grants a free Worker (Civ 6's own
+  # Pyramids effect), so it needs BOTH the `buildings` flip AND a real
+  # `spawn_event` — the SAME landing-tile machinery (`landing_tile/4`)
+  # every ordinary unit completion below already uses, blocked-tile-
+  # waits-a-turn included, per this story's own instruction to reuse
+  # that path rather than hand-build a unit. The spawned event's own
+  # `type` is `:worker` — deliberately NOT `current.type` (`:pyramids`)
+  # the way the generic clause below builds its event, since the
+  # WONDER itself never becomes a placed unit; the free Worker it hands
+  # out does. No population cost (`apply_pop_cost/3` only ever touches
+  # `:settler`) and no `spawnable?/2` gate — a wonder has no population
+  # of its own to spare.
+  defp complete_loop(
+         %{queue: [%{type: :pyramids} = current | rest]} = city,
+         occupied,
+         world,
+         events
+       )
+       when current.banked >= current.cost do
+    case landing_tile(city, :worker, occupied, world) do
+      nil ->
+        {city, Enum.reverse(events)}
+
+      tile ->
+        overflow = current.banked - current.cost
+        event = %{player_id: city.player_id, type: :worker, tile_id: tile}
+
+        city
+        |> Map.update(:buildings, [:pyramids], &Enum.uniq([:pyramids | &1]))
+        |> Map.put(:queue, carry_overflow(rest, overflow))
+        |> complete_loop(occupied, world, [event | events])
+    end
   end
 
   defp complete_loop(%{queue: [current | rest]} = city, occupied, world, events) do

@@ -35,7 +35,9 @@ defmodule BrokenOaths.Cities.ProductionTest do
                library: 90,
                ancient_walls: 80,
                barracks: 90,
-               water_mill: 90
+               water_mill: 90,
+               pyramids: 220,
+               hanging_gardens: 220
              }
 
       assert Production.cost(:settler) == 100
@@ -56,6 +58,14 @@ defmodule BrokenOaths.Cities.ProductionTest do
       assert Production.cost(:ancient_walls) == 80
       assert Production.cost(:barracks) == 90
       assert Production.cost(:water_mill) == 90
+    end
+
+    # Story 933 — the Pyramids/Hanging Gardens world wonders: both cost
+    # 220, priced above every standard building (see this module's own
+    # moduledoc, "Story 933").
+    test "Pyramids 220, Hanging Gardens 220" do
+      assert Production.cost(:pyramids) == 220
+      assert Production.cost(:hanging_gardens) == 220
     end
   end
 
@@ -251,6 +261,98 @@ defmodule BrokenOaths.Cities.ProductionTest do
     end
   end
 
+  # -------------------------------------------------------------------
+  # Story 933 — the Pyramids and Hanging Gardens world wonders
+  # -------------------------------------------------------------------
+
+  describe "can_queue?/3 (story 933 — the Pyramids)" do
+    test "a Pyramids defaults to locked — arity-2 has no research context" do
+      assert Production.can_queue?(city([]), :pyramids) == {:error, :locked}
+    end
+
+    test "refused before Masonry is researched" do
+      assert Production.can_queue?(city([]), :pyramids, pyramids_available?: false) ==
+               {:error, :locked}
+    end
+
+    test "allowed once Masonry is researched and nobody has claimed it" do
+      assert Production.can_queue?(city([]), :pyramids,
+               pyramids_available?: true,
+               pyramids_claimed?: false
+             ) == :ok
+    end
+
+    test "refused once claimed anywhere in the world — no per-city :already_built check, a wonder has no per-city cap" do
+      assert Production.can_queue?(city(buildings: [:pyramids]), :pyramids,
+               pyramids_available?: true,
+               pyramids_claimed?: true
+             ) == {:error, :wonder_taken}
+    end
+
+    test "claimed takes priority over locked (a stray missing tech opt never masks the real reason)" do
+      assert Production.can_queue?(city([]), :pyramids,
+               pyramids_available?: false,
+               pyramids_claimed?: true
+             ) == {:error, :wonder_taken}
+    end
+
+    test "Hanging Gardens's own opt is untouched by the Pyramids's opts" do
+      assert Production.can_queue?(city([]), :pyramids,
+               pyramids_available?: true,
+               pyramids_claimed?: false,
+               hanging_gardens_claimed?: true
+             ) == :ok
+    end
+  end
+
+  describe "can_queue?/3 (story 933 — the Hanging Gardens)" do
+    test "a Hanging Gardens defaults to locked — arity-2 has no research context" do
+      assert Production.can_queue?(city([]), :hanging_gardens) == {:error, :locked}
+    end
+
+    test "refused before Irrigation is researched" do
+      assert Production.can_queue?(city([]), :hanging_gardens, hanging_gardens_available?: false) ==
+               {:error, :locked}
+    end
+
+    test "allowed once Irrigation is researched and nobody has claimed it" do
+      assert Production.can_queue?(city([]), :hanging_gardens,
+               hanging_gardens_available?: true,
+               hanging_gardens_claimed?: false
+             ) == :ok
+    end
+
+    test "refused once claimed anywhere in the world" do
+      assert Production.can_queue?(city([]), :hanging_gardens,
+               hanging_gardens_available?: true,
+               hanging_gardens_claimed?: true
+             ) == {:error, :wonder_taken}
+    end
+  end
+
+  describe "available_items/1 (story 933 — the Pyramids/Hanging Gardens wonders)" do
+    test "hidden until each wonder's own tech is researched" do
+      refute :pyramids in Production.available_items([])
+      refute :hanging_gardens in Production.available_items([])
+    end
+
+    test "offered once researched and unclaimed" do
+      assert :pyramids in Production.available_items(pyramids_available?: true)
+      assert :hanging_gardens in Production.available_items(hanging_gardens_available?: true)
+    end
+
+    test "dropped from the list entirely once claimed — unlike Copper/coastal's visible-but-disabled posture" do
+      refute :pyramids in
+               Production.available_items(pyramids_available?: true, pyramids_claimed?: true)
+
+      refute :hanging_gardens in
+               Production.available_items(
+                 hanging_gardens_available?: true,
+                 hanging_gardens_claimed?: true
+               )
+    end
+  end
+
   describe "complete/3 (story 930)" do
     test "a Library completes into buildings: [:library] — no spawn event, no landing tile needed" do
       c = city(tile_id: 1, queue: [%{id: 1, type: :library, banked: 90, cost: 90}])
@@ -317,6 +419,74 @@ defmodule BrokenOaths.Cities.ProductionTest do
     test "a below-cost building item does not complete" do
       c = city(tile_id: 1, queue: [%{id: 1, type: :water_mill, banked: 89, cost: 90}])
       assert Production.complete(c, %{}, world()) == {c, []}
+    end
+  end
+
+  describe "complete/3 (story 933 — the Hanging Gardens: passive, like every standard building)" do
+    test "completes into buildings: [:hanging_gardens] — no spawn event, no landing tile needed" do
+      c = city(tile_id: 1, queue: [%{id: 1, type: :hanging_gardens, banked: 220, cost: 220}])
+      occupied_everywhere = %{1 => true}
+
+      {new_city, events} = Production.complete(c, occupied_everywhere, world())
+
+      assert new_city.buildings == [:hanging_gardens]
+      assert new_city.queue == []
+      assert events == []
+    end
+  end
+
+  describe "complete/3 (story 933 — the Pyramids: buildings flip AND a free Worker spawn)" do
+    test "flips buildings to [:pyramids] AND spawns a free Worker via the normal landing path" do
+      c = city(tile_id: 1, queue: [%{id: 1, type: :pyramids, banked: 220, cost: 220}])
+      {new_city, events} = Production.complete(c, %{}, world())
+
+      assert new_city.buildings == [:pyramids]
+      assert new_city.queue == []
+      # The spawned unit's own type is :worker, deliberately NOT
+      # :pyramids — the wonder itself never becomes a placed unit.
+      assert events == [%{player_id: 1, type: :worker, tile_id: 1}]
+    end
+
+    test "the free Worker lands on a free adjacent tile when the city tile is occupied" do
+      neighbor =
+        Regions.adjacent_tiles(world(), 1)
+        |> Enum.find(&(Regions.tile_class(world(), &1) == :land))
+
+      c = city(tile_id: 1, queue: [%{id: 1, type: :pyramids, banked: 220, cost: 220}])
+      occupied = %{1 => true}
+
+      {new_city, events} = Production.complete(c, occupied, world())
+      assert new_city.buildings == [:pyramids]
+      assert [%{type: :worker, tile_id: landed}] = events
+      refute landed == 1
+      assert landed in [neighbor | Regions.adjacent_tiles(world(), 1)]
+    end
+
+    test "nothing lost when every landing tile is occupied — the wonder itself waits too, same as any other blocked spawn" do
+      neighbors =
+        Regions.adjacent_tiles(world(), 1)
+        |> Enum.filter(&(Regions.tile_class(world(), &1) == :land))
+
+      occupied = Map.new([1 | neighbors], &{&1, true})
+      c = city(tile_id: 1, queue: [%{id: 1, type: :pyramids, banked: 220, cost: 220}])
+
+      assert Production.complete(c, occupied, world()) == {c, []}
+    end
+
+    test "overflow carries into the next queued item, same as every other completion" do
+      c =
+        city(
+          tile_id: 1,
+          queue: [
+            %{id: 1, type: :pyramids, banked: 230, cost: 220},
+            %{id: 2, type: :worker, banked: 0, cost: 60}
+          ]
+        )
+
+      {new_city, events} = Production.complete(c, %{}, world())
+      assert new_city.buildings == [:pyramids]
+      assert [%{id: 2, banked: 10}] = new_city.queue
+      assert [%{type: :worker}] = events
     end
   end
 

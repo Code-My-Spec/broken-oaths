@@ -68,6 +68,14 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
       `assignable_tiles` arrives pre-computed for. Defaults to `false`
       when omitted, same "missing reads as not met" posture every
       other opt here has.
+    * `:wonders_claimed` - story 933 (the Pyramids/Hanging Gardens
+      world wonders): `%{pyramids: boolean(), hanging_gardens: boolean()}`
+      — whether each wonder has already been built or queued ANYWHERE
+      in the world, by ANY player. WORLD-level, unlike every other opt
+      above (none of which cross player lines) — `Play` computes it via
+      `BrokenOaths.Game.wonders_claimed/1`. Defaults to `%{}` (reads as
+      "nothing claimed yet") when omitted, same "missing reads as not
+      met" posture `copper_access?`/`coastal?` already have.
 
   The production catalog is dynamic, not a fixed compile-time list
   (QA issue 846e0c96 — Bronze Spearman never appeared in the Build UI
@@ -125,7 +133,8 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
       production_opts(
         Map.get(assigns, :player_research),
         Map.get(assigns, :copper_access?, false),
-        Map.get(assigns, :coastal?, false)
+        Map.get(assigns, :coastal?, false),
+        Map.get(assigns, :wonders_claimed, %{})
       )
 
     assigns =
@@ -284,6 +293,13 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
   defp building_effect_label(:water_mill),
     do:
       "+#{Yields.water_mill_food_bonus()} food, +#{Production.water_mill_production_bonus()} production"
+
+  # Story 933 — the Pyramids/Hanging Gardens world wonders: same
+  # generic `.building_badge` component every other building already
+  # renders through (`Map.get(@city, :buildings, [])` in `render/1`
+  # above already includes them), just two more label clauses.
+  defp building_effect_label(:pyramids), do: "Free Worker, +1 Worker charge"
+  defp building_effect_label(:hanging_gardens), do: "+15% city growth, empire-wide"
 
   attr :queue, :list, required: true
   attr :city_id, :any, required: true
@@ -494,10 +510,15 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
   # already refuses `:bronze_spearman` on `bronze_age?` alone whenever
   # research is unknown, so a stray `copper_access?: true` with no
   # research can never enable it early.
-  defp production_opts(nil, copper_access?, coastal?),
-    do: [copper_access?: copper_access?, coastal?: coastal?]
+  defp production_opts(nil, copper_access?, coastal?, wonders_claimed),
+    do: [
+      copper_access?: copper_access?,
+      coastal?: coastal?,
+      pyramids_claimed?: Map.get(wonders_claimed, :pyramids, false),
+      hanging_gardens_claimed?: Map.get(wonders_claimed, :hanging_gardens, false)
+    ]
 
-  defp production_opts(player_research, copper_access?, coastal?) do
+  defp production_opts(player_research, copper_access?, coastal?, wonders_claimed) do
     [
       granary_available?: Research.granary_enabled?(player_research),
       bronze_age?: Research.age(player_research) == :bronze_age,
@@ -510,7 +531,18 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
       library_available?: Research.library_enabled?(player_research),
       walls_available?: Research.walls_enabled?(player_research),
       barracks_available?: Research.barracks_enabled?(player_research),
-      water_mill_available?: Research.water_mill_enabled?(player_research)
+      water_mill_available?: Research.water_mill_enabled?(player_research),
+      # Story 933 — the Pyramids/Hanging Gardens wonders: unlike every
+      # opt above, their own `_claimed?` half is WORLD-level, not
+      # derived from `player_research` at all — `wonders_claimed`
+      # arrives as its own assign (`Game.wonders_claimed/1`, mirroring
+      # how `copper_access?`/`coastal?` arrive pre-computed above),
+      # defaulting to "unclaimed" when omitted so a stray missing assign
+      # never HIDES an otherwise-offerable wonder.
+      pyramids_available?: Research.pyramids_enabled?(player_research),
+      pyramids_claimed?: Map.get(wonders_claimed, :pyramids, false),
+      hanging_gardens_available?: Research.hanging_gardens_enabled?(player_research),
+      hanging_gardens_claimed?: Map.get(wonders_claimed, :hanging_gardens, false)
     ]
   end
 end

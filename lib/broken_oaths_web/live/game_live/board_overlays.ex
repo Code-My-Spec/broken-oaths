@@ -59,6 +59,9 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
   attr :copper_access?, :boolean, required: true
   # Story 921 (the Galley) — see `GameLive.CityPanel`'s own moduledoc.
   attr :coastal?, :boolean, required: true
+  # Story 933 (the Pyramids/Hanging Gardens wonders) — see
+  # `GameLive.CityPanel`'s own moduledoc.
+  attr :wonders_claimed, :map, required: true
 
   def overlays(assigns) do
     ~H"""
@@ -290,6 +293,7 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
         player_research={@player_research}
         copper_access?={@copper_access?}
         coastal?={@coastal?}
+        wonders_claimed={@wonders_claimed}
       />
     </div>
     """

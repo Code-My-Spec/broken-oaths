@@ -127,12 +127,15 @@ defmodule BrokenOaths.Technology.Research do
   issue eb5ec4f9 — plus, story 930, the Water Mill; the Heavy Chariot
   it also names remains unwired), Writing (the Library, story 930 —
   `library_enabled?/1`), and Masonry (Ancient Walls, story 930 —
-  `walls_enabled?/1`; the Quarry improvement it also names remains
-  unwired). The other two (Astrology, Irrigation) are STRUCTURE-ONLY
-  for this story: they research, bank science, complete, and gate
-  their own dependents exactly like every other tech, but the content
-  they name (the Holy Site, Plantation) doesn't exist in this codebase
-  yet and ships in later stories.
+  `walls_enabled?/1` — plus, story 933, the Pyramids wonder,
+  `pyramids_enabled?/1`; the Quarry improvement Masonry also names
+  remains unwired). Astrology is still STRUCTURE-ONLY: it researches,
+  banks science, completes, and gates its own dependents exactly like
+  every other tech, but the Holy Site it names doesn't exist in this
+  codebase yet. Irrigation is no longer structure-only as of story
+  933 — it now gates the Hanging Gardens wonder
+  (`hanging_gardens_enabled?/1`); the Plantation improvement it also
+  names still ships in a later story.
   """
 
   @type tech ::
@@ -184,14 +187,19 @@ defmodule BrokenOaths.Technology.Research do
     astrology: %{cost: 150, prereqs: [], unlock: "Enables the Holy Site district"},
     # After Pottery.
     writing: %{cost: 150, prereqs: [:pottery], unlock: "Enables the Library building (+2 science/turn)"},
-    irrigation: %{cost: 150, prereqs: [:pottery], unlock: "Enables farming irrigated resources"},
+    irrigation: %{
+      cost: 150,
+      prereqs: [:pottery],
+      unlock: "Enables farming irrigated resources and the Hanging Gardens wonder"
+    },
     # After Animal Husbandry.
     archery: %{cost: 150, prereqs: [:animal_husbandry], unlock: "Enables the Archer unit"},
     # After Mining — the capstone band.
     masonry: %{
       cost: 240,
       prereqs: [:mining],
-      unlock: "Enables the Ancient Walls building (+50 HP, +5 defense) and the Quarry improvement"
+      unlock:
+        "Enables the Ancient Walls building (+50 HP, +5 defense), the Quarry improvement, and the Pyramids wonder"
     },
     the_wheel: %{
       cost: 240,
@@ -618,4 +626,18 @@ defmodule BrokenOaths.Technology.Research do
   @doc "The Wheel's OTHER unlock (alongside road_enabled?/1): whether the Water Mill building is available."
   @spec water_mill_enabled?(player_research()) :: boolean()
   def water_mill_enabled?(player_research), do: completed?(player_research, :the_wheel)
+
+  # Story 933 — the Pyramids/Hanging Gardens world wonders: two more
+  # `_enabled?` accessors, the exact same `completed?/2` one-liner
+  # shape every unlock above already uses. Masonry's OTHER unlock
+  # (alongside `walls_enabled?/1`); Irrigation's FIRST real one (it
+  # was structure-only before this story — see this module's own
+  # moduledoc, "Unlocks").
+  @doc "Masonry's OTHER unlock (alongside walls_enabled?/1): whether the Pyramids wonder is available."
+  @spec pyramids_enabled?(player_research()) :: boolean()
+  def pyramids_enabled?(player_research), do: completed?(player_research, :masonry)
+
+  @doc "Irrigation's unlock: whether the Hanging Gardens wonder is available."
+  @spec hanging_gardens_enabled?(player_research()) :: boolean()
+  def hanging_gardens_enabled?(player_research), do: completed?(player_research, :irrigation)
 end

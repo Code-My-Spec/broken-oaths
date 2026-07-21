@@ -27,6 +27,8 @@ defmodule BrokenOathsWeb.GameLive.CityPanelTest do
   @writing_done %{completed_techs: [:writing], current_research: nil, banked_science: %{}}
   @masonry_done %{completed_techs: [:masonry], current_research: nil, banked_science: %{}}
   @the_wheel_done %{completed_techs: [:the_wheel], current_research: nil, banked_science: %{}}
+  # Story 933 — the Hanging Gardens wonder's own gate.
+  @irrigation_done %{completed_techs: [:irrigation], current_research: nil, banked_science: %{}}
 
   defp render_panel(assigns_overrides) do
     assigns =
@@ -272,6 +274,76 @@ defmodule BrokenOathsWeb.GameLive.CityPanelTest do
     test "an unwalled city still shows the plain 100 max" do
       html = render_panel(player_research: @stone_age)
       assert html =~ "100/100"
+    end
+  end
+
+  # Story 933 — the Pyramids/Hanging Gardens world wonders: hidden
+  # until their own tech, offered once it is, AND (unlike every story
+  # 930 building) dropped from the list entirely once claimed anywhere
+  # in the world — mirrors `Production.available_items/1`'s own
+  # `wonder_offerable?/3`.
+  describe "story 933 — the Pyramids (Masonry)" do
+    test "hidden in the Stone Age" do
+      html = render_panel(player_research: @stone_age)
+      refute html =~ ~s(data-test="production-option-pyramids")
+    end
+
+    test "offered and enabled once Masonry is researched and nobody has claimed it" do
+      html = render_panel(player_research: @masonry_done, wonders_claimed: %{pyramids: false})
+      assert html =~ ~s(data-test="production-option-pyramids" data-disabled="false")
+      assert html =~ "Pyramids"
+    end
+
+    test "dropped from the list entirely once claimed anywhere in the world — even with Masonry done" do
+      html = render_panel(player_research: @masonry_done, wonders_claimed: %{pyramids: true})
+      refute html =~ ~s(data-test="production-option-pyramids")
+    end
+
+    test "defaults to unclaimed when wonders_claimed is omitted" do
+      html = render_panel(player_research: @masonry_done)
+      assert html =~ ~s(data-test="production-option-pyramids" data-disabled="false")
+    end
+  end
+
+  describe "story 933 — the Hanging Gardens (Irrigation)" do
+    test "hidden in the Stone Age" do
+      html = render_panel(player_research: @stone_age)
+      refute html =~ ~s(data-test="production-option-hanging_gardens")
+    end
+
+    test "offered and enabled once Irrigation is researched and nobody has claimed it" do
+      html =
+        render_panel(player_research: @irrigation_done, wonders_claimed: %{hanging_gardens: false})
+
+      assert html =~ ~s(data-test="production-option-hanging_gardens" data-disabled="false")
+      assert html =~ "Hanging Gardens"
+    end
+
+    test "dropped from the list entirely once claimed anywhere in the world" do
+      html =
+        render_panel(player_research: @irrigation_done, wonders_claimed: %{hanging_gardens: true})
+
+      refute html =~ ~s(data-test="production-option-hanging_gardens")
+    end
+  end
+
+  describe "story 933 — wonder building indicators" do
+    test "a built wonder renders its own badge with its real effect description" do
+      city = Map.put(@city, :buildings, [:pyramids, :hanging_gardens])
+      html = render_panel(city: city, player_research: @masonry_done)
+
+      assert html =~ ~s(data-test="city-building-pyramids")
+      assert html =~ "Free Worker"
+
+      assert html =~ ~s(data-test="city-building-hanging_gardens")
+      assert html =~ "+15% city growth"
+    end
+
+    test "no wonder badges render for a city with neither built" do
+      html = render_panel(player_research: @masonry_done)
+
+      refute html =~ ~s(data-test="city-building-pyramids")
+      refute html =~ ~s(data-test="city-building-hanging_gardens")
     end
   end
 end

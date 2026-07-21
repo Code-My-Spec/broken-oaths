@@ -1022,6 +1022,135 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
     end
   end
 
+  # Story 933 — the Pyramids/Hanging Gardens world wonders: real,
+  # end-to-end coverage through the actual `queue_production/4` command
+  # path (the pure gate itself, `Production.can_queue?/3`'s
+  # `:pyramids`/`:hanging_gardens` clauses, is already covered in
+  # isolation by `production_test.exs`) — one-per-world enforcement,
+  # the free-Worker spawn, and the owner's next Worker's charge bonus.
+  describe "queue_production/4 — the Pyramids/Hanging Gardens one-per-world gate (story 933)" do
+    test "a second city — same player, different city — cannot queue a wonder already queued elsewhere in the world" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+      [city_a] = Game.player_cities(world, user)
+
+      research_masonry(world, user)
+
+      :ok = Game.queue_production(world, user, city_a.id, "pyramids")
+
+      city_b_id = found_far_city(world, user, player.id)
+
+      assert Game.queue_production(world, user, city_b_id, "pyramids") == {:error, :wonder_taken}
+
+      WorldServer.restart(world)
+    end
+  end
+
+  describe "queue_production/4 — completing the Pyramids (story 933)" do
+    test "spawns a free Worker AND the owner's NEXT Worker starts with 4 charges instead of 3" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, _player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+      [city] = Game.player_cities(world, user)
+      # Long-running (research + a full 220-cost build) — keep barbarian
+      # AI out of the way, same reason the worker-charges describe block
+      # above does this.
+      :ok = Game.isolate_camp_for_test(world, -1)
+
+      research_masonry(world, user)
+
+      workers_before = Enum.count(Game.player_units(world, user), &(&1.type == :worker))
+
+      :ok = Game.queue_production(world, user, city.id, "pyramids")
+
+      Enum.reduce_while(1..80, :ok, fn _, :ok ->
+        if pyramids_built?(world, user) do
+          {:halt, :ok}
+        else
+          :ok = Game.advance_turn(world)
+          {:cont, :ok}
+        end
+      end)
+
+      assert pyramids_built?(world, user)
+
+      workers_after = Enum.count(Game.player_units(world, user), &(&1.type == :worker))
+      assert workers_after == workers_before + 1
+
+      # The Pyramids' own free Worker already benefits from its own
+      # bonus — the `buildings` flip happens before the spawn
+      # materializes (`WorldServer.worker_charges/3`'s own doc).
+      free_worker = Enum.find(Game.player_units(world, user), &(&1.type == :worker))
+      assert free_worker.charges == 4
+
+      :ok = Game.queue_production(world, user, city.id, "worker")
+
+      Enum.reduce_while(1..30, :ok, fn _, :ok ->
+        if Enum.count(Game.player_units(world, user), &(&1.type == :worker)) > workers_after do
+          {:halt, :ok}
+        else
+          :ok = Game.advance_turn(world)
+          {:cont, :ok}
+        end
+      end)
+
+      newest_worker =
+        Game.player_units(world, user)
+        |> Enum.filter(&(&1.type == :worker))
+        |> Enum.max_by(& &1.id)
+
+      assert newest_worker.charges == 4
+
+      WorldServer.restart(world)
+    end
+  end
+
+  defp pyramids_built?(world, user) do
+    Game.player_cities(world, user)
+    |> hd()
+    |> Map.get(:buildings, [])
+    |> Enum.member?(:pyramids)
+  end
+
+  # The first land tile far enough from every existing city to found on
+  # (`Production.validate_founding/3`'s own 4-hex spacing) — tries each
+  # land tile in mesh order via the REAL `found_city/3` command itself
+  # rather than reimplementing the spacing math, so a `{:error,
+  # :too_close}` just means "try the next candidate."
+  defp found_far_city(world, user, player_id) do
+    Enum.find_value(0..641, fn tile ->
+      if Regions.tile_class(world, tile) == :land do
+        settler = Game.spawn_unit_for_test(world, player_id, :settler, tile)
+
+        case Game.found_city(world, user, settler.id) do
+          :ok ->
+            Game.player_cities(world, user) |> Enum.find(&(&1.tile_id == tile)) |> Map.fetch!(:id)
+
+          {:error, _} ->
+            nil
+        end
+      end
+    end)
+  end
+
+  # Masonry's own two-step prerequisite chain (Mining first), the same
+  # shape `research_the_wheel/2` below already establishes for The
+  # Wheel — the Pyramids' own gate (`Research.pyramids_enabled?/1`).
+  defp research_masonry(world, user) do
+    :ok = Game.set_research(world, user, :mining)
+    complete_current_research(world, user)
+    :ok = Game.set_research(world, user, :masonry)
+    complete_current_research(world, user)
+    assert :masonry in Game.player_research(world, user).completed_techs
+  end
+
   defp hills_tile(world) do
     land? = fn t -> BrokenOaths.Worlds.Regions.tile_class(world, t) == :land end
 

@@ -545,4 +545,123 @@ defmodule BrokenOaths.Cities.YieldsTest do
       assert Yields.grow(city, [city], world(), :bronze_age) == city
     end
   end
+
+  describe "grow/5 — the Hanging Gardens bonus (story 933)" do
+    test "arity-4 stays hanging_gardens?: false by default, agreeing exactly with arity-5's own false clause" do
+      city = %{id: 1, tile_id: 0, size: 1, food: 19, territory: [0], worked_tiles: []}
+
+      assert Yields.grow(city, [city], world(), :stone_age) ==
+               Yields.grow(city, [city], world(), :stone_age, false)
+    end
+
+    test "without the wonder, the ordinary size-1 threshold (20) still applies — 19 food doesn't grow" do
+      city = %{id: 1, tile_id: 0, size: 1, food: 19, territory: [0], worked_tiles: []}
+
+      assert Yields.grow(city, [city], world(), :stone_age, false) == city
+    end
+
+    test "with the wonder, the shrunk threshold (div(20*100,115) == 17) lets 19 food grow — below the ordinary 20" do
+      city = %{id: 1, tile_id: 0, size: 1, food: 19, territory: [0], worked_tiles: []}
+
+      grown = Yields.grow(city, [city], world(), :stone_age, true)
+
+      assert grown.size == 2
+      # overflow is computed against the SHRUNK threshold (17), not 20.
+      assert grown.food == 19 - 17
+    end
+
+    test "the shrunk threshold, not the raw one, is what banked food is compared against at every size" do
+      # size 2 -> 3 threshold is 30; div(30*100,115) == 26.
+      city = %{id: 1, tile_id: 0, size: 2, food: 26, territory: [0], worked_tiles: []}
+
+      grown = Yields.grow(city, [city], world(), :stone_age, true)
+      assert grown.size == 3
+      assert grown.food == 0
+    end
+
+    test "still respects the cap — a wonder can't grow a capped city" do
+      city = %{id: 1, tile_id: 0, size: 4, food: 999, territory: [0], worked_tiles: []}
+
+      assert Yields.grow(city, [city], world(), :stone_age, true) == city
+    end
+  end
+
+  describe "grow_cities/2 — the Hanging Gardens is empire-wide (story 933)" do
+    test "a city grows off the shrunk threshold when its OWNER holds the wonder in ANY of their cities — not just this one" do
+      wonder_city = %{
+        id: 1,
+        player_id: 1,
+        tile_id: 0,
+        size: 1,
+        food: 0,
+        territory: [0],
+        worked_tiles: [],
+        buildings: [:hanging_gardens]
+      }
+
+      other_city = %{
+        id: 2,
+        player_id: 1,
+        tile_id: 100,
+        size: 1,
+        # Below the ordinary threshold (20) but at/above the shrunk one (17).
+        food: 18,
+        territory: [100],
+        worked_tiles: [],
+        buildings: []
+      }
+
+      state = %{world: world(), cities: %{1 => wonder_city, 2 => other_city}}
+
+      grown = Yields.grow_cities(state, MapSet.new())
+      assert grown.cities[2].size == 2
+    end
+
+    test "a city grows at the ordinary threshold when its owner does NOT hold the wonder" do
+      city = %{
+        id: 1,
+        player_id: 1,
+        tile_id: 0,
+        size: 1,
+        food: 18,
+        territory: [0],
+        worked_tiles: [],
+        buildings: []
+      }
+
+      state = %{world: world(), cities: %{1 => city}}
+
+      grown = Yields.grow_cities(state, MapSet.new())
+      assert grown.cities[1].size == 1
+    end
+
+    test "another player's own Hanging Gardens gives THIS player nothing" do
+      wonder_city = %{
+        id: 1,
+        player_id: 1,
+        tile_id: 0,
+        size: 1,
+        food: 0,
+        territory: [0],
+        worked_tiles: [],
+        buildings: [:hanging_gardens]
+      }
+
+      other_players_city = %{
+        id: 2,
+        player_id: 2,
+        tile_id: 100,
+        size: 1,
+        food: 18,
+        territory: [100],
+        worked_tiles: [],
+        buildings: []
+      }
+
+      state = %{world: world(), cities: %{1 => wonder_city, 2 => other_players_city}}
+
+      grown = Yields.grow_cities(state, MapSet.new())
+      assert grown.cities[2].size == 1
+    end
+  end
 end

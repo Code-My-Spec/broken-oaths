@@ -342,6 +342,19 @@ defmodule BrokenOaths.Technology.ResearchTest do
       assert Research.water_mill_enabled?(pr)
     end
 
+    # Story 933 — the Pyramids/Hanging Gardens world wonders' own gates.
+    test "pyramids_enabled?/1 flips on Masonry (alongside walls_enabled?/1)" do
+      refute Research.pyramids_enabled?(Research.new())
+      pr = %{Research.new() | completed_techs: [:masonry]}
+      assert Research.pyramids_enabled?(pr)
+    end
+
+    test "hanging_gardens_enabled?/1 flips on Irrigation" do
+      refute Research.hanging_gardens_enabled?(Research.new())
+      pr = %{Research.new() | completed_techs: [:irrigation]}
+      assert Research.hanging_gardens_enabled?(pr)
+    end
+
     test "age/1 flips to :bronze_age on Bronze Working, otherwise :stone_age" do
       assert Research.age(Research.new()) == :stone_age
       pr = %{Research.new() | completed_techs: [:bronze_working]}

@@ -12,6 +12,21 @@ defmodule BrokenOaths.Cities.ProductionItem do
   `position` (lowest = current/head), appended at max+1 and swapped by
   `WorldServer.do_reorder_production_item/4`. Item identity (and its
   banked progress) never moves — only positions swap.
+
+  ## The `:type` Ecto.Enum — every buildable, kept in sync by hand
+
+  This field's own `values:` list must name every atom
+  `BrokenOaths.Cities.Production.buildable()` can produce, or
+  `queue_production/4`'s own `Repo.insert()` rejects the changeset the
+  instant a new buildable ships (story 930's Library/Ancient
+  Walls/Barracks/Water Mill were missing from this list entirely until
+  story 933 caught it while wiring in the Pyramids/Hanging Gardens
+  wonders — no existing test exercised the real `queue_production/4`
+  round trip for any of the four, only the pure, in-memory
+  `Production.can_queue?/3`/`available_items/1` calls, so the gap went
+  undetected). There is no automatic derivation from `Production`'s
+  own catalog — this list is maintained by hand, the same way
+  `BrokenOaths.Cities.City`'s own `buildings` Ecto.Enum is.
   """
 
   use Ecto.Schema
@@ -20,7 +35,19 @@ defmodule BrokenOaths.Cities.ProductionItem do
   alias BrokenOaths.Cities.City
 
   @type item_type ::
-          :settler | :worker | :warrior | :granary | :bronze_spearman | :archer | :galley
+          :settler
+          | :worker
+          | :warrior
+          | :granary
+          | :bronze_spearman
+          | :archer
+          | :galley
+          | :library
+          | :ancient_walls
+          | :barracks
+          | :water_mill
+          | :pyramids
+          | :hanging_gardens
 
   @type t :: %__MODULE__{
           id: integer() | nil,
@@ -35,7 +62,21 @@ defmodule BrokenOaths.Cities.ProductionItem do
 
   schema "game_production_items" do
     field :type, Ecto.Enum,
-      values: [:settler, :worker, :warrior, :granary, :bronze_spearman, :archer, :galley]
+      values: [
+        :settler,
+        :worker,
+        :warrior,
+        :granary,
+        :bronze_spearman,
+        :archer,
+        :galley,
+        :library,
+        :ancient_walls,
+        :barracks,
+        :water_mill,
+        :pyramids,
+        :hanging_gardens
+      ]
 
     field :banked, :integer, default: 0
     field :position, :integer

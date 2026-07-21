@@ -39,7 +39,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
 
   import Ecto.Query
 
-  alias BrokenOaths.Cities.{City, Improvement, Production, ProductionItem, Yields}
+  alias BrokenOaths.Cities.{Buildings, City, Improvement, Production, ProductionItem, Yields}
 
   alias BrokenOaths.Combat.{Camp, Camps, CityDefense, Siege}
   alias BrokenOaths.Combat.Resolver
@@ -1413,6 +1413,22 @@ defmodule BrokenOaths.Simulation.WorldServer do
     {:reply, access?, state}
   end
 
+  # Story 933 — WORLD-level (no `user`, unlike `:copper_access?` above):
+  # `GameLive.CityPanel`'s own Build catalog needs to know whether the
+  # Pyramids/Hanging Gardens has already been claimed ANYWHERE in the
+  # world, by ANY player, to hide an offered-but-already-gone wonder
+  # (`Production.available_items/1`'s own `wonder_offerable?/3`) —
+  # information no single player's own `player_research`/`copper_access?`
+  # read could ever carry.
+  def handle_call({:wonders_claimed}, _from, state) do
+    claimed = %{
+      pyramids: Production.pyramids_claimed?(state),
+      hanging_gardens: Production.hanging_gardens_claimed?(state)
+    }
+
+    {:reply, claimed, state}
+  end
+
   # Test-only: move a barbarian warrior directly onto `tile_id`,
   # applying `Turn`'s own pillage-on-entry rule (`maybe_pillage/2`)
   # exactly as `apply_barbarian_decision({:move, tile}, ...)` would —
@@ -1823,7 +1839,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
   defp materialize_spawns(events, state) do
     Enum.map_reduce(events, state, fn
       {:unit_spawned, spawn_event}, acc_state ->
-        unit = insert_spawned_unit!(acc_state.world.id, spawn_event)
+        unit = insert_spawned_unit!(acc_state, spawn_event)
 
         {{:unit_spawned, Map.put(spawn_event, :unit_id, unit.id)},
          %{acc_state | units: Map.put(acc_state.units, unit.id, unit)}}
@@ -1833,18 +1849,35 @@ defmodule BrokenOaths.Simulation.WorldServer do
     end)
   end
 
-  defp insert_spawned_unit!(
-         world_id,
-         %{player_id: player_id, type: type, tile_id: tile_id} = event
-       ) do
+  defp insert_spawned_unit!(state, %{player_id: player_id, type: type, tile_id: tile_id} = event) do
     stats = Production.unit_stats(type)
     camp_id = Map.get(event, :camp_id)
+    charges = worker_charges(state, player_id, type)
 
     {:ok, unit} =
-      insert_unit(world_id, player_id, type, tile_id, stats.hp, stats.movement, camp_id)
+      insert_unit(state.world.id, player_id, type, tile_id, stats.hp, stats.movement, camp_id, charges)
 
     unit_map(unit)
   end
+
+  # Story 933 — the Pyramids' own Civ 6 "+1 Builder charge": a Worker
+  # spawned while its owner holds the Pyramids (ANY of their own
+  # cities — `Buildings.player_has?/3`, the same player-wide read
+  # `Production.player_copper_access?/2` already established for
+  # Copper) starts with 4 charges instead of the schema's own default
+  # of 3. Reads `state.cities` as handed in — for the Pyramids' OWN
+  # free-Worker spawn event this is already the POST-completion state
+  # (`Production.resolve_completions/1`'s own city update runs before
+  # its `spawn_event` is ever returned), so that very first Worker
+  # already enjoys the bonus its own wonder just granted. Every other
+  # unit type (and a Worker for a Pyramids-less owner) gets `nil`
+  # here, which leaves `insert_unit/8`'s own `charges` arg — and, in
+  # turn, `Unit.changeset/2`'s struct default (3) — untouched.
+  defp worker_charges(state, player_id, :worker) do
+    if Buildings.player_has?(Map.values(state.cities), player_id, :pyramids), do: 4, else: nil
+  end
+
+  defp worker_charges(_state, _player_id, _type), do: nil
 
   # -------------------------------------------------------------------
   # Join
@@ -1958,21 +1991,33 @@ defmodule BrokenOaths.Simulation.WorldServer do
     result
   end
 
-  defp insert_unit(world_id, player_id, type, tile_id, hp, movement, camp_id \\ nil) do
+  defp insert_unit(world_id, player_id, type, tile_id, hp, movement, camp_id \\ nil, charges \\ nil) do
+    attrs =
+      %{
+        world_id: world_id,
+        player_id: player_id,
+        camp_id: camp_id,
+        type: type,
+        tile_id: tile_id,
+        hp: hp,
+        max_hp: hp,
+        movement: movement,
+        max_movement: movement
+      }
+      |> maybe_put_charges(charges)
+
     %Unit{}
-    |> Unit.changeset(%{
-      world_id: world_id,
-      player_id: player_id,
-      camp_id: camp_id,
-      type: type,
-      tile_id: tile_id,
-      hp: hp,
-      max_hp: hp,
-      movement: movement,
-      max_movement: movement
-    })
+    |> Unit.changeset(attrs)
     |> Repo.insert()
   end
+
+  # `charges` only ever OVERRIDES `Unit.changeset/2`'s own struct
+  # default (3) — story 933's Pyramids bonus (`worker_charges/3`
+  # above) is the one caller that ever passes a real value; every
+  # other `insert_unit/8` call site passes `nil` (its own default) and
+  # gets the ordinary 3.
+  defp maybe_put_charges(attrs, nil), do: attrs
+  defp maybe_put_charges(attrs, charges), do: Map.put(attrs, :charges, charges)
 
   defp world_full?(state) do
     match?({:error, :world_full}, Spawner.spawn_player(state.world, taken_region_ids(state)))

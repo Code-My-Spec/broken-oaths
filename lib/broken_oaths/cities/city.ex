@@ -66,10 +66,16 @@ defmodule BrokenOaths.Cities.City do
 
   # Story 930 — the four new buildings (see `BrokenOaths.Cities.Buildings`'s
   # own moduledoc for why they land in a LIST rather than four more
-  # `has_*` booleans). `has_granary` itself is untouched.
-  @buildings [:library, :ancient_walls, :barracks, :water_mill]
+  # `has_*` booleans). `has_granary` itself is untouched. Story 933
+  # adds the Pyramids and Hanging Gardens WORLD WONDERS to the same
+  # list — see `Buildings`'s own moduledoc, "Wonders", for why a
+  # wonder is still just another `buildings` entry at the storage
+  # layer even though its own cap (one per WORLD, not one per city)
+  # is enforced a level up, in `Production.can_queue?/3`.
+  @buildings [:library, :ancient_walls, :barracks, :water_mill, :pyramids, :hanging_gardens]
 
-  @type building :: :library | :ancient_walls | :barracks | :water_mill
+  @type building ::
+          :library | :ancient_walls | :barracks | :water_mill | :pyramids | :hanging_gardens
 
   @type t :: %__MODULE__{
           id: integer() | nil,
@@ -116,7 +122,10 @@ defmodule BrokenOaths.Cities.City do
     # Ancient Walls, Barracks, Water Mill): see `BrokenOaths.Cities.
     # Buildings`'s own moduledoc for why these four land in a list
     # rather than four more `has_*` booleans alongside `has_granary`
-    # above.
+    # above. Story 933 adds the Pyramids and Hanging Gardens wonders
+    # to this same list — a wonder still records on the ONE city that
+    # built it, exactly like a standard building; only its CAP (one
+    # per world) and its EFFECT (empire-wide) work differently.
     field :buildings, {:array, Ecto.Enum}, values: @buildings, default: []
     # Story 906 — the siege capture flow (`BrokenOaths.Combat.Siege`):
     # `nil` while free (the owner's own, unoccupied by anyone else);

@@ -33,9 +33,35 @@ defmodule BrokenOaths.Cities.Buildings do
   this across a player's whole city list for the turn-boundary sweep —
   stories 922/923's shared settlement path) needing to know that split
   exists at all.
+
+  ## Wonders (story 933): Pyramids and Hanging Gardens
+
+  Two more buildings land in the exact same `buildings` list — 0
+  upkeep each, wonders are maintenance-free in Civ 6 too — but they're
+  a different SHAPE of building: world-unique. Every standard building
+  above caps at one PER CITY (`can_queue?/3`'s own `:already_built`);
+  a wonder caps at one PER WORLD, across every city any player owns.
+  `wonder?/1` flags the two; `wonder_built_or_building?/2` is the
+  world-wide read `BrokenOaths.Cities.Production.can_queue?/3` gates
+  `:pyramids`/`:hanging_gardens` on instead of the per-city
+  `:already_built` check, and `player_has?/3` is the player-wide read
+  their own EFFECTS need (a wonder is built in exactly one city, but
+  its bonus always applies empire-wide — the Pyramids' extra Worker
+  charge, `BrokenOaths.Simulation.WorldServer`'s own
+  `worker_charges/3`, and the Hanging Gardens' growth bonus,
+  `BrokenOaths.Cities.Yields.grow_cities/2` — the same player-wide
+  shape `BrokenOaths.Cities.Production.player_copper_access?/2`
+  already established for Copper).
   """
 
-  @type building :: :granary | :library | :ancient_walls | :barracks | :water_mill
+  @type building ::
+          :granary
+          | :library
+          | :ancient_walls
+          | :barracks
+          | :water_mill
+          | :pyramids
+          | :hanging_gardens
   @type city :: %{optional(atom()) => term()}
 
   @catalog %{
@@ -43,7 +69,9 @@ defmodule BrokenOaths.Cities.Buildings do
     library: 1,
     ancient_walls: 0,
     barracks: 1,
-    water_mill: 1
+    water_mill: 1,
+    pyramids: 0,
+    hanging_gardens: 0
   }
 
   @doc "The full per-building maintenance catalog."
@@ -78,5 +106,45 @@ defmodule BrokenOaths.Cities.Buildings do
     |> Enum.filter(&has?(city, &1))
     |> Enum.map(&maintenance/1)
     |> Enum.sum()
+  end
+
+  @wonders [:pyramids, :hanging_gardens]
+
+  @doc "Whether `building` is a world-unique wonder (Pyramids, Hanging Gardens) rather than a standard, per-city buildable (story 933)."
+  @spec wonder?(building()) :: boolean()
+  def wonder?(building), do: building in @wonders
+
+  @doc """
+  Whether `wonder` is already completed in ANY city, OR is currently
+  queued (not yet complete) in ANY city's own build queue, anywhere in
+  `cities` — the ONE-PER-WORLD gate a wonder needs instead of the
+  per-city `:already_built` check every standard building uses (a
+  wonder has no per-city cap to begin with; its cap is world-wide,
+  across every player). `cities` is expected to carry each city's own
+  `:queue` (the `queue_item()` shape `BrokenOaths.Cities.Production`
+  already threads through `state.cities`), not just `:buildings` —
+  a wonder mid-build (banked but not yet complete) counts as claimed
+  too, so a second city can't start racing to finish first.
+  """
+  @spec wonder_built_or_building?([city()], building()) :: boolean()
+  def wonder_built_or_building?(cities, wonder) do
+    Enum.any?(cities, fn city ->
+      has?(city, wonder) or Enum.any?(Map.get(city, :queue, []), &(&1.type == wonder))
+    end)
+  end
+
+  @doc """
+  Whether `player_id` has completed `building` in ANY city they own —
+  the player-wide read `BrokenOaths.Cities.Production.
+  player_copper_access?/2` already established for Copper access
+  (story 911), reused here for a wonder's empire-wide effect (story
+  933): a wonder is built in exactly ONE city, but its effect always
+  reads back player-wide, never scoped to just that one city.
+  """
+  @spec player_has?([city()], term(), building()) :: boolean()
+  def player_has?(cities, player_id, building) do
+    cities
+    |> Enum.filter(&(Map.get(&1, :player_id) == player_id))
+    |> Enum.any?(&has?(&1, building))
   end
 end

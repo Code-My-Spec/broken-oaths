@@ -120,6 +120,18 @@ defmodule BrokenOaths.Cities do
   @spec copper_access?(map(), map()) :: boolean()
   def copper_access?(world, user), do: WorldServer.call(world, {:copper_access?, user})
 
+  @doc """
+  Whether the Pyramids/Hanging Gardens wonder has already been claimed
+  (built or queued) ANYWHERE in `world`, by ANY player (story 933) —
+  `%{pyramids: boolean(), hanging_gardens: boolean()}`, WORLD-level
+  unlike `copper_access?/2` above (no `user` — a wonder's claimed
+  status is the same fact for every player looking at it). See
+  `BrokenOaths.Cities.Production.pyramids_claimed?/1`/
+  `hanging_gardens_claimed?/1` for the actual rule.
+  """
+  @spec wonders_claimed(map()) :: %{pyramids: boolean(), hanging_gardens: boolean()}
+  def wonders_claimed(world), do: WorldServer.call(world, {:wonders_claimed})
+
   @doc "A tile's completed improvement (`nil | :farm | :mine | :road`)."
   def tile_improvement(world, tile_id), do: WorldServer.call(world, {:tile_improvement, tile_id})
 
