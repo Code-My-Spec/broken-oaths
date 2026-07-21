@@ -276,6 +276,16 @@ defmodule BrokenOaths.Technology.ResearchTest do
       assert Research.pasture_enabled?(pr)
     end
 
+    # Playtest issue eb5ec4f9 "players can build Roads without
+    # researching The Wheel" — the capability flag
+    # `Improvement.validate_improvement_terrain/4`'s `:road` clause
+    # reads, same shape as `pasture_enabled?/1` above.
+    test "road_enabled?/1 flips on The Wheel (the Road improvement's own gate)" do
+      refute Research.road_enabled?(Research.new())
+      pr = %{Research.new() | completed_techs: [:the_wheel]}
+      assert Research.road_enabled?(pr)
+    end
+
     # Story 921 — Sailing's own unlock, finally wired (see this
     # module's own moduledoc, "Unlocks").
     test "sailing_enabled?/1 flips on Sailing (the Galley's own gate)" do

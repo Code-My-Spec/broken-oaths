@@ -276,11 +276,15 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
       resource = Resources.at(world, tile_id)
 
       # `:mine` uses the resource-aware gate (QA issue 5a30ad3f — Copper
-      # guaranteed near spawn can land off-Hills); Farm/Road stay
-      # terrain-only.
+      # guaranteed near spawn can land off-Hills); Farm stays
+      # terrain-only. `:road` stays terrain-wide-open but now ALSO
+      # needs The Wheel researched (playtest issue eb5ec4f9) — mirrors
+      # `pasture_offered?/3` below, just folded into this same filter
+      # instead of appended after it.
       terrain_kinds =
         Enum.filter([:farm, :mine, :road], fn
           :mine -> Improvement.mine_allowed?(terrain, resource)
+          :road -> road_enabled?(player_research)
           kind -> Improvement.allowed?(kind, terrain)
         end)
 
@@ -305,6 +309,12 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
 
   defp pasture_enabled?(nil), do: false
   defp pasture_enabled?(player_research), do: Research.pasture_enabled?(player_research)
+
+  # Road (playtest issue eb5ec4f9) only ever renders once the selecting
+  # player has researched The Wheel — mirrors `pasture_enabled?/1` just
+  # above.
+  defp road_enabled?(nil), do: false
+  defp road_enabled?(player_research), do: Research.road_enabled?(player_research)
 
   # Territory tiles `CityPanel` may offer a "Work" action for: not the
   # always-free center, not already worked, and workable terrain — the

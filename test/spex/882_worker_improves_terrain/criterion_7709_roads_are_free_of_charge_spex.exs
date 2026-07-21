@@ -13,6 +13,25 @@ defmodule BrokenOathsSpex.Story882.Criterion7709Spex do
   throughout this batch's own multi-site scenarios) and builds a Road
   there — the SUBJECT here is "does a Road spend a charge," not how
   the worker got to 2 in the first place.
+
+  Playtest issue eb5ec4f9 (The Wheel now gates Road) means the worker
+  can no longer just walk up and build one — the player has to
+  research The Wheel first. Reuses story 902's own established
+  `TechPanel` surface exactly (`"toggle_tech_panel"` +
+  `"select_research"`, `[data-test='tech-completed-<name>']` — see
+  `BrokenOathsSpex.Story902.Criterion7625Spex`'s moduledoc for the full
+  contract), researching Mining THEN The Wheel (The Wheel's own
+  prerequisite, `Research.prereqs(:the_wheel) == [:mining]`). 55 turns
+  (Mining's 110 cost / a size->=1 city's >=2/turn income) then 120 more
+  (The Wheel's 240 cost / the same >=2/turn) are exact lower bounds,
+  safe regardless of any growth along the way (growth only completes
+  either one sooner) — the same turn math criterion 7648's own
+  moduledoc documents for Animal Husbandry. `clear_all_camps/1` runs
+  once, right after founding, to protect this whole ~175-turn research
+  grind (plus the Farm/Road builds either side of it) from incidental
+  barbarian interference — the same guard `WorldServerTest`'s own
+  "start_improvement/4 resolves mine duration" describe block already
+  documents needing for a comparable research-driven wait.
   """
 
   use BrokenOathsSpex.Case
@@ -39,6 +58,7 @@ defmodule BrokenOathsSpex.Story882.Criterion7709Spex do
           for u <- Fixtures.player_units(context.world, context.user), u.type == :settler, do: u
 
         render_hook(play_live, "found_city", %{"unit_id" => settler.id})
+        :ok = clear_all_camps(context.world)
         [city] = Fixtures.player_cities(context.world, context.user)
 
         {:ok, player} = Fixtures.join_world(context.world, context.user)
@@ -69,6 +89,19 @@ defmodule BrokenOathsSpex.Story882.Criterion7709Spex do
          |> Map.put(:play_live, play_live)
          |> Map.put(:worker, worker)
          |> Map.put(:road_tile, road_tile)}
+      end
+
+      given_ "the player has researched The Wheel", context do
+        render_hook(context.play_live, "toggle_tech_panel", %{})
+        render_hook(context.play_live, "select_research", %{"tech" => "mining"})
+        for _ <- 1..55, do: Fixtures.advance_turn(context.world)
+        assert has_element?(context.play_live, "[data-test='tech-completed-mining']")
+
+        render_hook(context.play_live, "select_research", %{"tech" => "the_wheel"})
+        for _ <- 1..120, do: Fixtures.advance_turn(context.world)
+        assert has_element?(context.play_live, "[data-test='tech-completed-the_wheel']")
+
+        {:ok, context}
       end
 
       when_ "it completes a Road on a land tile", context do

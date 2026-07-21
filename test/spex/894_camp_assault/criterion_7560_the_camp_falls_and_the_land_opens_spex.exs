@@ -19,16 +19,25 @@ defmodule BrokenOathsSpex.Story894.Criterion7560Spex do
   only, narrow exception).
 
   Scope note: "reverts to normal terrain" is demonstrated here through
-  the Worker/Improvement path only (a Road is legal on any land tile —
-  `Improvement.allowed?(:road, _)` is unconditionally `true` — so it
-  needs no terrain-specific setup). Founding a *second* city on the
-  former camp hex is not separately exercised: it would additionally
-  require producing and marching a Settler, and risks tripping the
-  unrelated `:too_close` founding-distance rule (`Production.
-  validate_founding/3` requires 4+ hexes from every existing city)
-  for an in-region camp, which would fail the scenario for a reason
-  unrelated to this criterion. Both paths are gated by the same "is
-  this hex ordinary land" fact, so the Worker path stands in for both.
+  the Worker/Improvement path only. Asserts `build-farm` specifically
+  (not `build-road`, this criterion's original witness): this world's
+  own seed (424242) deterministically places the camp on flat,
+  featureless Plains, so Farm's own terrain gate
+  (`Improvement.allowed?(:farm, _)`) is satisfied with no extra setup
+  — Road stopped being a terrain-only, always-legal witness once
+  playtest issue eb5ec4f9 gated it behind The Wheel, and researching
+  that tech here would mean hundreds of extra live `advance_turn`s (no
+  `isolate_camp_for_test` guard in this scenario), reintroducing
+  exactly the barbarian-interference flakiness this criterion's own
+  "Setup-hardening" note below already went out of its way to avoid.
+  Founding a *second* city on the former camp hex is not separately
+  exercised: it would additionally require producing and marching a
+  Settler, and risks tripping the unrelated `:too_close`
+  founding-distance rule (`Production.validate_founding/3` requires
+  4+ hexes from every existing city) for an in-region camp, which
+  would fail the scenario for a reason unrelated to this criterion.
+  Both paths are gated by the same "is this hex ordinary land" fact,
+  so the Worker path stands in for both.
 
   Setup-hardening (not in the original contract): both the warrior and
   the worker used to WALK to their targets via `queue_move` + 40-turn
@@ -210,7 +219,7 @@ defmodule BrokenOathsSpex.Story894.Criterion7560Spex do
         :ok = Fixtures.relocate_unit(context.world, worker.id, context.camp.tile_id)
 
         render_hook(context.play_live, "select_unit", %{"unit_id" => worker.id})
-        assert has_element?(context.play_live, "[data-test='build-road']")
+        assert has_element?(context.play_live, "[data-test='build-farm']")
         {:ok, context}
       end
     end

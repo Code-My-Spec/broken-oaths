@@ -81,6 +81,17 @@ defmodule BrokenOaths.Cities.Improvement do
   gate `validate_improvement_terrain/4` uses for this one kind, folded
   into the research check before ever calling `persist_start_improvement!/3`.
 
+  ## The Wheel gates Road (playtest issue eb5ec4f9)
+
+  Unlike Farm/Mine, which gate purely on TERRAIN (`allowed?/2`), Road's
+  terrain check was always wide open — any `:land` tile — with no
+  research gate at all, so a worker could build a Road before ever
+  researching The Wheel. `validate_improvement_terrain/4`'s `:road`
+  clause now folds in the same research check Pasture already
+  established: the building worker's OWNER must have researched The
+  Wheel (`BrokenOaths.Technology.Research.road_enabled?/1`) before a
+  Road can start.
+
   ## Mining's 3-turn unlock (story 902)
 
   `duration/1` is the KIND's base — a hardcoded constant, same as
@@ -500,6 +511,25 @@ defmodule BrokenOaths.Cities.Improvement do
         Regions.terrain(state.world, tile_id),
         Resources.at(state.world, tile_id)
       ) ->
+        {:error, :invalid_terrain}
+
+      true ->
+        :ok
+    end
+  end
+
+  # Road (playtest issue eb5ec4f9 "players can build Roads without
+  # researching The Wheel") gates on the building worker's OWNER having
+  # researched The Wheel (`Research.road_enabled?/1`) — `allowed?/2`
+  # itself is skipped here (unlike the generic clause below) since it
+  # is unconditionally `true` for `:road`, same as Mine/Pasture's own
+  # clauses each skip it for their own tailored gate.
+  defp validate_improvement_terrain(state, tile_id, :road, player_id) do
+    cond do
+      Regions.tile_class(state.world, tile_id) != :land ->
+        {:error, :invalid_terrain}
+
+      not Research.road_enabled?(player_research_for(state, player_id)) ->
         {:error, :invalid_terrain}
 
       true ->

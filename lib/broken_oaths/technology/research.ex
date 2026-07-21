@@ -110,23 +110,23 @@ defmodule BrokenOaths.Technology.Research do
   player unlocked X" and no separate flag can ever drift out of sync
   with it.
 
-  Six techs have a real, wired unlock today: Pottery (Granary), Animal
-  Husbandry (Pasture), Mining (faster mines), Archery (the Archer, QA
-  issue da39e50b), Bronze Working (the Bronze Age itself, plus Bronze
-  units and — story 911 — revealing the Copper strategic resource),
-  and Sailing (the Galley, story 921 — see `.code_my_spec/knowledge/
-  unit_and_unlock_convention.md`, written after Sailing itself shipped
-  as the convention doc's own cautionary example: researchable, its
-  `unlock:` string already reading "Enables Galleys," but no Galley
-  anywhere in the codebase to deliver on it). The other five
-  (Astrology, Writing, Irrigation, Masonry, The Wheel) are
-  STRUCTURE-ONLY for this story: they research, bank science, complete,
-  and gate their own dependents exactly like every other tech, but the
-  content they name (the Holy Site, Library, Plantation, Walls/Quarry,
-  roads/Heavy Chariot) doesn't exist in this codebase yet and ships in
-  later stories. The Wheel in particular is the intended future gate
-  for the deferred Road worker-improvement (story 882) — it is NOT
-  wired to anything yet, on purpose.
+  Seven techs have a real, wired unlock today: Pottery (Granary),
+  Animal Husbandry (Pasture), Mining (faster mines), Archery (the
+  Archer, QA issue da39e50b), Bronze Working (the Bronze Age itself,
+  plus Bronze units and — story 911 — revealing the Copper strategic
+  resource), Sailing (the Galley, story 921 — see `.code_my_spec/
+  knowledge/unit_and_unlock_convention.md`, written after Sailing
+  itself shipped as the convention doc's own cautionary example:
+  researchable, its `unlock:` string already reading "Enables
+  Galleys," but no Galley anywhere in the codebase to deliver on it),
+  and — playtest issue eb5ec4f9 — The Wheel (the Road worker-
+  improvement, `road_enabled?/1`; the Heavy Chariot it also names
+  remains unwired). The other four (Astrology, Writing, Irrigation,
+  Masonry) are STRUCTURE-ONLY for this story: they research, bank
+  science, complete, and gate their own dependents exactly like every
+  other tech, but the content they name (the Holy Site, Library,
+  Plantation, Walls/Quarry) doesn't exist in this codebase yet and
+  ships in later stories.
   """
 
   @type tech ::
@@ -506,6 +506,16 @@ defmodule BrokenOaths.Technology.Research do
   """
   @spec pasture_enabled?(player_research()) :: boolean()
   def pasture_enabled?(player_research), do: completed?(player_research, :animal_husbandry)
+
+  @doc """
+  The Wheel's unlock (playtest issue eb5ec4f9 "players can build Roads
+  without researching The Wheel"): whether the Road improvement is
+  buildable. `Improvement.validate_improvement_terrain/4`'s `:road`
+  clause reads this the same "research check folds into the terrain
+  gate" seam `pasture_enabled?/1` already established for Pasture.
+  """
+  @spec road_enabled?(player_research()) :: boolean()
+  def road_enabled?(player_research), do: completed?(player_research, :the_wheel)
 
   @doc """
   Archery's unlock (QA issue da39e50b "No archer"): whether the Archer

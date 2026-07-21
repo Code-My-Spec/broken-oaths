@@ -592,6 +592,54 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
     end
   end
 
+  # Playtest issue eb5ec4f9 "players can build Roads without researching
+  # The Wheel" — `start_improvement/4`'s `:road` clause now refuses
+  # exactly like Pasture's own research gate does (same `{:error,
+  # :invalid_terrain}` shape `Improvement.validate_improvement_terrain/4`
+  # already returns for Pasture before Animal Husbandry).
+  describe "start_improvement/4 gates :road on The Wheel (playtest issue eb5ec4f9)" do
+    test "refuses a Road before The Wheel is researched" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+      :ok = Game.isolate_camp_for_test(world, -1)
+
+      hills_tile = hills_tile(world)
+      worker = Game.spawn_unit_for_test(world, player.id, :worker, hills_tile)
+
+      assert {:error, :invalid_terrain} = Game.start_improvement(world, user, worker.id, "road")
+      refute Enum.any?(Game.improvements_visible_to(world, user), &(&1.tile_id == hills_tile))
+
+      WorldServer.restart(world)
+    end
+
+    test "allows a Road once the building worker's owner has completed The Wheel" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+      :ok = Game.isolate_camp_for_test(world, -1)
+      research_the_wheel(world, user)
+
+      hills_tile = hills_tile(world)
+      worker = Game.spawn_unit_for_test(world, player.id, :worker, hills_tile)
+
+      assert :ok = Game.start_improvement(world, user, worker.id, "road")
+
+      assert Enum.any?(
+               Game.improvements_visible_to(world, user),
+               &(&1.tile_id == hills_tile and &1.kind == :road and &1.status == :building)
+             )
+
+      WorldServer.restart(world)
+    end
+  end
+
   # QA issue 1c47edff "Granary confusion" — `has_granary` never reached
   # `Game.player_cities/2`'s map at all, so the built Granary had no way
   # to surface anywhere in the UI even though it was already banking its
@@ -646,6 +694,8 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
 
       [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
       :ok = Game.found_city(world, user, settler.id)
+      :ok = Game.isolate_camp_for_test(world, -1)
+      research_the_wheel(world, user)
 
       hills_tile = hills_tile(world)
       worker = Game.spawn_unit_for_test(world, player.id, :worker, hills_tile)
@@ -671,6 +721,8 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
 
       [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
       :ok = Game.found_city(world, user, settler.id)
+      :ok = Game.isolate_camp_for_test(world, -1)
+      research_the_wheel(world, user)
 
       hills_tile = hills_tile(world)
       worker = Game.spawn_unit_for_test(world, player.id, :worker, hills_tile)
@@ -795,6 +847,7 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
       [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
       :ok = Game.found_city(world, user, settler.id)
       :ok = Game.isolate_camp_for_test(world, -1)
+      research_the_wheel(world, user)
 
       hills_tile = hills_tile(world)
       worker = Game.spawn_unit_for_test(world, player.id, :worker, hills_tile)
@@ -846,6 +899,7 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
       [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
       :ok = Game.found_city(world, user, settler.id)
       :ok = Game.isolate_camp_for_test(world, -1)
+      research_the_wheel(world, user)
 
       [farm_tile] = farmable_tiles(world, 1)
       worker = Game.spawn_unit_for_test(world, player.id, :worker, farm_tile)
@@ -885,6 +939,7 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
       [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
       :ok = Game.found_city(world, user, settler.id)
       :ok = Game.isolate_camp_for_test(world, -1)
+      research_the_wheel(world, user)
 
       hills_tile = hills_tile(world)
       miner = Game.spawn_unit_for_test(world, player.id, :worker, hills_tile)
@@ -1011,8 +1066,12 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
     )
   end
 
+  # 130-turn cap — enough for The Wheel's own 240-cost/2-per-turn 120
+  # turns (below), the priciest research any caller here drives to
+  # completion; Mining (110) and Pottery (80) both finish well short of
+  # it, same as before this cap was raised.
   defp complete_current_research(world, user) do
-    Enum.reduce_while(1..60, :ok, fn _, :ok ->
+    Enum.reduce_while(1..130, :ok, fn _, :ok ->
       if Game.player_research(world, user).current_research == nil do
         {:halt, :ok}
       else
@@ -1020,5 +1079,19 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
         {:cont, :ok}
       end
     end)
+  end
+
+  # Playtest issue eb5ec4f9 — The Wheel now gates Road
+  # (`Improvement.validate_improvement_terrain/4`'s `:road` clause), and
+  # The Wheel itself requires Mining first (`Research.prereqs(:the_wheel)
+  # == [:mining]`), so any test that wants to actually START a Road has
+  # to clear both, in order, same two-step research chain the mine-
+  # duration describe block above already drives for Mining alone.
+  defp research_the_wheel(world, user) do
+    :ok = Game.set_research(world, user, :mining)
+    complete_current_research(world, user)
+    :ok = Game.set_research(world, user, :the_wheel)
+    complete_current_research(world, user)
+    assert :the_wheel in Game.player_research(world, user).completed_techs
   end
 end
