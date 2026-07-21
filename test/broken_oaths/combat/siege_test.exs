@@ -1,5 +1,13 @@
 defmodule BrokenOaths.Combat.SiegeTest do
-  use ExUnit.Case, async: true
+  # `BrokenOathsTest.DataCase` (not plain `ExUnit.Case`): the new
+  # "Archer melee/ranged strength split" describe block below drives a
+  # REAL `attack_city/4` exchange (not just its refusal paths, which is
+  # all this file exercised before), which reaches `ProtectionPact.
+  # maybe_raise_protection_call/3` — a real (if empty) Repo query needs
+  # a sandboxed connection and a non-nil `world.id`, the same reason
+  # `ResolverTest` (this same combat/ test directory) already uses
+  # `DataCase` for its own `shoot/4` tests.
+  use BrokenOathsTest.DataCase, async: true
 
   alias BrokenOaths.Combat.CityDefense
   alias BrokenOaths.Combat.Resolver
@@ -9,8 +17,12 @@ defmodule BrokenOaths.Combat.SiegeTest do
 
   @frequency 8
   @seed 424_242
+  # An arbitrary, never-persisted world id — same trick `ResolverTest`
+  # uses: `ProtectionPact.maybe_raise_protection_call/3`'s own query
+  # just needs a non-nil `world_id` to compare against.
+  @world_id 999_999_999
 
-  defp world, do: %World{seed: @seed, frequency: @frequency}
+  defp world, do: %World{id: @world_id, seed: @seed, frequency: @frequency}
 
   # A tile at EXACTLY `distance` raw mesh-adjacency hops from `from` —
   # same growing-ring BFS `ResolverTest`/`CampsTest` already use.
@@ -239,7 +251,10 @@ defmodule BrokenOaths.Combat.SiegeTest do
       besieger_b = unit(11, tile: 6, player_id: 1)
 
       {cities, events} =
-        Siege.materialize_captures(%{1 => city_a, 2 => city_b}, %{10 => besieger_a, 11 => besieger_b})
+        Siege.materialize_captures(%{1 => city_a, 2 => city_b}, %{
+          10 => besieger_a,
+          11 => besieger_b
+        })
 
       assert cities[1].occupied_by_player_id == 1
       assert cities[2].occupied_by_player_id == 1
@@ -303,10 +318,11 @@ defmodule BrokenOaths.Combat.SiegeTest do
       defender_a = unit(1, type: :warrior, tile: 5, player_id: 2)
       defender_b = unit(4, type: :lord, tile: 5, player_id: 2)
 
-      assert Siege.resolve_garrison_fate(:execute, c, [defender_a, defender_b]) |> Enum.sort() == [
-               1,
-               4
-             ]
+      assert Siege.resolve_garrison_fate(:execute, c, [defender_a, defender_b]) |> Enum.sort() ==
+               [
+                 1,
+                 4
+               ]
     end
 
     test "resolve_garrison_fate/3 with :execute never reports a civilian sheltering on the tile" do
@@ -338,7 +354,8 @@ defmodule BrokenOaths.Combat.SiegeTest do
       defender_b = unit(4, type: :lord, tile: 5, player_id: 2)
       conqueror_unit = unit(99, type: :lord, tile: 5, player_id: 7)
 
-      to_remove = Siege.resolve_garrison_fate(:execute, c, [defender_a, defender_b, conqueror_unit])
+      to_remove =
+        Siege.resolve_garrison_fate(:execute, c, [defender_a, defender_b, conqueror_unit])
 
       assert Enum.sort(to_remove) == [1, 4]
       refute 99 in to_remove
@@ -356,9 +373,12 @@ defmodule BrokenOaths.Combat.SiegeTest do
   describe "execute_garrison_honor_penalty/0 and apply_execute_honor_penalty/1" do
     test "executing costs a small, fixed Honor penalty" do
       assert Siege.execute_garrison_honor_penalty() > 0
-      assert Siege.apply_execute_honor_penalty(100) == 100 - Siege.execute_garrison_honor_penalty()
+
+      assert Siege.apply_execute_honor_penalty(100) ==
+               100 - Siege.execute_garrison_honor_penalty()
     end
   end
+
   # -------------------------------------------------------------------
   # Ranged city assault (QA issue 12bed1e4 "Archers don't have a shoot
   # action") — the Archer's own `shoot_city/4`. Only the VALIDATION
@@ -379,7 +399,19 @@ defmodule BrokenOaths.Combat.SiegeTest do
     end
 
     defp shoot_state(units, cities) do
-      %{world: world(), turn: 0, units: units, cities: cities, players: %{1 => %{id: 1, user_id: 1}}}
+      %{
+        world: world(),
+        turn: 0,
+        units: units,
+        cities: cities,
+        # Player 2 (the target city's own owner in the tests below that
+        # actually reach `attack_city/4`'s `owner_user_id/2` alert
+        # lookup) alongside the attacker's own player 1 — every earlier
+        # test in this describe block only ever reaches a refusal
+        # before that lookup runs, so this is a strict addition, not a
+        # behavior change for them.
+        players: %{1 => %{id: 1, user_id: 1}, 2 => %{id: 2, user_id: 2}}
+      }
     end
 
     test "refuses any non-Archer attacker" do
@@ -443,6 +475,65 @@ defmodule BrokenOaths.Combat.SiegeTest do
       st = shoot_state(%{1 => archer}, %{})
 
       assert Siege.shoot_city(st, %{id: 1}, 1, 999) == {:error, :invalid_target}
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Melee/ranged strength split (playtest issue 0edd8679 "Archer too
+  # strong") — closes the scope note from the original unit-vs-unit
+  # fix: `attack_city/4` (melee) and `shoot_city/4` (ranged) now source
+  # DIFFERENT strengths for the same Archer, exactly like `Resolver.
+  # attack/4`/`shoot/4` already do against a unit target.
+  # -------------------------------------------------------------------
+
+  describe "attack_city/4 vs shoot_city/4 — Archer melee/ranged strength split" do
+    setup do
+      original = Application.get_env(:broken_oaths, :feudal_enabled)
+      on_exit(fn -> Application.put_env(:broken_oaths, :feudal_enabled, original) end)
+      Application.put_env(:broken_oaths, :feudal_enabled, true)
+      :ok
+    end
+
+    # Distance 1 is both adjacent (melee-legal) and within
+    # `Resolver.shoot_range/0` (2), so the SAME starting `st` — same
+    # world seed/turn/attacker id/city id, hence the SAME damage roll
+    # (`resolve_city_attack/4`'s own seed tuple) — isolates the
+    # strength split as the only variable between the two calls.
+    test "the SAME Archer deals more damage shooting a city than meleeing it — ranged (14) beats melee (7)" do
+      target_tile = tile_at_distance(0, 1)
+      archer = unit(1, type: :archer, tile: 0, player_id: 1)
+      target_city = city(10, tile: target_tile, player_id: 2, hp: 1000)
+      st = shoot_state(%{1 => archer}, %{10 => target_city})
+
+      assert {:ok, %{damage_dealt: melee_dealt}, _melee_state, _alert} =
+               Siege.attack_city(st, %{id: 1}, 1, 10)
+
+      assert {:ok, %{damage_dealt: ranged_dealt}, _ranged_state, _alert2} =
+               Siege.shoot_city(st, %{id: 1}, 1, 10)
+
+      assert ranged_dealt > melee_dealt
+    end
+
+    test "an Archer's own melee siege damage now sits below a Warrior's — it lost the melee strength lead it never should have had" do
+      target_tile = tile_at_distance(0, 1)
+      # Both units are `player_id: 1` (`shoot_state/2`'s own single
+      # `Player` row) — each resolved against its OWN fresh state, so
+      # they never actually meet on the board; only the attacker's own
+      # type differs between the two calls.
+      archer = unit(1, type: :archer, tile: 0, player_id: 1)
+      warrior = unit(1, type: :warrior, tile: 0, player_id: 1)
+      target_city = city(10, tile: target_tile, player_id: 2, hp: 1000)
+
+      archer_state = shoot_state(%{1 => archer}, %{10 => target_city})
+      warrior_state = shoot_state(%{1 => warrior}, %{10 => target_city})
+
+      assert {:ok, %{damage_dealt: archer_dealt}, _s1, _a1} =
+               Siege.attack_city(archer_state, %{id: 1}, 1, 10)
+
+      assert {:ok, %{damage_dealt: warrior_dealt}, _s2, _a2} =
+               Siege.attack_city(warrior_state, %{id: 1}, 1, 10)
+
+      assert archer_dealt < warrior_dealt
     end
   end
 end

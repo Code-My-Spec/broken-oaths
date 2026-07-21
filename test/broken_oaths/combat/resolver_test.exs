@@ -50,10 +50,14 @@ defmodule BrokenOaths.Combat.ResolverTest do
   # matching `Player` row, keyed AND `user_id`'d identically, mirroring
   # `find_player/2`'s own "match on `user_id`" lookup.
   defp state(units, opts \\ []) do
-    player_ids = units |> Map.values() |> Enum.map(& &1.player_id) |> Enum.reject(&is_nil/1) |> Enum.uniq()
+    player_ids =
+      units |> Map.values() |> Enum.map(& &1.player_id) |> Enum.reject(&is_nil/1) |> Enum.uniq()
 
     players =
-      Map.new(player_ids, &{&1, %{id: &1, user_id: &1, region_id: 0, gold: 50, barbarians_killed: 0}})
+      Map.new(
+        player_ids,
+        &{&1, %{id: &1, user_id: &1, region_id: 0, gold: 50, barbarians_killed: 0}}
+      )
 
     %{
       world: world(),
@@ -106,16 +110,29 @@ defmodule BrokenOaths.Combat.ResolverTest do
       assert Resolver.base_strength(:bronze_spearman) == 16
     end
 
-    # QA issue da39e50b "No archer" — a first-pass MELEE unit (this
-    # engine has no ranged-attack model), strength 14: above the
-    # Warrior (10), below the Bronze Spearman (16).
-    test "the Archer (QA issue da39e50b) sits between the Warrior and the Bronze Spearman" do
-      assert Resolver.base_strength(:archer) == 14
+    # Playtest issue 0edd8679 "Archer too strong" — melee/defense
+    # strength drops to 7, clearly BELOW the Warrior (10): a Warrior now
+    # wins a head-on fight and an Archer caught in melee dies easily,
+    # matching Civ 6. The Archer's old 14 lives on as its RANGED-only
+    # strength (`ranged_strength/1`, below).
+    test "the Archer (playtest issue 0edd8679) sits below the Warrior in melee/defense" do
+      assert Resolver.base_strength(:archer) == 7
+      assert Resolver.base_strength(:archer) < Resolver.base_strength(:warrior)
     end
 
     # Story 921 — the Galley: same as the Lord's own 12.
     test "the Galley (story 921) matches the Lord's own base strength" do
       assert Resolver.base_strength(:galley) == 12
+    end
+  end
+
+  describe "ranged_strength/1" do
+    # Playtest issue 0edd8679 — the Archer's OLD single strength (14),
+    # repurposed as a ranged-only figure once melee/defense dropped to
+    # 7. Above the Warrior (10), unlike the Archer's own melee number.
+    test "the Archer's ranged strength is its old 14 — above the Warrior" do
+      assert Resolver.ranged_strength(:archer) == 14
+      assert Resolver.ranged_strength(:archer) > Resolver.base_strength(:warrior)
     end
   end
 
@@ -344,10 +361,10 @@ defmodule BrokenOaths.Combat.ResolverTest do
     end
   end
 
-  describe "resolve/3 — Archer vs Barbarian Warrior (QA issue da39e50b, melee-for-now)" do
-    test "an Archer (14) always lands within its own asymmetric band against a Barbarian Warrior (15)" do
-      {lo, hi} = expected_band(14, 15)
-      {counter_lo, counter_hi} = expected_band(15, 14)
+  describe "resolve/3 — Archer vs Barbarian Warrior, plain melee (no ranged? opt)" do
+    test "an Archer (7) always lands within its own asymmetric band against a Barbarian Warrior (15)" do
+      {lo, hi} = expected_band(7, 15)
+      {counter_lo, counter_hi} = expected_band(15, 7)
 
       archer = unit(1, type: :archer, hp: 100, max_hp: 100)
       barbarian = unit(2, type: :barbarian_warrior, hp: 120, max_hp: 120, player_id: nil)
@@ -370,6 +387,54 @@ defmodule BrokenOaths.Combat.ResolverTest do
 
       assert dealt > 0
       assert taken > 0
+    end
+  end
+
+  describe "resolve/3 — Warrior vs Archer, melee (playtest issue 0edd8679 \"Archer too strong\")" do
+    test "a Warrior (10) always lands within its own asymmetric band against an Archer (7) in melee" do
+      {lo, hi} = expected_band(10, 7)
+      {counter_lo, counter_hi} = expected_band(7, 10)
+
+      warrior = unit(1, type: :warrior, hp: 100, max_hp: 100)
+      archer = unit(2, type: :archer, hp: 100, max_hp: 100, player_id: 2)
+
+      for seed <- 1..100 do
+        %{damage_to_defender: dealt, damage_to_attacker: taken} =
+          Resolver.resolve(warrior, archer, seed: {:warrior_vs_archer_melee, seed})
+
+        assert dealt in lo..hi
+        assert taken in counter_lo..counter_hi
+      end
+    end
+
+    test "the Warrior's expected damage output exceeds the Archer's, on average, across a wide sample — the Warrior wins a head-on melee fight, as in Civ 6" do
+      warrior = unit(1, type: :warrior, hp: 100, max_hp: 100)
+      archer = unit(2, type: :archer, hp: 100, max_hp: 100, player_id: 2)
+
+      {dealt_total, taken_total} =
+        Enum.reduce(1..200, {0, 0}, fn seed, {dealt_acc, taken_acc} ->
+          %{damage_to_defender: dealt, damage_to_attacker: taken} =
+            Resolver.resolve(warrior, archer, seed: {:warrior_vs_archer_avg, seed})
+
+          {dealt_acc + dealt, taken_acc + taken}
+        end)
+
+      assert dealt_total > taken_total
+    end
+
+    test "an Archer that instead attacks a Warrior in melee fares just as badly, on average — its own weak strength applies whichever side it's on" do
+      archer = unit(1, type: :archer, hp: 100, max_hp: 100)
+      warrior = unit(2, type: :warrior, hp: 100, max_hp: 100, player_id: 2)
+
+      {dealt_total, taken_total} =
+        Enum.reduce(1..200, {0, 0}, fn seed, {dealt_acc, taken_acc} ->
+          %{damage_to_defender: dealt, damage_to_attacker: taken} =
+            Resolver.resolve(archer, warrior, seed: {:archer_attacks_warrior_avg, seed})
+
+          {dealt_acc + dealt, taken_acc + taken}
+        end)
+
+      assert taken_total > dealt_total
     end
   end
 
@@ -415,7 +480,7 @@ defmodule BrokenOaths.Combat.ResolverTest do
     end
   end
 
-  describe "camp_damage/2" do
+  describe "camp_damage/3" do
     test "a strength-10 Warrior deals 10 flat damage, no roll" do
       assert Resolver.camp_damage(unit(1, type: :warrior, hp: 100, max_hp: 100)) == 10
     end
@@ -431,6 +496,33 @@ defmodule BrokenOaths.Combat.ResolverTest do
 
     test "the lord's aura raises camp damage the same way it raises combat strength" do
       assert Resolver.camp_damage(unit(1, type: :warrior, hp: 100, max_hp: 100), true) == 12
+    end
+
+    # Playtest issue 0edd8679 — an Archer's MELEE camp assault (the
+    # default `ranged?: false`, `attack_camp/4`'s own path) uses its
+    # weak 7, same as any other unit's own `base_strength/1`; a RANGED
+    # shot (`ranged?: true`, `shoot_camp/4`'s own path) uses the strong
+    # 14 instead.
+    test "an Archer's melee camp damage uses its weak base strength (7)" do
+      archer = unit(1, type: :archer, hp: 100, max_hp: 100)
+      assert Resolver.camp_damage(archer) == 7
+      assert Resolver.camp_damage(archer, false, false) == 7
+    end
+
+    test "an Archer's ranged camp damage uses its strong ranged strength (14)" do
+      archer = unit(1, type: :archer, hp: 100, max_hp: 100)
+      assert Resolver.camp_damage(archer, false, true) == 14
+    end
+
+    # `shoot_camp/4`'s own `:not_archer` gate means `ranged?: true` is
+    # never actually passed for anything but an Archer in practice — if
+    # it somehow were, `@ranged_strength` has no entry to look up
+    # (nothing else can shoot), so this fails loudly rather than
+    # silently falling back to some other number.
+    test "a non-Archer passed ranged?: true raises — nothing else has a ranged strength" do
+      warrior = unit(1, type: :warrior, hp: 100, max_hp: 100)
+
+      assert_raise KeyError, fn -> Resolver.camp_damage(warrior, false, true) end
     end
   end
 
@@ -483,6 +575,7 @@ defmodule BrokenOaths.Combat.ResolverTest do
       assert Resolver.validate_attack(a, d, [2]) == :ok
     end
   end
+
   # -------------------------------------------------------------------
   # Ranged (QA issue 12bed1e4 "Archers don't have a shoot action")
   # -------------------------------------------------------------------
@@ -528,7 +621,16 @@ defmodule BrokenOaths.Combat.ResolverTest do
     test "an in-range Archer hits a barbarian without taking any counter-blow" do
       target_tile = tile_at_distance(0, 2)
       archer = unit(1, type: :archer, tile_id: 0, player_id: 1, hp: 100, max_hp: 100)
-      barbarian = unit(2, type: :barbarian_warrior, tile_id: target_tile, player_id: nil, hp: 100, max_hp: 100)
+
+      barbarian =
+        unit(2,
+          type: :barbarian_warrior,
+          tile_id: target_tile,
+          player_id: nil,
+          hp: 100,
+          max_hp: 100
+        )
+
       st = state(%{1 => archer, 2 => barbarian})
 
       assert {:ok, %{damage_dealt: dealt, damage_taken: taken}, new_state} =
@@ -542,6 +644,34 @@ defmodule BrokenOaths.Combat.ResolverTest do
       assert new_state.units[1].hp == 100
       assert new_state.units[1].movement == 0
       assert new_state.units[2].hp == 100 - dealt
+    end
+
+    # Playtest issue 0edd8679 — the melee/defense split (base_strength
+    # 7) must NOT weaken the Archer's own shot: `shoot/4` still fires at
+    # `ranged_strength/1`'s 14, a strong hit above the Warrior (10), and
+    # still takes zero counter — this is the whole reason the split
+    # exists rather than a flat nerf to `@base_strength`.
+    test "an Archer's shot still deals strong damage at its ranged strength (14), with zero counter" do
+      {lo, hi} = expected_band(14, 15)
+
+      archer = unit(1, type: :archer, tile_id: 0, player_id: 1, hp: 100, max_hp: 100)
+
+      barbarian =
+        unit(2,
+          type: :barbarian_warrior,
+          tile_id: tile_at_distance(0, 2),
+          player_id: nil,
+          hp: 120,
+          max_hp: 120
+        )
+
+      st = state(%{1 => archer, 2 => barbarian})
+
+      assert {:ok, %{damage_dealt: dealt, damage_taken: taken}, _new_state} =
+               Resolver.shoot(st, %{id: 1}, 1, 2)
+
+      assert dealt in lo..hi
+      assert taken == 0
     end
 
     test "adjacent (1 hex) is still in range — shoot doesn't require standing off at max range" do

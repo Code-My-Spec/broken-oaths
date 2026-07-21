@@ -26,7 +26,14 @@ defmodule BrokenOaths.Combat.CampsTest do
       {home, city_tile} = home_region_and_city_tile()
 
       tiles =
-        Camps.place_wilderness(world(), city_tile, home, MapSet.new(), MapSet.new(), {@seed, city_tile})
+        Camps.place_wilderness(
+          world(),
+          city_tile,
+          home,
+          MapSet.new(),
+          MapSet.new(),
+          {@seed, city_tile}
+        )
 
       near = Enum.filter(tiles, &MapSet.member?(home, &1))
       far = Enum.reject(tiles, &MapSet.member?(home, &1))
@@ -58,7 +65,14 @@ defmodule BrokenOaths.Combat.CampsTest do
       {home, city_tile} = home_region_and_city_tile()
 
       tiles =
-        Camps.place_wilderness(world(), city_tile, home, MapSet.new(), MapSet.new(), {@seed, city_tile})
+        Camps.place_wilderness(
+          world(),
+          city_tile,
+          home,
+          MapSet.new(),
+          MapSet.new(),
+          {@seed, city_tile}
+        )
 
       far = Enum.reject(tiles, &MapSet.member?(home, &1))
 
@@ -75,7 +89,14 @@ defmodule BrokenOaths.Combat.CampsTest do
       {home, city_tile} = home_region_and_city_tile()
 
       tiles =
-        Camps.place_wilderness(world(), city_tile, home, MapSet.new(), MapSet.new(), {@seed, city_tile})
+        Camps.place_wilderness(
+          world(),
+          city_tile,
+          home,
+          MapSet.new(),
+          MapSet.new(),
+          {@seed, city_tile}
+        )
 
       refute city_tile in tiles
     end
@@ -99,7 +120,14 @@ defmodule BrokenOaths.Combat.CampsTest do
       occupied = home |> Enum.take(50) |> MapSet.new()
 
       tiles =
-        Camps.place_wilderness(world(), city_tile, home, MapSet.new(), occupied, {@seed, city_tile})
+        Camps.place_wilderness(
+          world(),
+          city_tile,
+          home,
+          MapSet.new(),
+          occupied,
+          {@seed, city_tile}
+        )
 
       assert Enum.all?(tiles, &(&1 not in occupied))
     end
@@ -117,8 +145,25 @@ defmodule BrokenOaths.Combat.CampsTest do
     test "different seeds can yield different placements" do
       {home, city_tile} = home_region_and_city_tile()
 
-      a = Camps.place_wilderness(world(), city_tile, home, MapSet.new(), MapSet.new(), {@seed, city_tile})
-      b = Camps.place_wilderness(world(), city_tile, home, MapSet.new(), MapSet.new(), {@seed, :other})
+      a =
+        Camps.place_wilderness(
+          world(),
+          city_tile,
+          home,
+          MapSet.new(),
+          MapSet.new(),
+          {@seed, city_tile}
+        )
+
+      b =
+        Camps.place_wilderness(
+          world(),
+          city_tile,
+          home,
+          MapSet.new(),
+          MapSet.new(),
+          {@seed, :other}
+        )
 
       refute a == b
     end
@@ -243,7 +288,7 @@ defmodule BrokenOaths.Combat.CampsTest do
   end
 
   describe "shoot_camp/4" do
-    test "an in-range Archer hits a camp with flat, no-counter damage — same as attack_camp/4" do
+    test "an in-range Archer hits a camp with flat, no-counter damage — same SHAPE as attack_camp/4 (the amount now differs, playtest issue 0edd8679)" do
       target_tile = tile_at_distance(0, 2)
       archer = unit(1, tile: 0, type: :archer, player_id: 1)
       target_camp = camp(%{id: 10, tile_id: target_tile, hp: 100})
@@ -278,7 +323,10 @@ defmodule BrokenOaths.Combat.CampsTest do
     test "refuses an already-destroyed camp — same :invalid_target attack_camp/4 uses" do
       target_tile = tile_at_distance(0, 1)
       archer = unit(1, tile: 0, type: :archer, player_id: 1)
-      destroyed_camp = camp(%{id: 10, tile_id: target_tile, hp: 0, destroyed_at: ~N[2026-01-01 00:00:00]})
+
+      destroyed_camp =
+        camp(%{id: 10, tile_id: target_tile, hp: 0, destroyed_at: ~N[2026-01-01 00:00:00]})
+
       st = state(%{1 => archer}, %{10 => destroyed_camp})
 
       assert Camps.shoot_camp(st, %{id: 1}, 1, 10) == {:error, :invalid_target}
@@ -291,6 +339,50 @@ defmodule BrokenOaths.Combat.CampsTest do
       st = state(%{1 => archer}, %{10 => target_camp})
 
       assert Camps.shoot_camp(st, %{id: 1}, 1, 10) == {:error, :out_of_movement}
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Melee/ranged strength split (playtest issue 0edd8679 "Archer too
+  # strong") — closes the scope note from the original unit-vs-unit
+  # fix: `attack_camp/4` (melee) and `shoot_camp/4` (ranged) now source
+  # DIFFERENT strengths for the same Archer, exactly like `Resolver.
+  # attack/4`/`shoot/4` already do against a unit target.
+  # -------------------------------------------------------------------
+
+  describe "attack_camp/4 vs shoot_camp/4 — Archer melee/ranged strength split" do
+    test "an Archer's melee attack_camp deals its weak base strength (7) worth of damage" do
+      target_tile = tile_at_distance(0, 1)
+      archer = unit(1, tile: 0, type: :archer, player_id: 1)
+      target_camp = camp(%{id: 10, tile_id: target_tile, hp: 100})
+      st = state(%{1 => archer}, %{10 => target_camp})
+
+      assert {:ok, %{damage_dealt: 7, damage_taken: 0}, new_state} =
+               Camps.attack_camp(st, %{id: 1}, 1, 10)
+
+      assert new_state.camps[10].hp == 93
+    end
+
+    test "the SAME Archer's ranged shoot_camp deals its strong ranged strength (14) worth of damage instead" do
+      target_tile = tile_at_distance(0, 2)
+      archer = unit(1, tile: 0, type: :archer, player_id: 1)
+      target_camp = camp(%{id: 10, tile_id: target_tile, hp: 100})
+      st = state(%{1 => archer}, %{10 => target_camp})
+
+      assert {:ok, %{damage_dealt: 14, damage_taken: 0}, new_state} =
+               Camps.shoot_camp(st, %{id: 1}, 1, 10)
+
+      assert new_state.camps[10].hp == 86
+    end
+
+    test "a Warrior's melee camp damage is unaffected — only the Archer's own base strength changed" do
+      target_tile = tile_at_distance(0, 1)
+      warrior = unit(1, tile: 0, type: :warrior, player_id: 1)
+      target_camp = camp(%{id: 10, tile_id: target_tile, hp: 100})
+      st = state(%{1 => warrior}, %{10 => target_camp})
+
+      assert {:ok, %{damage_dealt: 10, damage_taken: 0}, _new_state} =
+               Camps.attack_camp(st, %{id: 1}, 1, 10)
     end
   end
 end

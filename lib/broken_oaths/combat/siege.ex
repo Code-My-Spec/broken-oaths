@@ -385,7 +385,10 @@ defmodule BrokenOaths.Combat.Siege do
   # shape `Resolver.resolve_attack/4`'s own `ranged?: true` opt uses for
   # a unit target, so a ranged siege still resolves through the exact
   # `CityDefense.resolve_attack/4` curve `attack_city/4` uses, never a
-  # second, drifting damage calculation.
+  # second, drifting damage calculation. Threaded straight through as
+  # `CityDefense.resolve_attack/4`'s own `:ranged?` opt too (playtest
+  # issue 0edd8679) — an Archer's shot swaps onto its ranged strength
+  # for the SAME exchange, not just the zeroed counter.
   defp resolve_city_attack(state, attacker, city, opts \\ []) do
     seed = {state.world.seed, state.turn, attacker.id, city.id}
     units = Map.values(state.units)
@@ -394,6 +397,7 @@ defmodule BrokenOaths.Combat.Siege do
     %{damage_to_city: dealt, damage_to_barbarian: countered} =
       CityDefense.resolve_attack(city, units, attacker,
         seed: seed,
+        ranged?: ranged?,
         attacker_aura?: lord_adjacent?(state, attacker)
       )
 
@@ -479,9 +483,15 @@ defmodule BrokenOaths.Combat.Siege do
 
   defp validate_shoot_city(attacker, city, world) do
     cond do
-      attacker.type != :archer -> {:error, :not_archer}
-      attacker.movement <= 0 -> {:error, :out_of_movement}
-      attacker.player_id == city.player_id -> {:error, :own_city}
+      attacker.type != :archer ->
+        {:error, :not_archer}
+
+      attacker.movement <= 0 ->
+        {:error, :out_of_movement}
+
+      attacker.player_id == city.player_id ->
+        {:error, :own_city}
+
       not Resolver.in_shoot_range?(world, attacker.tile_id, city.tile_id) ->
         {:error, :out_of_range}
 

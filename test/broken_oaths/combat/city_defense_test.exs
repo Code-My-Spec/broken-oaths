@@ -229,6 +229,38 @@ defmodule BrokenOaths.Combat.CityDefenseTest do
       b = CityDefense.resolve_attack(c, [warrior], barbarian, seed: {:pin, 42})
       assert a == b
     end
+
+    # Playtest issue 0edd8679 — `:ranged?` swaps an Archer ATTACKER onto
+    # `Resolver.ranged_strength/1` (14) instead of `Resolver.
+    # base_strength/1` (7); an undefended city takes no counter either
+    # way, so this is the cleanest place to see the strength jump on
+    # `damage_to_city` alone. `BrokenOaths.Combat.Siege.shoot_city/4` is
+    # the only real caller that ever passes `ranged?: true`.
+    test "ranged?: true deals more damage to the city than melee — the Archer's own strength split" do
+      c = city(1, size: 1, tile: 10, hp: 1000)
+      archer = unit(1, type: :archer, tile: 11)
+
+      melee = CityDefense.resolve_attack(c, [], archer, seed: {:archer_siege, 1})
+      ranged = CityDefense.resolve_attack(c, [], archer, seed: {:archer_siege, 1}, ranged?: true)
+
+      assert ranged.damage_to_city > melee.damage_to_city
+    end
+
+    # `BrokenOaths.Simulation.Turn.BarbarianPhase`'s own call never
+    # passes `:ranged?` at all — confirms the default keeps a
+    # barbarian's melee siege damage byte-for-byte identical to before
+    # this opt existed.
+    test "omitting :ranged? (every barbarian call) behaves exactly like ranged?: false" do
+      c = city(1, size: 1, tile: 10, hp: 1000)
+      barbarian = unit(1, player_id: nil, type: :barbarian_warrior, tile: 11)
+
+      default = CityDefense.resolve_attack(c, [], barbarian, seed: {:barbarian_siege, 1})
+
+      explicit =
+        CityDefense.resolve_attack(c, [], barbarian, seed: {:barbarian_siege, 1}, ranged?: false)
+
+      assert default == explicit
+    end
   end
 
   describe "validate_attack/3" do

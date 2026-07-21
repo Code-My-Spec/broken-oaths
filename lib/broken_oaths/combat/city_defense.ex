@@ -229,14 +229,30 @@ defmodule BrokenOaths.Combat.CityDefense do
     * `:seed` — any term; rolls are deterministic for a given seed
     * `:attacker_aura?` — whether `attacker` stands adjacent to its own
       living lord (default `false`)
+    * `:ranged?` — playtest issue 0edd8679, default `false`: when
+      `true` (`BrokenOaths.Combat.Siege.shoot_city/4`'s own Archer
+      shot), `attacker`'s own strength comes from `Resolver.
+      ranged_strength/1` instead of `Resolver.base_strength/1` — the
+      SAME attacker-side-only switch `Resolver.combat_strength/3` uses
+      for a unit target. `BrokenOaths.Simulation.Turn.BarbarianPhase`'s
+      own barbarian-vs-city call never passes this (barbarians can't
+      shoot), so that path is untouched.
   """
   @spec resolve_attack(city(), [unit()], unit(), keyword()) :: attack_result()
   def resolve_attack(city, units, attacker, opts) do
     seed = Keyword.fetch!(opts, :seed)
     attacker_aura? = Keyword.get(opts, :attacker_aura?, false)
+    ranged? = Keyword.get(opts, :ranged?, false)
+
+    attacker_strength_value =
+      if ranged?,
+        do: Resolver.ranged_strength(attacker.type),
+        else: Resolver.base_strength(attacker.type)
 
     resisting_strength = defensive_strength(city, units)
-    striking_strength = Resolver.effective_strength(attacker, attacker_aura?)
+
+    striking_strength =
+      Resolver.effective_strength(attacker, attacker_aura?, false, attacker_strength_value)
 
     damage_to_city =
       min(Resolver.damage(striking_strength, resisting_strength, {seed, :to_city}), city.hp)
@@ -247,7 +263,9 @@ defmodule BrokenOaths.Combat.CityDefense do
 
       defender ->
         counter_strength = Resolver.garrisoned_strength(defender)
-        attacker_strength = Resolver.effective_strength(attacker, attacker_aura?)
+
+        attacker_strength =
+          Resolver.effective_strength(attacker, attacker_aura?, false, attacker_strength_value)
 
         damage_to_barbarian =
           Resolver.damage(counter_strength, attacker_strength, {seed, :to_attacker})

@@ -155,7 +155,14 @@ defmodule BrokenOaths.Combat.Camps do
           MapSet.t(tile_id()),
           term()
         ) :: [tile_id()]
-  def place_wilderness(world, city_tile_id, home_region_tiles, explored_tiles, occupied_tiles, seed) do
+  def place_wilderness(
+        world,
+        city_tile_id,
+        home_region_tiles,
+        explored_tiles,
+        occupied_tiles,
+        seed
+      ) do
     reachable = land_reachable_tiles(world, city_tile_id)
 
     {near, taken} =
@@ -182,7 +189,8 @@ defmodule BrokenOaths.Combat.Camps do
     # could land on the founding city's doorstep and make the early
     # game unsurvivable). Regions too small to reach the full band fall
     # back to 4+ hexes: outside the founding ring, never adjacent.
-    candidates = near_candidates(world, city_tile_id, home_region_tiles, occupied_tiles, @ring_min)
+    candidates =
+      near_candidates(world, city_tile_id, home_region_tiles, occupied_tiles, @ring_min)
 
     candidates =
       if candidates == [],
@@ -190,7 +198,15 @@ defmodule BrokenOaths.Combat.Camps do
         else: candidates
 
     count = seeded_int({seed, :near_count}, @near_count)
-    seeded_pick_preferring_land(candidates, count, world, reachable, {seed, :near_pick}, MapSet.new())
+
+    seeded_pick_preferring_land(
+      candidates,
+      count,
+      world,
+      reachable,
+      {seed, :near_pick},
+      MapSet.new()
+    )
   end
 
   defp near_candidates(world, city_tile_id, home_region_tiles, occupied_tiles, min_ring) do
@@ -203,7 +219,16 @@ defmodule BrokenOaths.Combat.Camps do
     |> Enum.sort()
   end
 
-  defp pick_far(world, city_tile_id, home_region_tiles, explored_tiles, occupied_tiles, reachable, seed, taken) do
+  defp pick_far(
+         world,
+         city_tile_id,
+         home_region_tiles,
+         explored_tiles,
+         occupied_tiles,
+         reachable,
+         seed,
+         taken
+       ) do
     candidates =
       world
       |> ring_band(city_tile_id, @ring_min, @ring_max)
@@ -397,8 +422,10 @@ defmodule BrokenOaths.Combat.Camps do
   @doc """
   Resolve an immediate "attack_camp" request: `user`'s own `unit_id`
   strikes `camp_id` right now, against whatever movement the attacker
-  has left — flat damage, no counter-attack (`Resolver.camp_damage/2`),
-  resolving immediately like `Resolver.attack/4` rather than queuing. An
+  has left — flat damage, no counter-attack (`Resolver.camp_damage/3`,
+  melee/defense strength — see `resolve_camp_attack/4`'s own `:ranged?`
+  doc for the Archer's shooting sibling), resolving immediately like
+  `Resolver.attack/4` rather than queuing. An
   already-destroyed (or nonexistent) camp is refused the same way an
   already-dead unit target is. `WorldServer`'s own `:attack_camp`
   `handle_call` wraps this with persistence and the broadcast.
@@ -433,11 +460,19 @@ defmodule BrokenOaths.Combat.Camps do
 
   @doc """
   Resolve a single already-validated camp exchange: `attack_camp/4`'s
-  own post-`Resolver.validate_camp_attack/3` step.
+  own post-`Resolver.validate_camp_attack/3` step, also reused by
+  `shoot_camp/4` below (QA issue 12bed1e4). `opts`:
+
+    * `:ranged?` — when `true` (`shoot_camp/4`'s own Archer shot,
+      playtest issue 0edd8679), the attacker's own strength comes from
+      `Resolver.ranged_strength/1` instead of `Resolver.base_strength/1`
+      — see `Resolver.camp_damage/3` and its "Melee/ranged strength
+      split" doc. Defaults `false` (ordinary melee, unchanged).
   """
-  @spec resolve_camp_attack(map(), map(), camp()) :: {attack_outcome(), map()}
-  def resolve_camp_attack(state, attacker, camp) do
-    dealt = Resolver.camp_damage(attacker, lord_adjacent?(state, attacker))
+  @spec resolve_camp_attack(map(), map(), camp(), keyword()) :: {attack_outcome(), map()}
+  def resolve_camp_attack(state, attacker, camp, opts \\ []) do
+    ranged? = Keyword.get(opts, :ranged?, false)
+    dealt = Resolver.camp_damage(attacker, lord_adjacent?(state, attacker), ranged?)
     new_camp = %{camp | hp: max(camp.hp - dealt, 0)}
     # Story 920 — attacking a camp (melee or a ranged shot) drops the
     # attacker's own Fortify stance too (back to 0), same as unit-vs-unit
@@ -457,22 +492,26 @@ defmodule BrokenOaths.Combat.Camps do
   # -------------------------------------------------------------------
   # Ranged camp assault (QA issue 12bed1e4) — the Archer's own `shoot`
   # sibling to `attack_camp/4`, mirroring `Resolver.shoot/4`'s own
-  # shape. A camp never counters either way (`Resolver.camp_damage/2`
+  # shape. A camp never counters either way (`Resolver.camp_damage/3`
   # already has no return blow), so `shoot_camp/4` reuses
-  # `resolve_camp_attack/3` UNCHANGED — the only thing that differs
-  # from melee is the RANGE check standing in for adjacency, plus the
-  # attacker-must-be-an-Archer gate.
+  # `resolve_camp_attack/4` with `ranged?: true` — the RANGE check
+  # standing in for adjacency and the attacker-must-be-an-Archer gate
+  # are the only DIFFERENCES from melee; the strength split (playtest
+  # issue 0edd8679) is the reason `ranged?: true` matters at all now.
   # -------------------------------------------------------------------
 
   @doc """
   Resolve an immediate ranged "shoot" request against a camp: `user`'s
   own Archer `unit_id` strikes `camp_id` from up to `Resolver.
-  shoot_range/0` hexes away, without moving there. Same flat, no-counter
-  damage `attack_camp/4` already deals (a camp never counters either
-  way) — only the RANGE check (`Resolver.in_shoot_range?/3`) and the
-  `:not_archer` gate differ from the melee surface. An already-destroyed
-  (or nonexistent) camp is refused exactly like `attack_camp/4`'s own
-  `:invalid_target`.
+  shoot_range/0` hexes away, without moving there, at the Archer's own
+  `Resolver.ranged_strength/1` (playtest issue 0edd8679 — the SAME
+  strong figure `shoot/4` fires at against a unit target, not the
+  weaker melee/defense number `attack_camp/4` uses). Same flat,
+  no-counter damage shape `attack_camp/4` already deals (a camp never
+  counters either way) — only the RANGE check (`Resolver.
+  in_shoot_range?/3`), the `:not_archer` gate, and the strength source
+  differ from the melee surface. An already-destroyed (or nonexistent)
+  camp is refused exactly like `attack_camp/4`'s own `:invalid_target`.
   """
   @spec shoot_camp(map(), map(), term(), term()) ::
           {:ok, attack_outcome(), map()} | {:error, term()}
@@ -491,7 +530,7 @@ defmodule BrokenOaths.Combat.Camps do
       true ->
         case validate_shoot_camp(attacker, camp, state.world) do
           :ok ->
-            {result, new_state} = resolve_camp_attack(state, attacker, camp)
+            {result, new_state} = resolve_camp_attack(state, attacker, camp, ranged?: true)
             {:ok, result, new_state}
 
           {:error, reason} ->
@@ -502,8 +541,12 @@ defmodule BrokenOaths.Combat.Camps do
 
   defp validate_shoot_camp(attacker, camp, world) do
     cond do
-      attacker.type != :archer -> {:error, :not_archer}
-      attacker.movement <= 0 -> {:error, :out_of_movement}
+      attacker.type != :archer ->
+        {:error, :not_archer}
+
+      attacker.movement <= 0 ->
+        {:error, :out_of_movement}
+
       not Resolver.in_shoot_range?(world, attacker.tile_id, camp.tile_id) ->
         {:error, :out_of_range}
 
@@ -608,7 +651,13 @@ defmodule BrokenOaths.Combat.Camps do
       seeded_pick_spaced(stranded, count - length(picked1), world, {seed, :stranded}, taken1)
 
     {picked3, taken3} =
-      seeded_pick_spaced(rest, count - length(picked1) - length(picked2), world, {seed, :fallback}, taken2)
+      seeded_pick_spaced(
+        rest,
+        count - length(picked1) - length(picked2),
+        world,
+        {seed, :fallback},
+        taken2
+      )
 
     {picked1 ++ picked2 ++ picked3, taken3}
   end

@@ -119,6 +119,26 @@ defmodule BrokenOaths.Combat.Resolver do
   camp/city siblings, both reusing `in_shoot_range?/3` here instead of
   a second, drifting range check.
 
+  ### Melee/ranged strength split (playtest issue 0edd8679 "Archer too strong")
+
+  The Archer originally used ONE `@base_strength` figure (14) for both
+  a melee exchange and a ranged shot, which let it win a head-on melee
+  fight against the Warrior (10) — backwards from Civ 6, where the
+  Archer is deliberately weak in melee and only dangerous at range.
+  `@base_strength[:archer]` is now 7 (clearly below the Warrior),
+  `@ranged_strength` holds the Archer's old 14 as a SEPARATE figure
+  `ranged_strength/1` exposes, used ONLY for the shooting side of a
+  `shoot/4` exchange. `combat_strength/3` is the seam: it reads the
+  `:ranged?` opt `resolve_attack/4` threads through from `shoot/4`, and
+  substitutes `ranged_strength/1` for `base_strength/1` on the
+  ATTACKER'S side alone when set — the defender (whether it's the
+  thing being shot, or the Archer itself on the receiving end of a
+  melee attack) always fights at its plain melee/defense strength, the
+  same `base_strength/1` every other unit already uses. Fortify never
+  intersects this: it's defense-only (`combat_strength/3`'s own `side
+  == :defender` check, unchanged), and a ranged attacker is never the
+  defending side, so the two never combine.
+
   ## Attack orchestration (stories 891/893/896/899/914)
 
   `attack/4` and `resolve_attack/4` are the pragdave-pattern "domain
@@ -196,15 +216,16 @@ defmodule BrokenOaths.Combat.Resolver do
     # §5's recommendation), comfortably above a Barbarian Warrior's 15
     # so it reliably wins a 1v1 (criterion 7633).
     bronze_spearman: 16,
-    # QA issue da39e50b "No archer" — a first-pass MELEE Archer (this
-    # engine originally shipped with no ranged-attack model at all; QA
-    # issue 12bed1e4 is what actually adds one — see `shoot/4` and this
-    # module's own "Ranged" doc above), single strength like every
-    # other unit here, between the Warrior (10) and the Bronze Spearman
-    # (16). Unchanged by the ranged-attack fix: `shoot/4` reads this
-    # SAME base strength, `resolve_attack/4`'s `ranged?: true` opt only
-    # zeroes the counter-blow, never the archer's own damage curve.
-    archer: 14,
+    # QA issue da39e50b "No archer" originally gave the Archer a single
+    # strength (14, between the Warrior and the Bronze Spearman) for
+    # both melee and its later ranged shot (QA issue 12bed1e4). Playtest
+    # issue 0edd8679 "Archer too strong" is the correction: Civ 6's own
+    # Archer is WEAK in melee, so this MELEE/DEFENSE figure drops to 7 —
+    # clearly below the Warrior (10), meaning a Warrior wins a head-on
+    # fight and an Archer caught in melee (attacking OR defending) dies
+    # easily. The Archer's old 14 lives on as `@ranged_strength[:archer]`
+    # below — see this module's own "Melee/ranged strength split" doc.
+    archer: 7,
     # Story 921 — the Galley: same as the Lord's own 12, below the
     # Bronze Spearman (16) — see `Cities.Production`'s own moduledoc,
     # "The Galley", for the rest of the unit's stats. Galley-vs-galley
@@ -214,6 +235,16 @@ defmodule BrokenOaths.Combat.Resolver do
     # pipeline land combat already does.
     galley: 12
   }
+  # Playtest issue 0edd8679 — the Archer's OLD single strength (14),
+  # repurposed as its ranged-only figure now that `@base_strength`'s own
+  # melee/defense number has dropped to 7 (see this module's
+  # "Melee/ranged strength split" doc). A strong shot, above the
+  # Warrior (10), used ONLY for the shooting side of a `shoot/4`
+  # exchange (`combat_strength/3`'s own `ranged?` branch) — never for
+  # the thing being shot, and never for the Archer's own defense. No
+  # other unit type is keyed here: nothing else can shoot (`shoot/4`'s
+  # `:not_archer` gate), so nothing else needs a ranged figure.
+  @ranged_strength %{archer: 14}
   @lord_aura_bonus 2
   # Story 920 rework — the Fortify stance's own defensive bonus ramps
   # with how long the unit has held it (`unit.fortified_turns`, see
@@ -241,6 +272,14 @@ defmodule BrokenOaths.Combat.Resolver do
   def base_strength(type), do: Map.fetch!(@base_strength, type)
 
   @doc """
+  A unit type's RANGED strength — only meaningful for `:archer` (the
+  only type `shoot/4` will ever let take this path); see this module's
+  own "Melee/ranged strength split" doc.
+  """
+  @spec ranged_strength(unit_type()) :: non_neg_integer()
+  def ranged_strength(type), do: Map.fetch!(@ranged_strength, type)
+
+  @doc """
   `unit`'s effective strength right now: base strength plus the lord's
   aura (when `aura?` is true) plus the Fortify stance's own bonus (when
   `fortified?` is true — story 920, see this module's own "Fortify"
@@ -252,12 +291,18 @@ defmodule BrokenOaths.Combat.Resolver do
   caller that ever passes `true`, and only for the defending side of an
   exchange) — this module has no notion of "adjacent," "same player,"
   or "which side of the fight," only the numbers those decisions
-  produce.
+  produce. `strength` defaults to `unit`'s own `base_strength/1`; the
+  only other caller (`combat_strength/3`'s own `ranged?` branch) passes
+  `ranged_strength/1` instead, for an Archer's shooting side only.
   """
-  @spec effective_strength(unit(), boolean(), boolean()) :: float()
-  def effective_strength(unit, aura? \\ false, fortified? \\ false) do
-    (base_strength(unit.type) + aura_bonus(aura?) + fortify_bonus(unit, fortified?)) *
-      wounded_multiplier(unit)
+  @spec effective_strength(unit(), boolean(), boolean(), number()) :: float()
+  def effective_strength(unit, aura? \\ false, fortified? \\ false, strength \\ nil)
+
+  def effective_strength(unit, aura?, fortified?, nil),
+    do: effective_strength(unit, aura?, fortified?, base_strength(unit.type))
+
+  def effective_strength(unit, aura?, fortified?, strength) do
+    (strength + aura_bonus(aura?) + fortify_bonus(unit, fortified?)) * wounded_multiplier(unit)
   end
 
   defp aura_bonus(true), do: @lord_aura_bonus
@@ -283,15 +328,18 @@ defmodule BrokenOaths.Combat.Resolver do
 
   @doc """
   `unit`'s combat strength while garrisoned on its own city's tile
-  (story 895): `effective_strength/3`, boosted 50% for fighting from
+  (story 895): `effective_strength/4`, boosted 50% for fighting from
   the walls — the fortify bonus (story 920), if any, is folded in
   BEFORE this multiplier, same "whole figure times 1.5" ordering the
   aura already gets. Callers (`BrokenOaths.Combat.CityDefense`) determine
   whether a unit qualifies; this module only applies the multiplier.
+  `strength` is the same `effective_strength/4` override (see this
+  module's "Melee/ranged strength split" doc) — a garrisoned Archer
+  shooting from its own walls still shoots at its RANGED strength.
   """
-  @spec garrisoned_strength(unit(), boolean(), boolean()) :: float()
-  def garrisoned_strength(unit, aura? \\ false, fortified? \\ false),
-    do: effective_strength(unit, aura?, fortified?) * @garrison_bonus
+  @spec garrisoned_strength(unit(), boolean(), boolean(), number()) :: float()
+  def garrisoned_strength(unit, aura? \\ false, fortified? \\ false, strength \\ nil),
+    do: effective_strength(unit, aura?, fortified?, strength) * @garrison_bonus
 
   @doc """
   Resolve a single simultaneous exchange: damage `attacker` deals to
@@ -303,8 +351,13 @@ defmodule BrokenOaths.Combat.Resolver do
     * `:attacker_aura?` / `:defender_aura?` — whether each side stands
       adjacent to its own living lord (default `false`)
     * `:attacker_garrisoned?` / `:defender_garrisoned?` — whether each
-      side fights from its own city's walls, `garrisoned_strength/2`
-      instead of `effective_strength/2` (default `false`, story 895)
+      side fights from its own city's walls, `garrisoned_strength/4`
+      instead of `effective_strength/4` (default `false`, story 895)
+    * `:ranged?` — whether the ATTACKER is shooting rather than
+      striking in melee (default `false`) — swaps `ranged_strength/1`
+      in for `base_strength/1` on the attacker's side ONLY (see this
+      module's "Melee/ranged strength split" doc); the defender is
+      never affected, ranged or not.
   """
   @spec resolve(unit(), unit(), keyword()) :: attack_result()
   def resolve(attacker, defender, opts) do
@@ -325,11 +378,22 @@ defmodule BrokenOaths.Combat.Resolver do
     # to still carry a nonzero count mid-exchange (see this module's
     # own "Fortify" doc for why that can briefly be true).
     fortified? = side == :defender and Map.get(unit, :fortified_turns, 0) > 0
+    # Playtest issue 0edd8679 — ranged only ever swaps in the ATTACKER's
+    # own shooting strength; the defender (whether it's what's being
+    # shot, or an Archer defending against melee) always fights at its
+    # plain `base_strength/1` (see this module's "Melee/ranged strength
+    # split" doc).
+    strength =
+      if side == :attacker and Keyword.get(opts, :ranged?, false) do
+        ranged_strength(unit.type)
+      else
+        base_strength(unit.type)
+      end
 
     if Keyword.get(opts, :"#{side}_garrisoned?", false) do
-      garrisoned_strength(unit, aura?, fortified?)
+      garrisoned_strength(unit, aura?, fortified?, strength)
     else
-      effective_strength(unit, aura?, fortified?)
+      effective_strength(unit, aura?, fortified?, strength)
     end
   end
 
@@ -353,13 +417,19 @@ defmodule BrokenOaths.Combat.Resolver do
 
   @doc """
   Flat camp damage: `attacker`'s own effective strength, rounded, with
-  no random roll (camps don't counter-attack). Pure and unwired —
-  `BrokenOaths.Combat.Camps` (story 892) doesn't exist yet; this is the
-  function a future camp-assault handler calls once it does.
+  no random roll (camps don't counter-attack either way). `ranged?`
+  (playtest issue 0edd8679, default `false`) is the same attacker-side
+  switch `combat_strength/3` uses for a unit target: `true` sources the
+  strength from `ranged_strength/1` (an Archer's `shoot_camp/4`) instead
+  of `base_strength/1` (every melee `attack_camp/4`, archer or not) —
+  see this module's "Melee/ranged strength split" doc. `BrokenOaths.
+  Combat.Camps.resolve_camp_attack/3` is the caller that threads it
+  through.
   """
-  @spec camp_damage(unit(), boolean()) :: pos_integer()
-  def camp_damage(attacker, aura? \\ false) do
-    attacker |> effective_strength(aura?) |> round()
+  @spec camp_damage(unit(), boolean(), boolean()) :: pos_integer()
+  def camp_damage(attacker, aura? \\ false, ranged? \\ false) do
+    strength = if ranged?, do: ranged_strength(attacker.type), else: base_strength(attacker.type)
+    attacker |> effective_strength(aura?, false, strength) |> round()
   end
 
   @doc """
@@ -563,8 +633,11 @@ defmodule BrokenOaths.Combat.Resolver do
       defender's own counter-blow is computed exactly like every other
       melee exchange (so the SAME aura/garrison/wounding curve applies
       either way) and then discarded before it's ever applied to
-      `attacker` — the whole "no counterattack" ranged advantage.
-      Defaults `false` (ordinary melee, unchanged).
+      `attacker` — the whole "no counterattack" ranged advantage. Also
+      swaps the attacker onto `ranged_strength/1` for its own strength
+      (see this module's "Melee/ranged strength split" doc) — the
+      defender's own strength is unaffected either way. Defaults
+      `false` (ordinary melee, unchanged).
   """
   @spec resolve_attack(map(), unit(), unit(), keyword()) :: {attack_outcome(), map()}
   def resolve_attack(state, attacker, defender, opts \\ []) do
@@ -574,6 +647,7 @@ defmodule BrokenOaths.Combat.Resolver do
     %{damage_to_defender: dealt, damage_to_attacker: countered} =
       resolve(attacker, defender,
         seed: seed,
+        ranged?: ranged?,
         attacker_aura?: lord_adjacent?(state, attacker),
         defender_aura?: lord_adjacent?(state, defender),
         attacker_garrisoned?: CityDefense.garrisoned?(attacker, Map.values(state.cities)),
@@ -710,8 +784,12 @@ defmodule BrokenOaths.Combat.Resolver do
 
   defp validate_shoot(state, attacker, defender) do
     cond do
-      attacker.type != :archer -> {:error, :not_archer}
-      attacker.movement <= 0 -> {:error, :out_of_movement}
+      attacker.type != :archer ->
+        {:error, :not_archer}
+
+      attacker.movement <= 0 ->
+        {:error, :out_of_movement}
+
       not in_shoot_range?(state.world, attacker.tile_id, defender.tile_id) ->
         {:error, :out_of_range}
 
