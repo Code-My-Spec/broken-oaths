@@ -141,32 +141,69 @@ defmodule BrokenOaths.Simulation.Turn do
 
   `BrokenOaths.Simulation.Turn.Movement` (`reset_movement/1`, `resolve_orders/1`,
   `advance_fortify/1`) — see that module's own moduledoc for the full
-  lockstep-round collision contract. At the start of a tick every
-  unit's `movement` resets to its `max_movement`; orders with `status:
-  :pending` then resolve in lockstep rounds, one step per round per
-  still-active mover, movers processed in ascending unit id each round
-  for determinism. Right after, `advance_fortify/1` ramps the Fortify
-  stance (story 920) of every unit that stayed put and didn't fight
-  this tick.
+  lockstep-round collision contract. At the start of EVERY tick every
+  unit's `movement` resets to its `max_movement` unconditionally (the
+  timer inversion, below); orders with `status: :pending` then resolve
+  in lockstep rounds, one step per round per still-active mover,
+  movers processed in ascending unit id each round for determinism.
+  Right after, `advance_fortify/1` ramps the Fortify stance (story 920)
+  of every unit that stayed put and didn't fight this tick.
+
+  ## Timer inversion — fast tick vs. economy tick
+
+  Movement used to recharge only every `recharge_turns` ticks (story
+  924), which stranded a unit on an off-turn — a live bug. The timer
+  inversion (prod-critical tick change) flips the throttle: movement,
+  combat, barbarians, fortify, healing, and heir succession all run on
+  the FAST layer (unthrottled, every tick — the 1-minute action
+  cadence), while only the ECONOMY — improvement progress, production
+  accrual/completions, science accrual, food accrual/growth — slows
+  down, running once every `world.economy_turns` ticks (default 10 =
+  10 minutes on a 60s tick). `economy? = rem(new_turn,
+  economy_turns) == 0` is computed once per tick and threaded through
+  every economy-gated phase below (`economy_turns` itself read
+  defensively via `Map.get(state.world, :economy_turns, 10) || 10`, so
+  an in-memory world built before this field existed still gets the
+  default cadence rather than crashing). `recharge_turns` (story 924's
+  own field) is retired — nothing reads it anymore; see `Worlds.World`'s
+  own doc.
+
+  On a tick where `economy?` is `false`, each economy phase below is
+  skipped and its output is the SAME neutral shape a real run would
+  produce on a turn with nothing to do: `Production.resolve_completions/1`'s
+  own `occupied` map (`%{tile_id => true}`, the exact shape it itself
+  starts from before folding in any completions) is rebuilt directly
+  off `state.units`, so phase 3b/3c below still see a correct
+  occupied-tile set to spawn camps/barbarians against even though
+  phase 3 itself didn't run; `spawn_events`, `settled_this_tick`, and
+  `city_completions` are simply empty, same as a real tick that
+  happened to complete nothing. `WorldServer`'s own income/upkeep
+  sweep (`Bank.apply_upkeep/2`, via `apply_bank/1`) is gated on the
+  SAME `economy?` formula, recomputed there off `new_state.turn`/
+  `new_state.world` after `tick/1` returns — see that module's own
+  `apply_bank/1` doc.
 
   ## City loop phases
 
   After movement resolves, `tick/1` runs the city-loop phases in a
   fixed order, each delegating to the domain model that owns it (or, if
-  genuinely cross-cutting with no single owner, a `Turn.*` submodule):
+  genuinely cross-cutting with no single owner, a `Turn.*` submodule).
+  ECONOMY-gated phases (only on an `economy?` tick) are marked below;
+  everything else runs every tick regardless:
 
-    1. improvement progress -- `BrokenOaths.Cities.Improvement.advance/1`.
-    2. production accrual -- `BrokenOaths.Cities.Production.accrue_cities/1`,
+    1. [ECONOMY] improvement progress -- `BrokenOaths.Cities.Improvement.advance/1`.
+    2. [ECONOMY] production accrual -- `BrokenOaths.Cities.Production.accrue_cities/1`,
        EXCEPT a pillaged city still serving its own production halt
        (story 895).
-    3. completions/spawn placement -- `BrokenOaths.Cities.Production.
+    3. [ECONOMY] completions/spawn placement -- `BrokenOaths.Cities.Production.
        resolve_completions/1`; a completed item with nowhere to land
        simply waits. Successful spawns come back as `{:unit_spawned,
        spawn_event}` events -- this module never allocates a real unit
        id itself.
     3b. camp spawn loop (story 892) -- `BrokenOaths.Combat.Camps.
        resolve_spawns/2`, threading the SAME "claimed this tick"
-       occupied-tile set city completions just built.
+       occupied-tile set phase 3 built (or, on a non-economy tick, the
+       neutral occupied set described above).
     3c. barbarian AI loop (story 893) -- `BrokenOaths.Simulation.Turn.
        BarbarianPhase.resolve/3` (cross-cutting: orchestrates
        `BarbarianAI`, `Combat`, `CityDefense`, and heir scheduling
@@ -174,11 +211,11 @@ defmodule BrokenOaths.Simulation.Turn do
     3d. city regeneration (story 895) -- `BrokenOaths.Combat.CityDefense.
        regen_cities/2`, skipping every city phase 3c's own barbarian-AI
        assault struck THIS tick.
-    4. food accrual -- `BrokenOaths.Cities.Yields.accrue_food_all/1`.
-    5. growth -- `BrokenOaths.Cities.Yields.grow_cities/2`, at most once
-       per city per tick, and never for a city that already paid a
-       settler's population cost in phase 3 THIS SAME tick (issue
-       63300098).
+    4. [ECONOMY] food accrual -- `BrokenOaths.Cities.Yields.accrue_food_all/1`.
+    5. [ECONOMY] growth -- `BrokenOaths.Cities.Yields.grow_cities/2`, at
+       most once per city per tick, and never for a city that already
+       paid a settler's population cost in phase 3 THIS SAME tick
+       (issue 63300098).
     6. healing -- `BrokenOaths.Units.Unit.heal_all/1`: a unit that spent
        no movement this tick heals 15 HP garrisoned on its own city's
        tile, 10 HP anywhere else in its owner's territory, 0 outside it.
@@ -187,7 +224,7 @@ defmodule BrokenOaths.Simulation.Turn do
        single owning domain model). Any player whose lord died gets a
        fresh Lord at their capital this tick, plus a
        `{:lineage_continued, user_id, message}` event.
-    8. science accrual (story 902) -- `BrokenOaths.Technology.Research.
+    8. [ECONOMY] science accrual (story 902) -- `BrokenOaths.Technology.Research.
        accrue_science/1`; a tech that reaches its cost completes
        automatically and fires `{:tech_completed, user_id, tech}`.
 
@@ -284,34 +321,39 @@ defmodule BrokenOaths.Simulation.Turn do
   @spec tick(state()) :: {state(), [event()]}
   def tick(state) do
     new_turn = state.turn + 1
+    economy? = economy_tick?(state, new_turn)
 
     # Snapshot each unit's tile before the movement phase so Unit.heal_all/2 can
     # tell who actually moved this tick — healing is gated on "didn't move",
-    # decoupled from the split-recharge movement points (story 924).
+    # decoupled from the fast/economy tick split (timer inversion).
     tiles_before = Map.new(state.units, fn {id, u} -> {id, u.tile_id} end)
 
     state =
       state
-      |> maybe_reset_movement(new_turn)
+      |> Movement.reset_movement()
       |> Movement.resolve_orders()
       |> Movement.advance_fortify()
-      |> Improvement.advance()
-      |> Production.accrue_cities()
+
+    state =
+      if economy?, do: state |> Improvement.advance() |> Production.accrue_cities(), else: state
 
     {state, spawn_events, occupied, settled_this_tick, city_completions} =
-      Production.resolve_completions(state)
+      if economy? do
+        Production.resolve_completions(state)
+      else
+        {state, [], occupied_tiles(state), MapSet.new(), []}
+      end
 
     {state, camp_events, occupied} = Camps.resolve_spawns(state, occupied)
     {state, attacked_cities} = BarbarianPhase.resolve(state, occupied, new_turn)
     {state, heir_events} = HeirSuccession.resolve(state, new_turn)
-    {state, tech_events} = Research.accrue_science(state)
+    {state, tech_events} = if economy?, do: Research.accrue_science(state), else: {state, []}
 
     new_state =
       state
       |> Improvement.clear_orphaned_builders()
       |> CityDefense.regen_cities(attacked_cities)
-      |> Yields.accrue_food_all()
-      |> Yields.grow_cities(settled_this_tick)
+      |> maybe_grow(economy?, settled_this_tick)
       |> Unit.heal_all(tiles_before)
       |> Visibility.refresh_explored()
       |> Map.put(:turn, new_turn)
@@ -328,16 +370,29 @@ defmodule BrokenOaths.Simulation.Turn do
     {new_state, events}
   end
 
-  # Story 924 — unit movement recharges every `recharge_turns` economy ticks
-  # (default 2), not every one, so movement feels less frantic than the economy
-  # pace. On non-recharge ticks movement is left as-is (a unit that held its
-  # points can still act; a unit that spent them waits for the refill), and
-  # every other phase — resources, build, income/upkeep, barbarian AI — still
-  # runs each tick. recharge_turns == 1 restores every-turn recharge; a stray
-  # missing value falls back to every-turn.
-  defp maybe_reset_movement(state, new_turn) do
-    n = Map.get(state.world, :recharge_turns, 1) || 1
-    if rem(new_turn, n) == 0, do: Movement.reset_movement(state), else: state
+  # Timer inversion — whether THIS tick is an economy tick, per the formula
+  # `WorldServer`'s own `apply_bank/1` must recompute identically after
+  # `tick/1` returns (see that module's doc). `economy_turns` is read the
+  # same defensive way every other story-924-and-later field is (`Map.get`
+  # with a fallback) so an in-memory world built before the column existed
+  # still gets the default cadence rather than crashing.
+  defp economy_tick?(state, new_turn), do: rem(new_turn, economy_turns(state)) == 0
+
+  defp economy_turns(state), do: Map.get(state.world, :economy_turns, 10) || 10
+
+  # The neutral `occupied` phase 3 (`Production.resolve_completions/1`)
+  # would otherwise build on a non-economy tick — the SAME `%{tile_id =>
+  # true}` shape that function itself starts from before folding in any
+  # completions THIS tick, so phase 3b/3c below still see a correct
+  # occupied-tile set even though phase 3 didn't run to build one.
+  defp occupied_tiles(state), do: Map.new(state.units, fn {_id, unit} -> {unit.tile_id, true} end)
+
+  defp maybe_grow(state, false, _settled_this_tick), do: state
+
+  defp maybe_grow(state, true, settled_this_tick) do
+    state
+    |> Yields.accrue_food_all()
+    |> Yields.grow_cities(settled_this_tick)
   end
 
   @doc """

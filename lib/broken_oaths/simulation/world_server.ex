@@ -2184,13 +2184,25 @@ defmodule BrokenOaths.Simulation.WorldServer do
   # kills, camp rewards — the only things that ever moved `gold` before
   # this story) stays exactly as it was until the flag flips on for
   # real (v0.3.0).
+  #
+  # Timer inversion — the income/upkeep sweep is part of the ECONOMY, not
+  # the fast tick, so it's gated on the SAME `economy?` formula
+  # `BrokenOaths.Simulation.Turn.tick/1`'s own `economy_tick?/2` uses
+  # (recomputed here, off `state.turn`/`state.world`, since `run_tick/1`
+  # calls this well after `tick/1` already returned — see that module's
+  # own "Timer inversion" doc for why a matching recompute is fine here).
   defp apply_bank(state) do
-    if Game.feudal_enabled?() do
+    if Game.feudal_enabled?() and economy_tick?(state) do
       income_by_player = gold_income_by_player(state)
       Bank.apply_upkeep(state, income_by_player)
     else
       {state, []}
     end
+  end
+
+  defp economy_tick?(state) do
+    economy_turns = Map.get(state.world, :economy_turns, 10) || 10
+    rem(state.turn, economy_turns) == 0
   end
 
   # -------------------------------------------------------------------

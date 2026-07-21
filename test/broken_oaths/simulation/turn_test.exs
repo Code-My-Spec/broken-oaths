@@ -10,10 +10,11 @@ defmodule BrokenOaths.Simulation.TurnTest do
   @frequency 8
   @seed 424_242
 
-  # Story 924 default is recharge_turns 2, but these tests assume movement
-  # recharges every turn — pin to 1 (behavior-preserving); the tick-split
-  # describe below builds its own world with recharge_turns: 2.
-  defp world, do: %World{seed: @seed, frequency: @frequency, recharge_turns: 1}
+  # Timer inversion default is economy_turns 10, but most of these tests
+  # assume the economy (production/research/growth/income) advances every
+  # turn — pin to 1 (behavior-preserving); the "timer inversion" describe
+  # below builds its own world with a real economy_turns.
+  defp world, do: %World{seed: @seed, frequency: @frequency, economy_turns: 1}
 
   defp unit(id, opts) do
     max_movement = Keyword.get(opts, :max_movement, 2)
@@ -83,28 +84,39 @@ defmodule BrokenOaths.Simulation.TurnTest do
     end
   end
 
-  describe "tick/1 movement recharge cadence (story 924)" do
-    test "recharge_turns: 2 refills movement every 2nd turn, not every turn" do
+  describe "tick/1 timer inversion — movement every tick, economy on economy_turns" do
+    test "movement recharges every tick, regardless of economy_turns" do
       u = unit(1, tile: 5, movement: 0, max_movement: 2)
-      world2 = %World{seed: @seed, frequency: @frequency, recharge_turns: 2}
-      state = %{base_state(%{1 => u}) | world: world2}
+      world3 = %World{seed: @seed, frequency: @frequency, economy_turns: 3}
+      state = %{base_state(%{1 => u}) | world: world3}
 
-      # Turn 1 (rem 1,2 != 0): no recharge — movement stays spent.
+      # Turn 1 (rem 1,3 != 0, economy frozen): movement still recharges.
       {after_t1, _} = Turn.tick(state)
-      assert after_t1.units[1].movement == 0
+      assert after_t1.units[1].movement == 2
 
-      # Turn 2 (rem 2,2 == 0): recharge — back to max.
-      {after_t2, _} = Turn.tick(after_t1)
+      # Spend it again, tick to turn 2 (still rem != 0): recharges again.
+      spent = %{after_t1 | units: %{1 => %{after_t1.units[1] | movement: 0}}}
+      {after_t2, _} = Turn.tick(spent)
       assert after_t2.units[1].movement == 2
     end
 
-    test "recharge_turns: 1 refills every turn (behavior-preserving)" do
-      u = unit(1, tile: 5, movement: 0, max_movement: 2)
-      world1 = %World{seed: @seed, frequency: @frequency, recharge_turns: 1}
-      state = %{base_state(%{1 => u}) | world: world1}
+    test "economy_turns: 3 freezes production for two ticks, then accrues on the 3rd" do
+      c = city(1, tile: 1, queue: [%{id: 10, type: :warrior, banked: 0, cost: 40}])
+      world3 = %World{seed: @seed, frequency: @frequency, economy_turns: 3}
+      state = %{base_state(%{}) | world: world3, cities: %{1 => c}}
 
+      # Turns 1 and 2 (rem != 0): the economy is frozen — banked production
+      # doesn't move.
       {after_t1, _} = Turn.tick(state)
-      assert after_t1.units[1].movement == 2
+      assert after_t1.cities[1].queue == [%{id: 10, type: :warrior, banked: 0, cost: 40}]
+
+      {after_t2, _} = Turn.tick(after_t1)
+      assert after_t2.cities[1].queue == [%{id: 10, type: :warrior, banked: 0, cost: 40}]
+
+      # Turn 3 (rem == 0): the economy runs — the flat 5/turn base (story
+      # 879) finally banks.
+      {after_t3, _} = Turn.tick(after_t2)
+      assert [%{banked: 5}] = after_t3.cities[1].queue
     end
   end
 

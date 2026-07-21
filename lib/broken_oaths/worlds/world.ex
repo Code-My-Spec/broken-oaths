@@ -43,9 +43,21 @@ defmodule BrokenOaths.Worlds.World do
     field :turn_seconds, :integer, default: 60
     field :paused, :boolean, default: false
     field :resource_density, Ecto.Enum, values: [:sparse, :standard, :dense], default: :standard
-    # Story 924 — unit movement recharges every N economy ticks (2 = every 2
-    # minutes on a 60s tick). A per-world balance lever; 1 = recharge every turn.
+    # Story 924 shipped movement recharging every N economy ticks. The timer
+    # inversion (prod-critical tick change) retired that: movement now
+    # recharges EVERY tick unconditionally (`BrokenOaths.Simulation.Turn.tick/1`
+    # always calls `Movement.reset_movement/1`, no gate). This field is kept
+    # only for backward compat with rows/fixtures that still set it — nothing
+    # reads it anymore.
     field :recharge_turns, :integer, default: 2
+    # Timer inversion — the ECONOMY (improvement progress, production,
+    # research, food/growth, and `WorldServer`'s income/upkeep sweep) now
+    # runs only once every `economy_turns` ticks (default 10 = 10 minutes on
+    # a 60s tick) instead of every tick, while movement/combat/barbarians/
+    # healing/heir succession stay on the fast, every-tick layer. A per-world
+    # balance lever, like `turn_seconds`. See `BrokenOaths.Simulation.Turn.tick/1`'s
+    # own moduledoc for the full fast/economy split.
+    field :economy_turns, :integer, default: 10
 
     timestamps()
   end
@@ -63,8 +75,9 @@ defmodule BrokenOaths.Worlds.World do
   def creation_changeset(world, attrs) do
     world
     |> changeset(attrs)
-    |> cast(attrs, [:turn_seconds, :resource_density, :recharge_turns])
+    |> cast(attrs, [:turn_seconds, :resource_density, :recharge_turns, :economy_turns])
     |> validate_number(:turn_seconds, greater_than: 0)
     |> validate_number(:recharge_turns, greater_than_or_equal_to: 1)
+    |> validate_number(:economy_turns, greater_than_or_equal_to: 1)
   end
 end
