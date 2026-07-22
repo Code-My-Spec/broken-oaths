@@ -113,7 +113,7 @@ defmodule BrokenOathsWeb.GameLive.Join do
         id="display-name-form"
         phx-change="validate_name"
         phx-submit="save_name"
-        class="mt-6 flex items-end gap-2"
+        class="mt-6 max-w-sm"
       >
         <.input
           field={@name_form[:display_name]}
@@ -123,7 +123,7 @@ defmodule BrokenOathsWeb.GameLive.Join do
           data-test="display-name-input"
           autocomplete="off"
         />
-        <.button type="submit" data-test="save-display-name" class="btn-secondary">
+        <.button type="submit" data-test="save-display-name" class="btn-secondary mt-2">
           Save
         </.button>
       </.form>

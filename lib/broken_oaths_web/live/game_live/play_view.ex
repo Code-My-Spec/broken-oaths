@@ -593,7 +593,8 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
   # `GameLive.CityPanel`'s own always-visible requirement note already
   # renders (criterion 7708), so the toast and the production menu
   # never disagree about the reason.
-  def city_error_message(:copper_required), do: "Requires Copper."
+  def city_error_message(:copper_required),
+    do: "Requires Copper — build a Mine on a Copper tile in your territory first."
 
   def city_error_message(:size_exceeded),
     do: "This city has no idle citizen — unassign a worked tile first."

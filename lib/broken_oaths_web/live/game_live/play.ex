@@ -3411,6 +3411,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
               }
             }
 
+            // Owner-colored hex borders (playtest: "color the hex border
+            // instead of a ring"): index the visible tiles by id so each
+            // unit can stroke its OWN tile's polygon below.
+            const tileById = new Map(order.map((o) => [o.row[0], o.row]))
             const now = performance.now()
             const unitSize = Math.min(Math.max(this.scale * this.arc * 1.5, 14), 64)
             for (const u of this.units) {
@@ -3446,27 +3450,27 @@ defmodule BrokenOathsWeb.GameLive.Play do
                 ctx.globalAlpha = 1
               }
 
-              // Owner ring — a persistent colored circle framing every
-              // unit so a rival's is never mistaken for one of yours
-              // (playtest issue). Drawn UNDER the sprite/selection (same
-              // as the selection ellipse) so neither is obscured; a dark
-              // halo keeps it crisp over any terrain. Centered on the
-              // sprite body (feet for the fallback dot) and sized to
-              // enclose the sprite.
+              // Owner-colored HEX BORDER on the unit's own tile (playtest
+              // issue: "color the hex border around them instead" of a ring
+              // around the sprite). Stroke the tile's OWN polygon in the
+              // owner color, over a dark halo for crispness on any terrain;
+              // drawn under the sprite/selection so neither is obscured. No
+              // border if the tile isn't currently in view.
               {
-                const oc = this.ownerColor(u)
-                const ringCy = img ? py - unitSize * 0.18 : py
-                const ringRad = img ? unitSize * 0.5 : 8
-                ctx.beginPath()
-                ctx.arc(px, ringCy, ringRad, 0, 2 * Math.PI)
-                ctx.lineWidth = (img ? 2.5 : 2) + 1.5
-                ctx.strokeStyle = "rgba(10,12,18,0.5)"
-                ctx.stroke()
-                ctx.beginPath()
-                ctx.arc(px, ringCy, ringRad, 0, 2 * Math.PI)
-                ctx.lineWidth = img ? 2.5 : 2
-                ctx.strokeStyle = oc
-                ctx.stroke()
+                const trow = tileById.get(u.tile_id)
+                if (trow) {
+                  const oc = this.ownerColor(u)
+                  ctx.beginPath()
+                  GR.tracePolygon(ctx, R, trow, 7)
+                  ctx.strokeStyle = "rgba(10,12,18,0.55)"
+                  ctx.lineWidth = 4
+                  ctx.stroke()
+                  ctx.beginPath()
+                  GR.tracePolygon(ctx, R, trow, 7)
+                  ctx.strokeStyle = oc
+                  ctx.lineWidth = 2.5
+                  ctx.stroke()
+                }
               }
 
               if (img) {

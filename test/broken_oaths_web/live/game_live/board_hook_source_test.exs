@@ -92,16 +92,18 @@ defmodule BrokenOathsWeb.GameLive.BoardHookSourceTest do
       assert length(Enum.uniq(colors)) == length(colors)
     end
 
-    test "the unit draw loop strokes an owner-colored ring around each unit", %{
+    test "the unit draw loop strokes an owner-colored hex border on each unit's tile", %{
       play_source: source
     } do
       [_before, unit_loop] = String.split(source, "for (const u of this.units) {", parts: 2)
       [unit_loop_body, _rest] = String.split(unit_loop, "if (this.path", parts: 2)
 
       assert unit_loop_body =~ "this.ownerColor(u)"
-      # The ring is a stroked circle, not a sprite tint.
+      # The owner indicator is the unit's OWN tile hex polygon stroked in
+      # the owner color (playtest: "color the hex border instead of a ring").
+      assert unit_loop_body =~ "tileById.get(u.tile_id)"
+      assert unit_loop_body =~ "GR.tracePolygon(ctx, R, trow, 7)"
       assert unit_loop_body =~ "ctx.strokeStyle = oc"
-      assert unit_loop_body =~ "ctx.arc("
     end
   end
 
