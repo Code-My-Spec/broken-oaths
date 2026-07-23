@@ -62,6 +62,11 @@ defmodule BrokenOathsWeb.GameLive.StewardUiTest do
       %{vassal_play_live: vassal_play_live, vassal_city: vassal_city} =
         subjugate(world, conn, lord, vassal_conn, vassal)
 
+      # Playtest issue 340c1ad4: production stewardship is now opt-in —
+      # the owner must grant it before ANY eligible steward may set
+      # their production, empire-wide.
+      :ok = Game.set_allow_steward_production(world, vassal, true)
+
       go_offline(vassal_play_live)
 
       {:ok, lord_play_live, _html} = live(conn, ~p"/play/#{world.id}")
@@ -216,6 +221,10 @@ defmodule BrokenOathsWeb.GameLive.StewardUiTest do
       %{play_live_a: play_live_a, play_live_b: play_live_b} =
         establish_accepted_alliance(world, conn, user_a, other_conn, user_b)
 
+      # Playtest issue 340c1ad4: opt-in, empire-wide grant — the ally
+      # must turn it on before their own steward may set production.
+      :ok = Game.set_allow_steward_production(world, user_b, true)
+
       go_offline(play_live_b)
 
       {:ok, play_live_a2, _html} = live(conn, ~p"/play/#{world.id}")
@@ -275,6 +284,61 @@ defmodule BrokenOathsWeb.GameLive.StewardUiTest do
       [alliance] = Game.alliances(world, user_a)
       assert alliance.status == :proposed
       assert alliance.steward == nil
+    end
+  end
+
+  describe "empire-wide steward-production toggle (playtest issue 340c1ad4)" do
+    test "renders unchecked by default and a real click grants it — the CALLER's own flag only",
+         %{conn: conn, user: user, other_conn: other_conn, other_user: other_user, world: world} do
+      {:ok, join_live, _html} = live(conn, ~p"/play")
+
+      join_live
+      |> element("[data-test='join-world-#{world.id}']")
+      |> render_click()
+
+      {:ok, join_live_other, _html} = live(other_conn, ~p"/play")
+
+      join_live_other
+      |> element("[data-test='join-world-#{world.id}']")
+      |> render_click()
+
+      {:ok, play_live, _html} = live(conn, ~p"/play/#{world.id}")
+
+      refute Game.allow_steward_production(world, user)
+
+      refute has_element?(
+               play_live,
+               "[data-test='allow-steward-production-toggle'][checked]"
+             )
+
+      play_live
+      |> element("[data-test='allow-steward-production-toggle']")
+      |> render_click()
+
+      assert Game.allow_steward_production(world, user)
+
+      assert has_element?(
+               play_live,
+               "[data-test='allow-steward-production-toggle'][checked]"
+             )
+
+      # A second, unrelated player's own connection never sees THIS
+      # player's grant on remount — the command sets only the caller's
+      # own flag, empire-wide is about cities, never about other players.
+      {:ok, other_play_live, _html} = live(other_conn, ~p"/play/#{world.id}")
+      refute Game.allow_steward_production(world, other_user)
+
+      refute has_element?(
+               other_play_live,
+               "[data-test='allow-steward-production-toggle'][checked]"
+             )
+
+      # A fresh click sends the toggle back off.
+      play_live
+      |> element("[data-test='allow-steward-production-toggle']")
+      |> render_click()
+
+      refute Game.allow_steward_production(world, user)
     end
   end
 end

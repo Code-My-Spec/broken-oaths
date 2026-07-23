@@ -646,6 +646,12 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
   def steward_error_message(:not_eligible), do: "You aren't eligible to steward them."
   def steward_error_message(:owner_online), do: "They're back online — stewardship has ended."
   def steward_error_message(:not_found), do: "That city isn't theirs to steward."
+
+  # Playtest issue 340c1ad4 — the owner's own empire-wide grant hasn't
+  # been turned on, checked ahead of `:not_constructive` below.
+  def steward_error_message(:steward_production_disabled),
+    do: "That player hasn't allowed a steward to set their production."
+
   def steward_error_message(:not_constructive), do: "That build isn't on the steward whitelist."
   def steward_error_message(:invalid_item), do: "That can't be queued."
   def steward_error_message(:size_one), do: "This city needs a second citizen first."

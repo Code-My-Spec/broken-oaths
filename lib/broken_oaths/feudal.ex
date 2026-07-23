@@ -384,6 +384,27 @@ defmodule BrokenOaths.Feudal do
   def steward_log(world, user), do: WorldServer.call(world, {:steward_log, user})
 
   @doc """
+  Playtest issue 340c1ad4 — `user`'s own current EMPIRE-WIDE grant:
+  whether ANY eligible steward may set their production while they're
+  offline (`BrokenOaths.Players.Player.allow_steward_production`,
+  default `false`). The value `GameLive.FeudalTopBar`'s own toggle
+  reflects.
+  """
+  @spec allow_steward_production(map(), map()) :: boolean()
+  def allow_steward_production(world, user),
+    do: WorldServer.call(world, {:allow_steward_production, user})
+
+  @doc """
+  Playtest issue 340c1ad4 — `user` flips their OWN empire-wide grant
+  (never anyone else's — owner-only, no `owner_user_id` param exists
+  here). Covers every city `user` has the instant it's turned on; no
+  per-city variant exists.
+  """
+  @spec set_allow_steward_production(map(), map(), boolean()) :: :ok | {:error, :not_a_player}
+  def set_allow_steward_production(world, user, allowed?),
+    do: WorldServer.call(world, {:set_allow_steward_production, user, allowed?})
+
+  @doc """
   `steward_user` sweeps `owner_user_id`'s own offline Gold Bank
   entirely into the OWNER's treasury — pure stewardship, the steward's
   own treasury never moves. Refused unless `steward_user` is the
@@ -398,7 +419,10 @@ defmodule BrokenOaths.Feudal do
 
   @doc """
   `steward_user` sets `owner_user_id`'s own production queue —
-  constructive-only, same eligibility gate as `steward_collect_bank/3`.
+  constructive-only, same eligibility gate as `steward_collect_bank/3`,
+  PLUS (playtest issue 340c1ad4) the owner's own empire-wide
+  `allow_steward_production` grant — refused with
+  `:steward_production_disabled` unless the owner has turned it on.
   """
   @spec steward_queue_production(map(), map(), term(), term(), atom() | String.t()) ::
           :ok
@@ -406,6 +430,7 @@ defmodule BrokenOaths.Feudal do
              :not_a_player
              | :not_eligible
              | :owner_online
+             | :steward_production_disabled
              | :not_found
              | :not_constructive
              | :invalid_item

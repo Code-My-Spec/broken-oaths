@@ -1132,6 +1132,36 @@ defmodule BrokenOaths.Simulation.WorldServer do
     end
   end
 
+  # Playtest issue 340c1ad4 — `user`'s own EMPIRE-WIDE read of
+  # `Player.allow_steward_production` (default `false`), the current
+  # value `GameLive.FeudalTopBar`'s own toggle reflects. Same "no
+  # player, no data" shape `honor_of/1` already has below.
+  def handle_call({:allow_steward_production, user}, _from, state) do
+    {:reply, state |> find_player(user.id) |> allow_steward_production_of(), state}
+  end
+
+  # Playtest issue 340c1ad4 — the OWNER flips their own empire-wide
+  # grant (never anyone else's: `user` sets only their OWN player, no
+  # `owner_user_id` param exists here at all). Persisted immediately via
+  # `persist_tick/2`'s own generic `state.players` diff
+  # (`persist_player_changes/2` below), the same "not tick-state, still
+  # goes through the tick-diff path right after mutating, no broadcast
+  # — a self-service solo command, not a cross-player event" pattern
+  # `:collect_bank`/`:upgrade_bank` already establish for a direct
+  # single-field `Player` write.
+  def handle_call({:set_allow_steward_production, user, allowed?}, _from, state) do
+    case Stewardship.set_allow_steward_production(state, user, allowed?) do
+      {:ok, new_state} ->
+        case persist_tick(state, new_state) do
+          :ok -> {:reply, :ok, new_state}
+          :stale -> {:reply, {:error, :stale}, resync(state)}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   # "No cancel-griefing" — a steward's cancel attempt is refused
   # structurally: no path anywhere in this module ever reaches the
   # real `Production.cancel_production_item/4`. Same discipline
@@ -2798,6 +2828,11 @@ defmodule BrokenOaths.Simulation.WorldServer do
   defp honor_of(nil), do: 0
   defp honor_of(player), do: player.honor
 
+  # Playtest issue 340c1ad4 — same "no player, no data" shape `honor_of/1`
+  # above already has.
+  defp allow_steward_production_of(nil), do: false
+  defp allow_steward_production_of(player), do: player.allow_steward_production
+
   # -------------------------------------------------------------------
   # Persistence — tick delta
   # -------------------------------------------------------------------
@@ -2969,7 +3004,11 @@ defmodule BrokenOaths.Simulation.WorldServer do
   # riding the same diff-and-persist path: `barbarians_killed` (bumped
   # alongside every bounty payout) and `camps_destroyed` (bumped
   # alongside every reward-share payout `BrokenOaths.Combat.Camps.
-  # attack_camp/4` triggers).
+  # attack_camp/4` triggers). Playtest issue 340c1ad4 adds
+  # `allow_steward_production` — the owner's own empire-wide steward
+  # grant, mutated in-place by `Stewardship.set_allow_steward_production/3`
+  # and picked up here the same way every other single-field `Player`
+  # write already is.
   defp persist_player_changes(old_players, new_players) do
     for {id, player} <- new_players, Map.get(old_players, id) != player do
       Repo.update_all(from(p in Player, where: p.id == ^id),
@@ -2979,7 +3018,8 @@ defmodule BrokenOaths.Simulation.WorldServer do
           camps_destroyed: player.camps_destroyed,
           banked_gold: player.banked_gold,
           bank_cap: player.bank_cap,
-          honor: player.honor
+          honor: player.honor,
+          allow_steward_production: player.allow_steward_production
         ]
       )
     end
@@ -3344,7 +3384,8 @@ defmodule BrokenOaths.Simulation.WorldServer do
       camps_destroyed: p.camps_destroyed,
       banked_gold: p.banked_gold,
       bank_cap: p.bank_cap,
-      honor: p.honor
+      honor: p.honor,
+      allow_steward_production: p.allow_steward_production
     }
 
   defp unit_map(%Unit{} = u) do

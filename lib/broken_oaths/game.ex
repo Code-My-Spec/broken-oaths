@@ -675,18 +675,27 @@ defmodule BrokenOaths.Game do
   @spec steward_log(map(), map()) :: [map()]
   defdelegate steward_log(world, user), to: Feudal
 
+  @doc "`user`'s own current empire-wide steward-production grant (playtest issue 340c1ad4). See `Feudal.allow_steward_production/2`."
+  @spec allow_steward_production(map(), map()) :: boolean()
+  defdelegate allow_steward_production(world, user), to: Feudal
+
+  @doc "`user` flips their OWN empire-wide steward-production grant (playtest issue 340c1ad4). See `Feudal.set_allow_steward_production/3`."
+  @spec set_allow_steward_production(map(), map(), boolean()) :: :ok | {:error, :not_a_player}
+  defdelegate set_allow_steward_production(world, user, allowed?), to: Feudal
+
   @doc "`steward_user` sweeps `owner_user_id`'s own offline Gold Bank into the OWNER's treasury. See `Feudal.steward_collect_bank/3`."
   @spec steward_collect_bank(map(), map(), term()) ::
           :ok | {:error, :not_a_player | :not_eligible | :owner_online | :feudal_disabled}
   defdelegate steward_collect_bank(world, steward_user, owner_user_id), to: Feudal
 
-  @doc "`steward_user` sets `owner_user_id`'s own production queue — constructive-only. See `Feudal.steward_queue_production/5`."
+  @doc "`steward_user` sets `owner_user_id`'s own production queue — constructive-only, and (playtest issue 340c1ad4) only once the owner has granted it. See `Feudal.steward_queue_production/5`."
   @spec steward_queue_production(map(), map(), term(), term(), atom() | String.t()) ::
           :ok
           | {:error,
              :not_a_player
              | :not_eligible
              | :owner_online
+             | :steward_production_disabled
              | :not_found
              | :not_constructive
              | :invalid_item

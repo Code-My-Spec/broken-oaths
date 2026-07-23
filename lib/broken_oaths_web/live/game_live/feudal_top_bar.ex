@@ -29,6 +29,7 @@ defmodule BrokenOathsWeb.GameLive.FeudalTopBar do
   attr :bank_error, :any, required: true
   attr :honor, :any, required: true
   attr :steward_log, :list, required: true
+  attr :allow_steward_production, :boolean, required: true
   attr :vassals, :list, required: true
   attr :known_players, :list, required: true
   attr :conspiracy_heat, :any, required: true
@@ -69,6 +70,27 @@ defmodule BrokenOathsWeb.GameLive.FeudalTopBar do
         <.icon name="hero-scale" class="w-3 h-3" />
         <span data-test="player-honor">{@honor}</span>
       </span>
+
+      <%!-- Playtest issue 340c1ad4: the owner's own EMPIRE-WIDE grant
+               — whether ANY eligible steward may set my production
+               while I'm offline, opt-in and off by default. Sibling to
+               the Honor badge above, always mounted (a fresh player's
+               own grant reads a real, renderable `false`, not an
+               absent one). Clicking sends the OPPOSITE of the current
+               value; `Play`'s own `"set_allow_steward_production"`
+               handler always sets the CALLER's own flag, covering
+               every city they have, never a single one. --%>
+      <label class="badge badge-outline gap-1 cursor-pointer" title="Allow my steward to set my production">
+        <input
+          type="checkbox"
+          checked={@allow_steward_production}
+          phx-click="set_allow_steward_production"
+          phx-value-allowed={to_string(!@allow_steward_production)}
+          data-test="allow-steward-production-toggle"
+          class="checkbox checkbox-xs"
+        />
+        Steward: Production
+      </label>
 
       <%!-- Story 910: every steward action taken on my own behalf
                while I was away — always mounted (an empty log is a

@@ -68,11 +68,17 @@ defmodule BrokenOaths.Feudal.Stewardship do
       different COMMANDS this module never defines a path for at all
       (no `cancel`/`disband` function exists here — "no disbanding, no
       cancel-griefing" is enforced structurally, by absence, not by a
-      runtime check). `queue_production/5` is the state-taking command
-      behind `WorldServer`'s own `:steward_queue_production` — it
-      mirrors `BrokenOaths.Cities.Production.queue_production/4` exactly
-      (same catalog, same `can_queue?/3` gate) but scoped through
-      stewardship eligibility instead of ownership.
+      runtime check). Playtest issue 340c1ad4 adds a SECOND gate ahead
+      of the whitelist: the owner's own EMPIRE-WIDE `Player.
+      allow_steward_production` grant (opt-in, default `false`) —
+      `queue_production/5` refuses with `:steward_production_disabled`
+      before it ever looks at `city_id` unless that ONE flag is set,
+      covering every city the owner has, not a per-city switch.
+      `queue_production/5` is the state-taking command behind
+      `WorldServer`'s own `:steward_queue_production` — it mirrors
+      `BrokenOaths.Cities.Production.queue_production/4` exactly (same
+      catalog, same `can_queue?/3` gate) but scoped through stewardship
+      eligibility instead of ownership.
     * **Emergency defense** — `under_attack?/1` is the gate: normally a
       steward cannot touch the offline owner's units at all; only while
       at least one of the owner's own units carries live damage (`hp <
@@ -241,16 +247,38 @@ defmodule BrokenOaths.Feudal.Stewardship do
   def constructive_item?(type), do: type in @constructive_items
 
   @doc """
+  Playtest issue 340c1ad4 — `user`'s own EMPIRE-WIDE grant: whether
+  ANY eligible steward may set their production while they're offline.
+  Owner-only (`user` may only ever set THEIR OWN flag — there is no
+  `owner_user_id` param here at all, unlike every real steward
+  mutation above), and never scoped by `city_id`: `queue_production/5`'s
+  own `ensure_production_allowed/1` gate reads this ONE flag regardless
+  of which of the owner's cities the steward is targeting.
+  """
+  @spec set_allow_steward_production(map(), term(), boolean()) :: {:ok, map()} | {:error, atom()}
+  def set_allow_steward_production(state, user, allowed?) do
+    with {:ok, player} <- fetch_player(state, user.id) do
+      updated = %{player | allow_steward_production: allowed?}
+      {:ok, %{state | players: Map.put(state.players, player.id, updated)}}
+    end
+  end
+
+  @doc """
   Sets the offline owner's own production queue — the SAME
   constructive-only catalog `Production.queue_production/4` itself
   already builds from, scoped through stewardship eligibility instead
   of ownership. Persisted immediately, same "not tick-state" status
-  `Production.queue_production/4` already has.
+  `Production.queue_production/4` already has. Playtest issue
+  340c1ad4: refuses with `:steward_production_disabled` unless the
+  OWNER has granted `Player.allow_steward_production` — empire-wide,
+  checked BEFORE `city_id` is ever resolved, so the grant covers every
+  city the owner has, not just this one.
   """
   @spec queue_production(map(), term(), term(), term(), atom() | String.t()) ::
           {:ok, map()} | {:error, atom()}
   def queue_production(state, steward_user, owner_user_id, city_id, type) do
     with {:ok, steward_player, owner_player} <- fetch_context(state, steward_user, owner_user_id),
+         :ok <- ensure_production_allowed(owner_player),
          {:ok, city} <- fetch_owned_city(state, owner_player, city_id),
          {:ok, type} <- Production.parse_item_type(type),
          :ok <- ensure_constructive(type),
@@ -288,6 +316,18 @@ defmodule BrokenOaths.Feudal.Stewardship do
 
   defp ensure_constructive(type) do
     if constructive_item?(type), do: :ok, else: {:error, :not_constructive}
+  end
+
+  # Playtest issue 340c1ad4 — the owner's own empire-wide grant, never
+  # the per-city `constructive_item?/1` whitelist's own job. `%Player{}`
+  # rows from BEFORE this migration's own default backfilled `false`
+  # would already read `false` for a missing key too (`Map.get/3`
+  # default), same defensive posture `queue_item_map/1`'s own
+  # `Map.get(unit, :charges, 3)` sibling establishes elsewhere.
+  defp ensure_production_allowed(owner_player) do
+    if Map.get(owner_player, :allow_steward_production, false),
+      do: :ok,
+      else: {:error, :steward_production_disabled}
   end
 
   defp fetch_owned_city(state, owner_player, city_id) do

@@ -19,6 +19,12 @@ defmodule BrokenOathsSpex.Story910.Criterion7690Spex do
   through `attempt_event/3` since no `handle_event/3` clause exists for
   it yet.
 
+  Playtest issue 340c1ad4 — production stewardship is now opt-in: the
+  vassal grants `Game.set_allow_steward_production/3` (empire-wide)
+  before going offline, so this criterion still exercises the ALLOWED
+  half unchanged (story 926's own rule/scenarios cover the refusal
+  half, with the grant left off).
+
   Reuses `subjugate/5`'s own `vassal_play_live` directly (rather than a
   fresh `live/2` remount) before calling `go_offline/1` on it — see
   `criterion_7689`'s own moduledoc for why a stray extra mount would
@@ -30,6 +36,7 @@ defmodule BrokenOathsSpex.Story910.Criterion7690Spex do
 
   import BrokenOathsSpex.SharedGivens
 
+  alias BrokenOaths.Game
   alias BrokenOathsSpex.Fixtures
 
   spex "the steward queues a whitelisted constructive build", fail_on_error_logs: false do
@@ -51,6 +58,10 @@ defmodule BrokenOathsSpex.Story910.Criterion7690Spex do
             context.other_conn,
             context.other_user
           )
+
+        # Playtest issue 340c1ad4: production stewardship is opt-in —
+        # grant it before going offline, empire-wide.
+        :ok = Game.set_allow_steward_production(context.world, context.other_user, true)
 
         go_offline(vassal_play_live)
 

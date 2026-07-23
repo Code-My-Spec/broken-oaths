@@ -24,6 +24,11 @@ defmodule BrokenOathsSpex.Story910.Criterion7695Spex do
   is all `"steward_collect_bank"` needs to have something to log; this
   criterion is only about the LOG entries themselves, not the amount.
 
+  Playtest issue 340c1ad4: production stewardship is opt-in now, so
+  this "given" grants `Game.set_allow_steward_production/3` before
+  going offline — otherwise the production half of this scenario would
+  never log at all, leaving only the bank sweep entry.
+
   ## This criterion's own new judgment call: the log itself
 
   `data-test="steward-log"` on `GameLive.Play`, containing one
@@ -37,6 +42,7 @@ defmodule BrokenOathsSpex.Story910.Criterion7695Spex do
 
   import BrokenOathsSpex.SharedGivens
 
+  alias BrokenOaths.Game
   alias BrokenOathsSpex.Fixtures
 
   spex "the owner reviews a full steward-action log on return", fail_on_error_logs: false do
@@ -58,6 +64,11 @@ defmodule BrokenOathsSpex.Story910.Criterion7695Spex do
             context.other_conn,
             context.other_user
           )
+
+        # Playtest issue 340c1ad4: production stewardship is opt-in —
+        # grant it before going offline, empire-wide, so the second
+        # logged action (the production order) still actually lands.
+        :ok = Game.set_allow_steward_production(context.world, context.other_user, true)
 
         go_offline(vassal_play_live)
 

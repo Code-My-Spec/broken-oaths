@@ -23,6 +23,7 @@ defmodule BrokenOaths.Players.Player do
           banked_gold: integer(),
           bank_cap: integer(),
           honor: integer(),
+          allow_steward_production: boolean(),
           world_id: integer() | nil,
           user_id: integer() | nil,
           world: World.t() | Ecto.Association.NotLoaded.t(),
@@ -62,6 +63,15 @@ defmodule BrokenOaths.Players.Player do
     # Stewardship`'s provable-sabotage penalty, same never-cast status
     # as every other system-mutated counter on this schema.
     field :honor, :integer, default: 100
+    # Playtest issue 340c1ad4 — the owner-controlled, EMPIRE-WIDE grant
+    # gating whether ANY eligible steward may set THEIR production
+    # while offline (`BrokenOaths.Feudal.Stewardship.queue_production/5`'s
+    # own new gate). Opt-in: `false` until the owner explicitly turns it
+    # on via `BrokenOaths.Game.set_allow_steward_production/3`. Unlike
+    # `honor`/`banked_gold`/`bank_cap`, this IS cast through
+    # `changeset/2` below — it's an owner-supplied preference, not a
+    # system-incremented counter.
+    field :allow_steward_production, :boolean, default: false
 
     belongs_to :world, World
     belongs_to :user, User
@@ -72,7 +82,14 @@ defmodule BrokenOaths.Players.Player do
   @doc false
   def changeset(player, attrs) do
     player
-    |> cast(attrs, [:world_id, :user_id, :region_id, :gold, :joined_turn])
+    |> cast(attrs, [
+      :world_id,
+      :user_id,
+      :region_id,
+      :gold,
+      :joined_turn,
+      :allow_steward_production
+    ])
     |> validate_required([:world_id, :user_id, :region_id, :gold, :joined_turn])
     |> validate_number(:gold, greater_than_or_equal_to: 0)
     |> validate_number(:joined_turn, greater_than_or_equal_to: 0)

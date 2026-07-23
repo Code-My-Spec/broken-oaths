@@ -1460,6 +1460,21 @@ defmodule BrokenOathsWeb.GameLive.Play do
     end
   end
 
+  # Playtest issue 340c1ad4 — the owner's own empire-wide toggle:
+  # "Allow my steward to set my production" (`GameLive.FeudalTopBar`'s
+  # own checkbox). Owner-only by construction — `Game.
+  # set_allow_steward_production/3` always sets THIS connection's own
+  # `user`, never anyone else's, so there's no `owner_user_id` param to
+  # parse here at all. A checkbox's own `phx-value`/form value arrives
+  # as the STRING `"true"`/`"false"` (never absent — the checkbox is
+  # always submitted via its own `phx-click`, not a form whose unchecked
+  # box would vanish from the params).
+  def handle_event("set_allow_steward_production", %{"allowed" => allowed}, socket) do
+    %{world: world, user: user} = socket.assigns
+    Game.set_allow_steward_production(world, user, allowed == "true")
+    {:noreply, refresh_board(socket)}
+  end
+
   # "No cancel-griefing" — always refused, whitelist enforced by
   # structural absence (`BrokenOaths.Feudal.Stewardship`'s own moduledoc).
   def handle_event(
@@ -2081,6 +2096,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
       bank: Game.bank(world, user),
       honor: Game.honor(world, user),
       steward_log: Game.steward_log(world, user),
+      # Playtest issue 340c1ad4: the owner's own current empire-wide
+      # steward-production grant — `GameLive.FeudalTopBar`'s own toggle
+      # reflects this, same "single source of truth, re-fetched on
+      # every signal" status `bank`/`honor` above already have, so a
+      # second connected tab on the same account never shows it stale.
+      allow_steward_production: Game.allow_steward_production(world, user),
       # Stories 922/923: `GameLive.ProgressPanel`'s own "Gold/turn"
       # line — same "single source of truth, re-fetched on every
       # signal" status `bank` above already has, so a queued unit's
@@ -2502,6 +2523,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
           bank_error={@bank_error}
           honor={@honor}
           steward_log={@steward_log}
+          allow_steward_production={@allow_steward_production}
           vassals={@vassals}
           known_players={@known_players}
           conspiracy_heat={@conspiracy_heat}
