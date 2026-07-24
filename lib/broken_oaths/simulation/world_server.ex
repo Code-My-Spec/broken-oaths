@@ -170,10 +170,6 @@ defmodule BrokenOaths.Simulation.WorldServer do
     end
   end
 
-  def handle_call(:world_full?, _from, state) do
-    {:reply, world_full?(state), state}
-  end
-
   def handle_call({:claimed_region, user}, _from, state) do
     region = state |> find_player(user.id) |> region_of()
     {:reply, region, state}
@@ -559,6 +555,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
         case persist_tick(state, new_state) do
           :ok ->
             broadcast(new_state.world.id, [:units_changed, :cities_changed, :improvements_changed])
+
             {:reply, :ok, new_state}
 
           :stale ->
@@ -2043,7 +2040,16 @@ defmodule BrokenOaths.Simulation.WorldServer do
     charges = worker_charges(state, player_id, type)
 
     {:ok, unit} =
-      insert_unit(state.world.id, player_id, type, tile_id, stats.hp, stats.movement, camp_id, charges)
+      insert_unit(
+        state.world.id,
+        player_id,
+        type,
+        tile_id,
+        stats.hp,
+        stats.movement,
+        camp_id,
+        charges
+      )
 
     unit_map(unit)
   end
@@ -2104,8 +2110,9 @@ defmodule BrokenOaths.Simulation.WorldServer do
   # has spilled a city into it. Folding in city regions means a new player is
   # never dropped into settled territory just because that region wasn't
   # someone's original spawn, and a carved-up world reports full on real
-  # occupancy rather than a raw home-region count. Used by both the live spawn
-  # placement and `world_full?`.
+  # occupancy rather than a raw home-region count. Used by live spawn placement
+  # (`spawn_new_player/2`); the lobby's advisory fullness check derives the same
+  # set from the DB in `BrokenOaths.Game.world_full?/1` without booting a world.
   defp taken_region_ids(state) do
     home_regions = state.players |> Map.values() |> Enum.map(& &1.region_id)
 
@@ -2179,7 +2186,16 @@ defmodule BrokenOaths.Simulation.WorldServer do
     result
   end
 
-  defp insert_unit(world_id, player_id, type, tile_id, hp, movement, camp_id \\ nil, charges \\ nil) do
+  defp insert_unit(
+         world_id,
+         player_id,
+         type,
+         tile_id,
+         hp,
+         movement,
+         camp_id \\ nil,
+         charges \\ nil
+       ) do
     attrs =
       %{
         world_id: world_id,
@@ -2206,10 +2222,6 @@ defmodule BrokenOaths.Simulation.WorldServer do
   # gets the ordinary 3.
   defp maybe_put_charges(attrs, nil), do: attrs
   defp maybe_put_charges(attrs, charges), do: Map.put(attrs, :charges, charges)
-
-  defp world_full?(state) do
-    match?({:error, :world_full}, Spawner.spawn_player(state.world, taken_region_ids(state)))
-  end
 
   # -------------------------------------------------------------------
   # Abandon
@@ -3306,8 +3318,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
     )
     |> Repo.all()
     |> Map.new(fn o ->
-      {o.unit_id,
-       %{kind: o.kind, path: o.path, status: o.status, hp_at_issue: o.hp_at_issue}}
+      {o.unit_id, %{kind: o.kind, path: o.path, status: o.status, hp_at_issue: o.hp_at_issue}}
     end)
   end
 

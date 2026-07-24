@@ -13,7 +13,22 @@ defmodule BrokenOaths.Cities do
   needs to know this module exists.
   """
 
+  import Ecto.Query
+
+  alias BrokenOaths.Cities.City
+  alias BrokenOaths.Repo
   alias BrokenOaths.Simulation.WorldServer
+
+  @doc """
+  Every tile in `world` that holds a city — a direct DB read (no WorldServer
+  boot), unlike the live-state wrappers below. Used by the lobby's occupancy
+  check (`Game.world_full?/1`), where a city that has spilled into a fresh
+  region counts against that region's capacity, so the picker must see it
+  without spinning up the world's simulation.
+  """
+  @spec tiles_in_world(map()) :: [integer()]
+  def tiles_in_world(world),
+    do: Repo.all(from c in City, where: c.world_id == ^world.id, select: c.tile_id)
 
   @doc """
   Found a city on `unit_id`'s tile: the settler must be `user`'s, the

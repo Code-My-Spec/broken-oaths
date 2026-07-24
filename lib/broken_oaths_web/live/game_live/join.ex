@@ -8,18 +8,24 @@ defmodule BrokenOathsWeb.GameLive.Join do
   of its own — it renders the picker, sends the command, and redirects to
   the board on success.
 
-  Depends on this contract from `BrokenOaths.Game` (context not yet
-  implemented as of this writing):
+  Rendering the list stays entirely off the live simulation: membership and
+  fullness are both answered from the DB, so the picker never boots (or waits
+  on) a single world's `WorldServer`. One slow or wedged world would otherwise
+  hang the whole page.
 
-    * `claimed_region(world, user) :: region | nil` — already a member?
-    * `world_full?(world) :: boolean` — any open region left for a new player?
-    * `join_world(world, user) :: {:ok, world} | {:error, :world_full} | {:error, :membership_limit}`
-      idempotent for an existing member (resumes without re-spawning).
+    * `Players.member_world_ids(user) :: [world_id]` — the worlds this user
+      already has a civilization in (a direct DB read).
+    * `Game.world_full?(world) :: boolean` — any open region left for a new
+      player, computed from the persisted region/city occupancy (no boot).
+    * `Game.join_world(world, user) :: {:ok, world} | {:error, :world_full} | {:error, :membership_limit}`
+      the atomic authority — idempotent for an existing member (resumes
+      without re-spawning), and re-checks fullness against live state.
   """
 
   use BrokenOathsWeb, :live_view
 
   alias BrokenOaths.Game
+  alias BrokenOaths.Players
   alias BrokenOaths.Users
   alias BrokenOaths.Users.User
   alias BrokenOaths.Worlds
@@ -33,6 +39,7 @@ defmodule BrokenOathsWeb.GameLive.Join do
      |> assign(:page_title, "Play")
      |> assign(:join_error, nil)
      |> assign(:name_form, to_form(Users.change_user_display_name(user)))
+     |> assign(:member_world_ids, MapSet.new(Players.member_world_ids(user)))
      |> assign(:worlds, active_worlds())}
   end
 
@@ -145,7 +152,7 @@ defmodule BrokenOathsWeb.GameLive.Join do
       <div :if={@worlds != []} class="divider mt-8 text-sm opacity-50">or pick a world</div>
 
       <ul :if={@worlds != []} class="menu bg-base-200 rounded-box w-full">
-        <.world_row :for={world <- @worlds} world={world} current_user={@current_scope.user} />
+        <.world_row :for={world <- @worlds} world={world} member_world_ids={@member_world_ids} />
       </ul>
     </div>
     """
@@ -154,7 +161,7 @@ defmodule BrokenOathsWeb.GameLive.Join do
   defp world_row(assigns) do
     assigns =
       assigns
-      |> assign(:member?, member?(assigns.world, assigns.current_user))
+      |> assign(:member?, MapSet.member?(assigns.member_world_ids, assigns.world.id))
       |> assign(:full?, full?(assigns.world))
 
     ~H"""
@@ -192,7 +199,6 @@ defmodule BrokenOathsWeb.GameLive.Join do
   defp error_message(:world_full), do: "That world just filled up — pick another."
   defp error_message(:membership_limit), do: "You can only play in three worlds at once."
 
-  defp member?(world, user), do: Game.claimed_region(world, user) != nil
   defp full?(world), do: Game.world_full?(world)
 
   defp active_worlds do

@@ -37,12 +37,14 @@ defmodule BrokenOaths.Game do
   alias BrokenOaths.Combat
   alias BrokenOaths.Diplomacy
   alias BrokenOaths.Feudal
+  alias BrokenOaths.Simulation.Spawner
   alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.Players
   alias BrokenOaths.Technology
   alias BrokenOaths.Units
   alias BrokenOaths.Vision
   alias BrokenOaths.Worlds
+  alias BrokenOaths.Worlds.Regions
 
   # -------------------------------------------------------------------
   # World lifecycle / runtime
@@ -60,9 +62,33 @@ defmodule BrokenOaths.Game do
   @spec join_world(map(), map()) :: {:ok, map()} | {:error, :world_full | :membership_limit}
   def join_world(world, user), do: WorldServer.call(world, {:join, user})
 
-  @doc "Any spawnable region left for a new player?"
+  @doc """
+  Any spawnable region left for a new player? Answered straight from the
+  DB — home regions already claimed by players, plus regions cities have
+  spilled into — so this never boots the world's `WorldServer`. That
+  matters for the lobby (`GameLive.Join`), which asks it for every listed
+  world at once: routing it through the live server would spin up (and
+  catch-up) every world's simulation just to render the picker, so one
+  slow or wedged world would hang the whole page. `join_world/2` remains
+  the atomic authority — it re-checks against live state and returns
+  `{:error, :world_full}` if the DB view was a beat stale.
+  """
   @spec world_full?(map()) :: boolean()
-  def world_full?(world), do: WorldServer.call(world, :world_full?)
+  def world_full?(world) do
+    match?({:error, :world_full}, Spawner.spawn_player(world, taken_region_ids(world)))
+  end
+
+  defp taken_region_ids(world) do
+    home_regions = Players.region_ids(world)
+
+    city_regions =
+      world
+      |> Cities.tiles_in_world()
+      |> Enum.map(&Regions.region_of(world, &1))
+      |> Enum.reject(&is_nil/1)
+
+    Enum.uniq(home_regions ++ city_regions)
+  end
 
   @doc "The region `user` claimed in `world`, or `nil` if they haven't joined."
   @spec claimed_region(map(), map()) :: term() | nil

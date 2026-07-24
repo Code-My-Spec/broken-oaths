@@ -26,6 +26,15 @@ defmodule BrokenOaths.Players do
   def member_world_ids(user),
     do: Repo.all(from p in Player, where: p.user_id == ^user.id, select: p.world_id)
 
+  @doc """
+  Every home `region_id` claimed by a player in `world` — a direct DB read (no
+  WorldServer boot), used by the lobby's occupancy check (`Game.world_full?/1`)
+  so rendering the world picker never has to spin up a live simulation.
+  """
+  @spec region_ids(map()) :: [integer()]
+  def region_ids(world),
+    do: Repo.all(from p in Player, where: p.world_id == ^world.id, select: p.region_id)
+
   @doc "`user`'s current gold in `world`."
   def gold(world, user), do: WorldServer.call(world, {:gold, user})
 
