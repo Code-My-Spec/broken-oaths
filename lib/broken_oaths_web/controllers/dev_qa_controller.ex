@@ -25,6 +25,7 @@ defmodule BrokenOathsWeb.DevQaController do
   | Method | Path                | Body / query params           | What it does |
   |---|---|---|---|
   | GET    | `/`                 | —                              | `%{id, turn, turn_seconds, paused}` |
+  | POST   | `/reload`           | —                              | Restart the live `WorldServer`, force-rehydrating from the DB (pairs with a raw-`Repo` reseed so the running server picks up the fresh state) |
   | POST   | `/pause`            | —                              | Freeze the turn clock |
   | POST   | `/resume`           | —                              | Unfreeze the turn clock |
   | POST   | `/step`             | —                              | Advance exactly one turn (works even while paused) |
@@ -64,6 +65,12 @@ defmodule BrokenOathsWeb.DevQaController do
       turn_seconds: world.turn_seconds,
       paused: Game.paused?(world)
     })
+  end
+
+  def reload(conn, %{"id" => id}) do
+    world = Worlds.get_world!(id)
+    :ok = Game.restart_world_server(world)
+    json(conn, %{ok: true, reloaded: true, turn: Game.turn_number(world), paused: Game.paused?(world)})
   end
 
   def pause(conn, %{"id" => id}) do
