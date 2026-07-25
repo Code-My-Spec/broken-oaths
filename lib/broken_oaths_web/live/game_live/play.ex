@@ -2773,10 +2773,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
             // server-side to a yaw/pitch pair (`PlayView.camera_on/2`,
             // the same centroid math the initial mount already uses)
             // and this just points the camera at it, same as dragging.
-            this.handleEvent("globe3d:center", ({yaw, pitch}) => {
-              this.yaw = yaw
-              this.pitch = pitch
-              this.draw()
+            this.handleEvent("globe3d:center", ({yaw, pitch, dur}) => {
+              this.panTo(yaw, pitch, dur)
             })
 
             // Unified pointer input for mouse, pen and touch. One active
@@ -2797,6 +2795,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
               return {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2}
             }
             const panBy = (dx, dy) => {
+              this.camAnim = null // a manual drag cancels any in-flight auto-pan
               this.yaw -= dx / this.scale / Math.max(Math.cos(this.pitch), 0.25)
               this.pitch = Math.max(-this.maxPitch, Math.min(this.maxPitch, this.pitch + dy / this.scale))
             }
@@ -3078,8 +3077,22 @@ defmodule BrokenOathsWeb.GameLive.Play do
             return [a[0] * wa + b[0] * wb, a[1] * wa + b[1] * wb, a[2] * wa + b[2] * wb]
           },
 
-          // Animation loop — runs only while a slide is in flight or a
-          // unit with a pending path needs its pulse.
+          // Smoothly pan the camera to a target yaw/pitch (used by the
+          // `globe3d:center` handler). Takes the shortest way around in
+          // yaw and eases in/out; a manual drag cancels it (see panBy).
+          panTo(toYaw, toPitch, dur) {
+            const TWO_PI = Math.PI * 2
+            const d = (((toYaw - this.yaw) % TWO_PI) + TWO_PI + Math.PI) % TWO_PI - Math.PI
+            this.camAnim = {
+              fromYaw: this.yaw, toYaw: this.yaw + d,
+              fromPitch: this.pitch, toPitch,
+              start: performance.now(), dur: dur || 900,
+            }
+            this.ensureLoop()
+          },
+
+          // Animation loop — runs only while a slide is in flight, a
+          // camera pan is easing, or a unit with a pending path pulses.
           ensureLoop() {
             if (this.raf) return
             const step = () => {
@@ -3088,10 +3101,17 @@ defmodule BrokenOathsWeb.GameLive.Play do
               for (const [id, a] of this.anims) {
                 if (now - a.start > 450) this.anims.delete(id)
               }
+              if (this.camAnim) {
+                const p = Math.min(1, (now - this.camAnim.start) / this.camAnim.dur)
+                const e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2 // easeInOutQuad
+                this.yaw = this.camAnim.fromYaw + (this.camAnim.toYaw - this.camAnim.fromYaw) * e
+                this.pitch = this.camAnim.fromPitch + (this.camAnim.toPitch - this.camAnim.fromPitch) * e
+                if (p >= 1) this.camAnim = null
+              }
               this.render()
               const pulsing = this.units.some((u) => u.order && u.order.status === "pending")
               const flashing = this.combatFlash && now < this.combatFlash.until
-              if (this.anims.size || pulsing || flashing) this.raf = requestAnimationFrame(step)
+              if (this.anims.size || pulsing || flashing || this.camAnim) this.raf = requestAnimationFrame(step)
             }
             this.raf = requestAnimationFrame(step)
           },
