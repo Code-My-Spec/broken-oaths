@@ -67,6 +67,7 @@ defmodule BrokenOathsWeb.Router do
       pipe_through :api
 
       get "/worlds/:id", DevQaController, :show
+      post "/worlds/:id/reload", DevQaController, :reload
       post "/worlds/:id/pause", DevQaController, :pause
       post "/worlds/:id/resume", DevQaController, :resume
       post "/worlds/:id/step", DevQaController, :step
