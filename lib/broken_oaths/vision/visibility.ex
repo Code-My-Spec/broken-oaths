@@ -194,6 +194,11 @@ defmodule BrokenOaths.Vision.Visibility do
       # draws an owner-colored ring off these; `UnitPanel` reads them
       # for its owner readout. `player_id` is nil for a barbarian.
       player_id: unit.player_id,
+      # Owner's display name (playtest: the unit panel showed "Player #<n>"
+      # instead of a name). Resolved from `state.players`' preloaded
+      # `display_name`; nil for a barbarian or an unresolved owner, in which
+      # case `UnitPanel` falls back to a short "Player #<id>".
+      owner_name: owner_name(state, unit.player_id),
       own: unit.player_id == viewer_player_id,
       hp: unit.hp,
       max_hp: unit.max_hp,
@@ -215,6 +220,15 @@ defmodule BrokenOaths.Vision.Visibility do
       fortified_turns: Map.get(unit, :fortified_turns, 0),
       order: order
     }
+  end
+
+  defp owner_name(_state, nil), do: nil
+
+  defp owner_name(state, player_id) do
+    case Map.get(state.players, player_id) do
+      %{display_name: name} -> name
+      _ -> nil
+    end
   end
 
   defp format_order(nil), do: nil

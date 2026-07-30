@@ -543,7 +543,9 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
     cond do
       is_nil(Map.get(unit, :player_id)) -> "Barbarians"
       Map.get(unit, :own, true) -> "You"
-      true -> "Player ##{Map.get(unit, :player_id)}"
+      # Prefer the owner's display name carried on the unit wire; fall
+      # back to a short "Player #<id>" only when it's unresolved.
+      true -> Map.get(unit, :owner_name) || "Player ##{Map.get(unit, :player_id)}"
     end
   end
 

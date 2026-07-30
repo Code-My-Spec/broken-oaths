@@ -2179,7 +2179,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
           |> PlayerResearch.changeset(%{world_id: state.world.id, player_id: player.id})
           |> Repo.insert()
 
-        {player_map(player), [unit_map(lord), unit_map(settler)], explored,
+        {player_map(%{player | user: user}), [unit_map(lord), unit_map(settler)], explored,
          player_research_map(player_research)}
       end)
 
@@ -3298,7 +3298,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
   end
 
   defp load_players(world_id) do
-    from(p in Player, where: p.world_id == ^world_id)
+    from(p in Player, where: p.world_id == ^world_id, preload: :user)
     |> Repo.all()
     |> Map.new(&{&1.id, player_map(&1)})
   end
@@ -3388,6 +3388,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
     do: %{
       id: p.id,
       user_id: p.user_id,
+      display_name: player_display_name(p),
       region_id: p.region_id,
       gold: p.gold,
       heir_arrives_turn: p.heir_arrives_turn,
@@ -3398,6 +3399,13 @@ defmodule BrokenOaths.Simulation.WorldServer do
       honor: p.honor,
       allow_steward_production: p.allow_steward_production
     }
+
+  # Owner display name, resolved only when the `:user` assoc is loaded
+  # (load_players preloads it; the join path sets it via `%{player | user: user}`).
+  # Nil when unloaded so downstream falls back to `User.display_name/1`'s
+  # canonical "Player #<user id>" — never crashes on an unloaded assoc.
+  defp player_display_name(%Player{user: %User{} = u}), do: User.display_name(u)
+  defp player_display_name(_), do: nil
 
   defp unit_map(%Unit{} = u) do
     %{
