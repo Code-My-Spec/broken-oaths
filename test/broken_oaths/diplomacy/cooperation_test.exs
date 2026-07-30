@@ -125,4 +125,23 @@ defmodule BrokenOaths.Diplomacy.CooperationTest do
       assert Cooperation.accept(alliance, 20) == {:error, :already_accepted}
     end
   end
+
+  describe "break/2" do
+    test "either party may break an accepted alliance" do
+      alliance = %Alliance{status: :accepted, player_a_id: 10, player_b_id: 20, proposer_player_id: 10}
+      assert Cooperation.break(alliance, 10) == {:ok, alliance}
+      assert Cooperation.break(alliance, 20) == {:ok, alliance}
+    end
+
+    test "either party may cancel a still-proposed alliance" do
+      alliance = %Alliance{status: :proposed, player_a_id: 10, player_b_id: 20, proposer_player_id: 10}
+      assert Cooperation.break(alliance, 10) == {:ok, alliance}
+      assert Cooperation.break(alliance, 20) == {:ok, alliance}
+    end
+
+    test "a stranger to the alliance cannot break it" do
+      alliance = %Alliance{status: :accepted, player_a_id: 10, player_b_id: 20, proposer_player_id: 10}
+      assert Cooperation.break(alliance, 99) == {:error, :not_a_party}
+    end
+  end
 end

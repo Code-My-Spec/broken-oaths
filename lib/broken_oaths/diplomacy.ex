@@ -62,4 +62,15 @@ defmodule BrokenOaths.Diplomacy do
              | Ecto.Changeset.t()}
   def accept_alliance(world, user, alliance_id),
     do: WorldServer.call(world, {:accept_alliance, user, alliance_id})
+
+  @doc """
+  End (or cancel) `alliance_id` that `user` is a party to — deletes the
+  row, returning both players to plain peace. Works whether the alliance
+  is still `:proposed` (cancel/decline) or already `:accepted` (break)
+  (`BrokenOaths.Diplomacy.Cooperation.break_alliance/3`).
+  """
+  @spec break_alliance(map(), map(), term()) ::
+          :ok | {:error, :not_found | :not_a_party | :not_a_player | Ecto.Changeset.t()}
+  def break_alliance(world, user, alliance_id),
+    do: WorldServer.call(world, {:break_alliance, user, alliance_id})
 end

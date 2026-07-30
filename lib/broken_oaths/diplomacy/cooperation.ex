@@ -171,6 +171,19 @@ defmodule BrokenOaths.Diplomacy.Cooperation do
 
   def accept(_alliance, _accepting_player_id), do: {:error, :not_a_party}
 
+  @doc """
+  Validate that `breaking_player_id` is a party to `alliance` — either
+  side may end it, whether it is still `:proposed` (cancel/decline) or
+  already `:accepted` (break). Returns the row to delete: breaking an
+  alliance removes it entirely, returning both players to plain peace.
+  """
+  @spec break(Alliance.t(), player_id()) :: {:ok, Alliance.t()} | {:error, :not_a_party}
+  def break(%Alliance{player_a_id: a, player_b_id: b} = alliance, breaking_player_id)
+      when breaking_player_id in [a, b],
+      do: {:ok, alliance}
+
+  def break(_alliance, _breaking_player_id), do: {:error, :not_a_party}
+
   # -------------------------------------------------------------------
   # Alliance propose/accept — imperative wrappers (see this module's
   # own "Alliance propose/accept" moduledoc section above).
@@ -195,6 +208,16 @@ defmodule BrokenOaths.Diplomacy.Cooperation do
          {:ok, alliance} <- fetch_alliance(alliance_id),
          {:ok, changeset} <- accept(alliance, player.id) do
       Repo.update(changeset)
+    end
+  end
+
+  @doc "Resolve `user` and the target `alliance_id`, then `break/2` + delete the row."
+  @spec break_alliance(map(), map(), term()) :: {:ok, Alliance.t()} | {:error, atom()}
+  def break_alliance(state, user, alliance_id) do
+    with {:ok, player} <- fetch_player(state, user.id),
+         {:ok, alliance} <- fetch_alliance(alliance_id),
+         {:ok, alliance} <- break(alliance, player.id) do
+      Repo.delete(alliance)
     end
   end
 

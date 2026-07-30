@@ -500,6 +500,7 @@ defmodule BrokenOaths.Game do
              | :already_accepted
              | Ecto.Changeset.t()}
   defdelegate accept_alliance(world, user, alliance_id), to: Diplomacy
+  defdelegate break_alliance(world, user, alliance_id), to: Diplomacy
 
   # -------------------------------------------------------------------
   # Vassalage / Tribute (stories 907/908) —

@@ -628,6 +628,19 @@ defmodule BrokenOaths.Simulation.WorldServer do
     end
   end
 
+  # Delete the row, returning both players to plain peace. Same
+  # non-tick-state status as the two above.
+  def handle_call({:break_alliance, user, alliance_id}, _from, state) do
+    case Cooperation.break_alliance(state, user, alliance_id) do
+      {:ok, _alliance} ->
+        broadcast(state.world.id, [:alliances_changed])
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   # -------------------------------------------------------------------
   # Vassalage / Tribute (stories 907/908)
   # -------------------------------------------------------------------

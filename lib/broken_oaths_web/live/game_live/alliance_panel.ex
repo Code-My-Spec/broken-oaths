@@ -108,6 +108,15 @@ defmodule BrokenOathsWeb.GameLive.AlliancePanel do
     end
   end
 
+  def handle_event("break_alliance", %{"alliance_id" => alliance_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.break_alliance(world, user, parse_id(alliance_id)) do
+      :ok -> {:noreply, socket |> assign(error: nil) |> refresh_alliances()}
+      {:error, reason} -> {:noreply, assign(socket, error: alliance_error_message(reason))}
+    end
+  end
+
   # -------------------------------------------------------------------
   # Helpers
   # -------------------------------------------------------------------
@@ -253,6 +262,42 @@ defmodule BrokenOathsWeb.GameLive.AlliancePanel do
           class="btn btn-primary btn-xs"
         >
           Accept
+        </button>
+
+        <button
+          :if={@alliance.status == :accepted}
+          type="button"
+          data-test="break-alliance"
+          phx-click="break_alliance"
+          phx-value-alliance_id={@alliance.id}
+          phx-target={@myself}
+          class="btn btn-ghost btn-xs text-error"
+        >
+          Break
+        </button>
+
+        <button
+          :if={@alliance.status == :proposed and @alliance.proposed_by_me?}
+          type="button"
+          data-test="cancel-alliance"
+          phx-click="break_alliance"
+          phx-value-alliance_id={@alliance.id}
+          phx-target={@myself}
+          class="btn btn-ghost btn-xs"
+        >
+          Cancel
+        </button>
+
+        <button
+          :if={@alliance.status == :proposed and !@alliance.proposed_by_me?}
+          type="button"
+          data-test="decline-alliance"
+          phx-click="break_alliance"
+          phx-value-alliance_id={@alliance.id}
+          phx-target={@myself}
+          class="btn btn-ghost btn-xs"
+        >
+          Decline
         </button>
       </div>
 
