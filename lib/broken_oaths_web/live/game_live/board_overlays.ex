@@ -276,6 +276,12 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
           <p :if={@selected_tile.resource} class="text-xs" data-test="tile-resource">
             {resource_label(@selected_tile.resource)}
           </p>
+          <div :if={@selected_tile[:hostile_city]} class="flex items-center gap-2 text-xs mt-1" data-test="enemy-city">
+            <span class="font-medium">Enemy city: {@selected_tile.hostile_city.name}</span>
+            <span class="badge badge-error badge-outline badge-sm" data-test="enemy-city-hp">
+              {@selected_tile.hostile_city.hp} HP{if @selected_tile.hostile_city.broken, do: " · broken", else: ""}
+            </span>
+          </div>
         </div>
       </div>
 

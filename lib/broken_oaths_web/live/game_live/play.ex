@@ -455,6 +455,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
     yields = Yields.tile_yield(terrain, resource)
     improvement = Enum.find(improvements, &(&1.tile_id == tile_id))
 
+    # An enemy city on this tile rides the tile panel (CityPanel assumes an
+    # owned shape) — carry its HP so a besieger clicking through their own
+    # unit can watch it drop.
+    hostile_city = Enum.find(socket.assigns.cities, &(&1.tile_id == tile_id and Map.get(&1, :hostile)))
+
     socket =
       assign(socket,
         selected_tile: %{
@@ -463,7 +468,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
           food: yields.food,
           production: yields.production,
           improvement: improvement,
-          resource: resource
+          resource: resource,
+          hostile_city:
+            hostile_city &&
+              %{name: hostile_city.name, hp: hostile_city.hp, broken: Map.get(hostile_city, :broken, false)}
         },
         selected_unit_id: nil,
         selected_unit: nil,
@@ -2962,28 +2970,29 @@ defmodule BrokenOathsWeb.GameLive.Play do
               return
             }
 
-            const unit = this.units.find((u) => u.tile_id === tile)
-            if (unit) { this.pushEvent("select_unit", {unit_id: unit.id, tile_id: tile}); return }
-
-            // QA issue 56ee521a — a hostile (enemy) city never opens
-            // `CityPanel` (that component assumes an OWNED city's own
-            // shape: queue, worked tiles, etc., which `city_marker/1`'s
-            // trimmed board payload doesn't carry for someone else's
-            // city) — falls through to the plain tile-info panel below,
-            // same as clicking any other occupied-but-foreign ground.
-            const city = this.cities.find((c) => c.tile_id === tile && !c.hostile)
-            if (city) { this.pushEvent("select_city", {city_id: city.id}); return }
-
-            // QA issue 748348fe — a barbarian camp is selectable too,
-            // the same left-click convention as a unit/city, so a
-            // besieging player can watch its HP drop.
+            // Everything selectable on this tile, top of the stack first.
+            // Clicking the SAME tile again cycles DOWN through them, so a
+            // unit standing on a city (or on an enemy city's tile) no
+            // longer traps selection on the unit — click again to reach
+            // the city / camp / ground beneath it. A hostile (enemy) city
+            // never opens `CityPanel` (QA issue 56ee521a — that component
+            // assumes an OWNED city's shape); it rides the tile-info panel
+            // instead, which now surfaces its HP (see `select_tile`), so a
+            // player besieging under their own unit can watch it drop.
+            const stack = []
+            for (const u of this.units) {
+              if (u.tile_id === tile) stack.push(["select_unit", {unit_id: u.id, tile_id: tile}])
+            }
+            const own = this.cities.find((c) => c.tile_id === tile && !c.hostile)
+            if (own) stack.push(["select_city", {city_id: own.id}])
             const camp = this.camps.find((c) => c.tile_id === tile)
-            if (camp) { this.pushEvent("select_camp", {camp_id: camp.id}); return }
+            if (camp) stack.push(["select_camp", {camp_id: camp.id}])
+            stack.push(["select_tile", {tile_id: tile}])
 
-            // Open ground: show the tile's own info (terrain, yields,
-            // improvement) — but only for tiles the player knows, which
-            // is all the client ever has.
-            this.pushEvent("select_tile", {tile_id: tile})
+            this.cycleIndex = this.cycleTile === tile ? (this.cycleIndex + 1) % stack.length : 0
+            this.cycleTile = tile
+            const [event, payload] = stack[this.cycleIndex]
+            this.pushEvent(event, payload)
           },
 
           // Right click: queue the selected unit's move toward the clicked
