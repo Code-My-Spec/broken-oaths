@@ -1486,6 +1486,30 @@ defmodule BrokenOaths.Simulation.WorldServer do
     end
   end
 
+  # Test-only: the SAME instant relocate as `:relocate_unit_for_test`
+  # above, minus its occupancy refusal — for the one class of scenario
+  # that refusal actively blocks constructing: two hostile units
+  # deliberately sharing a tile (e.g. story 927's chop-refusal check,
+  # `Improvement.validate_chop_not_hostile_occupied/2`, which the real
+  # game logic explicitly anticipates as a reachable state to detect
+  # and refuse). Normal relocation staying occupancy-checked is
+  # correct — "one unit per hex" holds everywhere gameplay can reach
+  # on its own — but a scenario testing what happens WHEN that rule is
+  # bypassed (two units already co-located) has no other route to that
+  # precondition: every other test-only placement path (`relocate_unit_for_test`,
+  # `spawn_unit_for_test`, `spawn_barbarian_for_test`) enforces the same
+  # rule, and real movement/pathing refuses stepping onto an occupied
+  # tile at all, so nothing in-game can walk two hostiles onto the same
+  # hex either. Same narrow, documented-bridge status as its sibling —
+  # use only to construct an already-co-occupied precondition, never as
+  # a general-purpose relocate.
+  def handle_call({:force_relocate_unit_for_test, unit_id, tile_id}, _from, state) do
+    unit = Map.fetch!(state.units, unit_id)
+    Repo.update_all(from(u in Unit, where: u.id == ^unit_id), set: [tile_id: tile_id])
+    new_state = %{state | units: Map.put(state.units, unit_id, %{unit | tile_id: tile_id})}
+    {:reply, :ok, new_state}
+  end
+
   # Test-only: instantly place a COMPLETE improvement of `kind` on
   # `tile_id`, bypassing the real build (a worker standing still for
   # `Improvement.duration/1` real turns) entirely — same narrow,

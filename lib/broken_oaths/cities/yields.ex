@@ -592,6 +592,37 @@ defmodule BrokenOaths.Cities.Yields do
     pick_best(candidates, &growth_key(world, city.tile_id, &1))
   end
 
+  @doc """
+  Story 927 (chopping a worked tile) — drop any of `state.cities`' own
+  `worked_tiles` entries that have been permanently Chopped
+  (`state.cleared_features`, story 927's own delta set) since they were
+  assigned. `assign_new_citizen/2` only ever FILLS a city's worked-tile
+  slots when it's under capacity — nothing revisits an EXISTING
+  assignment once made, so a citizen working a woods tile stays pinned
+  there forever even after a worker chops the feature out from under
+  them unless something else evicts it. This is that eviction, run every
+  tick (not economy-gated — "by the next turn" means the very next turn
+  boundary, not the next economy tick, `economy_turns` defaulting to 10
+  would otherwise make this feel arbitrarily delayed).
+
+  Deliberately narrow: only DROPS the stale assignment, it does not
+  auto-pick a replacement (`assign_new_citizen/2`'s own economy-tick
+  pass already re-fills any city left under capacity, on its own
+  schedule — duplicating that here would double-run the same fill
+  logic on two different cadences).
+  """
+  @spec revalidate_worked_tiles(map()) :: map()
+  def revalidate_worked_tiles(state) do
+    cleared = Map.get(state, :cleared_features, MapSet.new())
+
+    cities =
+      Map.new(state.cities, fn {id, city} ->
+        {id, %{city | worked_tiles: Enum.reject(city.worked_tiles, &MapSet.member?(cleared, &1))}}
+      end)
+
+    %{state | cities: cities}
+  end
+
   @doc "The best unworked, owned, workable tile for a new citizen, or `nil` if none is free."
   @spec pick_worked_tile(city(), World.t()) :: tile_id() | nil
   def pick_worked_tile(city, world) do

@@ -15,6 +15,10 @@ defmodule BrokenOathsSpex.Fixtures do
 
   use Boundary, top_level?: true, deps: [BrokenOaths]
 
+  alias BrokenOaths.Game
+  alias BrokenOaths.Worlds.Globe
+  alias BrokenOaths.Worlds.Regions
+
   # --- Users / session ---
   defdelegate user_fixture(attrs \\ %{}), to: BrokenOaths.UsersFixtures
   defdelegate user_scope_fixture(), to: BrokenOaths.UsersFixtures
@@ -96,14 +100,14 @@ defmodule BrokenOathsSpex.Fixtures do
   # right-clicks the globe (fog targets have no id client-side, so
   # orders travel as points). Seed-derived geometry, read-only.
   def tile_center(world, tile_id) do
-    mesh = BrokenOaths.Worlds.Globe.get(world.frequency)
-    BrokenOaths.Worlds.Globe.tile(mesh, tile_id).center
+    mesh = Globe.get(world.frequency)
+    Globe.tile(mesh, tile_id).center
   end
 
   # Total tile count for a world's mesh frequency — lets specs iterate
   # "every tile" (e.g. searching for a narrow spot) without hardcoding
   # a size. Seed/frequency-derived geometry, same status as tile_class.
-  def tile_count(world), do: BrokenOaths.Worlds.Globe.tile_count(world.frequency)
+  def tile_count(world), do: Globe.tile_count(world.frequency)
 
   # --- City loop (stories 878-883): sanctioned domain reads ---
   # A city is state the SUT produces by founding/growing/producing —
@@ -123,10 +127,20 @@ defmodule BrokenOathsSpex.Fixtures do
   # `tile_class`/`tile_center`, just the finer-grained view yield and
   # founding criteria need (grassland founding spots, farm/mine
   # eligibility, yield-stacking terrain combos).
+  #
+  # Story 927/948 QA fix: this used to call `Generator.generate_maps/2`
+  # directly — the raw, seed-ONLY generator, with no chop delta applied
+  # (`BrokenOaths.Worlds.ClearedFeature`). Every state-aware reader in
+  # the real app goes through `Regions.terrain/3` instead, which layers
+  # `state.cleared_features` on top so a chopped tile reads
+  # `feature: nil` — a spec reading terrain through the seed-only path
+  # after a real chop would see `feature: :woods` forever, an artifact
+  # of which reader it called, not of anything actually wrong in the
+  # app. Routes through `Game.cleared_features/1` (a thin accessor onto
+  # the live `WorldServer`) so this fixture agrees with the real app
+  # the instant a tile is chopped, same as every other reader does.
   def tile_terrain(world, tile_id) do
-    mesh = BrokenOaths.Worlds.Globe.get(world.frequency)
-    %{terrain: terrain} = BrokenOaths.Worlds.Generator.generate_maps(world.seed, mesh)
-    Map.fetch!(terrain, tile_id)
+    Regions.terrain(world, tile_id, Game.cleared_features(world))
   end
 
   # A tile's bonus resource (story 905), or `nil` for a bare tile —
@@ -238,6 +252,14 @@ defmodule BrokenOathsSpex.Fixtures do
   defdelegate relocate_unit(world, unit_id, tile_id),
     to: BrokenOaths.Game,
     as: :relocate_unit_for_test
+
+  # Narrow exception to `relocate_unit/3`'s own occupancy refusal — for
+  # deliberately constructing a two-hostile-units-share-a-tile
+  # precondition no other test-only placement path can reach. See
+  # `WorldServer`'s `:force_relocate_unit_for_test` handler for why.
+  defdelegate force_relocate_unit(world, unit_id, tile_id),
+    to: BrokenOaths.Game,
+    as: :force_relocate_unit_for_test
 
   # Deliberate, narrow exception to "read-only" above, same status as
   # `relocate_unit/3`: instantly places a COMPLETE improvement of

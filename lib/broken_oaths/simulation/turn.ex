@@ -244,18 +244,18 @@ defmodule BrokenOaths.Simulation.Turn do
   production completions racing for a tile) resolve deterministically.
   """
 
-  alias BrokenOaths.Combat.Camps
-  alias BrokenOaths.Combat.CityDefense
   alias BrokenOaths.Cities.Improvement
   alias BrokenOaths.Cities.Production
-  alias BrokenOaths.Technology.Research
+  alias BrokenOaths.Cities.Yields
+  alias BrokenOaths.Combat.Camps
+  alias BrokenOaths.Combat.CityDefense
   alias BrokenOaths.Simulation.Turn.BarbarianPhase
   alias BrokenOaths.Simulation.Turn.HeirSuccession
   alias BrokenOaths.Simulation.Turn.Movement
   alias BrokenOaths.Simulation.Turn.RoadBuilder
+  alias BrokenOaths.Technology.Research
   alias BrokenOaths.Units.Unit
   alias BrokenOaths.Vision.Visibility
-  alias BrokenOaths.Cities.Yields
 
   @type unit_id :: term()
   @type player_id :: term()
@@ -384,6 +384,7 @@ defmodule BrokenOaths.Simulation.Turn do
       state
       |> Improvement.clear_orphaned_builders()
       |> CityDefense.regen_cities(attacked_cities)
+      |> Yields.revalidate_worked_tiles()
       |> maybe_grow(economy?, settled_this_tick)
       |> Unit.heal_all(tiles_before)
       |> Visibility.refresh_explored()

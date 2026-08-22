@@ -37,9 +37,9 @@ defmodule BrokenOaths.Game do
   alias BrokenOaths.Combat
   alias BrokenOaths.Diplomacy
   alias BrokenOaths.Feudal
+  alias BrokenOaths.Players
   alias BrokenOaths.Simulation.Spawner
   alias BrokenOaths.Simulation.WorldServer
-  alias BrokenOaths.Players
   alias BrokenOaths.Technology
   alias BrokenOaths.Units
   alias BrokenOaths.Vision
@@ -263,6 +263,10 @@ defmodule BrokenOaths.Game do
   @doc "Test-only: instantly relocate `unit_id` to `tile_id`. See `Units.relocate_unit_for_test/3`."
   @spec relocate_unit_for_test(map(), term(), term()) :: :ok | {:error, :occupied}
   defdelegate relocate_unit_for_test(world, unit_id, tile_id), to: Units
+
+  @doc "Test-only: same as `relocate_unit_for_test/3` without the occupancy refusal. See `Units.force_relocate_unit_for_test/3`."
+  @spec force_relocate_unit_for_test(map(), term(), term()) :: :ok
+  defdelegate force_relocate_unit_for_test(world, unit_id, tile_id), to: Units
 
   @doc "Dev-only QA control surface: place a REAL player-owned unit at `tile_id`. See `Units.spawn_unit_for_test/4`."
   @spec spawn_unit_for_test(map(), term(), atom(), term()) :: map()

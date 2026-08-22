@@ -101,6 +101,17 @@ defmodule BrokenOaths.Units do
     do: WorldServer.call(world, {:relocate_unit_for_test, unit_id, tile_id})
 
   @doc """
+  Dev-only QA control surface: the same instant relocate as
+  `relocate_unit_for_test/3`, minus its occupancy refusal — see
+  `WorldServer`'s `:force_relocate_unit_for_test` handler for why this
+  narrow exception exists (constructing an already-co-occupied
+  precondition no other test-only path can reach). Always `:ok`.
+  """
+  @spec force_relocate_unit_for_test(map(), term(), term()) :: :ok
+  def force_relocate_unit_for_test(world, unit_id, tile_id),
+    do: WorldServer.call(world, {:force_relocate_unit_for_test, unit_id, tile_id})
+
+  @doc """
   Dev-only QA control surface: place a REAL player-owned unit
   (`:warrior | :worker | :settler | :lord`) at `tile_id` with that
   type's starting stats (`BrokenOaths.Cities.Production.unit_stats/1`) —

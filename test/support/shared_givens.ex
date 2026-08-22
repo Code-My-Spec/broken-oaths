@@ -280,6 +280,112 @@ defmodule BrokenOathsSpex.SharedGivens do
   end
 
   @doc """
+  Founds `context.user`'s first city like `:a_founded_city`, but at a
+  deliberately-chosen location instead of wherever the settler happened
+  to spawn: BFS outward (ring by ring, same shape as
+  `find_difficult_tile_near/4` in story 952's own criterion_2773 spec)
+  from the settler's spawn tile for the nearest LAND tile whose own
+  RING of neighbors (`Fixtures.adjacent_tiles/2` — NOT the candidate
+  tile itself, see below) contains at least `min_count` tiles matching
+  `feature_pred` (a `Terrain.t() -> boolean()` predicate), then
+  relocates the settler there (`Fixtures.relocate_unit/3`, the same
+  fixture-engineering bridge story 952 established) before founding.
+
+  Deliberately excludes the candidate tile ITSELF from the match count
+  — that tile becomes `city.tile_id`, the free center, which
+  `City.assign_worked_tile/5`'s own `validate_assign/4` refuses to ever
+  treat as a manually-workable tile (`tile == city.tile_id ->
+  {:error, :invalid_tile}`) regardless of its terrain. A caller wanting
+  a chop/work TARGET, not just "the founding spot happens to sit on
+  forest", needs a match in the ring, not the center.
+
+  A freshly-founded city's territory is tiny — just its center tile plus
+  its immediate 6-hex ring (`Production.founding_territory/2`) — so any
+  chop criterion that needs MULTIPLE distinct woods/rainforest tiles
+  inside that one ring can't rely on the settler's own spawn point
+  happening to land somewhere forest-rich; this searches for a spawn
+  point that actually has enough, rather than asserting on whatever the
+  default `:a_founded_city` ring turns out to contain.
+
+  Raises if no qualifying location exists within `max_rings` (default
+  12) hops — a genuine "this world doesn't have enough of this terrain
+  reachably close" signal, not something to silently paper over.
+  """
+  def found_city_with_enough_feature(context, min_count, feature_pred, max_rings \\ 12) do
+    {:ok, join_live, _html} = live(context.conn, "/play")
+
+    join_live
+    |> element("[data-test='join-world-#{context.world.id}']")
+    |> render_click()
+
+    {:ok, play_live, _html} = live(context.conn, "/play/#{context.world.id}")
+
+    [settler | _] =
+      for u <- Fixtures.player_units(context.world, context.user), u.type == :settler, do: u
+
+    land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
+
+    matches? = fn t -> land?.(t) and feature_pred.(Fixtures.tile_terrain(context.world, t)) end
+
+    candidate_ok? = fn tile ->
+      land?.(tile) and
+        context.world
+        |> Fixtures.adjacent_tiles(tile)
+        |> Enum.count(matches?)
+        |> Kernel.>=(min_count)
+    end
+
+    # A terrain-eligible candidate can still be occupied by something
+    # already in the world (a barbarian, a rival unit) —
+    # `relocate_unit` is the only ground truth for that, so try it and
+    # treat `{:error, :occupied}` as just another disqualified
+    # candidate rather than crashing (same shape as story 952's
+    # `relocate_to_first_free/3`). A successful try both confirms AND
+    # performs the relocation in one step.
+    try_candidate = fn tile ->
+      if candidate_ok?.(tile) do
+        case Fixtures.relocate_unit(context.world, settler.id, tile) do
+          :ok -> tile
+          {:error, _reason} -> nil
+        end
+      end
+    end
+
+    target =
+      Enum.reduce_while(
+        1..max_rings,
+        {[settler.tile_id], MapSet.new([settler.tile_id])},
+        fn _, {frontier, seen} ->
+          case Enum.find_value(frontier, try_candidate) do
+            nil ->
+              next =
+                frontier
+                |> Enum.flat_map(&Fixtures.adjacent_tiles(context.world, &1))
+                |> Enum.uniq()
+                |> Enum.reject(&MapSet.member?(seen, &1))
+
+              if next == [] do
+                {:halt, nil}
+              else
+                {:cont, {next, MapSet.union(seen, MapSet.new(next))}}
+              end
+
+            found ->
+              {:halt, found}
+          end
+        end
+      )
+
+    assert target,
+           "expected a founding location within #{max_rings} rings whose own territory has >= #{min_count} matching tiles and is free to stand on"
+
+    render_hook(play_live, "found_city", %{"unit_id" => settler.id})
+    [city] = Fixtures.player_cities(context.world, context.user)
+
+    context |> Map.put(:play_live, play_live) |> Map.put(:city, city)
+  end
+
+  @doc """
   Destroys every wilderness camp (and every unit tied to one) in
   `world` — a thin, self-documenting wrapper around
   `Fixtures.isolate_camp/2`'s own "keep only this one camp" contract,
