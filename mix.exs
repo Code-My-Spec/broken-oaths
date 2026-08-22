@@ -101,6 +101,7 @@ defmodule BrokenOaths.MixProject do
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
+      spex: ["ecto.create --quiet", "ecto.migrate --quiet", "spex"],
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
       "assets.build": ["compile", "tailwind broken_oaths", "esbuild broken_oaths"],
       "assets.deploy": [

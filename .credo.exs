@@ -173,7 +173,14 @@
           {Credo.Check.Warning.UnusedRegexOperation, []},
           {Credo.Check.Warning.UnusedStringOperation, []},
           {Credo.Check.Warning.UnusedTupleOperation, []},
-          {Credo.Check.Warning.WrongTestFilename, []}
+          # `test/spex/**/*_spex.exs` is excluded: sexy_spex's own BDD spec
+          # convention (`use BrokenOathsSpex.Case`, matched here for it
+          # ending in "Case") deliberately uses `_spex.exs`, not `_test.exs`
+          # — `mix spex`'s default --pattern only discovers `_spex.exs`
+          # files, so renaming them would break spec discovery, not fix
+          # anything.
+          {Credo.Check.Warning.WrongTestFilename,
+           [files: %{included: ["test/"], excluded: ["test/**/*_test.exs", "test/spex/**/*_spex.exs"]}]}
         ],
         disabled: [
           #

@@ -48,6 +48,10 @@ npm-debug.log
 .claude/
 /settings.local.json
 
+# This working copy's harness identity — machine-local, written by
+# `mix harness.onboard`.
+/.cms_harness.json
+
 # Cached hex docs for offline reference.
 .code_my_spec/hex_docs/
 
