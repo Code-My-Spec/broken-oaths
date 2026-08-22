@@ -571,6 +571,12 @@ mailbox:     http://localhost:4050/dev/mailbox
 advance turn: curl -X POST http://localhost:4050/dev/qa/worlds/#{world.id}/step   (works even while paused; also /pause, /resume)
 
 === Beat-by-beat: what to click ===
+0. DISMISS THE OATH SCREEN (907, off-camera) — the demo player's one city is
+   marked occupied by the tyrant and their Hidden Agenda is unpicked, so the
+   FIRST board load opens on the "Terms of Oath" screen ("your last free city
+   has fallen"). Intentional. Pick any agenda to close it onto the board (it's
+   secret, changes nothing below) BEFORE recording — the "you're a vassal too"
+   turn is saved for beat 2, so the video opens on the conquest.
 1. TAKE OVER + VASSALIZE (906/907) — log in as the demo player, open the
    globe, select warrior ##{demo_warrior.id} (tile #{demo_warrior.tile_id}), attack
    city ##{rival_city.id} ("#{rival_city.name}") — one hit breaks it (#{rival_city.hp} HP, no

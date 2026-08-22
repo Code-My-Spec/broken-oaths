@@ -25,6 +25,17 @@ when you run the step control:
 
 Bind that to a key or keep the command handy. It works even while paused.
 
+## Dismiss the Oath screen first (off-camera — 907's agenda UI)
+
+Do this BEFORE you hit record, so the video opens on the conquest and saves the
+"you're a vassal too" turn for Beat 2. The seed marks the demo player's one city
+as occupied by the tyrant and leaves the Hidden Agenda unpicked, so on the FIRST
+board load you are greeted by the **Terms of Oath** screen
+(`data-test="oath-screen"`): "Your last free city has fallen. You are sworn to
+[the tyrant]." Pick a Hidden Agenda — any works, it's secret and changes nothing
+downstream (this also exercises story 907's agenda-choice UI) — and the modal
+closes onto the board. Now start recording.
+
 ## Beat 1 — Take over another civ and vassalize them (906 + 907)
 
 The money shot. You are one hit from conquering the rival.
