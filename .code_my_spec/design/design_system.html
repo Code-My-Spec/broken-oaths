@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html data-theme="oath">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Broken Oaths — Design System</title>
+
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@5/daisyui.css" rel="stylesheet" type="text/css">
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@5/themes.css" rel="stylesheet" type="text/css">
+
+  <!-- The "oath" theme. These are the exact values that ship in
+       assets/css/app.css under `@plugin "../vendor/daisyui-theme"`.
+       Declared on :root as well as [data-theme] so the swatches below
+       still render if the daisyUI CDN is unreachable. -->
+  <style>
+    :root,
+    [data-theme="oath"] {
+      color-scheme: dark;
+
+      --color-base-100: oklch(24% 0.018 258);
+      --color-base-200: oklch(20% 0.016 258);
+      --color-base-300: oklch(16% 0.014 258);
+      --color-base-content: oklch(92% 0.020 85);
+
+      --color-primary: oklch(74% 0.130 74);
+      --color-primary-content: oklch(22% 0.045 74);
+      --color-secondary: oklch(62% 0.055 250);
+      --color-secondary-content: oklch(16% 0.020 250);
+      --color-accent: oklch(56% 0.170 22);
+      --color-accent-content: oklch(96% 0.015 22);
+      --color-neutral: oklch(32% 0.020 258);
+      --color-neutral-content: oklch(92% 0.015 258);
+
+      --color-info: oklch(66% 0.110 235);
+      --color-info-content: oklch(16% 0.030 235);
+      --color-success: oklch(66% 0.130 150);
+      --color-success-content: oklch(16% 0.030 150);
+      --color-warning: oklch(78% 0.150 78);
+      --color-warning-content: oklch(22% 0.050 78);
+      --color-error: oklch(58% 0.200 25);
+      --color-error-content: oklch(96% 0.015 25);
+
+      --radius-selector: 0.25rem;
+      --radius-field: 0.25rem;
+      --radius-box: 0.375rem;
+      --size-selector: 0.21875rem;
+      --size-field: 0.21875rem;
+      --border: 1.5px;
+      --depth: 0;  /* no shadows anywhere — see the Tone section */
+      --noise: 0;
+    }
+
+    /* The board backdrop, copied from assets/css/app.css:110 (.space-bg).
+       The theme's base-300 is tuned to sit against this without a seam. */
+    .space-bg {
+      background-color: #04060d;
+      background-image:
+        radial-gradient(ellipse 80% 60% at 28% 18%, rgba(64, 86, 168, 0.14), transparent 65%),
+        radial-gradient(ellipse 70% 55% at 78% 82%, rgba(120, 60, 140, 0.10), transparent 60%),
+        radial-gradient(1.3px 1.3px at 18px 26px, rgba(255, 255, 255, 0.95) 50%, transparent 51%),
+        radial-gradient(1px 1px at 111px 74px, rgba(255, 255, 255, 0.70) 50%, transparent 51%),
+        radial-gradient(0.9px 0.9px at 61px 133px, rgba(198, 214, 255, 0.65) 50%, transparent 51%),
+        radial-gradient(1px 1px at 157px 41px, rgba(255, 238, 214, 0.60) 50%, transparent 51%);
+      background-size: 100% 100%, 100% 100%, 231px 231px, 199px 199px, 173px 173px, 251px 251px;
+      background-repeat: no-repeat, no-repeat, repeat, repeat, repeat, repeat;
+    }
+
+    /* Type: system stack, no webfont on the critical path. */
+    :root {
+      --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+                   "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+                   "Cascadia Mono", "Liberation Mono", monospace;
+
+      /* Compact scale, ratio 1.125, base 16px. */
+      --text-xs:      0.79rem;  /* 12.6px */
+      --text-sm:      0.889rem; /* 14.2px */
+      --text-base:    1rem;     /* 16px   */
+      --text-lg:      1.125rem; /* 18px   */
+      --text-xl:      1.266rem; /* 20.3px */
+      --text-2xl:     1.424rem; /* 22.8px */
+      --text-3xl:     1.602rem; /* 25.6px */
+      --text-4xl:     1.802rem; /* 28.8px */
+    }
+
+    body {
+      background: var(--color-base-200);
+      color: var(--color-base-content);
+      font-family: var(--font-sans);
+    }
+
+    /* Every number in the game renders here. Tabular figures keep columns
+       from shifting as a counter ticks. */
+    .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+    .swatch { height: 3.5rem; border-radius: var(--radius-box); border: 1.5px solid rgb(255 255 255 / 0.08); }
+    .spec { font-family: var(--font-mono); font-size: 0.7rem; opacity: 0.65; }
+    .panel { background: var(--color-base-100); border: 1.5px solid rgb(255 255 255 / 0.08); border-radius: var(--radius-box); }
+    .ascii { font-family: var(--font-mono); font-size: 0.7rem; line-height: 1.35; white-space: pre; }
+  </style>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: "var(--color-primary)",
+            "primary-content": "var(--color-primary-content)",
+            secondary: "var(--color-secondary)",
+            "secondary-content": "var(--color-secondary-content)",
+            accent: "var(--color-accent)",
+            "accent-content": "var(--color-accent-content)",
+            neutral: "var(--color-neutral)",
+            "neutral-content": "var(--color-neutral-content)",
+            "base-100": "var(--color-base-100)",
+            "base-200": "var(--color-base-200)",
+            "base-300": "var(--color-base-300)",
+            "base-content": "var(--color-base-content)",
+            info: "var(--color-info)",
+            success: "var(--color-success)",
+            warning: "var(--color-warning)",
+            error: "var(--color-error)"
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="p-8">
+  <header class="max-w-5xl mx-auto mb-10">
+    <h1 class="text-3xl font-bold">Broken Oaths — Design System</h1>
+    <p class="mt-2 opacity-70 max-w-2xl">
+      A browser-first, asynchronous 4X on a hex globe. The audience is
+      <strong>Gem-Weary Wes</strong>: a mid-30s-to-50s casual strategy player
+      who plays in 2–10 minute work-break sessions, in a browser tab, on
+      whatever machine is in front of him. Every choice below is answerable to
+      that: legible at a glance, quiet enough for a work laptop, and honest
+      about state so he can quit mid-turn without losing his place.
+    </p>
+  </header>
+
+  <main class="max-w-5xl mx-auto space-y-16">
+
+  <section id="theme">
+    <h2 class="text-2xl font-semibold mb-4">Theme</h2>
+
+    <p class="mb-4 max-w-3xl opacity-80">
+      A single custom daisyUI 5 theme named <code class="spec">oath</code>,
+      applied dark-only across the entire app — marketing, auth, world picker,
+      and game board. There is no light variant and no theme toggle in
+      production.
+    </p>
+
+    <div class="grid gap-4 md:grid-cols-2 mb-6">
+      <div class="rounded-lg p-4" style="background: var(--color-base-100); border: 1.5px solid rgb(255 255 255 / 0.08)">
+        <h3 class="font-semibold mb-2">Why custom, not a built-in</h3>
+        <p class="text-sm opacity-80">
+          The board is already a fixed deep-space backdrop
+          (<code class="spec">#04060d</code>). A built-in theme either fights it
+          (<code class="spec">coffee</code> is warm-brown against cold black) or
+          flattens the game into an admin console
+          (<code class="spec">dim</code>, <code class="spec">night</code>). The
+          <code class="spec">oath</code> palette is tuned so panel chrome recedes
+          into the same void the globe hangs in, and so the one warm colour on
+          screen — seal gold — is always the thing you can act on.
+        </p>
+      </div>
+      <div class="rounded-lg p-4" style="background: var(--color-base-100); border: 1.5px solid rgb(255 255 255 / 0.08)">
+        <h3 class="font-semibold mb-2">Why dark-only</h3>
+        <p class="text-sm opacity-80">
+          Wes plays in a tab at work. A dark UI reads as a terminal from three
+          feet away, which is the discretion this audience actually wants. It
+          also halves the surface: one palette to maintain, one pass of QA per
+          panel, and no hard cut in brightness when he enters a world. Space has
+          no light-mode answer, so the board would have stayed dark regardless.
+        </p>
+      </div>
+    </div>
+
+    <div class="rounded-lg p-4 mb-6" style="background: var(--color-base-100); border: 1.5px solid rgb(255 255 255 / 0.08)">
+      <h3 class="font-semibold mb-2">Theme against the board</h3>
+      <p class="text-sm opacity-80 mb-3">
+        The chrome sits <em>on</em> the space backdrop, never beside it.
+        <code class="spec">base-300</code> is the darkest step so floating panels
+        read as a layer above the void rather than a hole punched in it.
+      </p>
+      <div class="space-bg rounded-lg p-6 flex flex-wrap gap-3 items-start">
+        <div class="rounded-lg p-3 text-sm" style="background: var(--color-base-100); color: var(--color-base-content); border: 1.5px solid rgb(255 255 255 / 0.10)">
+          base-100 panel
+        </div>
+        <div class="rounded-lg p-3 text-sm" style="background: var(--color-base-200); color: var(--color-base-content); border: 1.5px solid rgb(255 255 255 / 0.10)">
+          base-200 surface
+        </div>
+        <div class="rounded-lg p-3 text-sm" style="background: var(--color-base-300); color: var(--color-base-content); border: 1.5px solid rgb(255 255 255 / 0.10)">
+          base-300 well
+        </div>
+        <button class="btn btn-primary btn-sm">Act</button>
+      </div>
+    </div>
+
+    <div class="rounded-lg p-4" style="background: var(--color-base-300)">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="font-semibold">Preview switcher (this document only)</h3>
+        <select id="theme-switcher" class="select select-sm" style="background: var(--color-base-100); color: var(--color-base-content); border: 1.5px solid rgb(255 255 255 / 0.15); border-radius: var(--radius-field); padding: 0.25rem 0.5rem">
+          <option value="oath" selected>oath (ships)</option>
+          <option value="night">night</option>
+          <option value="coffee">coffee</option>
+          <option value="dim">dim</option>
+          <option value="business">business</option>
+        </select>
+      </div>
+      <p class="text-sm opacity-70">
+        Switch to sanity-check the decision against the built-ins that were
+        considered. Production ships <code class="spec">oath</code> only; the
+        <code class="spec">html</code> element is hardcoded to it.
+      </p>
+    </div>
+
+    <h3 class="font-semibold mt-6 mb-2">Ships as</h3>
+    <pre class="rounded-lg p-4 overflow-x-auto text-xs" style="background: var(--color-base-300)"><code>/* assets/css/app.css — replaces the two Phoenix default themes */
+@plugin "../vendor/daisyui" { themes: false; }
+
+@plugin "../vendor/daisyui-theme" {
+  name: "oath";
+  default: true;
+  prefersdark: true;
+  color-scheme: "dark";
+  /* ...variables from the Colors section... */
+}</code></pre>
+    <pre class="rounded-lg p-4 overflow-x-auto text-xs mt-2" style="background: var(--color-base-300)"><code>&lt;!-- root.html.heex --&gt;
+&lt;html lang="en" data-theme="oath"&gt;</code></pre>
+  </section>
+
+  <section id="colors">
+    <h2 class="text-2xl font-semibold mb-4">Colors</h2>
+
+    <p class="mb-6 max-w-3xl opacity-80">
+      One warm hue, one cool hue, one alarm hue. Seal gold is reserved for
+      <em>things you can act on</em>; steel blue for structure and navigation;
+      wine red for conflict and irreversible acts. If everything is gold,
+      nothing is — restraint here is the whole system.
+    </p>
+
+    <h3 class="font-semibold mb-3">Brand roles</h3>
+    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-8">
+      <div>
+        <div class="swatch flex items-end p-2" style="background: var(--color-primary); color: var(--color-primary-content)">
+          <span class="text-xs font-semibold">primary</span>
+        </div>
+        <p class="spec mt-1">oklch(74% 0.130 74)</p>
+        <p class="text-xs mt-1 opacity-75">Seal gold. Actionable: submit orders, confirm, the one primary button per panel.</p>
+      </div>
+      <div>
+        <div class="swatch flex items-end p-2" style="background: var(--color-secondary); color: var(--color-secondary-content)">
+          <span class="text-xs font-semibold">secondary</span>
+        </div>
+        <p class="spec mt-1">oklch(62% 0.055 250)</p>
+        <p class="text-xs mt-1 opacity-75">Steel blue. Structure: nav, tabs, links, non-committal controls.</p>
+      </div>
+      <div>
+        <div class="swatch flex items-end p-2" style="background: var(--color-accent); color: var(--color-accent-content)">
+          <span class="text-xs font-semibold">accent</span>
+        </div>
+        <p class="spec mt-1">oklch(56% 0.170 22)</p>
+        <p class="text-xs mt-1 opacity-75">Wine red. Conflict: war declarations, broken oaths, siege state, hostile players.</p>
+      </div>
+      <div>
+        <div class="swatch flex items-end p-2" style="background: var(--color-neutral); color: var(--color-neutral-content)">
+          <span class="text-xs font-semibold">neutral</span>
+        </div>
+        <p class="spec mt-1">oklch(32% 0.020 258)</p>
+        <p class="text-xs mt-1 opacity-75">Quiet chrome: badges, turn counter, inert metadata.</p>
+      </div>
+    </div>
+
+    <h3 class="font-semibold mb-3">Base scale</h3>
+    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-8">
+      <div>
+        <div class="swatch" style="background: var(--color-base-100)"></div>
+        <p class="spec mt-1">base-100 · oklch(24% 0.018 258)</p>
+        <p class="text-xs mt-1 opacity-75">Panels and cards floating over the board.</p>
+      </div>
+      <div>
+        <div class="swatch" style="background: var(--color-base-200)"></div>
+        <p class="spec mt-1">base-200 · oklch(20% 0.016 258)</p>
+        <p class="text-xs mt-1 opacity-75">Page background outside the board.</p>
+      </div>
+      <div>
+        <div class="swatch" style="background: var(--color-base-300)"></div>
+        <p class="spec mt-1">base-300 · oklch(16% 0.014 258)</p>
+        <p class="text-xs mt-1 opacity-75">Wells, code blocks, inset lists, table stripes.</p>
+      </div>
+      <div>
+        <div class="swatch flex items-end p-2" style="background: var(--color-base-content); color: var(--color-base-300)">
+          <span class="text-xs font-semibold">base-content</span>
+        </div>
+        <p class="spec mt-1">oklch(92% 0.020 85)</p>
+        <p class="text-xs mt-1 opacity-75">Warm parchment, not pure white — long sessions, less glare.</p>
+      </div>
+    </div>
+
+    <h3 class="font-semibold mb-3">Status</h3>
+    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-8">
+      <div>
+        <div class="swatch flex items-end p-2" style="background: var(--color-info); color: var(--color-info-content)">
+          <span class="text-xs font-semibold">info</span>
+        </div>
+        <p class="spec mt-1">oklch(66% 0.110 235)</p>
+        <p class="text-xs mt-1 opacity-75">Turn resolved, someone traded with you, alliance news.</p>
+      </div>
+      <div>
+        <div class="swatch flex items-end p-2" style="background: var(--color-success); color: var(--color-success-content)">
+          <span class="text-xs font-semibold">success</span>
+        </div>
+        <p class="spec mt-1">oklch(66% 0.130 150)</p>
+        <p class="text-xs mt-1 opacity-75">Built, researched, grown, oath kept.</p>
+      </div>
+      <div>
+        <div class="swatch flex items-end p-2" style="background: var(--color-warning); color: var(--color-warning-content)">
+          <span class="text-xs font-semibold">warning</span>
+        </div>
+        <p class="spec mt-1">oklch(78% 0.150 78)</p>
+        <p class="text-xs mt-1 opacity-75">Starving, unrest, production stalled. Never used for a paywall or a countdown-to-buy.</p>
+      </div>
+      <div>
+        <div class="swatch flex items-end p-2" style="background: var(--color-error); color: var(--color-error-content)">
+          <span class="text-xs font-semibold">error</span>
+        </div>
+        <p class="spec mt-1">oklch(58% 0.200 25)</p>
+        <p class="text-xs mt-1 opacity-75">Order rejected, city fallen, form invalid.</p>
+      </div>
+    </div>
+
+    <div class="rounded-lg p-4 mb-6" style="background: var(--color-base-100); border-left: 3px solid var(--color-warning)">
+      <h3 class="font-semibold mb-2">Colour is never the only signal</h3>
+      <p class="text-sm opacity-80">
+        Roughly 1 in 12 men has a red/green deficiency, and this persona skews
+        male and 35+. Every status colour is paired with an icon or a word —
+        never a bare coloured dot. On the globe, player ownership uses hex
+        borders plus a name label, not fill hue alone.
+      </p>
+    </div>
+
+    <div class="rounded-lg p-4 mb-6" style="background: var(--color-base-100); border-left: 3px solid var(--color-accent)">
+      <h3 class="font-semibold mb-2">Reserved: gold is not a currency colour</h3>
+      <p class="text-sm opacity-80">
+        Seal gold means "you can do this now". It must never be attached to a
+        premium currency, a timer skip, or an upsell — the genre trained Wes to
+        read gold sparkle as a paywall, and Broken Oaths has no paywall to
+        advertise. Resources render as labelled numbers with icons, in
+        <code class="spec">base-content</code>.
+      </p>
+    </div>
+
+    <h3 class="font-semibold mb-2">Full theme variables</h3>
+    <pre class="rounded-lg p-4 overflow-x-auto text-xs" style="background: var(--color-base-300)"><code>--color-base-100: oklch(24% 0.018 258);
+--color-base-200: oklch(20% 0.016 258);
+--color-base-300: oklch(16% 0.014 258);
+--color-base-content: oklch(92% 0.020 85);
+
+--color-primary: oklch(74% 0.130 74);
+--color-primary-content: oklch(22% 0.045 74);
+--color-secondary: oklch(62% 0.055 250);
+--color-secondary-content: oklch(16% 0.020 250);
+--color-accent: oklch(56% 0.170 22);
+--color-accent-content: oklch(96% 0.015 22);
+--color-neutral: oklch(32% 0.020 258);
+--color-neutral-content: oklch(92% 0.015 258);
+
+--color-info: oklch(66% 0.110 235);
+--color-info-content: oklch(16% 0.030 235);
+--color-success: oklch(66% 0.130 150);
+--color-success-content: oklch(16% 0.030 150);
+--color-warning: oklch(78% 0.150 78);
+--color-warning-content: oklch(22% 0.050 78);
+--color-error: oklch(58% 0.200 25);
+--color-error-content: oklch(96% 0.015 25);
+
+/* shape — rationale in the Tone section */
+--radius-selector: 0.25rem;
+--radius-field: 0.25rem;
+--radius-box: 0.375rem;
+--size-selector: 0.21875rem;
+--size-field: 0.21875rem;
+--border: 1.5px;
+--depth: 0;
+--noise: 0;</code></pre>
+  </section>
+
+  <section id="typography">
+    <h2 class="text-2xl font-semibold mb-4">Typography</h2>
+
+    <p class="mb-6 max-w-3xl opacity-80">
+      No webfont on the critical path. Text paints on the first frame, which is
+      the entire promise of "a URL is the whole install." Two stacks: a system
+      sans for everything readable, and a monospace with tabular figures for
+      everything countable.
+    </p>
+
+    <div class="grid gap-4 md:grid-cols-2 mb-8">
+      <div class="panel p-4">
+        <h3 class="font-semibold mb-2">Sans — all UI and prose</h3>
+        <p class="spec mb-3">--font-sans</p>
+        <pre class="spec overflow-x-auto" style="opacity: 0.9"><code>system-ui, -apple-system, "Segoe UI",
+Roboto, Helvetica, Arial, sans-serif</code></pre>
+        <p class="mt-3 text-sm opacity-80">
+          Renders as San Francisco on macOS/iOS, Segoe UI on Windows, Roboto on
+          Android. Native everywhere Wes plays, zero bytes, no FOUT.
+        </p>
+      </div>
+      <div class="panel p-4">
+        <h3 class="font-semibold mb-2">Mono — every number</h3>
+        <p class="spec mb-3">--font-mono + font-variant-numeric: tabular-nums</p>
+        <pre class="spec overflow-x-auto" style="opacity: 0.9"><code>ui-monospace, SFMono-Regular, Menlo,
+Consolas, "Cascadia Mono", monospace</code></pre>
+        <p class="mt-3 text-sm opacity-80">
+          Resource rates, stock counts, turn numbers, countdowns, coordinates,
+          HP. Tabular figures mean a counter going 9 → 10 doesn't shove the
+          column sideways.
+        </p>
+      </div>
+    </div>
+
+    <h3 class="font-semibold mb-3">Why numbers get their own face</h3>
+    <div class="panel p-4 mb-8">
+      <div class="grid gap-6 sm:grid-cols-2">
+        <div>
+          <p class="text-sm mb-2 opacity-70">Proportional (wrong) — the column dances every tick</p>
+          <div class="rounded p-3 text-sm" style="background: var(--color-base-300)">
+            <div class="flex justify-between"><span>Food</span><span>+9 / 240</span></div>
+            <div class="flex justify-between"><span>Production</span><span>+11 / 80</span></div>
+            <div class="flex justify-between"><span>Turn ends</span><span>0:09</span></div>
+          </div>
+        </div>
+        <div>
+          <p class="text-sm mb-2 opacity-70">Tabular mono (right) — digits hold their lane</p>
+          <div class="rounded p-3 text-sm" style="background: var(--color-base-300)">
+            <div class="flex justify-between"><span>Food</span><span class="num">+9 / 240</span></div>
+            <div class="flex justify-between"><span>Production</span><span class="num">+11 / 80</span></div>
+            <div class="flex justify-between"><span>Turn ends</span><span class="num">0:09</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="font-semibold mb-3">Scale — compact, ratio 1.125, base 16px</h3>
+    <p class="mb-4 max-w-3xl text-sm opacity-80">
+      A tight ratio so a city panel can nest four heading levels without any of
+      them shouting over the board. Body never drops below 16px — this audience
+      is 35 to 55 and reading a strategy game on a laptop at arm's length.
+    </p>
+
+    <div class="panel p-5 mb-4">
+      <div class="space-y-4">
+        <div class="flex items-baseline gap-4 flex-wrap">
+          <span class="spec w-40 shrink-0">1.802rem / 28.8px · h1</span>
+          <span style="font-size: var(--text-4xl); font-weight: 700; line-height: 1.15">Kingdom of Ashfall</span>
+        </div>
+        <div class="flex items-baseline gap-4 flex-wrap">
+          <span class="spec w-40 shrink-0">1.602rem / 25.6px · h2</span>
+          <span style="font-size: var(--text-3xl); font-weight: 600; line-height: 1.2">Cities</span>
+        </div>
+        <div class="flex items-baseline gap-4 flex-wrap">
+          <span class="spec w-40 shrink-0">1.424rem / 22.8px · h3</span>
+          <span style="font-size: var(--text-2xl); font-weight: 600; line-height: 1.25">Ashfall</span>
+        </div>
+        <div class="flex items-baseline gap-4 flex-wrap">
+          <span class="spec w-40 shrink-0">1.266rem / 20.3px · h4</span>
+          <span style="font-size: var(--text-xl); font-weight: 600; line-height: 1.3">Production</span>
+        </div>
+        <div class="flex items-baseline gap-4 flex-wrap">
+          <span class="spec w-40 shrink-0">1.125rem / 18px · h5</span>
+          <span style="font-size: var(--text-lg); font-weight: 600; line-height: 1.35">Worked tiles</span>
+        </div>
+        <div class="flex items-baseline gap-4 flex-wrap">
+          <span class="spec w-40 shrink-0">1rem / 16px · body</span>
+          <span style="font-size: var(--text-base); line-height: 1.55">The granary is complete. Ashfall will grow next turn.</span>
+        </div>
+        <div class="flex items-baseline gap-4 flex-wrap">
+          <span class="spec w-40 shrink-0">0.889rem / 14.2px · small</span>
+          <span style="font-size: var(--text-sm); line-height: 1.5; opacity: 0.75">Founded turn 12 · 4 worked tiles · no garrison</span>
+        </div>
+        <div class="flex items-baseline gap-4 flex-wrap">
+          <span class="spec w-40 shrink-0">0.79rem / 12.6px · caption</span>
+          <span style="font-size: var(--text-xs); line-height: 1.45; opacity: 0.7">Smallest permitted size. Labels and badges only — never a sentence.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel p-4 mb-6" style="border-left: 3px solid var(--color-warning)">
+      <h3 class="font-semibold mb-2">Marketing overrides the scale on purpose</h3>
+      <p class="text-sm opacity-80">
+        A 28.8px h1 is right for a HUD and wrong for a landing hero. Marketing
+        and the world picker's page title opt out with explicit sizes
+        (<code class="spec">text-5xl</code> / <code class="spec">text-6xl</code>).
+        The compact ladder governs in-app chrome; it is not a ban on large type
+        where there is room for it.
+      </p>
+    </div>
+
+    <h3 class="font-semibold mb-3">Rules</h3>
+    <ul class="space-y-2 text-sm opacity-85 max-w-3xl list-disc pl-5">
+      <li><strong>Line length caps at ~72 characters.</strong> Prose gets a <code class="spec">max-w-prose</code> wrapper even inside a wider page.</li>
+      <li><strong>Line height:</strong> 1.5–1.6 for prose, 1.15–1.3 for headings, 1.4 for dense panel lists.</li>
+      <li><strong>Weights:</strong> 400 body, 600 headings and labels, 700 for the page h1 only. No 300 — thin text on a dark background is unreadable at 45.</li>
+      <li><strong>Never communicate with size alone.</strong> A number that turned red is also prefixed with a sign and an icon.</li>
+      <li><strong>12.6px is the floor.</strong> Anything smaller is a design bug, not a density win.</li>
+    </ul>
+  </section>
+
+  <section id="layout">
+    <h2 class="text-2xl font-semibold mb-4">Layout</h2>
+
+    <p class="mb-6 max-w-3xl opacity-80">
+      Two layouts, not one. Everything outside a world is a conventional
+      centered page under a thin top bar. Inside a world, the globe is
+      full-bleed and the app chrome disappears entirely — the HUD floats over
+      the board.
+    </p>
+
+    <h3 class="font-semibold mb-3">Navigation — top bar, chrome-free board</h3>
+    <div class="grid gap-4 lg:grid-cols-2 mb-8">
+      <div class="panel p-4">
+        <p class="text-sm font-semibold mb-3">Outside a world</p>
+        <div class="rounded overflow-hidden" style="background: var(--color-base-300)">
+          <div class="flex items-center justify-between px-3 py-2 text-sm" style="background: var(--color-base-100); border-bottom: 1.5px solid rgb(255 255 255 / 0.08)">
+            <span class="font-semibold" style="color: var(--color-primary)">◈ Broken Oaths</span>
+            <span class="flex gap-3 opacity-75 text-xs">
+              <span>Worlds</span><span>Account</span>
+            </span>
+          </div>
+          <div class="p-4">
+            <div class="grid grid-cols-3 gap-2">
+              <div class="rounded p-3 text-xs" style="background: var(--color-base-100)">world</div>
+              <div class="rounded p-3 text-xs" style="background: var(--color-base-100)">world</div>
+              <div class="rounded p-3 text-xs" style="background: var(--color-base-100)">world</div>
+            </div>
+          </div>
+        </div>
+        <p class="mt-3 text-sm opacity-80">
+          Thin bar, three items, no mega-menu. Marketing, auth, world picker,
+          and account all share it.
+        </p>
+      </div>
+
+      <div class="panel p-4">
+        <p class="text-sm font-semibold mb-3">Inside a world</p>
+        <div class="space-bg rounded relative" style="height: 11.5rem">
+          <div class="absolute left-2 top-2 px-2 py-1 rounded text-xs num" style="background: var(--color-neutral); color: var(--color-neutral-content)">turn 41 · 0:38</div>
+          <div class="absolute right-2 top-2 flex gap-1">
+            <span class="px-2 py-1 rounded text-xs" style="background: var(--color-base-100); opacity: 0.9">⚙</span>
+            <span class="px-2 py-1 rounded text-xs" style="background: var(--color-base-100); opacity: 0.9">?</span>
+          </div>
+          <div class="absolute rounded-full" style="width: 6rem; height: 6rem; left: 50%; top: 50%; transform: translate(-50%, -50%); background: radial-gradient(circle at 35% 30%, #2f5d3a, #14261c 70%); box-shadow: 0 0 24px rgba(120, 170, 255, 0.15)"></div>
+          <div class="absolute left-2 bottom-2 rounded p-2 text-xs" style="background: var(--color-base-100); border: 1.5px solid rgb(255 255 255 / 0.10); width: 6.5rem">
+            <div class="font-semibold">Ashfall</div>
+            <div class="num opacity-75">+9 / 240</div>
+          </div>
+          <div class="absolute right-2 bottom-2 rounded p-2 text-xs" style="background: var(--color-base-100); border: 1.5px solid rgb(255 255 255 / 0.10); width: 6.5rem">
+            <div class="font-semibold">Chat</div>
+            <div class="opacity-75">3 new</div>
+          </div>
+        </div>
+        <p class="mt-3 text-sm opacity-80">
+          No top bar, no sidebar. The globe gets every pixel; panels dock to the
+          corners and are dismissible. This is the pattern already built in
+          <code class="spec">GameLive.Play</code>.
+        </p>
+      </div>
+    </div>
+
+    <h3 class="font-semibold mb-3">Content width — 1024px, board full-bleed</h3>
+    <div class="panel p-4 mb-8">
+      <div class="ascii overflow-x-auto mb-3" style="opacity: 0.8">│←──────────── max-w-5xl · 1024px ────────────→│
+  ┌────────┐  ┌────────┐  ┌────────┐
+  │ world  │  │ world  │  │ world  │     3-up card grid
+  └────────┘  └────────┘  └────────┘
+
+  forms nest at  │← max-w-md ·  448px →│
+  prose nests at │← max-w-prose · 65ch →│
+  the board is   │←──── full-bleed, no cap ────→│</div>
+      <ul class="text-sm opacity-85 space-y-1 list-disc pl-5">
+        <li><code class="spec">max-w-5xl mx-auto px-4</code> is the default page wrapper.</li>
+        <li>Forms never inherit it — they sit in <code class="spec">max-w-md</code> inside.</li>
+        <li>Prose never inherits it — <code class="spec">max-w-prose</code> inside.</li>
+        <li>The board opts out completely: <code class="spec">fixed inset-0</code>, no wrapper.</li>
+      </ul>
+    </div>
+
+    <h3 class="font-semibold mb-3">Page templates</h3>
+    <div class="grid gap-4 md:grid-cols-2 mb-8">
+      <div class="panel p-4">
+        <h4 class="font-semibold mb-1" style="font-size: var(--text-lg)">Board (HUD)</h4>
+        <p class="spec mb-2">GameLive.Play</p>
+        <p class="text-sm opacity-80">
+          Full-bleed globe, corner-docked panels, turn bar top-left. Panels are
+          independently dismissible so a 13-inch laptop can still see the board.
+          Every panel states its own state in words, not just colour.
+        </p>
+      </div>
+      <div class="panel p-4">
+        <h4 class="font-semibold mb-1" style="font-size: var(--text-lg)">Card list</h4>
+        <p class="spec mb-2">WorldLive.Index</p>
+        <p class="text-sm opacity-80">
+          3-up grid at 1024px, 2-up at tablet, 1-up on phone. Each card leads
+          with the thing Wes actually decides on: is he in it, and is it full.
+        </p>
+      </div>
+      <div class="panel p-4">
+        <h4 class="font-semibold mb-1" style="font-size: var(--text-lg)">Form</h4>
+        <p class="spec mb-2">UserLive.*, AccountLive.*</p>
+        <p class="text-sm opacity-80">
+          Single column, <code class="spec">max-w-md</code>, labels above inputs,
+          one primary button bottom-right. Errors inline under the field, never
+          only in a toast.
+        </p>
+      </div>
+      <div class="panel p-4">
+        <h4 class="font-semibold mb-1" style="font-size: var(--text-lg)">Marketing</h4>
+        <p class="spec mb-2">PageController.home</p>
+        <p class="text-sm opacity-80">
+          Opts out of the compact scale for the hero. Leads with the promises
+          this persona is scanning for: no install, no timers to buy past,
+          nothing lost while you're away.
+        </p>
+      </div>
+    </div>
+
+    <h3 class="font-semibold mb-3">Responsive</h3>
+    <p class="mb-3 max-w-3xl text-sm opacity-80">
+      Wes plays on a phone browser too. Breakpoints are Tailwind's defaults; the
+      only non-obvious rule is that the board never collapses to a list — it
+      stays a globe, and the panels become a bottom sheet.
+    </p>
+    <div class="overflow-x-auto">
+      <table class="table w-full text-sm" style="background: var(--color-base-100)">
+        <thead>
+          <tr class="text-left">
+            <th class="p-2">Breakpoint</th>
+            <th class="p-2">Pages</th>
+            <th class="p-2">Board</th>
+          </tr>
+        </thead>
+        <tbody class="opacity-85">
+          <tr><td class="p-2 spec">&lt; 640px</td><td class="p-2">1-up cards, full-width forms</td><td class="p-2">Globe fills screen; panels become a bottom sheet, one at a time</td></tr>
+          <tr><td class="p-2 spec">640–1024px</td><td class="p-2">2-up cards</td><td class="p-2">Corner panels, narrower; chat collapses to a badge</td></tr>
+          <tr><td class="p-2 spec">≥ 1024px</td><td class="p-2">3-up cards, capped at 1024px</td><td class="p-2">Full corner-docked HUD</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tone">
+    <h2 class="text-2xl font-semibold mb-4">Tone</h2>
+
+    <p class="mb-8 max-w-3xl opacity-80">
+      Broken Oaths should feel like an <strong>instrument you consult</strong>,
+      not a game that summons you. Wes left Forge of Empires, Elvenar, and three
+      others because they nagged, manufactured urgency, and sold him past their
+      own timers. The interface's entire personality is the refusal to do that.
+    </p>
+
+    <h3 class="font-semibold mb-3">Density — layered</h3>
+    <div class="grid gap-4 lg:grid-cols-2 mb-8">
+      <div class="panel p-4">
+        <p class="text-sm font-semibold mb-3 opacity-70">Default — answers "what changed, what needs me?"</p>
+        <div class="rounded p-3" style="background: var(--color-base-300)">
+          <div class="flex items-baseline justify-between mb-1">
+            <span class="font-semibold" style="font-size: var(--text-lg)">Ashfall</span>
+            <span class="text-xs opacity-60">size <span class="num">4</span></span>
+          </div>
+          <p class="text-sm opacity-85">Grows in <span class="num">3</span> turns.</p>
+          <p class="text-sm opacity-85">Building a Granary — <span class="num">2</span> turns.</p>
+          <p class="text-sm mt-2 flex items-start gap-1.5" style="color: var(--color-warning)">
+            <span aria-hidden="true">⚠</span>
+            <span>Unrest. A temple would settle it.</span>
+          </p>
+          <button class="mt-3 text-xs px-2 py-1 rounded" style="background: var(--color-base-100); border: 1.5px solid rgb(255 255 255 / 0.12)">▾ details</button>
+        </div>
+      </div>
+      <div class="panel p-4">
+        <p class="text-sm font-semibold mb-3 opacity-70">Expanded — one click, nothing hidden behind a menu</p>
+        <div class="rounded p-3 text-sm" style="background: var(--color-base-300)">
+          <div class="flex justify-between"><span class="opacity-75">Food</span><span class="num">+9 / 240</span></div>
+          <div class="flex justify-between"><span class="opacity-75">Production</span><span class="num">+11 / 80</span></div>
+          <div class="flex justify-between"><span class="opacity-75">Worked tiles</span><span class="num">4 of 6</span></div>
+          <div class="flex justify-between"><span class="opacity-75">Defense</span><span class="num">12</span></div>
+          <div class="flex justify-between"><span class="opacity-75">Health</span><span class="num">20 / 20</span></div>
+          <div class="flex justify-between mt-2 pt-2" style="border-top: 1.5px solid rgb(255 255 255 / 0.08)"><span class="opacity-75">Queue</span><span>Granary, Walls</span></div>
+        </div>
+      </div>
+    </div>
+    <ul class="text-sm opacity-85 space-y-1 list-disc pl-5 mb-8 max-w-3xl">
+      <li>The collapsed state must be readable in about five seconds — that is most of a work-break session.</li>
+      <li>Expansion state persists per player, so a power user expands once and stays expanded.</li>
+      <li>Nothing lives behind a hover. Hover is not available on the phone browser Wes also uses.</li>
+    </ul>
+
+    <h3 class="font-semibold mb-3">Surfaces — tight corners, hairline borders, no shadows</h3>
+    <div class="panel p-4 mb-4">
+      <p class="text-sm opacity-80 mb-4">
+        A drop shadow has nothing to darken against <code class="spec">#04060d</code>.
+        What separates a panel from the void is a lit edge. Borders also cost
+        nothing to composite, which matters on a board already transforming
+        thousands of hex tiles per drag.
+      </p>
+      <div class="space-bg rounded p-6 flex flex-wrap gap-4 items-start">
+        <div class="p-3 text-sm" style="background: var(--color-base-100); border: 1.5px solid rgb(255 255 255 / 0.10); border-radius: var(--radius-box)">
+          <div class="font-semibold">Border — reads</div>
+          <div class="text-xs opacity-70">1.5px lit edge</div>
+        </div>
+        <div class="p-3 text-sm" style="background: var(--color-base-100); border-radius: 0.5rem; box-shadow: 0 2px 8px rgb(0 0 0 / 0.4)">
+          <div class="font-semibold">Shadow — doesn't</div>
+          <div class="text-xs opacity-70">invisible on black</div>
+        </div>
+      </div>
+    </div>
+    <div class="overflow-x-auto mb-8">
+      <table class="table w-full text-sm" style="background: var(--color-base-100)">
+        <thead>
+          <tr class="text-left">
+            <th class="p-2">Token</th><th class="p-2">Value</th><th class="p-2">Applies to</th>
+          </tr>
+        </thead>
+        <tbody class="opacity-85">
+          <tr><td class="p-2 spec">--radius-box</td><td class="p-2 spec">0.375rem</td><td class="p-2">Panels, cards, modals, alerts</td></tr>
+          <tr><td class="p-2 spec">--radius-field</td><td class="p-2 spec">0.25rem</td><td class="p-2">Inputs, selects, buttons</td></tr>
+          <tr><td class="p-2 spec">--radius-selector</td><td class="p-2 spec">0.25rem</td><td class="p-2">Checkboxes, toggles, tabs</td></tr>
+          <tr><td class="p-2 spec">--border</td><td class="p-2 spec">1.5px</td><td class="p-2">Every surface edge</td></tr>
+          <tr><td class="p-2 spec">--depth</td><td class="p-2 spec">0</td><td class="p-2">No raised effect on buttons</td></tr>
+          <tr><td class="p-2 spec">box-shadow</td><td class="p-2 spec">none</td><td class="p-2">Global. The one exception is the focus ring.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="font-semibold mb-3">Voice — plain chronicle</h3>
+    <p class="mb-4 max-w-3xl text-sm opacity-80">
+      Declarative and unhurried. Archaic in its nouns — oaths, stewards, vassals,
+      ages — and completely modern in its grammar. It reports what happened and
+      what is true. It never tells him to hurry.
+    </p>
+    <div class="grid gap-4 md:grid-cols-2 mb-6">
+      <div class="panel p-4" style="border-left: 3px solid var(--color-success)">
+        <h4 class="font-semibold mb-3" style="font-size: var(--text-lg)">Write this</h4>
+        <ul class="text-sm space-y-2 opacity-90">
+          <li>The granary is complete.</li>
+          <li>Ashfall will grow in <span class="num">3</span> turns.</li>
+          <li>Your alliance took Redmarch.</li>
+          <li>Nothing was lost while you were away.</li>
+          <li>Unrest in Ashfall. A temple would settle it.</li>
+          <li>Not enough production. The walls need <span class="num">40</span> more.</li>
+          <li>Wes swore an oath to Marra on turn <span class="num">38</span>.</li>
+        </ul>
+      </div>
+      <div class="panel p-4" style="border-left: 3px solid var(--color-error)">
+        <h4 class="font-semibold mb-3" style="font-size: var(--text-lg)">Never write this</h4>
+        <ul class="text-sm space-y-2 opacity-90">
+          <li>Your city is STARVING!! Act now!</li>
+          <li>Only 3 days left — don't miss out!</li>
+          <li>You haven't played in 6 days.</li>
+          <li>Speed this up instantly for 200 gems.</li>
+          <li>Log in tomorrow to keep your streak!</li>
+          <li>Your alliance is counting on you.</li>
+          <li>Nice job! You're crushing it! 🎉</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="panel p-4 mb-8" style="border-left: 3px solid var(--color-primary)">
+      <h4 class="font-semibold mb-2">The rules behind the examples</h4>
+      <ul class="text-sm opacity-85 space-y-2 list-disc pl-5">
+        <li><strong>No exclamation marks.</strong> Anywhere. Not in flash messages, not in tooltips, not in the tutorial.</li>
+        <li><strong>No second person imperative for optional acts.</strong> "A temple would settle it" — not "Build a temple."</li>
+        <li><strong>Never reference his absence.</strong> No "welcome back, it's been a while," no decay warnings, no streaks. Time away is not a debt.</li>
+        <li><strong>Countdowns state facts, never pressure.</strong> "Grows in 3 turns" is a fact. "Only 3 turns left!" is a threat with no referent.</li>
+        <li><strong>Rejections say what is missing and by how much.</strong> An order that fails must name the shortfall as a number he can act on.</li>
+        <li><strong>Never sell.</strong> The UI has no surface for a purchase prompt, because there is no purchase. That absence is the product's main promise — do not undercut it with the visual grammar of one.</li>
+      </ul>
+    </div>
+
+    <h3 class="font-semibold mb-3">Motion</h3>
+    <div class="panel p-4 mb-8">
+      <ul class="text-sm opacity-85 space-y-2 list-disc pl-5">
+        <li><strong>Motion clarifies, never celebrates.</strong> The camera eases to a target so he keeps his bearings. Nothing bursts, sparkles, or confetti-drops on a completed build.</li>
+        <li><strong>Fast and short.</strong> 100–200ms for hover and panel state, up to 400ms for camera easing. Nothing he must wait through to act.</li>
+        <li><strong>Nothing loops.</strong> A permanently pulsing badge is an attention tax, and this persona is paying too many already.</li>
+        <li><strong>Honor <code class="spec">prefers-reduced-motion</code>.</strong> Camera easing becomes an instant cut; transitions drop to zero.</li>
+        <li><strong>Muted by default.</strong> He is playing in a tab at work. Audio never autoplays.</li>
+      </ul>
+    </div>
+
+    <h3 class="font-semibold mb-3">Applied — the same panel in every state</h3>
+    <div class="space-bg rounded-lg p-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div class="panel p-3">
+        <div class="font-semibold mb-1" style="font-size: var(--text-lg)">Ashfall</div>
+        <p class="text-sm opacity-85">Building a Granary — <span class="num">2</span> turns.</p>
+        <button class="btn btn-primary btn-sm mt-3 w-full">Change build</button>
+      </div>
+      <div class="panel p-3">
+        <div class="font-semibold mb-1" style="font-size: var(--text-lg)">Redmarch</div>
+        <p class="text-sm flex items-start gap-1.5" style="color: var(--color-success)">
+          <span aria-hidden="true">✓</span><span>Ancient Walls complete.</span>
+        </p>
+        <button class="btn btn-sm mt-3 w-full" style="background: var(--color-base-300); color: var(--color-base-content); border: 1.5px solid rgb(255 255 255 / 0.12)">Change build</button>
+      </div>
+      <div class="panel p-3">
+        <div class="font-semibold mb-1" style="font-size: var(--text-lg)">Vale</div>
+        <p class="text-sm flex items-start gap-1.5" style="color: var(--color-warning)">
+          <span aria-hidden="true">⚠</span><span>Starving. Assign a grassland tile.</span>
+        </p>
+        <button class="btn btn-primary btn-sm mt-3 w-full">Assign tiles</button>
+      </div>
+      <div class="panel p-3" style="border-left: 3px solid var(--color-accent)">
+        <div class="font-semibold mb-1" style="font-size: var(--text-lg)">Thornhold</div>
+        <p class="text-sm flex items-start gap-1.5" style="color: var(--color-accent)">
+          <span aria-hidden="true">⚔</span><span>Besieged by Marra since turn <span class="num">39</span>.</span>
+        </p>
+        <button class="btn btn-sm mt-3 w-full" style="background: var(--color-base-300); color: var(--color-base-content); border: 1.5px solid rgb(255 255 255 / 0.12)">Send relief</button>
+      </div>
+    </div>
+    <p class="mt-3 text-sm opacity-70 max-w-3xl">
+      Four states, four colours, four icons, four sentences — and exactly one
+      gold button per panel, on the thing worth doing. No panel shouts; the one
+      under siege earns a coloured edge and nothing more.
+    </p>
+  </section>
+
+  </main>
+
+  <script>
+    document.getElementById("theme-switcher").addEventListener("change", (e) => {
+      document.documentElement.setAttribute("data-theme", e.target.value);
+    });
+  </script>
+</body>
+</html>
