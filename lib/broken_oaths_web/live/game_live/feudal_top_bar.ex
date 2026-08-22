@@ -275,6 +275,19 @@ defmodule BrokenOathsWeb.GameLive.FeudalTopBar do
         Refuse
       </button>
 
+      <%!-- Story 915, criterion 7732 — lets a vassal see which cities
+               would rise and the predicted army size before touching
+               the irreversible "Declare Independence" button below. --%>
+      <button
+        type="button"
+        phx-click="open_independence_preview"
+        phx-value-lord_user_id={@vassal_status.lord_user_id}
+        data-test="preview-independence"
+        class="btn btn-xs btn-outline"
+      >
+        Preview Independence
+      </button>
+
       <%!-- Story 915 — the irreversible choice: step one raises the
                confirming warning below, commits nothing. --%>
       <button

@@ -84,6 +84,15 @@ defmodule BrokenOathsWeb.GameLive.Join do
       {:error, reason} ->
         {:noreply, assign(socket, :join_error, error_message(reason))}
     end
+  catch
+    # Issue 4f25b084: `quick_join/1` can route into `join_world/2` for a
+    # long-dormant, unpaused world still replaying its boot-time
+    # catch-up (see `BrokenOaths.Simulation.WorldServer`'s moduledoc) —
+    # the `{:join, user}` call can time out while that's underway. Show
+    # the same inline error the picker already uses for a full world
+    # instead of crashing the socket.
+    :exit, {:timeout, {GenServer, :call, _}} ->
+      {:noreply, assign(socket, :join_error, error_message(:world_catching_up))}
   end
 
   @impl true
@@ -98,6 +107,10 @@ defmodule BrokenOathsWeb.GameLive.Join do
       {:error, reason} ->
         {:noreply, assign(socket, :join_error, error_message(reason))}
     end
+  catch
+    # See the matching `catch` on "quick_play" above.
+    :exit, {:timeout, {GenServer, :call, _}} ->
+      {:noreply, assign(socket, :join_error, error_message(:world_catching_up))}
   end
 
   @impl true
@@ -198,6 +211,9 @@ defmodule BrokenOathsWeb.GameLive.Join do
 
   defp error_message(:world_full), do: "That world just filled up — pick another."
   defp error_message(:membership_limit), do: "You can only play in three worlds at once."
+
+  defp error_message(:world_catching_up),
+    do: "That world is still catching up after being idle — try again in a moment."
 
   defp full?(world), do: Game.world_full?(world)
 

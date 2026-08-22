@@ -35,10 +35,11 @@ defmodule BrokenOaths.Simulation.Turn.BarbarianPhase do
   `BrokenOaths.Simulation.Turn`.
   """
 
+  alias BrokenOaths.Cities.Improvement
   alias BrokenOaths.Combat.BarbarianAI
   alias BrokenOaths.Combat.CityDefense
   alias BrokenOaths.Combat.Resolver
-  alias BrokenOaths.Cities.Improvement
+  alias BrokenOaths.Feudal.ProtectionPact
   alias BrokenOaths.Worlds.Regions
 
   @doc """
@@ -221,6 +222,22 @@ defmodule BrokenOaths.Simulation.Turn.BarbarianPhase do
   # player-initiated kill would. `defender_garrisoned?` (story 895):
   # a player unit standing on its own city's tile fights back at +50%
   # here too, same as when it's the one striking out.
+  #
+  # Story 936: also drives the SAME `ProtectionPact` hooks
+  # `Resolver.resolve_attack/4` already runs for a real player's own
+  # attack, so a barbarian striking a vassal's unit raises/resolves a
+  # Protection Pact call exactly like a hostile player would — this was
+  # the real gap the story's bug fix closed (only the test-only
+  # `resolve_barbarian_attack_for_test` bridge drove these before). The
+  # one-line `Map.put(:turn, new_turn)` right before those hooks matters:
+  # this whole phase runs mid-`Turn.tick/1`, BEFORE `state.turn` itself
+  # is bumped to `new_turn` (see that module's own doc), so
+  # `ProtectionPact.maybe_raise_protection_call/3` — which stamps a
+  # freshly-raised call's deadline off `state.turn` — would otherwise
+  # timestamp it one turn stale and shave a turn off the lord's response
+  # window. Safe to bump here: nothing else in the tick pipeline between
+  # this phase and `Turn.tick/1`'s own unconditional final
+  # `Map.put(:turn, new_turn)` reads `state.turn`.
   defp resolve_barbarian_attack(state, barbarian, target, new_turn) do
     seed = {state.world.seed, state.turn, barbarian.id, target.id}
 
@@ -242,6 +259,10 @@ defmodule BrokenOaths.Simulation.Turn.BarbarianPhase do
     %{state | units: units}
     |> schedule_heir_if_lord_fell(target, new_target, new_turn)
     |> pay_bounty_if_barbarian_fell(new_barbarian, target)
+    |> Map.put(:turn, new_turn)
+    |> ProtectionPact.maybe_raise_protection_call(barbarian, target.player_id)
+    |> ProtectionPact.resolve_protection_call_if_dead(new_barbarian)
+    |> ProtectionPact.resolve_protection_call_if_dead(new_target)
   end
 
   defp apply_combat_unit(units, id, %{hp: 0}), do: Map.delete(units, id)

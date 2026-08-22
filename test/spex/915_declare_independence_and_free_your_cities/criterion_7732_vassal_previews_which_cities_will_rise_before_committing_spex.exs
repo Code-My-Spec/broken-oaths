@@ -57,6 +57,7 @@ defmodule BrokenOathsSpex.Story915.Criterion7732Spex do
 
   import BrokenOathsSpex.SharedGivens
 
+  alias BrokenOaths.Users.User
   alias BrokenOathsSpex.Fixtures
 
   defp verdict(view, city_id) do
@@ -180,7 +181,7 @@ defmodule BrokenOathsSpex.Story915.Criterion7732Spex do
         assert has_element?(
                  context.other_play_live,
                  "[data-test='vassal-status']",
-                 context.user.email
+                 User.display_name(context.user)
                ),
                "Wes should still read as sworn to Mira until he actually commits"
 

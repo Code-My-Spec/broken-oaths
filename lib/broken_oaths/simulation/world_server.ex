@@ -25,14 +25,25 @@ defmodule BrokenOaths.Simulation.WorldServer do
   column, default 60, immutable after creation — see
   `BrokenOaths.Worlds.World`) rather than every world in the process
   sharing one hardcoded cadence. In every environment except test,
-  `init/1` schedules a `Process.send_after(self(), :tick, turn_seconds
-  * 1_000)` self-loop, and if `turn_started_at` is more than
-  `turn_seconds` stale on boot (the world was dormant), missed ticks
-  are run synchronously before the server accepts requests — wall-clock
-  catch-up. Test env sets `config :broken_oaths, :game_auto_tick,
-  false`, which disables both the self-loop and catch-up: `advance_turn/1`
-  (called by `BrokenOathsSpex.Fixtures.advance_turn/1`) is the only
-  tick source, exactly mirroring what the timer would have fired.
+  once `init/1` returns and this world's process has caught up (see
+  below), it schedules a `Process.send_after(self(), :tick, turn_seconds
+  * 1_000)` self-loop.
+
+  If `turn_started_at` is more than `turn_seconds` stale on boot (the
+  world was dormant), missed ticks are replayed — wall-clock catch-up
+  — via `catch_up_step/1`. `init/1` itself always returns immediately
+  (`{:continue, :catch_up}`) rather than blocking on this: the replay
+  runs in bounded chunks of `@catch_up_chunk_size` turns, each chunk
+  self-sending `:catch_up_continue` for the next one, so a world that's
+  stale by weeks doesn't hold up `DynamicSupervisor.start_child/2` (and
+  therefore every OTHER world's `ensure_started/1`) for as long as its
+  own replay takes (issue 4f25b084), and other calls queued against
+  THIS world's mailbox get a chance to run between chunks. The
+  self-loop tick timer isn't armed until the replay fully finishes.
+  Test env sets `config :broken_oaths, :game_auto_tick, false`, which
+  disables both the self-loop and catch-up: `advance_turn/1` (called
+  by `BrokenOathsSpex.Fixtures.advance_turn/1`) is the only tick
+  source, exactly mirroring what the timer would have fired.
   """
 
   use GenServer
@@ -150,13 +161,26 @@ defmodule BrokenOaths.Simulation.WorldServer do
   def init(world) do
     world = Worlds.get_world!(world.id)
 
-    state = load_state(world) |> catch_up()
+    # Issue 4f25b084: `init/1` used to run the ENTIRE boot-time dormancy
+    # catch-up (see `catch_up_step/1` below) synchronously before
+    # returning, which held up `DynamicSupervisor.start_child/2` — and
+    # therefore every OTHER world's `ensure_started/1`, since they all
+    # share one `BrokenOaths.GameSupervisor` — for as long as the replay
+    # took. For a world stale by weeks that was many minutes, wedging
+    # the whole app. Returning `{:continue, :catch_up}` here lets
+    # `init/1` finish immediately (unblocking the supervisor and every
+    # other world) while the replay itself runs after, chunked, in this
+    # world's own process.
+    state =
+      load_state(world)
+      |> Map.put(:tick_timer, nil)
+      |> Map.put(:catch_up_remaining, nil)
 
-    tick_timer =
-      if auto_tick?() and not state.world.paused, do: schedule_tick(state.world.turn_seconds)
-
-    {:ok, Map.put(state, :tick_timer, tick_timer)}
+    {:ok, state, {:continue, :catch_up}}
   end
+
+  @impl true
+  def handle_continue(:catch_up, state), do: {:noreply, catch_up_step(state)}
 
   @impl true
   def handle_call({:join, user}, _from, state) do
@@ -1733,7 +1757,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
   # Dev-only QA control surface (see `BrokenOathsWeb.DevQaController`):
   # freeze this world's turn clock. Cancels any pending `:tick` timer
   # and persists `paused: true` so a restart mid-pause stays frozen —
-  # `catch_up/1` and `handle_info(:tick, ...)` below both check
+  # `catch_up_step/1` and `handle_info(:tick, ...)` below both check
   # `state.world.paused` before ever advancing. `:advance_turn` (the
   # manual step, right below) is a SEPARATE handler unaffected by this
   # flag — pausing only stops the AUTOMATIC clock.
@@ -1829,6 +1853,14 @@ defmodule BrokenOaths.Simulation.WorldServer do
     end
   end
 
+  # Issue 4f25b084: the next batch of a chunked boot-time catch-up (see
+  # `catch_up_step/1`) — a plain mailbox message rather than a nested
+  # `{:continue, ...}` so any `GenServer.call` against this world queued
+  # up in between gets its turn too, instead of every chunk running
+  # back-to-back with no chance for the mailbox to be drained.
+  @impl true
+  def handle_info(:catch_up_continue, state), do: {:noreply, catch_up_step(state)}
+
   # -------------------------------------------------------------------
   # Ticking
   # -------------------------------------------------------------------
@@ -1841,18 +1873,62 @@ defmodule BrokenOaths.Simulation.WorldServer do
   # dormancy catch-up must NEVER replay missed turns (checked first,
   # independent of `auto_tick?/0`), so a paused QA world stays frozen
   # across a server restart exactly like it was before the restart.
-  defp catch_up(state) do
+  #
+  # Issue 4f25b084: the missed-tick count is still computed exactly
+  # once, up front (`state.catch_up_remaining` starts `nil` and is
+  # seeded here) — wall-clock time spent catching up never grows the
+  # target, so this replays precisely the same number of turns the old
+  # single-shot `catch_up/1` did. The only change is HOW it's scheduled:
+  # replayed in bounded chunks (`@catch_up_chunk_size` missed turns at a
+  # time) via a self-sent `:catch_up_continue`, a real mailbox message,
+  # rather than one giant call to `run_missed/2`. Between chunks this
+  # world's process returns to its receive loop, so a `GenServer.call`
+  # against THIS world that arrived mid-catch-up gets serviced instead
+  # of queuing behind the entire replay. `run_missed/2` itself — and
+  # therefore what happens during any given replayed turn — is
+  # untouched.
+  @catch_up_chunk_size 50
+
+  defp catch_up_step(%{catch_up_remaining: nil} = state) do
     cond do
       state.world.paused ->
-        state
+        finish_catch_up(state)
 
       auto_tick?() ->
         elapsed = DateTime.diff(DateTime.utc_now(), state.turn_started_at, :second)
-        run_missed(state, div(elapsed, state.world.turn_seconds))
+        catch_up_step(%{state | catch_up_remaining: div(elapsed, state.world.turn_seconds)})
 
       true ->
-        state
+        finish_catch_up(state)
     end
+  end
+
+  defp catch_up_step(%{catch_up_remaining: remaining} = state) when remaining <= 0 do
+    finish_catch_up(state)
+  end
+
+  defp catch_up_step(%{catch_up_remaining: remaining} = state) do
+    chunk = min(remaining, @catch_up_chunk_size)
+    new_state = run_missed(state, chunk)
+    still_owed = remaining - chunk
+
+    if still_owed > 0 do
+      send(self(), :catch_up_continue)
+      %{new_state | catch_up_remaining: still_owed}
+    else
+      finish_catch_up(%{new_state | catch_up_remaining: still_owed})
+    end
+  end
+
+  # Mirrors the tick-timer arming `init/1` used to do right after its
+  # (formerly synchronous) catch-up returned — same condition, just
+  # deferred until the (possibly chunked) replay above has actually
+  # finished.
+  defp finish_catch_up(state) do
+    tick_timer =
+      if auto_tick?() and not state.world.paused, do: schedule_tick(state.world.turn_seconds)
+
+    %{state | tick_timer: tick_timer, catch_up_remaining: nil}
   end
 
   defp run_missed(state, missed) when missed <= 0, do: state

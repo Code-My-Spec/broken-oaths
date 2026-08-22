@@ -34,9 +34,10 @@ defmodule BrokenOathsSpex.Story915.Criterion7747Spex do
   convention. Inside it:
 
     * `data-test="rebellion-status"` → `"active"`
-    * `data-test="rebellion-rebel"` → the rebel's own `user.email`
+    * `data-test="rebellion-rebel"` → the rebel's own
+      `User.display_name/1`
     * `data-test="rebellion-former-lord"` → the former lord's own
-      `user.email`
+      `User.display_name/1`
     * `data-test="rebellion-started-turn"` → a digit string, checked
       against the ALREADY-established `data-test="turn-number"` badge
       (`BrokenOathsSpex.Story874.Criterion7419Spex` and many others)
@@ -56,6 +57,8 @@ defmodule BrokenOathsSpex.Story915.Criterion7747Spex do
   use BrokenOathsSpex.Case
 
   import BrokenOathsSpex.SharedGivens
+
+  alias BrokenOaths.Users.User
 
   spex "declaring independence opens a tracked rebellion", fail_on_error_logs: false do
     scenario "a Rebellion record naming both parties, with its own fields, is visible to both the rebel and the former lord" do
@@ -95,13 +98,13 @@ defmodule BrokenOathsSpex.Story915.Criterion7747Spex do
           assert has_element?(
                    view,
                    "[data-test='rebellion-panel'] [data-test='rebellion-rebel']",
-                   context.other_user.email
+                   User.display_name(context.other_user)
                  )
 
           assert has_element?(
                    view,
                    "[data-test='rebellion-panel'] [data-test='rebellion-former-lord']",
-                   context.user.email
+                   User.display_name(context.user)
                  )
         end
 

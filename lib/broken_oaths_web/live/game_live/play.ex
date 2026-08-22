@@ -365,6 +365,17 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
         {:ok, socket}
     end
+  catch
+    # Issue 4f25b084: a long-dormant world's boot-time catch-up (see
+    # `BrokenOaths.Simulation.WorldServer`'s moduledoc) can take a while
+    # even chunked — any of the `Game.*` calls above talking to that
+    # world's `WorldServer` can time out while it's still replaying.
+    # Land on the picker instead of an unhandled crash page.
+    :exit, {:timeout, {GenServer, :call, _}} ->
+      {:ok,
+       socket
+       |> put_flash(:error, "This world is still catching up — try again in a moment.")
+       |> push_navigate(to: ~p"/play")}
   end
 
   # Story 909/910's own eligibility check (`BrokenOaths.Players.Presence.
