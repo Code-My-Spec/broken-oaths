@@ -317,6 +317,40 @@ build("worker", "units", {
   "................",
 })
 
+-- --------------------------------------------------------------- scout
+-- The cheapest, fastest recon unit (strength 5, movement 3 — half the
+-- Warrior's strength, triple its movement, no shield). Leaner silhouette
+-- than Warrior/Bronze Spearman: a hood instead of a helmet, a narrow
+-- travel cloak instead of a broad armored tunic, and a small satchel
+-- in place of the spear+shield. Slate-teal cloak keeps it clear of the
+-- roster's other unit hues (Lord gold, Settler blue, Warrior red/steel,
+-- Bronze Spearman bronze/gold, Worker tan, Barbarian gray, Archer green).
+build("scout", "units", {
+  K = rgba("#1a1a1a"),
+  S = rgba("#eab887"), -- skin
+  H = rgba("#5a3d24"), -- hood leather
+  T = rgba("#a9835a"), -- hood/headband trim
+  C = rgba("#3d7a72"), -- travel cloak (slate-teal)
+  D = rgba("#26504a"), -- cloak shade
+}, {
+  "................",
+  ".....KKK........",
+  "....KHTHK.......",
+  "...KHHHHHK......",
+  "....KSSSSK......",
+  "....KSKSKK......",
+  "....KSSSSK......",
+  "....KCCCCK......",
+  "....KCDCCK..KHK.",
+  "....KCCCCK..KHK.",
+  "....KCDCCK..KKK.",
+  "....KCCCCK......",
+  "....KCCKCCK.....",
+  "....KCK.KCK.....",
+  "...KKKK.KKKK....",
+  "................",
+})
+
 -- ----------------------------------------------------------- barbarian
 build("barbarian", "units", {
   K = rgba("#1a1a1a"),
