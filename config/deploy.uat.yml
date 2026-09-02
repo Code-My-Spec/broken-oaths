@@ -21,8 +21,9 @@ servers:
         path: /up
 
 registry:
-  server: ghcr.io
-  username: johns10
+  server: 10.0.0.3:5000
+  username:
+    - KAMAL_REGISTRY_USERNAME
   password:
     - KAMAL_REGISTRY_PASSWORD
 
