@@ -24,6 +24,9 @@ ENV MIX_ENV="prod"
 
 # Install mix dependencies
 COPY mix.exs mix.lock ./
+RUN echo "--- diag: DNS ---" && getent hosts github.com; \
+    echo "--- diag: TLS/HTTP to github.com ---" && curl -v -sS --max-time 10 https://github.com/tailwindlabs/heroicons.git/info/refs?service=git-upload-pack -o /dev/null 2>&1 | tail -40; \
+    echo "--- diag done ---"
 RUN mix deps.get --only $MIX_ENV
 RUN mkdir config
 COPY config/config.exs config/${MIX_ENV}.exs config/
