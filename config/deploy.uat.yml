@@ -10,7 +10,7 @@ image: code-my-spec/broken_oaths
 servers:
   web:
     hosts:
-      - 46.225.150.126
+      - 999.999.999.999
     options:
       network: db_net           # pre-attach so app can reach infra-postgres-1 at start
     proxy:                      # role-level override
