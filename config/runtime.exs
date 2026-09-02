@@ -25,16 +25,13 @@ config :broken_oaths, BrokenOathsWeb.Endpoint,
 
 # === Secret loading ==========================================================
 #
-# Deployed containers (UAT + prod, both MIX_ENV=prod) carry only AWS
-# bootstrap creds + APP_ENV; every app secret is fetched from SSM
-# Parameter Store (/broken_oaths/<APP_ENV>/*) into System env here,
-# BEFORE any config below reads it. Local dev/test never set APP_ENV.
-if config_env() == :prod do
-  case System.get_env("APP_ENV") do
-    nil -> :ok
-    app_env -> BrokenOaths.Secrets.load!(app_env)
-  end
-end
+# Deployed containers (UAT + prod, both MIX_ENV=prod) decrypt
+# envs/<APP_ENV>.enc.env via `sops exec-env` in rel/overlays/bin/boot and
+# rel/overlays/bin/migrate, BEFORE the release process this file runs
+# inside is even started — every secret is already in System env by the
+# time any config below reads it. Migrated off the AWS SSM Parameter
+# Store fetch this used to do here; see BrokenOaths.Secrets' own history
+# for the old path.
 
 # Local dev convenience: load .env into System env so optional
 # integrations (CodeMySpec feedback widget, Google OAuth) work without
@@ -71,6 +68,29 @@ config :broken_oaths,
 config :broken_oaths,
   google_client_id: System.get_env("GOOGLE_CLIENT_ID"),
   google_client_secret: System.get_env("GOOGLE_CLIENT_SECRET")
+
+# CodeMySpec agent-conversation preview pane (ClientUtils.PreviewFraming +
+# ClientUtils.CloudflareTunnel, both driven from this one :preview config —
+# see lib/broken_oaths_web/application.ex's preview_tunnel/0), dev-only —
+# production never wants to be previewed or iframed. Read from
+# .cms_harness.json (written by `mix harness.onboard`, gitignored,
+# machine-local) rather than hardcoded: the hostname/tunnel_id/account_tag/
+# tunnel_secret/origin_url keys feed CloudflareTunnel directly (this
+# library's own moduledoc: "the keys come back named exactly as that
+# module's options, deliberately"), and embedder feeds PreviewFraming.
+# Empty when there's no .cms_harness.json or no preview recorded in it —
+# that's what leaves the tunnel disabled (preview_tunnel/0 below).
+#
+# The embedder MUST be a single origin, not "http://localhost:4000
+# https://dev.codemyspec.com" — localhost isn't same-site with the preview
+# host, so a browser never sends the (correctly Lax) session cookie into a
+# frame from there: the preview would render a login page whose cookie
+# never comes back, looping forever with nothing erroring. Framing must
+# happen from https://dev.codemyspec.com.
+if config_env() == :dev do
+  config :broken_oaths,
+    preview: ClientUtils.Harness.Preview.config(".", origin_url: "http://127.0.0.1:4050")
+end
 
 if config_env() == :prod do
   # Cloak vault key for encrypted OAuth token storage. The compile-time

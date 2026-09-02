@@ -25,4 +25,4 @@ if [ -z "${SOPS_AGE_KEY:-}" ]; then
   exit 1
 fi
 
-exec sops exec-env "$ENV_FILE" "./bin/broken_oaths start"
+exec sops exec-env "$ENV_FILE" "./bin/server"
