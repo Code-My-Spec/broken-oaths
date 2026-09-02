@@ -5,7 +5,7 @@
 # matches deploy.yml so the multi-arch image labels resolve.
 
 service: broken-oaths
-image: code-my-spec/broken_oaths
+image: broken-oaths
 
 servers:
   web:
