@@ -44,5 +44,7 @@ env:
 
 ssh:
   user: root
-  keys: ["/Users/johndavenport/.ssh/codemyspec_deploy"]
+<% if ENV["CMS_SSH_KEY_PATH"] %>
+  keys: ["<%= ENV["CMS_SSH_KEY_PATH"] %>"]
   keys_only: true
+<% end %>
