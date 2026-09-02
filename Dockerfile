@@ -24,11 +24,7 @@ ENV MIX_ENV="prod"
 
 # Install mix dependencies
 COPY mix.exs mix.lock ./
-RUN echo "--- diag: DNS ---" && getent hosts github.com; \
-    echo "--- diag: TLS/HTTP to github.com ---" && curl -v -sS --max-time 10 https://github.com/tailwindlabs/heroicons.git/info/refs?service=git-upload-pack -o /dev/null 2>&1 | tail -40; \
-    echo "--- diag: git clone, default (HTTP/2) ---" && git -c http.version=HTTP/2 clone --bare --depth=1 https://github.com/tailwindlabs/heroicons.git /tmp/h2 2>&1 | tail -10; \
-    echo "--- diag: git clone, forced HTTP/1.1 ---" && git -c http.version=HTTP/1.1 clone --bare --depth=1 https://github.com/tailwindlabs/heroicons.git /tmp/h1 2>&1 | tail -10; \
-    echo "--- diag done ---"
+RUN git config --global http.version HTTP/1.1
 RUN mix deps.get --only $MIX_ENV
 RUN mkdir config
 COPY config/config.exs config/${MIX_ENV}.exs config/
