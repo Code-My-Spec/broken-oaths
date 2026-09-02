@@ -44,3 +44,5 @@ env:
 
 ssh:
   user: root
+  keys: ["~/.ssh/codemyspec_deploy"]
+  keys_only: true
