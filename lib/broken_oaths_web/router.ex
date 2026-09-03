@@ -10,6 +10,12 @@ defmodule BrokenOathsWeb.Router do
     plug :put_root_layout, html: {BrokenOathsWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
+    # Must come AFTER put_secure_browser_headers: that plug sends
+    # frame-ancestors 'self', which silently refuses the CodeMySpec
+    # agent-conversation preview pane (blank iframe, no error) — this
+    # overwrites it for the preview case. otp_app tells the plug which
+    # app it's protecting; without it, it's a no-op.
+    plug ClientUtils.PreviewFraming, otp_app: :broken_oaths
     plug :fetch_current_scope_for_user
   end
 
@@ -40,6 +46,28 @@ defmodule BrokenOathsWeb.Router do
     pipe_through :api
 
     get "/users", CmsUsersController, :index
+  end
+
+  # Ask an integration to prove itself, on demand.
+  #
+  # Separate from `/up` deliberately: the proxy gates the traffic swap on
+  # that route, so it stays shallow. These actions reach a dependency for
+  # real — the widget's socket, its credential, its origin — which is
+  # exactly what must not decide whether traffic moves.
+  #
+  # Under `/_cms` so it cannot collide with the application's own routes,
+  # and behind the project's deploy key, which this app already holds.
+  # Each action can only make its integration *speak*; none of them can
+  # take the app down.
+  scope "/_cms", BrokenOathsWeb do
+    pipe_through :api
+
+    post "/verify/widget", VerifyController, :widget
+
+    # Down by construction, so a monitor can be proven to notice something
+    # without anything real being broken. Unauthenticated: a monitor will
+    # not carry a credential, and a constant reveals nothing.
+    get "/verify/always-failing", VerifyController, :always_failing
   end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
