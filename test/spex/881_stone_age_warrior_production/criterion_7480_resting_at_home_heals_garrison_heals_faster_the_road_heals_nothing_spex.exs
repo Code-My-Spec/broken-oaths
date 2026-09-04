@@ -3,7 +3,15 @@ defmodule BrokenOathsSpex.Story881.Criterion7480Spex do
   Story 881 — Stone Age Warrior Production
   Criterion 7480 — a damaged, unmoved unit heals 10 HP/turn in its
   owner's territory, 15 HP/turn garrisoned on its city's own tile, and
-  nothing outside friendly territory.
+  only 5 HP/turn outside any friendly territory.
+
+  Regression fix (not in the original contract): `Unit.heal_rate/2`'s
+  own moduledoc documents a deliberate "some slow healing anywhere
+  (open field, neutral, or enemy land) so a unit wounded out on
+  campaign isn't stuck at low HP with no way home" — 5 HP/turn, not 0.
+  This criterion originally encoded a flat "heals nothing" outside
+  territory; that's no longer the rule, so the abroad warrior's
+  expectation below reads 55 (50 + 5), not 50.
 
   Testing healing needs a starting point of damage, and this epic's
   only damage source (combat) is explicitly future work — see
@@ -17,7 +25,7 @@ defmodule BrokenOathsSpex.Story881.Criterion7480Spex do
 
   alias BrokenOathsSpex.Fixtures
 
-  spex "resting at home heals; garrison heals faster; the road heals nothing" do
+  spex "resting at home heals; garrison heals faster; the road heals a little" do
     scenario "three damaged warriors in three different situations" do
       given_(:a_world)
       given_(:registered_player)
@@ -123,13 +131,13 @@ defmodule BrokenOathsSpex.Story881.Criterion7480Spex do
         {:ok, context}
       end
 
-      then_ "the one abroad gains nothing", context do
+      then_ "the one abroad still gains a little (5 HP), not nothing", context do
         [w] =
           for u <- Fixtures.player_units(context.world, context.user),
               u.id == context.abroad_warrior.id,
               do: u
 
-        assert w.hp == 50
+        assert w.hp == 55
         {:ok, context}
       end
     end

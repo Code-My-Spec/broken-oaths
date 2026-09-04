@@ -119,7 +119,7 @@ defmodule BrokenOathsSpex.Story899.Criterion7617Spex do
         assert has_element?(
                  revisited_live,
                  "[data-test='known-player-#{context.other_user.id}']",
-                 context.other_user.email
+                 BrokenOaths.Users.User.display_name(context.other_user)
                )
 
         {:ok, context}

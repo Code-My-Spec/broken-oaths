@@ -101,7 +101,7 @@ defmodule BrokenOathsSpex.Story913.Criterion7725Spex do
         assert has_element?(
                  vassal_live,
                  "[data-test='vassal-status']",
-                 "Sworn to #{context.user.email}"
+                 "Sworn to #{BrokenOaths.Users.User.display_name(context.user)}"
                )
 
         {:ok, context}

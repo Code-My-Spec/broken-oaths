@@ -112,6 +112,24 @@ defmodule BrokenOathsSpex.Story880.Criterion7490Spex do
          |> Map.put(:hw_baseline_prod, after_item.banked - baseline_item.banked)}
       end
 
+      given_ "my rival has already claimed their spawn region on the shared world", context do
+        # This fixture world only has two spawnable regions (>= 175 tiles
+        # each, see `Regions.spawnable/1`). A player's HOME region is
+        # claimed the instant they join (`WorldServer.spawn_new_player/2`),
+        # well before any city exists — but a city's own worked-tile ring
+        # can span into the neighboring region the moment it's founded
+        # (`Game.world_full?/1` counts a region as taken by home OR by
+        # city-tile spillover, see `taken_region_ids/1`). Left to run in
+        # scenario order, the desert given_ below would found its city
+        # and spill into the SECOND region before `context.other_user`
+        # ever gets a chance to join, leaving no region left to claim and
+        # failing their join outright. Reserving it here, before either
+        # city exists, avoids that race.
+        {:ok, join_live, _html} = live(context.other_conn, ~p"/play")
+        join_live |> element("[data-test='join-world-#{context.world.id}']") |> render_click()
+        {:ok, context}
+      end
+
       given_ "a city working a flat desert tile", context do
         land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
 

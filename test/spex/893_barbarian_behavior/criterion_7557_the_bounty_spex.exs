@@ -138,8 +138,10 @@ defmodule BrokenOathsSpex.Story893.Criterion7557Spex do
       end
 
       when_ "my warriors keep attacking it, turn after turn, until it falls", context do
-        result =
-          Enum.reduce_while(1..6, :attacking, fn _round, :attacking ->
+        gold_before = read_gold(context.play_live)
+
+        {result, turns_elapsed} =
+          Enum.reduce_while(1..6, {:attacking, 0}, fn _round, {:attacking, turns} ->
             my_warriors =
               for u <- Fixtures.player_units(context.world, context.user),
                   u.type == :warrior,
@@ -166,23 +168,59 @@ defmodule BrokenOathsSpex.Story893.Criterion7557Spex do
 
             if still_alive do
               Fixtures.advance_turn(context.world)
-              {:cont, :attacking}
+              {:cont, {:attacking, turns + 1}}
             else
-              {:halt, :dead}
+              {:halt, {:dead, turns}}
             end
           end)
 
-        {:ok, Map.put(context, :fight_result, result)}
+        {:ok,
+         context
+         |> Map.put(:fight_result, result)
+         |> Map.put(:gold_before, gold_before)
+         |> Map.put(:turns_elapsed, turns_elapsed)}
       end
 
       then_ "the barbarian is destroyed and the player is paid a 10-gold bounty", context do
         assert context.fight_result == :dead,
                "the barbarian outlasted the assault (result: #{inspect(context.fight_result)})"
 
-        assert has_element?(context.play_live, "[data-test='player-gold']", "60")
+        # Passive per-turn city income (story 912) keeps accruing during
+        # the fight, on top of the flat bounty this criterion is actually
+        # about — so the expected total has to account for both rather
+        # than assume gold sat still until the kill (as this spec did
+        # before story 912 landed).
+        [city] =
+          for c <- Fixtures.player_cities(context.world, context.user),
+              c.id == context.city.id,
+              do: c
+
+        income_per_turn = BrokenOaths.Cities.Yields.city_gold_income(city, context.world)
+        expected_gold = context.gold_before + context.turns_elapsed * income_per_turn + 10
+
+        assert has_element?(
+                 context.play_live,
+                 "[data-test='player-gold']",
+                 to_string(expected_gold)
+               )
+
         {:ok, context}
       end
     end
+  end
+
+  # The gold badge's own integer, parsed straight out of the rendered
+  # markup (`Cities.Yields.city_gold_income/2`'s per-turn income, story
+  # 912, means this criterion's own bounty check has to read the real
+  # number rather than compare against a baked-in constant).
+  defp read_gold(play_live) do
+    html = play_live |> element("[data-test='player-gold']") |> render()
+    # Not a bare `\d+` scan — the icon span's own class carries digits
+    # too ("hero-circle-stack w-3 h-3"), which a naive scan matches
+    # before ever reaching the real number. This anchors on digits that
+    # are actual tag TEXT content, between a `>` and a `<`.
+    [_, digits] = Regex.run(~r/>\s*(\d+)\s*</, html)
+    String.to_integer(digits)
   end
 
   # Deliberate, narrow exception, same status as the rest of story 893's

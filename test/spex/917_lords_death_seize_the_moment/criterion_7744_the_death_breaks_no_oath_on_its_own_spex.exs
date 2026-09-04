@@ -159,7 +159,7 @@ defmodule BrokenOathsSpex.Story917.Criterion7744Spex do
           assert has_element?(
                    vassal_live,
                    "[data-test='vassal-status']",
-                   "Sworn to #{context.user.email}"
+                   "Sworn to #{BrokenOaths.Users.User.display_name(context.user)}"
                  ),
                  "#{vassal_user.email} should still show as sworn to the fallen lord, oath never auto-breaks"
         end
@@ -197,13 +197,13 @@ defmodule BrokenOathsSpex.Story917.Criterion7744Spex do
         {:ok, rebel_live, _html} = live(rebel.conn, "/play/#{context.world.id}")
         {:ok, loyalist_live, _html} = live(loyalist.conn, "/play/#{context.world.id}")
 
-        refute has_element?(rebel_live, "[data-test='vassal-status']", "Sworn to #{context.user.email}"),
+        refute has_element?(rebel_live, "[data-test='vassal-status']", "Sworn to #{BrokenOaths.Users.User.display_name(context.user)}"),
                "#{rebel.user.email} chose to declare independence and should no longer read sworn"
 
         assert has_element?(
                  loyalist_live,
                  "[data-test='vassal-status']",
-                 "Sworn to #{context.user.email}"
+                 "Sworn to #{BrokenOaths.Users.User.display_name(context.user)}"
                ),
                "#{loyalist.user.email} chose to stay and should still read sworn — declaring is a choice, not forced"
 

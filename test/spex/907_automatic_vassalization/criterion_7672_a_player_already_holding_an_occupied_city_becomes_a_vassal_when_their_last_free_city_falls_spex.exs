@@ -163,7 +163,7 @@ defmodule BrokenOathsSpex.Story907.Criterion7672Spex do
         assert has_element?(
                  context.play_live,
                  "[data-test='vassal-row-#{context.other_user.id}']",
-                 context.other_user.email
+                 BrokenOaths.Users.User.display_name(context.other_user)
                )
 
         {:ok, context}
@@ -173,7 +173,7 @@ defmodule BrokenOathsSpex.Story907.Criterion7672Spex do
         assert has_element?(
                  context.other_play_live,
                  "[data-test='vassal-status']",
-                 context.user.email
+                 BrokenOaths.Users.User.display_name(context.user)
                )
 
         {:ok, context}

@@ -126,7 +126,7 @@ defmodule BrokenOathsSpex.Story899.Criterion7602Spex do
         assert has_element?(
                  context.play_live,
                  "[data-test='known-player-#{context.other_user.id}']",
-                 context.other_user.email
+                 BrokenOaths.Users.User.display_name(context.other_user)
                )
 
         assert_push_event(context.play_live, "game:units", %{units: units}, 500)

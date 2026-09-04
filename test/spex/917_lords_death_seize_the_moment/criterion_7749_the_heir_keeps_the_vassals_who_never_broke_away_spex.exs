@@ -174,7 +174,7 @@ defmodule BrokenOathsSpex.Story917.Criterion7749Spex do
           assert has_element?(
                    kept_live,
                    "[data-test='vassal-status']",
-                   "Sworn to #{context.user.email}"
+                   "Sworn to #{BrokenOaths.Users.User.display_name(context.user)}"
                  ),
                  "#{kept_user.email} should still read sworn to the (now-heir) lord"
         end
