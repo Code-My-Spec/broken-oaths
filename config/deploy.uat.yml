@@ -10,7 +10,7 @@ image: broken-oaths
 servers:
   web:
     hosts:
-      - 46.225.150.126
+      - uat.broken-oaths.com
     options:
       network: db_net           # pre-attach so app can reach infra-postgres-1 at start
     proxy:                      # role-level override
@@ -21,7 +21,7 @@ servers:
         path: /up
 
 registry:
-  server: 10.0.0.3:5000
+  server: 10.1.0.2:5000
   username:
     - KAMAL_REGISTRY_USERNAME
   password:
