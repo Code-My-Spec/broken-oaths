@@ -5,6 +5,10 @@ defmodule BrokenOathsWeb.Application do
 
   use Application
 
+  alias BrokenOaths.Worlds.Facets
+  alias BrokenOaths.Worlds.Globe
+  alias BrokenOaths.Worlds.Texture
+
   @impl true
   def start(_type, _args) do
     children =
@@ -36,12 +40,47 @@ defmodule BrokenOathsWeb.Application do
         {DynamicSupervisor, strategy: :one_for_one, name: BrokenOaths.CodeMySpec.WidgetSupervisor},
         # Start to serve requests, typically the last entry
         BrokenOathsWeb.Endpoint
-      ] ++ globe_warmup()
+      ] ++ preview_tunnel() ++ globe_warmup()
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: BrokenOaths.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  # Named Cloudflare tunnel for the CodeMySpec agent-conversation preview
+  # pane — the app opens this connection itself (works from behind a
+  # router/NAT, unlike an inbound-dial proxy). Config comes from
+  # `:broken_oaths, :preview` (config/runtime.exs, itself read from
+  # .cms_harness.json by ClientUtils.Harness.Preview.config/2) rather
+  # than hardcoded literals or a required env var — an empty/absent
+  # config is a normal, supported "no preview" state (the library's own
+  # design), not an error, so `mix test` (no .cms_harness.json preview
+  # keys, no :preview config) simply gets no tunnel child rather than
+  # crashing. The config's keys are deliberately named exactly what
+  # CloudflareTunnel's own options expect (its own moduledoc), so no
+  # per-key translation here — `embedder` rides along unused by this
+  # module (PreviewFraming reads it separately from the same config).
+  # MUST come after Endpoint in the children list: init_mode/3 reads
+  # the Endpoint's own config via Phoenix.Config.config_change/3,
+  # which needs Endpoint's config ETS table to already exist —
+  # starting it earlier crashes with "the table identifier does not
+  # refer to an existing ETS table".
+  defp preview_tunnel do
+    case Application.get_env(:broken_oaths, :preview, []) do
+      [] ->
+        []
+
+      config ->
+        [
+          {ClientUtils.CloudflareTunnel,
+           Keyword.merge(config,
+             mode: :named,
+             endpoint: BrokenOathsWeb.Endpoint,
+             otp_app: :broken_oaths
+           )}
+        ]
+    end
   end
 
   # Pre-build the default globe mesh so the first world mount doesn't pay
@@ -52,9 +91,9 @@ defmodule BrokenOathsWeb.Application do
         Supervisor.child_spec(
           {Task,
            fn ->
-             BrokenOaths.Worlds.Globe.get(54)
-             BrokenOaths.Worlds.Facets.get(54)
-             BrokenOaths.Worlds.Texture.warm(54)
+             Globe.get(54)
+             Facets.get(54)
+             Texture.warm(54)
            end},
           id: :globe_warmup,
           restart: :temporary

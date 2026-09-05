@@ -327,33 +327,42 @@ part of database creation but seeds nothing.
 
 ## System Issues
 
-### A world left running with `paused: false` for a long real-world gap can wedge the whole app on the next server start
+### `/dev/qa/worlds/:id/reload` (or any restart) on a `paused: false` world can trigger a runaway catch-up replay — pause FIRST
 
-`WorldServer.init/1` calls `catch_up/1` SYNCHRONOUSLY before `init/1`
-returns — for a world with `paused: false`, this recomputes
-`elapsed = now - turn_started_at` and replays that many missed turns
-in a tight recursive loop (`run_missed/2`) before the process is
-usable at all. If the dev machine (or a deployed box) sits idle for
-days/weeks with a world still marked unpaused, the very first request
-that touches that world after a restart (a page mount, a
-`/dev/qa/worlds/:id/pause` call, anything routing through
-`WorldServer.call/2` → `ensure_started/1`) blocks for as long as the
-catch-up takes — observed 2026-08-21: turn count climbed from ~66k to
-~90k over roughly 15 minutes and was still going. Confirmed impact
-beyond that one world: while it was catching up, mounting
-`BrokenOathsWeb.GameLive.Play` for a COMPLETELY DIFFERENT, already-paused
-world produced an unhandled `** (EXIT) time out` crash page (5000ms
-`GenServer.call` timeout inside `mount/3`), and a `join` click on that
-other world hung silently for minutes with no crash and no error —
-exact mechanism not fully isolated, but a full `kill $(lsof -ti :4050)`
-+ restart, AFTER first setting `UPDATE worlds SET paused = true,
-turn_started_at = now() WHERE id = <stuck world>` via `psql` (so the
-new process's `catch_up/1` short-circuits instead of replaying), is
-what unblocked everything. Filed as issue (see `create_issue` this
-session) — before starting a QA session, it's worth a quick
-`select id, turn, paused, turn_started_at from worlds;` to check
+Originally (through 2026-08-21) `WorldServer.init/1` called `catch_up/1`
+SYNCHRONOUSLY before `init/1` returned, so a stale `paused: false` world
+blocked the ENTIRE app (every other world too, via the shared
+supervisor) for as long as the replay took — observed turn count
+climbing from ~66k to ~90k over ~15 minutes, other worlds' mounts
+timing out with a raw `** (EXIT) time out` crash. That specific
+whole-app blocking is fixed (issue 4f25b084): `init/1` now returns
+immediately and replays missed turns in bounded chunks
+(`catch_up_step/1`, `@catch_up_chunk_size` turns at a time via a real
+mailbox message between chunks), so other worlds are no longer held
+hostage.
+
+That world itself, however, can still get stuck in a long runaway
+replay: reloading (`POST .../reload`, which restarts the WorldServer)
+a world that's `paused: false` with a stale `turn_started_at`
+recomputes the same large `elapsed`/`catch_up_remaining` figure and
+replays it the same way — turn count climbing at tens of turns/sec,
+`/play/:id` mount timing out for THAT world specifically, for however
+many minutes the replay takes (issue 78578bd1, 2026-08-26). Calling
+`/pause` mid-replay is accepted (`{"ok":true,"paused":true}`) and now
+DOES halt the in-flight replay on its very next chunk (fixed
+alongside 78578bd1 — earlier the pause was silently ignored until
+`catch_up_remaining` exhausted on its own, since only the very first
+chunk ever checked `state.world.paused`).
+
+**Rule of thumb: always pause a world BEFORE reloading it, never
+after.** `POST .../pause` → `POST .../reload` → do whatever DB-level
+change needed the reload → `POST .../resume` if you want it live
+again. Before starting a QA session generally, it's also worth a
+quick `select id, turn, paused, turn_started_at from worlds;` to check
 whether any `paused: false` world has a very stale `turn_started_at`,
-and pausing it at the DB level BEFORE the first request touches it if so.
+and pausing it at the DB level first if so — a world that's already
+paused when its process (re)starts skips the replay entirely,
+regardless of how stale `turn_started_at` is.
 
 ### Dev server needs a restart after out-of-band compiles
 

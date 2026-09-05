@@ -11,11 +11,25 @@ As a player, once I've researched Writing, I want to build a Library in my citie
 
 ## Acceptance criteria
 
-_None defined._
+- A city can queue a Library once Writing is researched
+- A city cannot queue a Library before Writing is researched
+- A completed Library raises the city's science income by 2
+- The Library catalog entry states its own maintenance cost
+- Queuing a Library costs 90 production
+- A Library builds directly in the city with no district required
+- A Library's upkeep is deducted from its owner's gold at the turn boundary
+- A Library survives an upkeep shortfall — a unit disbands instead
 
 ## BDD spec files
 
-_No BDD specs found. Read the router and app code to understand this story's scope._
+- `test/spex/53_library/criterion_2850_a_city_can_queue_a_library_once_writing_is_researched_spex.exs`
+- `test/spex/53_library/criterion_2851_a_city_cannot_queue_a_library_before_writing_is_researched_spex.exs`
+- `test/spex/53_library/criterion_2852_a_completed_library_raises_the_citys_science_income_by_2_spex.exs`
+- `test/spex/53_library/criterion_2853_the_library_catalog_entry_states_its_own_maintenance_cost_spex.exs`
+- `test/spex/53_library/criterion_2854_queuing_a_library_costs_90_production_spex.exs`
+- `test/spex/53_library/criterion_2855_a_library_builds_directly_in_the_city_with_no_district_required_spex.exs`
+- `test/spex/53_library/criterion_2856_a_librarys_upkeep_is_deducted_from_its_owners_gold_at_the_turn_boundary_spex.exs`
+- `test/spex/53_library/criterion_2857_an_owner_who_cant_afford_their_librarys_upkeep_loses_it_same_as_an_unaffordable_unit_spex.exs`
 
 ## Linked component: Buildings
 

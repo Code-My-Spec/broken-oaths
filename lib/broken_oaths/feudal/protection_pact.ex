@@ -135,9 +135,9 @@ defmodule BrokenOaths.Feudal.ProtectionPact do
 
   import Ecto.Query
 
-  alias BrokenOaths.Game
   alias BrokenOaths.Feudal.OathStrain
   alias BrokenOaths.Feudal.Vassalage
+  alias BrokenOaths.Game
   alias BrokenOaths.Repo
 
   @type player_id :: term()
@@ -386,25 +386,47 @@ defmodule BrokenOaths.Feudal.ProtectionPact do
   down by exactly one (`tick/1`, criterion 7727); an expired, still-
   unanswered one resolves BROKEN right here (criterion 7729). A no-op
   while `Game.feudal_enabled?/0` reads `false`.
+
+  A call raised THIS SAME turn boundary (`call.raised_turn ==
+  state.turn` — e.g. one `BarbarianPhase.resolve_barbarian_attack/4`
+  just raised earlier in this same `Turn.tick/1`) is skipped: it
+  already carries the full `response_window/0` turns via `raise_call/3`'s
+  own `deadline_turn`, and ticking it here too would shave one turn off
+  before the lord ever sees it, inconsistent with a player/siege-raised
+  call (raised from `WorldServer.handle_call({:attack, ...})`, outside
+  `run_tick/1` entirely) which only starts ticking at the NEXT boundary
+  (issue a9b9d968).
   """
   @spec apply_protection_pact_ticks(map()) :: map()
   def apply_protection_pact_ticks(state) do
     if Game.feudal_enabled?() do
       Enum.reduce(protection_calls(state), state, fn {vassal_player_id, call}, acc ->
-        ticked_call = tick(call)
-
-        if expired?(ticked_call) do
-          resolve_broken(acc, vassal_player_id, ticked_call)
-        else
-          Map.put(
-            acc,
-            :protection_calls,
-            Map.put(protection_calls(acc), vassal_player_id, ticked_call)
-          )
-        end
+        tick_or_skip(acc, vassal_player_id, call, state.turn)
       end)
     else
       state
+    end
+  end
+
+  # A call raised THIS SAME turn boundary already carries its full
+  # response_window/0 via deadline_turn — see apply_protection_pact_ticks/1's
+  # own doc for why it must not also be ticked here.
+  defp tick_or_skip(acc, _vassal_player_id, %{raised_turn: raised_turn}, current_turn)
+       when raised_turn == current_turn do
+    acc
+  end
+
+  defp tick_or_skip(acc, vassal_player_id, call, _current_turn) do
+    ticked_call = tick(call)
+
+    if expired?(ticked_call) do
+      resolve_broken(acc, vassal_player_id, ticked_call)
+    else
+      Map.put(
+        acc,
+        :protection_calls,
+        Map.put(protection_calls(acc), vassal_player_id, ticked_call)
+      )
     end
   end
 

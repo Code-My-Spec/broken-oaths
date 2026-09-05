@@ -1889,17 +1889,22 @@ defmodule BrokenOaths.Simulation.WorldServer do
   # untouched.
   @catch_up_chunk_size 50
 
+  # Issue 78578bd1: a `:pause_ticks` call landing BETWEEN two chunks
+  # (real mailbox messages, so it genuinely can) used to be silently
+  # ignored — every other `catch_up_step/1` clause below only checked
+  # `state.world.paused` once, at the very start of a fresh replay,
+  # never again once chunking was under way. This clause is checked
+  # first on every single chunk (including the very first), so a pause
+  # that arrives mid-replay now takes effect on the very next chunk
+  # instead of only once `catch_up_remaining` finally exhausts itself.
+  defp catch_up_step(%{world: %{paused: true}} = state), do: finish_catch_up(state)
+
   defp catch_up_step(%{catch_up_remaining: nil} = state) do
-    cond do
-      state.world.paused ->
-        finish_catch_up(state)
-
-      auto_tick?() ->
-        elapsed = DateTime.diff(DateTime.utc_now(), state.turn_started_at, :second)
-        catch_up_step(%{state | catch_up_remaining: div(elapsed, state.world.turn_seconds)})
-
-      true ->
-        finish_catch_up(state)
+    if auto_tick?() do
+      elapsed = DateTime.diff(DateTime.utc_now(), state.turn_started_at, :second)
+      catch_up_step(%{state | catch_up_remaining: div(elapsed, state.world.turn_seconds)})
+    else
+      finish_catch_up(state)
     end
   end
 

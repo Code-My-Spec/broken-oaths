@@ -87,6 +87,50 @@ defmodule BrokenOathsSpex.SharedGivens do
     {:ok, context |> Map.put(:play_live, play_live) |> Map.put(:city, city)}
   end
 
+  # `:a_founded_city`, then researches Pottery (50 science, a
+  # prerequisite) and Writing (150 science) to completion — the Library
+  # gate (story 955). Science accrues at `@science_per_pop` (2) per
+  # point of city size; a freshly founded size-1 city earns 2/turn, so
+  # this is 25 turns for Pottery then 75 more for Writing (mirrors the
+  # exact math `criterion_7629_pottery_unlocks_the_granary_spex.exs`
+  # already uses for Pottery alone). Requires `context.world` and
+  # `context.user`/`context.conn` — run `:a_world` and
+  # `:registered_player` first (same as `:a_founded_city`, which this
+  # calls internally).
+  register_given :a_founded_city_with_writing, context do
+    {:ok, context} = a_founded_city(context)
+
+    render_hook(context.play_live, "select_city", %{"city_id" => to_string(context.city.id)})
+    render_hook(context.play_live, "toggle_tech_panel", %{})
+    render_hook(context.play_live, "select_research", %{"tech" => "pottery"})
+    for _ <- 1..25, do: Fixtures.advance_turn(context.world)
+    render_hook(context.play_live, "select_research", %{"tech" => "writing"})
+    for _ <- 1..75, do: Fixtures.advance_turn(context.world)
+
+    {:ok, context}
+  end
+
+  @doc """
+  Steps `world` forward, up to `max_turns`, until `context.user`'s
+  `city_id` city has completed `building` (story 955's Library and
+  siblings) — the same loop-until-condition idiom `grow_city_to/4`
+  uses for city size, generalized to any entry in `City`'s own
+  `buildings` list. Reads via `Fixtures.player_cities/2` (given-side
+  only, per the spec boundary — never called from a `then_`).
+  """
+  def advance_until_building_complete(world, user, city_id, building, max_turns \\ 400) do
+    Enum.reduce_while(1..max_turns, :ok, fn _, :ok ->
+      [city] = for c <- Fixtures.player_cities(world, user), c.id == city_id, do: c
+
+      if building in city.buildings do
+        {:halt, :ok}
+      else
+        Fixtures.advance_turn(world)
+        {:cont, :ok}
+      end
+    end)
+  end
+
   # Two players who have discovered each other in `context.world`:
   # `context.user`'s civilization has seen `context.other_user`'s (and
   # vice versa — discovery is mutual, story 899). Both join the world,
