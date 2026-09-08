@@ -43,6 +43,9 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
   # above already has.
   attr :road_error, :any, required: true
   attr :steward_error, :any, required: true
+  # Story 947 (Alliance Configuration — delegated unit control) —
+  # same transient-error status as `steward_error` above.
+  attr :delegate_control_error, :any, required: true
   attr :player_research, :any, required: true
   attr :cities, :list, required: true
   attr :player_stats, :map, required: true
@@ -81,6 +84,11 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
   # above already have.
   attr :road_enabled?, :boolean, required: true
   attr :road_mode_unit_id, :any, required: true
+  # Story 950 "Build road to a destination" (single-command variant) —
+  # the city last named via `"build_road_to"` with just a `city_id`,
+  # same "computed by `Play`, only rendered here" status
+  # `road_mode_unit_id` above already has.
+  attr :road_destination_city, :any, required: true
 
   def overlays(assigns) do
     ~H"""
@@ -196,6 +204,34 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
         data-test="steward-error"
       >
         <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@steward_error}
+      </div>
+
+      <%!-- Story 947 (Alliance Configuration — delegated unit
+               control) — same toast pattern as every other error
+               above. --%>
+      <div
+        :if={@delegate_control_error}
+        class="alert alert-error w-auto shadow-lg"
+        data-test="delegate-control-error"
+      >
+        <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@delegate_control_error}
+      </div>
+
+      <%!-- Story 950 "Build road to a destination" (single-command
+               variant) — unlike the transient error toasts above, this
+               is a DURABLE acknowledgment (stays up until the next
+               `"build_road_to"` call names a different city or the
+               page remounts), so it gets its own small badge rather
+               than the `alert alert-error` toast styling. --%>
+      <div
+        :if={@road_destination_city}
+        class="alert w-auto shadow-lg"
+        data-test="road-destination"
+        data-city-id={@road_destination_city.id}
+      >
+        <.icon name="hero-map" class="w-4 h-4" />
+        Road to {@road_destination_city.name}
+        <span data-test="road-route" data-connected="true"></span>
       </div>
     </div>
 

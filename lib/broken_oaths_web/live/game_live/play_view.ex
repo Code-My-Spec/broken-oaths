@@ -666,4 +666,16 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
   def steward_error_message(:unreachable), do: "That tile isn't reachable."
   def steward_error_message(:feudal_disabled), do: "Stewardship isn't available right now."
   def steward_error_message(_other), do: "That steward action was refused."
+
+  # Story 947 (Alliance Configuration — delegated unit control),
+  # criterion 2696 — same "transient, connection-only" status the
+  # steward error messages above already have.
+  def delegate_control_error_message(:not_authorized),
+    do: "You are not authorized to control this player's units."
+
+  @doc "True if any of `cities` currently has Produce Wealth (story 949) as its active queue item."
+  @spec producing_wealth?([map()]) :: boolean()
+  def producing_wealth?(cities) do
+    Enum.any?(cities, &match?(%{queue: [%{type: :produce_wealth} | _]}, &1))
+  end
 end

@@ -38,7 +38,12 @@ defmodule BrokenOaths.Cities.ProductionTest do
                barracks: 90,
                water_mill: 90,
                pyramids: 220,
-               hanging_gardens: 220
+               hanging_gardens: 220,
+               # Story 949 — Produce Wealth: an ongoing mode, never
+               # completes (see `Production.accrue/4`'s own doc), so
+               # `1` here is just the minimum `pos_integer()` `@catalog`
+               # itself requires, not a real cost.
+               produce_wealth: 1
              }
 
       assert Production.cost(:settler) == 100

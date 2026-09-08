@@ -240,6 +240,10 @@ defmodule BrokenOaths.Game do
           {:ok, %{route: [term()]}} | {:error, atom()}
   defdelegate build_road_to(world, user, unit_id, destination), to: Units
 
+  @doc "An ally attempts a delegated unit move (story 947). See `Units.delegate_move_unit/3`."
+  @spec delegate_move_unit(map(), map(), term()) :: {:error, :not_authorized}
+  defdelegate delegate_move_unit(world, delegate_user, owner_user_id), to: Units
+
   @doc "Cancel `unit_id`'s own currently queued order (move or road-to). See `Units.cancel_move/3`."
   @spec cancel_move(map(), map(), term()) :: :ok | {:error, :not_owner | :no_order}
   defdelegate cancel_move(world, user, unit_id), to: Units

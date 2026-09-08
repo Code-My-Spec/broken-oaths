@@ -109,7 +109,19 @@ defmodule BrokenOaths.Simulation.WorldServer do
         {:ok, pid}
 
       [] ->
-        case DynamicSupervisor.start_child(BrokenOaths.GameSupervisor, {__MODULE__, world}) do
+        # Propagate `$callers` (the same convention `Task`/`Phoenix.
+        # LiveView.Channel` already use) to whoever starts this world's
+        # process. `ensure_started/1` always runs in the process that
+        # asked for the world (a test process, or a mounted LiveView
+        # already carrying its own `$callers`) — never in the
+        # DynamicSupervisor's own process, since `start_child/2` is
+        # synchronous from the CALLER's perspective. Under the Ecto SQL
+        # Sandbox's private mode (`async: true` specs), `init/1` below
+        # needs this to reach the test's own checked-out DB connection;
+        # in every other env it's an inert process-dictionary entry.
+        callers = [self() | Process.get(:"$callers", [])]
+
+        case DynamicSupervisor.start_child(BrokenOaths.GameSupervisor, {__MODULE__, {world, callers}}) do
           {:ok, pid} -> {:ok, pid}
           {:error, {:already_started, pid}} -> {:ok, pid}
           other -> other
@@ -117,12 +129,16 @@ defmodule BrokenOaths.Simulation.WorldServer do
     end
   end
 
-  def start_link(world) do
-    GenServer.start_link(__MODULE__, world, name: via_tuple(world.id))
+  def start_link({world, callers}) do
+    GenServer.start_link(__MODULE__, {world, callers}, name: via_tuple(world.id))
   end
 
-  def child_spec(world) do
-    %{id: {__MODULE__, world.id}, start: {__MODULE__, :start_link, [world]}, restart: :transient}
+  def child_spec({world, callers}) do
+    %{
+      id: {__MODULE__, world.id},
+      start: {__MODULE__, :start_link, [{world, callers}]},
+      restart: :transient
+    }
   end
 
   @doc "Ensure the server is running, then make a synchronous request against it."
@@ -158,7 +174,12 @@ defmodule BrokenOaths.Simulation.WorldServer do
   # -------------------------------------------------------------------
 
   @impl true
-  def init(world) do
+  def init({world, callers}) do
+    # Must happen before the very first `Repo` call below — see
+    # `ensure_started/1`'s own comment on why `callers` is threaded
+    # through at all.
+    Process.put(:"$callers", callers)
+
     world = Worlds.get_world!(world.id)
 
     # Issue 4f25b084: `init/1` used to run the ENTIRE boot-time dormancy
@@ -277,6 +298,15 @@ defmodule BrokenOaths.Simulation.WorldServer do
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
+  end
+
+  # Story 947 (Alliance Configuration — delegated unit control),
+  # criterion 2696: no grant mechanism exists yet for `delegate_user`
+  # to gain unit-control over `owner_user_id`'s units, so this always
+  # refuses — a future criterion adds the real grant/revoke check
+  # (presumably against an alliance-scoped setting) once one exists.
+  def handle_call({:delegate_move_unit, _delegate_user, _owner_user_id}, _from, state) do
+    {:reply, {:error, :not_authorized}, state}
   end
 
   # Playtest issue 50a0c866 "all unit actions cancellable from the units
@@ -2505,11 +2535,25 @@ defmodule BrokenOaths.Simulation.WorldServer do
   # `apply_bank/1` (which only ever iterates entries actually present)
   # already treat a missing player the same as an explicit `0`.
   defp gold_income_by_player(state) do
+    cleared_features = Map.get(state, :cleared_features, MapSet.new())
+
     state.cities
     |> Map.values()
     |> Enum.group_by(& &1.player_id)
     |> Map.new(fn {player_id, cities} ->
-      income = cities |> Enum.map(&Yields.city_gold_income(&1, state.world)) |> Enum.sum()
+      income =
+        cities
+        |> Enum.map(fn city ->
+          Yields.city_gold_income(city, state.world) +
+            # Story 949 — Produce Wealth: a city with that item active
+            # converts its own production income to gold on TOP of its
+            # normal terrain-derived gold income above, same real
+            # tribute/bank pipeline either way (see `Production.
+            # wealth_gold/4`'s own doc).
+            Production.wealth_gold(city, state.world, state.improvements, cleared_features)
+        end)
+        |> Enum.sum()
+
       {player_id, income}
     end)
   end
