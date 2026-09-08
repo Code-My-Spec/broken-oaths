@@ -48,7 +48,7 @@ defmodule BrokenOathsSpex.Story906.Criterion7663Spex do
         my_lord = march_to(context.play_live, context.world, context.user, my_lord, target)
 
         grind_city(
-          context.play_live,
+          context.user,
           context.world,
           my_lord,
           context.other_user,

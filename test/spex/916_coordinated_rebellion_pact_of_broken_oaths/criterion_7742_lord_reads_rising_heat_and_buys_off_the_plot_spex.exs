@@ -126,19 +126,9 @@ defmodule BrokenOathsSpex.Story916.Criterion7742Spex do
 
       given_ "whisper volume among Mira's vassals rises — Wes and Ada each refuse several calls to arms, spiking their real Oath Strain — showing Mira a hot unrest needle but not the messages themselves",
              context do
-        {:ok, lord_live, _html} = live(context.conn, "/play/#{context.world.id}")
-
         for vassal <- [context.wes, context.ada] do
-          {:ok, vassal_live, _html} = live(vassal.conn, "/play/#{context.world.id}")
-
           for _ <- 1..7 do
-            attempt_event(lord_live, "issue_levy", %{
-              "vassal_user_id" => to_string(vassal.user.id),
-              "target_user_id" => to_string(context.levy_target.user.id),
-              "share" => "0.5"
-            })
-
-            attempt_event(vassal_live, "refuse_levy", %{"lord_user_id" => to_string(context.user.id)})
+            refuse_a_call_to_arms(context.world, context.user, vassal.user, context.levy_target.user)
           end
         end
 

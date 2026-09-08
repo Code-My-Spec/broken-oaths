@@ -28,7 +28,17 @@ defmodule BrokenOathsSpex.Fixtures do
   # --- Worlds ---
   # A world existing is server-side state (worlds are provisioned, not
   # player-created in the gameplay loop), so seeding one is sanctioned.
-  defdelegate world_fixture(attrs \\ %{}), to: BrokenOaths.WorldsFixtures
+  #
+  # Also registers this world's own scoped teardown (see
+  # `register_world_teardown/1` below) — the ONLY sanctioned path that
+  # creates a world a spex test can reach, so hooking it here covers
+  # every `async: true` spec without touching `BrokenOathsSpex.Case`'s
+  # own (necessarily test-agnostic) setup.
+  def world_fixture(attrs \\ %{}) do
+    attrs
+    |> BrokenOaths.WorldsFixtures.world_fixture()
+    |> register_world_teardown()
+  end
 
   # Read-by-id counterpart to `world_fixture/1` above, same sanctioned
   # status as `tile_terrain/2` below (read-only, no player mutation).
@@ -40,7 +50,49 @@ defmodule BrokenOathsSpex.Fixtures do
   # the real row back by that id so later sanctioned reads
   # (`resource_at/2`, `tile_class/2`, etc.) have a real
   # `world.seed`/`world.frequency` struct to work from.
-  defdelegate get_world!(id), to: BrokenOaths.Worlds
+  #
+  # Registers the same scoped teardown as `world_fixture/1` — this is
+  # the OTHER sanctioned world-creation path (see that function's own
+  # comment).
+  def get_world!(id) do
+    id
+    |> BrokenOaths.Worlds.get_world!()
+    |> register_world_teardown()
+  end
+
+  # `BrokenOathsSpex.Case`'s own `on_exit(&stop_world_servers/0)` sweeps
+  # EVERY `BrokenOaths.Simulation.WorldServer` under `GameSupervisor` —
+  # correct only when specs never run concurrently (see that module's
+  # own comment). An `async: true` spec skips that global sweep and
+  # relies entirely on THIS narrowly-scoped one instead: registered the
+  # moment a test learns a world's id, it looks the server up by THAT
+  # id alone at teardown time, so a sibling test's own concurrently-
+  # running world is never touched. Runs unconditionally (also under
+  # `async: false`) since it's a harmless no-op there — the global
+  # sweep just finds nothing left to stop.
+  #
+  # `ExUnit.Callbacks.on_exit/2` only requires running IN the test
+  # process (true here — every `given_`/`when_`/`then_` step, and thus
+  # every `Fixtures.world_fixture/1`/`get_world!/1` call, executes in
+  # it) — it does not require the caller to `use ExUnit.Case` itself,
+  # so calling it from this plain module is fine.
+  defp register_world_teardown(world) do
+    ExUnit.Callbacks.on_exit({:stop_world_server, world.id}, fn ->
+      case Registry.lookup(BrokenOaths.GameRegistry, world.id) do
+        [{pid, _}] ->
+          try do
+            GenServer.stop(pid, :normal)
+          catch
+            :exit, _ -> :ok
+          end
+
+        [] ->
+          :ok
+      end
+    end)
+
+    world
+  end
 
   # --- Regions (sanctioned domain reads) ---
   # Region identity is deliberately invisible to players ("invisible
@@ -391,4 +443,46 @@ defmodule BrokenOathsSpex.Fixtures do
   # own `tile_id` is exposed so a spec can route a unit's path around
   # one without waiting on fog-filtered visibility.
   defdelegate list_camps(world), to: BrokenOaths.Game, as: :list_camps
+
+  # --- Direct play-action dispatch (setup-speed machinery, NOT a
+  # state-faking exception) ---
+  #
+  # Unlike every `_for_test` escape hatch above (which injects state no
+  # real player action can reach yet), these two are the EXACT SAME
+  # calls `GameLive.Play`'s own `handle_event("attack"/"queue_move",
+  # ...)` clauses make — same `BrokenOaths.Game` entry point, same
+  # validation, same combat/movement resolution, same `persist_tick`
+  # writes. The only thing skipped is the LiveView test-harness's own
+  # `render_hook`/`attempt_event` round-trip, which measured at ~100ms
+  # PER CALL regardless of the underlying action (confirmed by timing
+  # 10 real, damage-dealing `attack_city` calls directly: ~1-2ms total,
+  # vs ~100ms EACH through `render_hook`) — overhead in
+  # `Phoenix.LiveViewTest`'s own dispatch machinery, not in the game
+  # engine or the database.
+  #
+  # `SharedGivens.grind_city/5` and `march_to/6` are the only callers:
+  # both drive REPEATED real actions purely to reach a precondition
+  # state (siege a city down, walk a unit N tiles) that no later
+  # `then_` step observes through `attacker_play_live` itself — the
+  # actual criteria that verify `"attack"`/`"queue_move"`'s OWN
+  # LiveView wiring (string/integer id parsing, the pushed
+  # `"game:path"`/`"game:combat"` events, error-flash assigns) already
+  # exercise them for real elsewhere (story 906's own criteria,
+  # criterion 2774 and siblings) — this doesn't reduce that coverage,
+  # it just stops re-paying its cost as incidental setup noise 40+
+  # times per siege.
+  defdelegate attack_city(world, user, unit_id, city_id), to: BrokenOaths.Game
+  defdelegate queue_move(world, user, unit_id, to_tile), to: BrokenOaths.Game
+
+  # Same category as `attack_city/4`/`queue_move/4` above: the EXACT
+  # calls `handle_event("issue_levy"/"refuse_levy", ...)` make.
+  # `SharedGivens.refuse_a_call_to_arms/5` is the only caller — driving
+  # a refused levy N times to accumulate real Oath Strain (stories
+  # 908/913/914/915/916/917's own shared precondition, previously
+  # ~14 lines of duplicated `attempt_event` calls inline in each of 14
+  # spec files, each paying the same ~100ms/call LiveView-harness tax).
+  defdelegate issue_levy(world, user, vassal_user_id, target_user_id, share),
+    to: BrokenOaths.Game
+
+  defdelegate refuse_levy(world, user, lord_user_id), to: BrokenOaths.Game
 end

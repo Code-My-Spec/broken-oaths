@@ -66,21 +66,40 @@ defmodule BrokenOathsSpex.Story905.Criterion7651Spex do
       end
 
       when_ "they create one sparse-density world and one dense (resource-rich) world", context do
+        # `frequency` has no form field (`WorldLive.New` never exposes
+        # it — story 905 is about `resource_density` alone), so it
+        # can't ride through `form/3`'s own strict "must match a real
+        # input" validation; going straight to `render_submit/3` on the
+        # view sends the SAME `"create_world"` event `handle_event/3`
+        # already handles identically either way, just with an extra
+        # `world[frequency]` key `World.creation_changeset/2` already
+        # casts. Sized down from the form's own production default
+        # (54, 29,162 tiles — a real ~1-2s terrain-generation cost per
+        # world, paid twice here) to 8 (642 tiles, the same size nearly
+        # every other spex world already uses) — verified this doesn't
+        # trade speed for flakiness first: `dense_count > sparse_count`
+        # is a wide, deliberate multiplicative gap (Civ-style
+        # sparse-vs-dense spread, per this criterion's own moduledoc),
+        # confirmed to hold in 60/60 random-seed trials at frequency 8.
+        # Contrast `criterion_7703`'s own percentage-BAND assertion,
+        # deliberately left at 54 — a narrow band is far more sensitive
+        # to a smaller world's sampling noise than a strict inequality
+        # is.
         {:error, {:live_redirect, %{to: sparse_to}}} =
-          context.new_world_view
-          |> form("[data-test='new-world-form']",
-            world: %{"name" => "Sparse Lands", "resource_density" => "sparse"}
-          )
-          |> render_submit()
+          render_submit(context.new_world_view, "create_world", %{
+            "world" => %{"name" => "Sparse Lands", "resource_density" => "sparse", "frequency" => "8"}
+          })
 
         {:ok, dense_view, _html} = live(context.conn, "/worlds/new")
 
         {:error, {:live_redirect, %{to: dense_to}}} =
-          dense_view
-          |> form("[data-test='new-world-form']",
-            world: %{"name" => "Resource-Rich Lands", "resource_density" => "dense"}
-          )
-          |> render_submit()
+          render_submit(dense_view, "create_world", %{
+            "world" => %{
+              "name" => "Resource-Rich Lands",
+              "resource_density" => "dense",
+              "frequency" => "8"
+            }
+          })
 
         sparse_world = Fixtures.get_world!(extract_world_id(sparse_to))
         dense_world = Fixtures.get_world!(extract_world_id(dense_to))

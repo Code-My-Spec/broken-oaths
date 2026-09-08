@@ -107,7 +107,7 @@ defmodule BrokenOathsSpex.Story906.Criterion7664Spex do
         target = adjacent_land_tile(context.world, first_city.tile_id, [my_lord.tile_id])
         my_lord = march_to(context.play_live, context.world, context.user, my_lord, target)
 
-        grind_city(context.play_live, context.world, my_lord, context.other_user, first_city)
+        grind_city(context.user, context.world, my_lord, context.other_user, first_city)
 
         my_lord =
           march_to(context.play_live, context.world, context.user, my_lord, first_city.tile_id)

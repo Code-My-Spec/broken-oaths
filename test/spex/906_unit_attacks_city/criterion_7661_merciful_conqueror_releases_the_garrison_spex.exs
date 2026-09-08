@@ -82,7 +82,7 @@ defmodule BrokenOathsSpex.Story906.Criterion7661Spex do
 
         broken_city =
           grind_city(
-            context.play_live,
+            context.user,
             context.world,
             my_lord,
             context.other_user,

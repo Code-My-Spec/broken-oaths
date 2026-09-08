@@ -100,7 +100,7 @@ defmodule BrokenOathsSpex.Story917.Criterion7745Spex do
         my_lord = march_to(context.play_live, context.world, context.user, my_lord, target)
 
         broken_city =
-          grind_city(context.play_live, context.world, my_lord, context.other_user, context.other_city)
+          grind_city(context.user, context.world, my_lord, context.other_user, context.other_city)
 
         render_hook(context.other_play_live, "queue_production", %{
           "city_id" => to_string(context.other_city.id),
@@ -151,15 +151,7 @@ defmodule BrokenOathsSpex.Story917.Criterion7745Spex do
         |> render_click()
 
         for _ <- 1..7 do
-          attempt_event(context.play_live, "issue_levy", %{
-            "vassal_user_id" => to_string(context.other_user.id),
-            "target_user_id" => to_string(context.third_user.id),
-            "share" => "0.5"
-          })
-
-          attempt_event(context.other_play_live, "refuse_levy", %{
-            "lord_user_id" => to_string(context.user.id)
-          })
+          refuse_a_call_to_arms(context.world, context.user, context.other_user, context.third_user)
         end
 
         units_before = Fixtures.player_units(context.world, context.other_user)
