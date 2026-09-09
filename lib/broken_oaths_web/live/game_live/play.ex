@@ -2154,9 +2154,16 @@ defmodule BrokenOathsWeb.GameLive.Play do
             {:allowed, nil}
 
           owner_user_id ->
-            if Game.at_war?(world, user, %{id: owner_user_id}),
-              do: {:allowed, owner_user_id},
-              else: {:declare_war_required, owner_user_id}
+            cond do
+              Game.at_war?(world, user, %{id: owner_user_id}) ->
+                {:allowed, owner_user_id}
+
+              Game.open_borders_active?(world, user, %{id: owner_user_id}) ->
+                {:allowed, nil}
+
+              true ->
+                {:declare_war_required, owner_user_id}
+            end
         end
     end
   end

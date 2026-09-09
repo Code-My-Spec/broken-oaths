@@ -93,6 +93,21 @@ defmodule BrokenOathsSpex.Story882.Criterion7483Spex do
         # dozens of turns anywhere near either territory.
         :ok = Fixtures.isolate_camp(context.world, :none)
 
+        # Story 994's border gate (queue_move's own border_entry_status/3)
+        # now blocks ANY unit -- workers included -- from entering a
+        # non-allied player's territory without a war declaration. This
+        # criterion predates that system and is about worker/improvement
+        # mechanics across two FRIENDLY players, so establish Open
+        # Borders between them first (same propose/accept idiom
+        # criterion 3110 uses) rather than declaring war.
+        render_hook(play_live, "propose_open_borders", %{
+          "neighbor_user_id" => to_string(context.other_user.id)
+        })
+
+        render_hook(other_play_live, "accept_open_borders", %{
+          "neighbor_user_id" => to_string(context.user.id)
+        })
+
         render_hook(other_play_live, "queue_production", %{
           "city_id" => other_city.id,
           "item" => "worker"
