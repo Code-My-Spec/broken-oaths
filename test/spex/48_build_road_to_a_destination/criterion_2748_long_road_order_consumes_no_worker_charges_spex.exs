@@ -56,18 +56,28 @@ defmodule BrokenOathsSpex.Story950.Criterion2748Spex do
           "to_tile" => to_string(target)
         })
 
-        # Economy ticks (road-build progress) land every 10 turns
-        # (`WorldServer`'s own `economy_tick?/1`, `rem(turn, 10) == 0`),
-        # and a road needs 2 of them to complete (`Improvement.duration(:road)`).
-        # A full 10-turn window can span two such boundaries depending on
-        # the turn's own starting phase, letting a single-tile road (the
-        # only kind reachable within a freshly founded city's own
-        # ring-1 territory, `Production.founding_territory/2`) finish and
-        # its order vanish before this scenario gets to observe it
-        # mid-build. 5 turns is comfortably under that 10-turn spacing, so
-        # at most one boundary can ever land inside it — the order is
-        # guaranteed to still be active regardless of turn phase.
-        for _ <- 1..5, do: Fixtures.advance_turn(context.world)
+        # Advance turns one at a time and stop the moment the order is
+        # actually mid-build (`cancel-road-build` only renders while
+        # `order.kind == :road_to`) rather than guessing a fixed turn
+        # count: a single-tile road (the only kind reachable within a
+        # freshly founded city's own ring-1 territory,
+        # `Production.founding_territory/2`) needs only
+        # `Improvement.duration(:road)` economy ticks to finish, and a
+        # hardcoded turn count that happens to land on or past that
+        # boundary lets the order complete and vanish before this
+        # scenario ever observes it mid-build. Bounded at 10 so a
+        # genuine regression (the order never starting) still fails
+        # loudly instead of hanging.
+        Enum.reduce_while(1..10, :ok, fn _, :ok ->
+          Fixtures.advance_turn(context.world)
+
+          if has_element?(context.play_live, "[data-test='cancel-road-build']") do
+            {:halt, :ok}
+          else
+            {:cont, :ok}
+          end
+        end)
+
         {:ok, context}
       end
 
