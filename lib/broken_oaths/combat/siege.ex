@@ -208,19 +208,25 @@ defmodule BrokenOaths.Combat.Siege do
 
     {new_cities, events} =
       Enum.reduce(cities, {cities, []}, fn {id, city}, {acc_cities, acc_events} ->
-        case captor(city, unit_list) do
-          nil ->
-            {acc_cities, acc_events}
+        case reclaimer(city, unit_list) do
+          true ->
+            {Map.put(acc_cities, id, %{city | occupied_by_player_id: nil}), acc_events}
 
-          captor_player_id ->
-            event = %{
-              city_id: id,
-              captor_player_id: captor_player_id,
-              defeated_player_id: city.player_id
-            }
+          false ->
+            case captor(city, unit_list) do
+              nil ->
+                {acc_cities, acc_events}
 
-            {Map.put(acc_cities, id, %{city | occupied_by_player_id: captor_player_id}),
-             [event | acc_events]}
+              captor_player_id ->
+                event = %{
+                  city_id: id,
+                  captor_player_id: captor_player_id,
+                  defeated_player_id: city.player_id
+                }
+
+                {Map.put(acc_cities, id, %{city | occupied_by_player_id: captor_player_id}),
+                 [event | acc_events]}
+            end
         end
       end)
 
@@ -237,6 +243,11 @@ defmodule BrokenOaths.Combat.Siege do
         [] -> nil
       end
     end
+  end
+
+  defp reclaimer(city, units) do
+    occupied?(city) and
+      Enum.any?(units, &(&1.tile_id == city.tile_id and &1.player_id == city.player_id))
   end
 
   # -------------------------------------------------------------------

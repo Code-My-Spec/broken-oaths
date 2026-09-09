@@ -529,6 +529,12 @@ ensure_known.(rival_player, demo_player)
 ensure_known.(demo_player, npc_player)
 ensure_known.(npc_player, demo_player)
 
+# The repair pass above deliberately uses raw Repo writes after the world
+# server may have been started by join/found calls. Reload it before exposing
+# the demo so combat uses the repaired city and warrior state rather than a
+# stale in-memory snapshot.
+:ok = Game.restart_world_server(world)
+
 # -------------------------------------------------------------------
 # Last write, always: refresh the wall-clock anchor — belt-and-
 # suspenders even though a paused world never reads it for catch-up

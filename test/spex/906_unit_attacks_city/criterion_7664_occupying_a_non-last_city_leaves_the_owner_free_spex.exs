@@ -105,6 +105,11 @@ defmodule BrokenOathsSpex.Story906.Criterion7664Spex do
           for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
 
         target = adjacent_land_tile(context.world, first_city.tile_id, [my_lord.tile_id])
+
+        render_hook(context.play_live, "declare_war", %{
+          "neighbor_user_id" => to_string(context.other_user.id)
+        })
+
         my_lord = march_to(context.play_live, context.world, context.user, my_lord, target)
 
         grind_city(context.play_live, context.world, my_lord, context.other_user, first_city)
@@ -137,7 +142,7 @@ defmodule BrokenOathsSpex.Story906.Criterion7664Spex do
           "city_id" => to_string(context.second_city.id)
         })
 
-        refute has_element?(context.other_play_live, "[data-test='city-status']")
+        assert has_element?(context.other_play_live, "[data-test='city-status']", "free")
         {:ok, context}
       end
 

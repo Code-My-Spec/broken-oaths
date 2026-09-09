@@ -38,7 +38,8 @@ defmodule BrokenOaths.Cities.ProductionTest do
                barracks: 90,
                water_mill: 90,
                pyramids: 220,
-               hanging_gardens: 220
+               hanging_gardens: 220,
+               produce_wealth: 1
              }
 
       assert Production.cost(:settler) == 100

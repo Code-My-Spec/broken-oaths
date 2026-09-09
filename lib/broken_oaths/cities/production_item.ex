@@ -49,6 +49,7 @@ defmodule BrokenOaths.Cities.ProductionItem do
           | :water_mill
           | :pyramids
           | :hanging_gardens
+          | :produce_wealth
 
   @type t :: %__MODULE__{
           id: integer() | nil,
@@ -77,7 +78,8 @@ defmodule BrokenOaths.Cities.ProductionItem do
         :barracks,
         :water_mill,
         :pyramids,
-        :hanging_gardens
+        :hanging_gardens,
+        :produce_wealth
       ]
 
     field :banked, :integer, default: 0

@@ -179,7 +179,7 @@ defmodule BrokenOathsSpex.SharedGivens do
 
     assert seen?, "the lord never scouted within sight of the other player's unit"
 
-    {:ok, context}
+    {:ok, Map.put(context, :play_live, play_live)}
   end
 
   # A player who has founded a first city and advanced to the Bronze
@@ -430,6 +430,102 @@ defmodule BrokenOathsSpex.SharedGivens do
   end
 
   @doc """
+  Founds `context.user`'s first city like `:a_founded_city`, but at a
+  deliberately-chosen location whose own ring of neighbors
+  (`Fixtures.adjacent_tiles/2`) contains at least one WATER tile — same
+  BFS/relocate shape as `found_city_with_enough_feature/4` above, except
+  the match has to live in the ring rather than on the candidate itself
+  (a settler can only ever found on land, so "water" is never a
+  candidate property to search for directly).
+
+  `founding_territory/2` folds every ring tile into a fresh city's
+  territory unconditionally, water included, so this gives criteria
+  needing a genuinely UNREACHABLE in-territory destination (a worker can
+  never route across water) a deterministic spawn point instead of
+  hoping the settler's default spawn ring happens to touch water.
+
+  Requires `:a_world`, `:registered_player` already run.
+  """
+  def found_city_with_water_in_ring(context, max_rings \\ 12) do
+    {:ok, join_live, _html} = live(context.conn, "/play")
+
+    join_live
+    |> element("[data-test='join-world-#{context.world.id}']")
+    |> render_click()
+
+    {:ok, play_live, _html} = live(context.conn, "/play/#{context.world.id}")
+
+    [settler | _] =
+      for u <- Fixtures.player_units(context.world, context.user), u.type == :settler, do: u
+
+    land? = fn t -> Fixtures.tile_class(context.world, t) == :land end
+    # `tile_class/2` never returns a bare `:water` — only the finer-grained
+    # `:coastal_water` / `:deep_ocean` — so this predicate must check both,
+    # or it silently never matches anything a worker can't walk on.
+    water? = fn t -> Fixtures.tile_class(context.world, t) in [:coastal_water, :deep_ocean] end
+
+    candidate_ok? = fn tile ->
+      land?.(tile) and
+        context.world
+        |> Fixtures.adjacent_tiles(tile)
+        |> Enum.any?(water?)
+    end
+
+    try_candidate = fn tile ->
+      if candidate_ok?.(tile) do
+        case Fixtures.relocate_unit(context.world, settler.id, tile) do
+          :ok -> tile
+          {:error, _reason} -> nil
+        end
+      end
+    end
+
+    search_result =
+      Enum.reduce_while(
+        1..max_rings,
+        {[settler.tile_id], MapSet.new([settler.tile_id])},
+        fn _, {frontier, seen} ->
+          case Enum.find_value(frontier, try_candidate) do
+            nil ->
+              next =
+                frontier
+                |> Enum.flat_map(&Fixtures.adjacent_tiles(context.world, &1))
+                |> Enum.uniq()
+                |> Enum.reject(&MapSet.member?(seen, &1))
+
+              if next == [] do
+                {:halt, nil}
+              else
+                {:cont, {next, MapSet.union(seen, MapSet.new(next))}}
+              end
+
+            found ->
+              {:halt, found}
+          end
+        end
+      )
+
+    # Ring expansion exhausting `max_rings` without ever hitting `:halt`
+    # leaves `reduce_while` returning its last `{frontier, seen}`
+    # accumulator, not `nil` — normalize that case so the assert below
+    # actually catches a genuine "no candidate found" failure instead of
+    # treating a truthy tuple as a found tile id.
+    target =
+      case search_result do
+        {_frontier, %MapSet{}} -> nil
+        tile -> tile
+      end
+
+    assert target,
+           "expected a founding location within #{max_rings} rings whose own ring contains a water tile and is free to stand on"
+
+    render_hook(play_live, "found_city", %{"unit_id" => settler.id})
+    [city] = Fixtures.player_cities(context.world, context.user)
+
+    context |> Map.put(:play_live, play_live) |> Map.put(:city, city)
+  end
+
+  @doc """
   Destroys every wilderness camp (and every unit tied to one) in
   `world` — a thin, self-documenting wrapper around
   `Fixtures.isolate_camp/2`'s own "keep only this one camp" contract,
@@ -607,6 +703,11 @@ defmodule BrokenOathsSpex.SharedGivens do
       for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
 
     target = adjacent_land_tile(context.world, context.other_city.tile_id, [my_lord.tile_id])
+
+    render_hook(context.play_live, "declare_war", %{
+      "counterparty_user_id" => to_string(context.other_user.id)
+    })
+
     my_lord = march_to(context.play_live, context.world, context.user, my_lord, target)
 
     {my_lord, _broken_city} =
@@ -851,6 +952,10 @@ defmodule BrokenOathsSpex.SharedGivens do
     target =
       adjacent_land_tile(world, vassal_city.tile_id, [lord_unit.tile_id | vassal_unit_tiles])
 
+    render_hook(lord_play_live, "declare_war", %{
+      "counterparty_user_id" => to_string(vassal_user.id)
+    })
+
     lord_unit = march_to(lord_play_live, world, lord_user, lord_unit, target, max_turns)
 
     {lord_unit, _broken_city} =
@@ -914,9 +1019,15 @@ defmodule BrokenOathsSpex.SharedGivens do
 
     clear_all_camps(world)
 
+    occupied_tiles =
+      for unit <- Fixtures.player_units(world, user_a) ++ Fixtures.player_units(world, user_b),
+          do: unit.tile_id
+
+    scout_tile = adjacent_land_tile(world, unit_b.tile_id, [lord_a.tile_id | occupied_tiles])
+
     render_hook(play_live_a, "queue_move", %{
       "unit_id" => to_string(lord_a.id),
-      "to_tile" => unit_b.tile_id
+      "to_tile" => scout_tile
     })
 
     seen? =

@@ -97,6 +97,22 @@ defmodule BrokenOathsSpex.Story879.Criterion7472Spex do
         third_play_live |> element("[data-test='join-world-#{context.world.id}']") |> render_click()
         {:ok, third_play_live, _html} = live(context.third_conn, ~p"/play/#{context.world.id}")
 
+        # The blockade tiles sit inside player1's own founding territory
+        # (city tile + 6 neighbors, unconditionally —
+        # `Production.founding_territory/2`), so an ordinary peacetime
+        # `queue_move` into them is refused at the border
+        # (`GameLive.Play`'s own `border_entry_status/3` gate) rather than
+        # queued — the mover never even reaches `Game.queue_move/4`. Both
+        # blocking players declare war on player1 up front so their units
+        # can actually walk onto the blockade.
+        render_hook(other_play_live, "declare_war", %{
+          "counterparty_user_id" => to_string(context.user.id)
+        })
+
+        render_hook(third_play_live, "declare_war", %{
+          "counterparty_user_id" => to_string(context.user.id)
+        })
+
         # Block EVERY land neighbor with the other two players' units —
         # the narrow spot on this world may have 1..4 land neighbors,
         # and four blocker units are available (two per player).

@@ -86,6 +86,10 @@ defmodule BrokenOathsSpex.Story895.Criterion7569Spex do
         render_hook(other_play_live, "found_city", %{"unit_id" => to_string(other_settler.id)})
         [other_city] = Fixtures.player_cities(context.world, context.other_user)
 
+        render_hook(play_live, "declare_war", %{
+          "counterparty_user_id" => to_string(context.other_user.id)
+        })
+
         render_hook(other_play_live, "queue_production", %{
           "city_id" => to_string(other_city.id),
           "item" => "warrior"

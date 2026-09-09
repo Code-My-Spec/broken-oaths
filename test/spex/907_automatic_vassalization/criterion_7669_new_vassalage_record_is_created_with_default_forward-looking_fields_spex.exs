@@ -49,6 +49,10 @@ defmodule BrokenOathsSpex.Story907.Criterion7669Spex do
         context = join_and_found_rival_city(context)
         :ok = clear_all_camps(context.world)
 
+        render_hook(context.play_live, "declare_war", %{
+          "counterparty_user_id" => to_string(context.other_user.id)
+        })
+
         [my_lord] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
 

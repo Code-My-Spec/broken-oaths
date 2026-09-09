@@ -319,7 +319,7 @@ defmodule BrokenOaths.Vision.Visibility do
         state.cities
         |> Map.values()
         |> Enum.filter(&enemy_city_visible?(&1, player, home, explored))
-        |> Enum.map(&enemy_city_summary/1)
+        |> Enum.map(&enemy_city_summary(state, &1))
     end
   end
 
@@ -329,9 +329,10 @@ defmodule BrokenOaths.Vision.Visibility do
   # (or the UnitPanel button) to `queue_move`/occupy instead of another
   # `attack` once the city is at 0 HP — `Siege.broken?/1` is the single
   # source of truth every other broken-city check already reads.
-  defp enemy_city_summary(city) do
+  defp enemy_city_summary(state, city) do
     city
     |> Map.take([:id, :name, :tile_id, :size, :hp])
+    |> Map.put(:user_id, Map.fetch!(state.players, city.player_id).user_id)
     |> Map.put(:broken, Siege.broken?(city))
   end
 

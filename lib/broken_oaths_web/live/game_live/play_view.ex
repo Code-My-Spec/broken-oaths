@@ -212,6 +212,19 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
   # unit has nothing queued to cancel.
   def order_error_message(:no_order), do: "That unit has no order to cancel."
 
+  def order_error_message(:already_at_war), do: "You're already at war with them."
+  def order_error_message(:not_a_player), do: "That player hasn't joined this world."
+
+  def order_error_message(:already_proposed), do: "Open Borders with them is already pending."
+  def order_error_message(:already_accepted), do: "Open Borders with them is already active."
+  def order_error_message(:not_found), do: "No Open Borders agreement exists with them."
+
+  def order_error_message(:not_a_party),
+    do: "That Open Borders agreement isn't yours to act on."
+
+  def order_error_message(:self_accept),
+    do: "You can't accept your own Open Borders proposal."
+
   def order_error_message(_other), do: "That order can't be queued."
 
   def combat_error_message(:not_owner), do: "You don't control that unit."
@@ -634,7 +647,7 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
   def road_error_message(:tech_locked), do: "You haven't researched The Wheel yet."
   def road_error_message(:invalid_tile), do: "That's not a valid destination."
   def road_error_message(:not_territory), do: "That tile isn't inside your own borders."
-  def road_error_message(:unreachable), do: "There's no route there."
+  def road_error_message(:unreachable), do: "That destination is unreachable."
   def road_error_message(_other), do: "That road can't be ordered."
 
   def bank_error_message(:insufficient_gold), do: "You can't afford that upgrade yet."

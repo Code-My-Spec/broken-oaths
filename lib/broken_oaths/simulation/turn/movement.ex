@@ -252,18 +252,15 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
     end)
   end
 
-  # `tile_id => owner_player_id` of every BROKEN (0 HP), still-free city
-  # — story 906's own movement exception (`BrokenOaths.Combat.Siege.
-  # enterable_despite_garrison?/2`): once a city's walls are down, any
-  # OTHER player's unit may step onto its own tile even past a fallen
-  # (still-alive, not-yet-resolved) garrison. A healthy or already-
-  # captured city (`occupied_by_player_id` set) is never in this map, so
-  # this never loosens collision for either case — see `Siege.broken?/1`.
+  # Cities with a special entry rule. A broken free city admits an enemy
+  # captor; an occupied city admits its original owner so they can reclaim it.
   defp broken_city_tiles(cities) do
     cities
     |> Map.values()
-    |> Enum.filter(&(Map.get(&1, :hp) == 0 and is_nil(Map.get(&1, :occupied_by_player_id))))
-    |> Map.new(&{&1.tile_id, &1.player_id})
+    |> Enum.filter(&(Map.get(&1, :hp) == 0 or not is_nil(Map.get(&1, :occupied_by_player_id))))
+    |> Map.new(fn city ->
+      {city.tile_id, %{owner_player_id: city.player_id, occupied?: not is_nil(city.occupied_by_player_id)}}
+    end)
   end
 
   defp attempt_step(
@@ -359,8 +356,14 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
 
   defp entering_broken_enemy_city?(target, mover_unit, broken_cities) do
     case Map.get(broken_cities, target) do
-      nil -> false
-      owner_player_id -> owner_player_id != mover_unit.player_id
+      nil ->
+        false
+
+      %{occupied?: true, owner_player_id: owner_player_id} ->
+        owner_player_id == mover_unit.player_id
+
+      %{owner_player_id: owner_player_id} ->
+        owner_player_id != mover_unit.player_id
     end
   end
 

@@ -49,6 +49,16 @@ defmodule BrokenOaths.Cities do
   def queue_production(world, user, city_id, type),
     do: WorldServer.call(world, {:queue_production, user, city_id, type})
 
+  @doc "Set the city's current production to Produce Wealth."
+  @spec produce_wealth(map(), map(), term()) :: :ok | {:error, atom()}
+  def produce_wealth(world, user, city_id),
+    do: WorldServer.call(world, {:produce_wealth, user, city_id})
+
+  @doc "Pillage an owned city, freezing its production for the normal halt duration."
+  @spec pillage_city(map(), map(), term()) :: :ok | {:error, atom()}
+  def pillage_city(world, user, city_id),
+    do: WorldServer.call(world, {:pillage_city, user, city_id})
+
   @doc "Move a queued item one slot toward the head — free, progress stays with the item."
   @spec reorder_production_item(map(), map(), term(), term()) ::
           :ok | {:error, :not_owner | :not_found | :invalid_item}
@@ -153,6 +163,9 @@ defmodule BrokenOaths.Cities do
 
   @doc "All of `user`'s cities in `world` (see `BrokenOaths.Simulation.WorldServer` for the shape)."
   def player_cities(world, user), do: WorldServer.call(world, {:player_cities, user})
+
+  @doc "The user whose city territory contains `tile_id`, or `nil` when unclaimed."
+  def territory_owner(world, tile_id), do: WorldServer.call(world, {:territory_owner, tile_id})
 
   @doc """
   Whether `user`'s player currently has Copper access (story 911

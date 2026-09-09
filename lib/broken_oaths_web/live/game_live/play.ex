@@ -258,6 +258,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
             # selected" status `attackable_cities` above already has.
             shoot_targets: [],
             known_players: Game.known_players(world, user),
+            war_relationships: Game.war_relationships(world, user),
+            open_borders_partners: Game.open_borders_partners(world, user),
             selected_tile: nil,
             visible: [],
             explored: [],
@@ -275,6 +277,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
             choppable_feature: nil,
             chop_error: nil,
             order_error: nil,
+            declare_war_required_user_id: nil,
+            war_hostile_user_id: nil,
+            hostile_border_entry_user_id: nil,
+            open_borders_entry_status: nil,
             combat_error: nil,
             # Story 929 "Build road to a destination" — `road_enabled?`
             # (The Wheel) is a real value only via `refresh_board/1`'s own
@@ -469,7 +475,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
     # An enemy city on this tile rides the tile panel (CityPanel assumes an
     # owned shape) — carry its HP so a besieger clicking through their own
     # unit can watch it drop.
-    hostile_city = Enum.find(socket.assigns.cities, &(&1.tile_id == tile_id and Map.get(&1, :hostile)))
+    hostile_city =
+      Enum.find(socket.assigns.cities, &(&1.tile_id == tile_id and Map.get(&1, :hostile)))
 
     socket =
       assign(socket,
@@ -482,7 +489,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
           resource: resource,
           hostile_city:
             hostile_city &&
-              %{name: hostile_city.name, hp: hostile_city.hp, broken: Map.get(hostile_city, :broken, false)}
+              %{
+                name: hostile_city.name,
+                hp: hostile_city.hp,
+                broken: Map.get(hostile_city, :broken, false)
+              }
         },
         selected_unit_id: nil,
         selected_unit: nil,
@@ -616,7 +627,37 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
     case Game.queue_production(world, user, PlayView.parse_id(city_id), item) do
       :ok ->
-        {:noreply, assign(socket, city_error: nil)}
+        socket = socket |> assign(city_error: nil) |> refresh_board()
+        city = Enum.find(socket.assigns.cities, &(&1.id == PlayView.parse_id(city_id)))
+        {:noreply, apply_city_panel(socket, city)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, city_error: PlayView.city_error_message(reason))}
+    end
+  end
+
+  def handle_event("pillage_city", %{"city_id" => city_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.pillage_city(world, user, PlayView.parse_id(city_id)) do
+      :ok ->
+        socket = socket |> assign(city_error: nil) |> refresh_board()
+        city = Enum.find(socket.assigns.cities, &(&1.id == PlayView.parse_id(city_id)))
+        {:noreply, apply_city_panel(socket, city)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, city_error: PlayView.city_error_message(reason))}
+    end
+  end
+
+  def handle_event("produce_wealth", %{"city_id" => city_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.produce_wealth(world, user, PlayView.parse_id(city_id)) do
+      :ok ->
+        socket = socket |> assign(city_error: nil) |> refresh_board()
+        city = Enum.find(socket.assigns.cities, &(&1.id == PlayView.parse_id(city_id)))
+        {:noreply, apply_city_panel(socket, city)}
 
       {:error, reason} ->
         {:noreply, assign(socket, city_error: PlayView.city_error_message(reason))}
@@ -775,13 +816,15 @@ defmodule BrokenOathsWeb.GameLive.Play do
     unit_id = PlayView.parse_id(unit_id)
     to_tile = PlayView.parse_id(to_tile)
 
-    socket = assign(socket, road_mode_unit_id: nil) |> push_event("game:road_mode", %{unit_id: nil})
+    socket =
+      assign(socket, road_mode_unit_id: nil) |> push_event("game:road_mode", %{unit_id: nil})
 
     case Game.build_road_to(world, user, unit_id, to_tile) do
       {:ok, %{route: route}} ->
         socket =
           socket
           |> assign(road_error: nil)
+          |> refresh_board()
           |> push_event("game:path", %{unit_id: unit_id, tiles: route})
 
         {:noreply, socket}
@@ -821,17 +864,62 @@ defmodule BrokenOathsWeb.GameLive.Play do
     unit_id = PlayView.parse_id(unit_id)
     to_tile = PlayView.parse_id(to_tile)
 
-    case Game.queue_move(world, user, unit_id, to_tile) do
-      {:ok, %{path: path}} ->
-        socket =
-          socket
-          |> assign(order_error: nil)
-          |> push_event("game:path", %{unit_id: unit_id, tiles: path})
+    case border_entry_status(world, user, to_tile) do
+      {:declare_war_required, rival_user_id} ->
+        {:noreply, assign(socket, declare_war_required_user_id: rival_user_id)}
 
-        {:noreply, socket}
+      {:allowed, hostile_user_id} ->
+        socket = assign(socket, hostile_border_entry_user_id: hostile_user_id)
+        queue_move(socket, world, user, unit_id, to_tile)
+    end
+  end
 
-      {:error, reason} ->
-        {:noreply, assign(socket, order_error: PlayView.order_error_message(reason))}
+  def handle_event("declare_war", %{"neighbor_user_id" => user_id}, socket),
+    do: declare_war(socket, user_id)
+
+  def handle_event("declare_war", %{"counterparty_user_id" => user_id}, socket),
+    do: declare_war(socket, user_id)
+
+  # Story 994 (Open Borders Agreements) — same thin "call Game, refresh,
+  # or surface the error" shape `declare_war/2` above already has.
+  def handle_event("propose_open_borders", %{"neighbor_user_id" => user_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.propose_open_borders(world, user, %{id: PlayView.parse_id(user_id)}) do
+      :ok -> {:noreply, socket |> assign(order_error: nil) |> refresh_board()}
+      {:error, reason} -> {:noreply, assign(socket, order_error: PlayView.order_error_message(reason))}
+    end
+  end
+
+  def handle_event("accept_open_borders", %{"neighbor_user_id" => user_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.accept_open_borders(world, user, %{id: PlayView.parse_id(user_id)}) do
+      :ok -> {:noreply, socket |> assign(order_error: nil) |> refresh_board()}
+      {:error, reason} -> {:noreply, assign(socket, order_error: PlayView.order_error_message(reason))}
+    end
+  end
+
+  def handle_event("revoke_open_borders", %{"neighbor_user_id" => user_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.revoke_open_borders(world, user, %{id: PlayView.parse_id(user_id)}) do
+      :ok -> {:noreply, socket |> assign(order_error: nil) |> refresh_board()}
+      {:error, reason} -> {:noreply, assign(socket, order_error: PlayView.order_error_message(reason))}
+    end
+  end
+
+  # Story 994 criterion 3111/3113 — a dedicated, directly-issuable order
+  # (not folded into `queue_move`'s own border gate) so the peaceful-entry
+  # and entry-refused outcomes are each independently assertable.
+  def handle_event("move_through_open_border", %{"neighbor_user_id" => user_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+    neighbor = %{id: PlayView.parse_id(user_id)}
+
+    if Game.open_borders_active?(world, user, neighbor) do
+      {:noreply, assign(socket, open_borders_entry_status: :peaceful)}
+    else
+      {:noreply, assign(socket, open_borders_entry_status: :refused)}
     end
   end
 
@@ -925,6 +1013,18 @@ defmodule BrokenOathsWeb.GameLive.Play do
           |> push_event("game:combat", %{damage_dealt: dealt, damage_taken: taken})
 
         {:noreply, socket}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, combat_error: PlayView.combat_error_message(reason))}
+    end
+  end
+
+  def handle_event("raid_city", %{"unit_id" => unit_id, "target_city_id" => city_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.raid_city(world, user, PlayView.parse_id(unit_id), PlayView.parse_id(city_id)) do
+      {:ok, _result} ->
+        {:noreply, socket |> assign(combat_error: nil) |> refresh_board()}
 
       {:error, reason} ->
         {:noreply, assign(socket, combat_error: PlayView.combat_error_message(reason))}
@@ -1254,6 +1354,22 @@ defmodule BrokenOathsWeb.GameLive.Play do
     {:noreply, assign(socket, declare_independence_lord_user_id: nil)}
   end
 
+  # Story 1001 — an ordinary wartime peace offer. Rebellion peace below
+  # carries settlement terms and remains a separate flow.
+  def handle_event(
+        "offer_peace",
+        %{"counterparty_user_id" => counterparty_user_id} = params,
+        socket
+      )
+      when not is_map_key(params, "outcome") do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.offer_war_peace(world, user, %{id: PlayView.parse_id(counterparty_user_id)}) do
+      :ok -> {:noreply, refresh_board(socket)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
+
   # Story 919, criterion 7754 — either side offers a negotiated peace.
   # `"outcome"` is `"independence"` or `"restored_vassal"`;
   # `"reparations_gold"` is optional (blank/missing reads as no
@@ -1280,10 +1396,20 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
   def handle_event("accept_peace", %{"counterparty_user_id" => counterparty_user_id}, socket) do
     %{world: world, user: user} = socket.assigns
+    counterparty = %{id: PlayView.parse_id(counterparty_user_id)}
 
-    case Game.accept_peace(world, user, PlayView.parse_id(counterparty_user_id)) do
-      :ok -> {:noreply, socket |> refresh_vassalage() |> refresh_rebellions() |> refresh_board()}
-      {:error, _reason} -> {:noreply, socket}
+    case Game.accept_war_peace(world, user, counterparty) do
+      :ok ->
+        {:noreply, refresh_board(socket)}
+
+      {:error, _reason} ->
+        case Game.accept_peace(world, user, counterparty.id) do
+          :ok ->
+            {:noreply, socket |> refresh_vassalage() |> refresh_rebellions() |> refresh_board()}
+
+          {:error, _reason} ->
+            {:noreply, socket}
+        end
     end
   end
 
@@ -1736,6 +1862,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
       |> assign(turn: turn, turn_ends_at: Game.turn_ends_at(world))
       |> refresh_board()
       |> refresh_research()
+      |> refresh_vassalage()
 
     {:noreply, socket}
   end
@@ -1748,6 +1875,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # second connected tab on the same account.
   def handle_info(:research_changed, socket) do
     {:noreply, refresh_research(socket)}
+  end
+
+  def handle_info(:diplomacy_changed, socket) do
+    {:noreply, refresh_board(socket)}
   end
 
   # Any board mutation (a queued order executing immediately, a join, an
@@ -1988,6 +2119,63 @@ defmodule BrokenOathsWeb.GameLive.Play do
   # Helpers
   # -------------------------------------------------------------------
 
+  defp declare_war(socket, user_id) do
+    %{world: world, user: user} = socket.assigns
+    rival_user_id = PlayView.parse_id(user_id)
+
+    case Game.declare_war(world, user, %{id: rival_user_id}) do
+      :ok ->
+        {:noreply,
+         socket
+         |> assign(declare_war_required_user_id: nil)
+         |> assign(war_hostile_user_id: rival_user_id)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, order_error: PlayView.order_error_message(reason))}
+    end
+  end
+
+  defp border_entry_status(world, user, to_tile) do
+    broken_enemy_city? =
+      Enum.any?(Game.enemy_cities_visible_to(world, user), fn city ->
+        city.tile_id == to_tile and city.hp == 0
+      end)
+
+    cond do
+      broken_enemy_city? ->
+        {:allowed, nil}
+
+      true ->
+        case Game.territory_owner(world, to_tile) do
+          nil ->
+            {:allowed, nil}
+
+          owner_user_id when owner_user_id == user.id ->
+            {:allowed, nil}
+
+          owner_user_id ->
+            if Game.at_war?(world, user, %{id: owner_user_id}),
+              do: {:allowed, owner_user_id},
+              else: {:declare_war_required, owner_user_id}
+        end
+    end
+  end
+
+  defp queue_move(socket, world, user, unit_id, to_tile) do
+    case Game.queue_move(world, user, unit_id, to_tile) do
+      {:ok, %{path: path}} ->
+        socket =
+          socket
+          |> assign(order_error: nil)
+          |> push_event("game:path", %{unit_id: unit_id, tiles: path})
+
+        {:noreply, socket}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, order_error: PlayView.order_error_message(reason))}
+    end
+  end
+
   # "First founding" is read back from the real surface (a player's own
   # city count) rather than threading a flag through `Game.found_city/3`'s
   # return value — founding always adds exactly one city, so having
@@ -2104,6 +2292,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
       wonders_claimed: Game.wonders_claimed(world),
       selected_camp: selected_camp,
       known_players: Game.known_players(world, user),
+      war_relationships: Game.war_relationships(world, user),
+      open_borders_partners: Game.open_borders_partners(world, user),
       player_stats: Game.player_stats(world, user),
       player_research: player_research,
       # Story 909/910: the bank badges, Honor figure, and the owner's
@@ -2545,6 +2735,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
           allow_steward_production={@allow_steward_production}
           vassals={@vassals}
           known_players={@known_players}
+          war_relationships={@war_relationships}
           conspiracy_heat={@conspiracy_heat}
           pact_informed={@pact_informed}
           rebellions_as_lord={@rebellions_as_lord}
@@ -2599,6 +2790,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
           id="board-viewport"
           class="flex-1 overflow-hidden space-bg relative touch-none"
           phx-hook=".Board"
+          data-test="game-board"
           data-yaw={@yaw}
           data-pitch={@pitch}
           data-scale={@scale}
@@ -2619,6 +2811,11 @@ defmodule BrokenOathsWeb.GameLive.Play do
           user={@user}
           chat_target_user_id={@chat_target_user_id}
           order_error={@order_error}
+          declare_war_required_user_id={@declare_war_required_user_id}
+          war_hostile_user_id={@war_hostile_user_id}
+          hostile_border_entry_user_id={@hostile_border_entry_user_id}
+          open_borders_partners={@open_borders_partners}
+          open_borders_entry_status={@open_borders_entry_status}
           combat_error={@combat_error}
           city_error={@city_error}
           improvement_error={@improvement_error}
@@ -2645,6 +2842,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
           wonders_claimed={@wonders_claimed}
           road_enabled?={@road_enabled?}
           road_mode_unit_id={@road_mode_unit_id}
+          improvements={@improvements}
         />
       </div>
 

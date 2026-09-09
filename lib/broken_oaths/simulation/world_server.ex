@@ -52,10 +52,12 @@ defmodule BrokenOaths.Simulation.WorldServer do
 
   alias BrokenOaths.Cities.{Buildings, City, Improvement, Production, ProductionItem, Yields}
 
-  alias BrokenOaths.Combat.{Camp, Camps, CityDefense, Siege}
+  alias BrokenOaths.Combat.{Camp, Camps, CityDefense, Raid, Siege}
   alias BrokenOaths.Combat.Resolver
 
   alias BrokenOaths.Diplomacy.{Cooperation, Discovery, KnownPlayer}
+  alias BrokenOaths.Diplomacy.OpenBorders
+  alias BrokenOaths.Diplomacy.War, as: DiplomacyWar
 
   alias BrokenOaths.Feudal.{
     Bank,
@@ -363,6 +365,23 @@ defmodule BrokenOaths.Simulation.WorldServer do
     end
   end
 
+  def handle_call({:raid_city, user, unit_id, city_id}, _from, state) do
+    case Raid.raid_city(state, user, unit_id, city_id) do
+      {:ok, result, new_state} ->
+        case persist_tick(state, new_state) do
+          :ok ->
+            broadcast(new_state.world.id, [:units_changed])
+            {:reply, {:ok, result}, new_state}
+
+          :stale ->
+            {:reply, {:error, :stale}, resync(state)}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   # QA issue 12bed1e4 — the Archer's own ranged "shoot" surface: same
   # immediate-resolution, persist+broadcast shape as `:attack` above,
   # just routed through `Resolver.shoot/4` instead of `Resolver.attack/4`.
@@ -495,6 +514,38 @@ defmodule BrokenOaths.Simulation.WorldServer do
     end
   end
 
+  def handle_call({:pillage_city, user, city_id}, _from, state) do
+    player = Enum.find(Map.values(state.players), &(&1.user_id == user.id))
+
+    case {Map.get(state.cities, city_id), player} do
+      {%{player_id: city_player_id} = city, %{id: player_id}} when city_player_id == player_id ->
+        new_state = %{state | cities: Map.put(state.cities, city_id, CityDefense.pillage(city, state.turn))}
+
+        case persist_tick(state, new_state) do
+          :ok ->
+            broadcast(state.world.id, [:cities_changed])
+            {:reply, :ok, new_state}
+
+          :stale ->
+            {:reply, {:error, :stale}, resync(state)}
+        end
+
+      _ ->
+        {:reply, {:error, :not_owner}, state}
+    end
+  end
+
+  def handle_call({:produce_wealth, user, city_id}, _from, state) do
+    case Production.produce_wealth(state, user, city_id) do
+      {:ok, new_state} ->
+        broadcast(new_state.world.id, [:cities_changed])
+        {:reply, :ok, new_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   def handle_call({:reorder_production_item, user, city_id, item_id}, _from, state) do
     case Production.reorder_production_item(state, user, city_id, item_id) do
       {:ok, new_state} ->
@@ -605,6 +656,19 @@ defmodule BrokenOaths.Simulation.WorldServer do
     {:reply, City.player_cities(state, user), state}
   end
 
+  def handle_call({:territory_owner, tile_id}, _from, state) do
+    owner_user_id =
+      state.cities
+      |> Map.values()
+      |> Enum.find_value(fn city ->
+        if tile_id in city.territory do
+          state.players |> Map.get(city.player_id) |> Map.get(:user_id)
+        end
+      end)
+
+    {:reply, owner_user_id, state}
+  end
+
   # Story 899: every civilization `user` has discovered in this world —
   # permanent once recorded, unrelated to current fog of war (see
   # `Discovery`'s and `KnownPlayer`'s docs). Ordered by `viewer_player_id`'s
@@ -663,6 +727,153 @@ defmodule BrokenOaths.Simulation.WorldServer do
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
+  end
+
+  def handle_call({:declare_war, user, other_user}, _from, state) do
+    case DiplomacyWar.declare(state, user, other_user) do
+      {:ok, _war} ->
+        broadcast(state.world.id, [:diplomacy_changed])
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:offer_war_peace, user, other_user}, _from, state) do
+    case DiplomacyWar.offer_peace(state, user, other_user) do
+      {:ok, _war} ->
+        broadcast(state.world.id, [:diplomacy_changed])
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:accept_war_peace, user, other_user}, _from, state) do
+    case DiplomacyWar.accept_peace(state, user, other_user) do
+      :ok ->
+        broadcast(state.world.id, [:diplomacy_changed])
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:at_war?, user, other_user}, _from, state) do
+    player = Enum.find(Map.values(state.players), &(&1.user_id == user.id))
+    other_player = Enum.find(Map.values(state.players), &(&1.user_id == other_user.id))
+
+    at_war? =
+      case {player, other_player} do
+        {%{id: player_id}, %{id: other_player_id}} ->
+          DiplomacyWar.active?(state.world.id, player_id, other_player_id)
+
+        _ ->
+          false
+      end
+
+    {:reply, at_war?, state}
+  end
+
+  def handle_call({:war_relationships, user}, _from, state) do
+    relationships =
+      state
+      |> Discovery.known_players(user)
+      |> Enum.flat_map(fn other ->
+        case DiplomacyWar.status_for(state, user, %{id: other.user_id}) do
+          nil ->
+            []
+
+          relationship ->
+            [
+              Map.merge(relationship, %{
+                other_user_id: other.user_id,
+                other_name: other.display_name
+              })
+            ]
+        end
+      end)
+
+    {:reply, relationships, state}
+  end
+
+  # Story 994 (Open Borders Agreements) — same non-tick-state status as
+  # the alliance/war handlers above: world-membership-scoped coordination
+  # state, persisted directly, never touching `persist_tick/2`.
+  def handle_call({:propose_open_borders, user, other_user}, _from, state) do
+    case OpenBorders.propose(state, user, other_user) do
+      {:ok, _agreement} ->
+        broadcast(state.world.id, [:diplomacy_changed])
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:accept_open_borders, user, other_user}, _from, state) do
+    case OpenBorders.accept(state, user, other_user) do
+      {:ok, _agreement} ->
+        broadcast(state.world.id, [:diplomacy_changed])
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:revoke_open_borders, user, other_user}, _from, state) do
+    case OpenBorders.revoke(state, user, other_user) do
+      {:ok, _agreement} ->
+        broadcast(state.world.id, [:diplomacy_changed])
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:open_borders_active?, user, other_user}, _from, state) do
+    case {find_player(state, user.id), find_player(state, other_user.id)} do
+      {%{id: a}, %{id: b}} -> {:reply, OpenBorders.active?(state.world.id, a, b), state}
+      _not_players -> {:reply, false, state}
+    end
+  end
+
+  # Mirrors `:war_relationships`' own shape/derivation above — every
+  # discovered player who has ANY Open Borders row with this player
+  # (proposed or accepted), so the UI can render Propose/Accept/Revoke
+  # correctly per row.
+  def handle_call({:open_borders_partners, user}, _from, state) do
+    player = find_player(state, user.id)
+
+    partners =
+      state
+      |> Discovery.known_players(user)
+      |> Enum.flat_map(fn other ->
+        other_player = find_player(state, other.user_id)
+
+        case player && other_player &&
+               OpenBorders.find(state.world.id, player.id, other_player.id) do
+          nil ->
+            []
+
+          agreement ->
+            [
+              %{
+                other_user_id: other.user_id,
+                other_name: other.display_name,
+                status: agreement.status,
+                proposed_by_me?: agreement.proposer_player_id == player.id
+              }
+            ]
+        end
+      end)
+
+    {:reply, partners, state}
   end
 
   # -------------------------------------------------------------------
@@ -1955,6 +2166,7 @@ defmodule BrokenOaths.Simulation.WorldServer do
   defp run_tick(state) do
     {gated_state, deferred_heirs} = War.defer_gated_heirs(state)
     {ticked, events} = Turn.tick(gated_state)
+    ticked = if economy_tick?(ticked), do: Production.settle_wealth(ticked), else: ticked
     ticked = War.restore_gated_heirs(ticked, deferred_heirs)
     {events, ticked} = materialize_spawns(events, ticked)
     # Story 929 — see `Simulation.Turn.RoadBuilder`'s own "Pure core,
@@ -2509,7 +2721,15 @@ defmodule BrokenOaths.Simulation.WorldServer do
     |> Map.values()
     |> Enum.group_by(& &1.player_id)
     |> Map.new(fn {player_id, cities} ->
-      income = cities |> Enum.map(&Yields.city_gold_income(&1, state.world)) |> Enum.sum()
+      income =
+        cities
+        |> Enum.map(fn city ->
+          if CityDefense.production_halted?(city, state.turn) or
+               match?([%{type: :produce_wealth} | _], city.queue),
+             do: 0,
+             else: Yields.city_gold_income(city, state.world)
+        end)
+        |> Enum.sum()
       {player_id, income}
     end)
   end
@@ -2627,6 +2847,8 @@ defmodule BrokenOaths.Simulation.WorldServer do
       vassal_user_id: vassal_user.id,
       display_name: User.display_name(vassal_user),
       tribute_rate: vassalage.tribute_rate,
+      tribute_received:
+        tribute_received(state.world.id, vassalage.lord_player_id, vassalage.vassal_player_id),
       oath_strain: vassalage.oath_strain,
       levy_status:
         Levy.status_for(state.world.id, vassalage.lord_player_id, vassalage.vassal_player_id),
@@ -2655,6 +2877,19 @@ defmodule BrokenOaths.Simulation.WorldServer do
   # whether the Oath screen is still owed (`Vassalization.
   # agenda_pending?/1`), and their own latest levy status. `nil` for a
   # free player — no Oath screen, no "Sworn to" badge.
+  defp tribute_received(world_id, lord_player_id, vassal_player_id) do
+    Repo.one(
+      from(g in GoldLog,
+        where:
+          g.world_id == ^world_id and
+            g.to_player_id == ^lord_player_id and
+            g.from_player_id == ^vassal_player_id and
+            g.reason == :tribute,
+        select: coalesce(sum(g.amount), 0)
+      )
+    )
+  end
+
   defp vassal_status(state, user) do
     case find_player(state, user.id) do
       nil ->
