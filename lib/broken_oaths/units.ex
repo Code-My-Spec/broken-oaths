@@ -27,6 +27,18 @@ defmodule BrokenOaths.Units do
     do: WorldServer.call(world, {:queue_move, user, unit_id, to_tile})
 
   @doc """
+  An ally (`delegate_user`) attempts to move one of `owner_user_id`'s
+  units under a delegated unit-control grant (story 947, criterion
+  2696). No grant mechanism exists yet — a future criterion adds the
+  actual grant/revoke surface and a real `unit_id`/`to_tile` payload
+  once an authorized delegate can queue a real move — so this always
+  refuses.
+  """
+  @spec delegate_move_unit(map(), map(), term()) :: {:error, :not_authorized}
+  def delegate_move_unit(world, delegate_user, owner_user_id),
+    do: WorldServer.call(world, {:delegate_move_unit, delegate_user, owner_user_id})
+
+  @doc """
   Queue a `:road_to` order (story 929) for `unit_id` — `user`'s own
   worker — to `destination`: walk the cheapest owned-territory route
   and lay road tile-by-tile as it arrives. Validates ownership, worker

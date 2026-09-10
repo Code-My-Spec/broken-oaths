@@ -549,26 +549,31 @@ defmodule BrokenOathsSpex.SharedGivens do
   def clear_all_camps(world), do: Fixtures.isolate_camp(world, -1)
 
   @doc """
-  Marches `unit` (owned by `user`, driven through `user`'s own
-  `play_live`) to `to_tile` via the real `"queue_move"` hook, advancing
-  real turn boundaries (`Fixtures.advance_turn/1`) up to `max_turns`
-  times until it arrives, then tops its movement back up to max via
-  `Fixtures.recharge_unit/2` — the same march-then-recharge idiom
-  `criterion_7567`'s (story 895) own long march already established:
-  the march's own final step spends the mover's movement in the same
-  tick it arrives, which would otherwise refuse an immediate follow-up
-  action (an attack, or a further move) this same test session. Returns
-  the freshest copy of `unit` — arrived at `to_tile`, or wherever it
-  actually got to within `max_turns` (a blocked destination, e.g. a
-  still-garrisoned enemy city, never arrives — callers that expect that
-  are responsible for asserting on the returned `tile_id` themselves,
-  not this helper).
+  Marches `unit` (owned by `user`) to `to_tile` via the real
+  `Game.queue_move/4` — see `Fixtures.attack_city/4`'s own moduledoc
+  section for why this calls that directly instead of driving it
+  through `_play_live`'s `"queue_move"` hook: same validation, same
+  movement resolution, same `persist_tick` write, minus the
+  `Phoenix.LiveViewTest` dispatch overhead a march-only setup step
+  never needed to pay (`"queue_move"`'s own LiveView wiring is verified
+  for real elsewhere — story 953's own movement criteria). `_play_live`
+  stays a required parameter purely so this signature — and every
+  existing call site — is unchanged; nothing inside this function reads
+  it anymore. Advances real turn boundaries (`Fixtures.advance_turn/1`)
+  up to `max_turns` times until it arrives, then tops its movement back
+  up to max via `Fixtures.recharge_unit/2` — the same march-then-
+  recharge idiom `criterion_7567`'s (story 895) own long march already
+  established: the march's own final step spends the mover's movement
+  in the same tick it arrives, which would otherwise refuse an
+  immediate follow-up action (an attack, or a further move) this same
+  test session. Returns the freshest copy of `unit` — arrived at
+  `to_tile`, or wherever it actually got to within `max_turns` (a
+  blocked destination, e.g. a still-garrisoned enemy city, never
+  arrives — callers that expect that are responsible for asserting on
+  the returned `tile_id` themselves, not this helper).
   """
-  def march_to(play_live, world, user, unit, to_tile, max_turns \\ 40) do
-    render_hook(play_live, "queue_move", %{
-      "unit_id" => to_string(unit.id),
-      "to_tile" => to_tile
-    })
+  def march_to(_play_live, world, user, unit, to_tile, max_turns \\ 40) do
+    _ = Fixtures.queue_move(world, user, unit.id, to_tile)
 
     Enum.reduce_while(1..max_turns, :ok, fn _, :ok ->
       [u] = for x <- Fixtures.player_units(world, user), x.id == unit.id, do: x
@@ -609,33 +614,40 @@ defmodule BrokenOathsSpex.SharedGivens do
 
   @doc """
   Repeatedly orders `attacker` (`user`'s own unit, already standing
-  adjacent to `city.tile_id`) to assault `city` through the real
-  `"attack"` hook (`target_city_id`), advancing a real turn boundary
-  between every swing — a boundary refills movement for every unit
-  (`Turn.tick/1`'s own `movement: unit.max_movement` reset), so no
-  `Fixtures.recharge_unit/2` is needed between repeated attacks the way
-  `march_to/5` needs it after a march. Stops early once the defending
-  player's own read of the city shows `hp <= 0`, or after `max_attacks`
-  swings (a generous safety cap, not a tuned number — see the calling
-  criterion's own moduledoc for whether zero HP is actually reached
-  under today's code). Every boundary this loop advances ALSO runs the
-  city's own `Game.CityDefense.regen/1` phase (5 HP), since an attack
-  landed through the immediate, out-of-tick "attack" surface never
-  suppresses the tick's own regen (see `CityDefense`'s own "Regeneration"
-  doc) — net progress per round is a swing's damage MINUS 5, not the
-  swing's raw damage, so `max_attacks` needs real headroom over a naive
+  adjacent to `city.tile_id`) to assault `city` via the real
+  `Game.attack_city/4` — see `Fixtures.attack_city/4`'s own moduledoc
+  section for why this calls that directly instead of driving it
+  through a `_play_live`'s `"attack"` hook: measured at ~100ms PER
+  ROUND through `attempt_event`/`render_hook` regardless of the
+  underlying action, vs ~0ms through this direct call — pure
+  `Phoenix.LiveViewTest` dispatch overhead, not the combat engine or
+  the database (10 real, damage-dealing rounds timed end-to-end at
+  ~1-2ms total). A full `max_attacks: 40` grind is the single most
+  expensive step in the vassalage/rebellion epic's own setup chains
+  (up to ~4s of pure LiveView-harness overhead per siege, previously);
+  this is the fix. Advances a real turn boundary between every swing —
+  a boundary refills movement for every unit (`Turn.tick/1`'s own
+  `movement: unit.max_movement` reset), so no `Fixtures.recharge_unit/2`
+  is needed between repeated attacks the way `march_to/5` needs it
+  after a march. Stops early once the defending player's own read of
+  the city shows `hp <= 0`, or after `max_attacks` swings (a generous
+  safety cap, not a tuned number — see the calling criterion's own
+  moduledoc for whether zero HP is actually reached under today's
+  code). Every boundary this loop advances ALSO runs the city's own
+  `Game.CityDefense.regen/1` phase (5 HP), since an attack landed
+  through the immediate, out-of-tick "attack" surface never suppresses
+  the tick's own regen (see `CityDefense`'s own "Regeneration" doc) —
+  net progress per round is a swing's damage MINUS 5, not the swing's
+  raw damage, so `max_attacks` needs real headroom over a naive
   "100 HP / average swing damage" estimate. Returns the freshest city
   row.
   """
-  def grind_city(attacker_play_live, world, attacker, defender_user, city, max_attacks \\ 40) do
+  def grind_city(user, world, attacker, defender_user, city, max_attacks \\ 40) do
     Enum.reduce_while(1..max_attacks, city, fn _, current_city ->
       if current_city.hp <= 0 do
         {:halt, current_city}
       else
-        attempt_event(attacker_play_live, "attack", %{
-          "unit_id" => to_string(attacker.id),
-          "target_city_id" => to_string(current_city.id)
-        })
+        _ = Fixtures.attack_city(world, user, attacker.id, current_city.id)
 
         Fixtures.advance_turn(world)
 
@@ -678,7 +690,7 @@ defmodule BrokenOathsSpex.SharedGivens do
         city,
         max_turns \\ 40
       ) do
-    broken_city = grind_city(attacker_play_live, world, attacker, defender_user, city)
+    broken_city = grind_city(user, world, attacker, defender_user, city)
     attacker = march_to(attacker_play_live, world, user, attacker, city.tile_id, max_turns)
     {attacker, broken_city}
   end
@@ -1142,6 +1154,27 @@ defmodule BrokenOathsSpex.SharedGivens do
     end)
   end
 
+  @doc """
+  One round of "the lord issues a call to arms against `target`, the
+  vassal refuses it" — via the real `Game.issue_levy/5` +
+  `Game.refuse_levy/3` directly (see `Fixtures.issue_levy/5`'s own
+  moduledoc section for why: the exact same calls the `"issue_levy"`/
+  `"refuse_levy"` LiveView hooks make, minus their ~100ms/call
+  `Phoenix.LiveViewTest` dispatch tax — those hooks' own wiring is
+  verified for real elsewhere, story 908's own criteria). A REFUSED
+  levy is stories 908/913/914/915/916/917's single most duplicated
+  Oath Strain driver — 14 spec files previously repeated the same
+  ~10-line `attempt_event` pair inline, most of them in a `for _ <-
+  1..N do ... end` loop, several times over. Callers still own that
+  loop (call this once per round); `share` defaults to `0.5`, the
+  literal every one of those 14 call sites already used.
+  """
+  def refuse_a_call_to_arms(world, lord, vassal, target, share \\ 0.5) do
+    _ = Fixtures.issue_levy(world, lord, vassal.id, target.id, share)
+    _ = Fixtures.refuse_levy(world, vassal, lord.id)
+    :ok
+  end
+
   # -------------------------------------------------------------------
   # Rebellion batch helpers (story 915 and friends): a lord who already
   # holds one vassal occupying MULTIPLE cities, and a way to depress
@@ -1347,7 +1380,7 @@ defmodule BrokenOathsSpex.SharedGivens do
     target = adjacent_land_tile(context.world, third_city.tile_id, [my_lord.tile_id])
     my_lord = march_to(context.play_live, context.world, context.user, my_lord, target)
 
-    grind_city(context.play_live, context.world, my_lord, context.third_user, third_city)
+    grind_city(context.user, context.world, my_lord, context.third_user, third_city)
 
     render_hook(third_play_live, "queue_production", %{
       "city_id" => to_string(third_city.id),

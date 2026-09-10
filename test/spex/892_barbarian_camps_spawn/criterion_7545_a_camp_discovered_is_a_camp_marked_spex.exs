@@ -65,6 +65,23 @@ defmodule BrokenOathsSpex.Story892.Criterion7545Spex do
           |> Fixtures.list_camps()
           |> Enum.reject(&MapSet.member?(visible_ids, &1.tile_id))
 
+        # QA issue (flaky test, ~1-in-5 failure rate): founding spawns
+        # SEVERAL camps at once (7, in the standard seed 424242/
+        # frequency 8 world), not just `target_camp`. Left un-isolated,
+        # every other camp is free to spawn and roam warriors of its
+        # own across the up-to-60 real turns this scenario's own
+        # `when_` marches through — same interference class story 895's
+        # own criterion_7567/criterion_7566 already guard against with
+        # `Fixtures.isolate_camp/2` (see `SharedGivens.
+        # clear_all_camps/1`'s own doc), just never applied here.
+        # `target_camp` itself is untouched by this call (still
+        # undiscovered, still there to reveal) — `isolate_camp/2`
+        # deliberately "leaves the KEPT camp's own warriors alone" per
+        # its own doc, so this narrows the interference source down to
+        # `target_camp`'s own warriors alone; the `when_` step's own
+        # fix (below) is what closes that remaining gap.
+        :ok = Fixtures.isolate_camp(context.world, target_camp.id)
+
         land_neighbor =
           context.world
           |> Fixtures.adjacent_tiles(target_camp.tile_id)
@@ -101,18 +118,46 @@ defmodule BrokenOathsSpex.Story892.Criterion7545Spex do
         # `context.camps` unchanged.
         camps_before = latest_camps(context.play_live, context.camps)
 
+        # QA issue (same flaky-test investigation as the `given_` step's
+        # own `isolate_camp/2` comment): even with every OTHER camp
+        # isolated away, `target_camp` was free to spawn its OWN
+        # warrior mid-march — and that warrior didn't need to catch the
+        # scout by roaming into it; the scout's own QUEUED PATH could
+        # (and, once `target_camp` stopped varying run to run while
+        # this was being debugged, reliably DID) pass directly through
+        # a tile the freshly-spawned warrior now stood on, snarling the
+        # march into repeated combat rather than a clean walk-past.
+        # `Fixtures.player_units/2` no longer containing the scout's id
+        # once that combat killed it crashed `scout_now` below with a
+        # raw `MatchError` on `[]`, not a normal assertion failure —
+        # the tell that something other than "the march is still in
+        # progress" was going on.
+        #
+        # The actual fix: this loop was marching all the way to
+        # `land_neighbor` even though the scenario's own subject —
+        # `target_camp` turning up in the pushed camp set — is
+        # typically satisfied several turns before the scout physically
+        # arrives (vision reaches beyond the scout's own tile). Once
+        # discovered, continuing to march the scout INTO the camp's own
+        # backyard is pure unrewarded risk this scenario never needed
+        # to take. Halting the instant `target_camp` appears in `camps`
+        # (in addition to the existing "order complete" halt) answers
+        # the scenario's own question as soon as it's answered, instead
+        # of gambling on a clean arrival too.
         scout_now = fn ->
-          [u] =
-            for u <- Fixtures.player_units(context.world, context.user),
-                u.id == context.scout.id,
-                do: u
-
-          u
+          case for u <- Fixtures.player_units(context.world, context.user),
+                   u.id == context.scout.id,
+                   do: u do
+            [u] -> u
+            [] -> flunk("the scouting lord died before reaching #{context.target_camp.tile_id}")
+          end
         end
 
         {_final_unit, camps_after} =
           Enum.reduce_while(1..60, {scout_now.(), camps_before}, fn _turn, {unit, camps} ->
-            if unit.order == nil do
+            discovered? = Enum.any?(camps, &(&1.tile_id == context.target_camp.tile_id))
+
+            if unit.order == nil or discovered? do
               {:halt, {unit, camps}}
             else
               Fixtures.advance_turn(context.world)

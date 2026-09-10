@@ -74,15 +74,7 @@ defmodule BrokenOathsSpex.Story913.Criterion7724Spex do
 
       given_ "Wes has an Oath Strain of 75, after five refusal spikes", context do
         for _ <- 1..5 do
-          attempt_event(context.play_live, "issue_levy", %{
-            "vassal_user_id" => to_string(context.other_user.id),
-            "target_user_id" => to_string(context.third_user.id),
-            "share" => "0.5"
-          })
-
-          attempt_event(context.other_play_live, "refuse_levy", %{
-            "lord_user_id" => to_string(context.user.id)
-          })
+          refuse_a_call_to_arms(context.world, context.user, context.other_user, context.third_user)
         end
 
         75 = read_strain(context.conn, context.world)

@@ -271,6 +271,10 @@ defmodule BrokenOaths.Cities.Production do
   # module's own moduledoc, "Story 933".
   @type building ::
           :library | :ancient_walls | :barracks | :water_mill | :pyramids | :hanging_gardens
+  # Story 949 — Produce Wealth: an ONGOING production mode (converts
+  # this turn's production income straight to gold, every turn, rather
+  # than banking toward a one-time completion) — see `accrue/4`'s own
+  # doc for why it never reaches `resolve_completions/1` at all.
   @type buildable :: unit_buildable() | :granary | building() | :produce_wealth
   @type unit_type ::
           :lord
@@ -340,6 +344,12 @@ defmodule BrokenOaths.Cities.Production do
     # moduledoc "Story 933").
     pyramids: 220,
     hanging_gardens: 220,
+    # Story 949 — Produce Wealth: `accrue/4` deliberately never banks
+    # ANY income onto this item (it's diverted to gold via
+    # `wealth_gold/4` instead), so `banked` permanently stays `0` and
+    # `resolve_completions/1`'s own generic "banked >= cost" check
+    # never fires regardless of `cost`'s exact value — `1` (not `0`)
+    # only to satisfy `@catalog`'s own `pos_integer()` contract.
     produce_wealth: 1
   }
 
@@ -771,6 +781,9 @@ defmodule BrokenOaths.Cities.Production do
   # Story 933 — see this module's own moduledoc, "Story 933".
   def parse_item_type("pyramids"), do: {:ok, :pyramids}
   def parse_item_type("hanging_gardens"), do: {:ok, :hanging_gardens}
+  # Story 949 — Produce Wealth: no research/building/resource gate at
+  # all — any city can switch to it any time, the same "no gate"
+  # posture the `can_queue?/3` catch-all below already gives it.
   def parse_item_type("produce_wealth"), do: {:ok, :produce_wealth}
   def parse_item_type(_other), do: {:error, :invalid_item}
 
@@ -975,12 +988,42 @@ defmodule BrokenOaths.Cities.Production do
   def accrue(city, world, improvements, cleared_features \\ MapSet.new())
   def accrue(%{queue: []} = city, _world, _improvements, _cleared_features), do: city
 
-  def accrue(%{queue: [current | rest]} = city, world, improvements, cleared_features) do
-    income =
-      @flat_production + worked_production(city, world, improvements, cleared_features) +
-        barracks_bonus(city, current.type) + water_mill_production_bonus(city)
+  # Story 949 — Produce Wealth: this turn's would-be production income
+  # is diverted to gold instead (`wealth_gold/4`, summed into
+  # `WorldServer`'s own `gold_income_by_player/1` off this SAME city),
+  # so nothing banks here — the item just sits as the permanent head of
+  # the queue, never reaching `resolve_completions/1`'s own "banked >=
+  # cost" check.
+  def accrue(%{queue: [%{type: :produce_wealth} | _]} = city, _world, _improvements, _cleared_features),
+    do: city
 
+  def accrue(%{queue: [current | rest]} = city, world, improvements, cleared_features) do
+    income = production_income(city, current.type, world, improvements, cleared_features)
     %{city | queue: [%{current | banked: current.banked + income} | rest]}
+  end
+
+  @doc """
+  This turn's production income CONVERTED TO GOLD (story 949, Produce
+  Wealth) — `0` unless `city`'s current (head) queue item is
+  `:produce_wealth`. Same formula `accrue/4` would otherwise bank
+  (flat base + worked-tile production + Barracks'/Water Mill's own
+  bonuses — `:produce_wealth` is never a `@military_types` entry, so
+  the Barracks bonus never applies here regardless), just routed to
+  gold instead: `WorldServer.gold_income_by_player/1` sums this
+  alongside `Yields.city_gold_income/2` per city, so it flows through
+  the SAME tribute/bank pipeline every other real gold income already
+  does.
+  """
+  @spec wealth_gold(city(), World.t(), map(), MapSet.t()) :: non_neg_integer()
+  def wealth_gold(city, world, improvements, cleared_features \\ MapSet.new())
+  def wealth_gold(%{queue: [%{type: :produce_wealth} | _]} = city, world, improvements, cleared_features),
+    do: production_income(city, :produce_wealth, world, improvements, cleared_features)
+
+  def wealth_gold(_city, _world, _improvements, _cleared_features), do: 0
+
+  defp production_income(city, current_type, world, improvements, cleared_features) do
+    @flat_production + worked_production(city, world, improvements, cleared_features) +
+      barracks_bonus(city, current_type) + water_mill_production_bonus(city)
   end
 
   @doc """

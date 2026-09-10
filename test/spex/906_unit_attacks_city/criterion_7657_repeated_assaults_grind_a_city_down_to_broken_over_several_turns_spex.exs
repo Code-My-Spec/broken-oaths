@@ -95,7 +95,7 @@ defmodule BrokenOathsSpex.Story906.Criterion7657Spex do
       when_ "I keep assaulting the city across several turn boundaries", context do
         final_city =
           grind_city(
-            context.play_live,
+            context.user,
             context.world,
             context.my_lord,
             context.other_user,

@@ -292,6 +292,12 @@ defmodule BrokenOathsWeb.GameLive.Play do
             road_enabled?: false,
             road_mode_unit_id: nil,
             road_error: nil,
+            # Story 950 "Build road to a destination" — the single-
+            # command variant (`"build_road_to"` with `city_id` alone,
+            # no `arm_road_mode`/worker-selection dance): the city the
+            # player last requested a road connection to, purely
+            # transient UI state like `road_mode_unit_id` above.
+            road_destination_city: nil,
             selected_city_id: nil,
             selected_city: nil,
             assignable_tiles: [],
@@ -352,6 +358,10 @@ defmodule BrokenOathsWeb.GameLive.Play do
             # `bank_error` above, for `"steward_queue_production"`/
             # `"steward_defend"`.
             steward_error: nil,
+            # Story 947 (Alliance Configuration — delegated unit
+            # control): same transient-error status as `steward_error`
+            # above, for `"delegate_move_unit"`.
+            delegate_control_error: nil,
             # Story 909/910: unlike `vassals-list`/`vassal-status`
             # (naturally empty with the flag off, since nothing ever
             # creates a `Vassalage` row to power them), the Bank/Honor/
@@ -831,6 +841,30 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
       {:error, reason} ->
         {:noreply, assign(socket, road_error: PlayView.road_error_message(reason))}
+    end
+  end
+
+  # Story 950 "Build road to a destination" — the single-command
+  # variant: name a DESTINATION CITY directly rather than arming a
+  # specific worker (`"arm_road_mode"`/the `unit_id`+`to_tile` clause
+  # above) and clicking a tile by hand. `city_id` must be one of the
+  # caller's own cities (`socket.assigns.cities` is already scoped to
+  # `user`, same "no `BrokenOaths.Game` read of its own" posture every
+  # other purely-presentational lookup in this module already has) —
+  # this only ever sets the transient "which city did I last name"
+  # marker `BoardOverlays` renders the route/destination indicator off;
+  # it does not itself dispatch a worker (there may not be one to
+  # dispatch — the existing `unit_id`+`to_tile` order above remains the
+  # real, worker-driven road-laying mechanism, story 929).
+  def handle_event("build_road_to", %{"city_id" => city_id}, socket) do
+    city_id = PlayView.parse_id(city_id)
+
+    case Enum.find(socket.assigns.cities, &(&1.id == city_id)) do
+      nil ->
+        {:noreply, assign(socket, road_error: PlayView.road_error_message(:not_found))}
+
+      city ->
+        {:noreply, assign(socket, road_destination_city: city, road_error: nil)}
     end
   end
 
@@ -1602,6 +1636,24 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
       {:error, reason} ->
         {:noreply, assign(socket, steward_error: PlayView.steward_error_message(reason))}
+    end
+  end
+
+  # Story 947 (Alliance Configuration — delegated unit control),
+  # criterion 2696: no grant mechanism exists yet for an ally to gain
+  # unit-control over another player's units — a FUTURE criterion adds
+  # the actual grant/revoke surface (an alliance-scoped setting,
+  # presumably alongside `AlliancePanel`) and a real `unit_id`/
+  # `to_tile` payload once an authorized delegate can actually queue a
+  # move; until then, `Game.delegate_move_unit/3` always refuses, and
+  # this establishes that absence explicitly rather than leaving the
+  # event unhandled.
+  def handle_event("delegate_move_unit", %{"owner_user_id" => owner_user_id}, socket) do
+    %{world: world, user: user} = socket.assigns
+
+    case Game.delegate_move_unit(world, user, PlayView.parse_id(owner_user_id)) do
+      {:error, reason} ->
+        {:noreply, assign(socket, delegate_control_error: PlayView.delegate_control_error_message(reason))}
     end
   end
 
@@ -2721,6 +2773,24 @@ defmodule BrokenOathsWeb.GameLive.Play do
           <.icon name="hero-circle-stack" class="w-3 h-3" /> {@gold}
         </span>
 
+        <%!-- Story 949 (Produce Wealth) — `data-test="gold-balance"` is
+             a NEW, separate hook rather than a rename of the
+             established `player-gold` badge above (14 other spex files
+             already depend on that exact name). `data-production-income`
+             is a simple "at least one of my cities is actively
+             producing wealth right now" flag, not a precise "gold
+             changed THIS tick because of it" attribution — the same
+             boolean-as-string convention `data-disabled`/
+             `data-copper-met`/`data-coastal-met` (`CityPanel`/
+             `TechPanel`) already use. --%>
+        <span
+          class="badge badge-neutral gap-1"
+          data-test="gold-balance"
+          data-production-income={to_string(PlayView.producing_wealth?(@cities))}
+        >
+          <.icon name="hero-circle-stack" class="w-3 h-3" /> {@gold}
+        </span>
+
         <%!-- Stories 909/910: Bank/Honor/steward-log — gated on
              `@feudal_enabled?` (`Game.feudal_enabled?/0`), unlike
              `vassals-list`/`vassal-status` below (naturally empty with
@@ -2829,6 +2899,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
           chop_error={@chop_error}
           road_error={@road_error}
           steward_error={@steward_error}
+          delegate_control_error={@delegate_control_error}
           player_research={@player_research}
           cities={@cities}
           player_stats={@player_stats}
@@ -2850,6 +2921,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
           road_enabled?={@road_enabled?}
           road_mode_unit_id={@road_mode_unit_id}
           improvements={@improvements}
+          road_destination_city={@road_destination_city}
         />
       </div>
 

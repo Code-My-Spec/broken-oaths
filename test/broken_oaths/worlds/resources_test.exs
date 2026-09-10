@@ -134,10 +134,22 @@ defmodule BrokenOaths.Worlds.ResourcesTest do
     # slightly at the top from the original 5-9% measurement to absorb
     # story 911's Copper-reachability fix — see `Resources`'s own
     # `@copper_rate` comment for why that fix nudges density up a little
-    # on purpose), comfortably inside a generous 5%-9% band. A regression
-    # back toward the old, too-dense default would blow well past 9%; a
-    # broken/near-empty placement would fall under 5% — either fails
-    # this loudly.
+    # on purpose).
+    #
+    # QA issue (found chasing an UNRELATED flaky spex test —
+    # `BrokenOathsSpex.Story905.Criterion7703Spex`, which drives the
+    # real `WorldLive.New` form and so can't pin its own seed down):
+    # this five-seed sample's own "comfortably inside 5-9%" call was
+    # optimistic — a genuinely random 60-seed sample (real scale) put
+    # the TRUE distribution at avg 8.23%, sd 0.58, max 9.84%. The 9.0%
+    # ceiling here sits only ~1.3 standard deviations above that mean
+    # (a real, if smaller than 5%, chance THESE five fixed seeds could
+    # land a future one over 9.0 too, e.g. if `@cache_version` ever
+    # bumps and reshuffles their placement slightly); 10.0% sits ~3.1 SD
+    # out (0/60 random trials exceeded it). Widened to 10.0 to match —
+    # a regression back toward the old, too-dense default would still
+    # blow well past that; a broken/near-empty placement would still
+    # fall under 5% — either still fails this loudly.
     test "a standard-density world places roughly 7% of land tiles with a resource" do
       frequency = 54
       total = Globe.tile_count(frequency)
@@ -149,8 +161,8 @@ defmodule BrokenOaths.Worlds.ResourcesTest do
         resource_count = Enum.count(land, &(Resources.at(w, &1) != nil))
         pct = resource_count / length(land) * 100
 
-        assert pct >= 5.0 and pct <= 9.0,
-               "seed #{seed}: standard density covered #{Float.round(pct, 2)}% of land tiles, expected ~7% (5-9% band)"
+        assert pct >= 5.0 and pct <= 10.0,
+               "seed #{seed}: standard density covered #{Float.round(pct, 2)}% of land tiles, expected ~7% (5-10% band)"
       end
     end
 

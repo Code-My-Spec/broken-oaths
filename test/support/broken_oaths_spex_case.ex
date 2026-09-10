@@ -10,12 +10,24 @@ defmodule BrokenOathsSpex.Case do
 
   import ExUnit.Assertions, only: [flunk: 1]
 
-  using do
+  using options do
     quote do
       @endpoint BrokenOathsWeb.Endpoint
 
       use BrokenOathsWeb, :verified_routes
       use SexySpex
+
+      # `SexySpex.__using__/1` (a vendored dep, not ours to edit)
+      # hardcodes `use ExUnit.Case, async: false` — this second
+      # `use ExUnit.Case` re-declaration is the sanctioned way to
+      # override it: `ExUnit.Case`'s own `:ex_unit_module` module
+      # attribute accumulates via `Keyword.merge/2` across repeated
+      # `use` calls in the same module, right-hand (i.e. LATER) wins,
+      # verified empirically before relying on it here. Defaults to
+      # `false` — unchanged behavior — so only a spex file that
+      # explicitly opts in with `use BrokenOathsSpex.Case, async: true`
+      # is affected.
+      use ExUnit.Case, async: unquote(Keyword.get(options, :async, false))
 
       import Plug.Conn
       import Phoenix.ConnTest
@@ -48,7 +60,15 @@ defmodule BrokenOathsSpex.Case do
     # `on_exit` to stop the sandbox owner — guarantees every world this
     # test touched is torn down first, closing that window before the
     # connection goes away.
-    on_exit(&stop_world_servers/0)
+    #
+    # `async: true` specs skip this: `stop_world_servers/0` sweeps
+    # EVERY `WorldServer` under `BrokenOaths.GameSupervisor`, not just
+    # this test's own — safe only when tests are guaranteed to run one
+    # at a time. Under async, `BrokenOathsSpex.Fixtures.world_fixture/1`/
+    # `get_world!/1` register their OWN narrowly-scoped `on_exit`
+    # (stopping only the specific world they created/read) instead, so
+    # concurrently-running sibling tests are never touched.
+    unless tags[:async], do: on_exit(&stop_world_servers/0)
 
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end

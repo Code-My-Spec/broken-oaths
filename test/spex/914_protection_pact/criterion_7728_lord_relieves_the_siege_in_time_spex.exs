@@ -105,15 +105,7 @@ defmodule BrokenOathsSpex.Story914.Criterion7728Spex do
       given_ "Wes has already refused three calls to arms, giving him a real, positive Oath Strain baseline",
              context do
         for _ <- 1..3 do
-          attempt_event(context.play_live, "issue_levy", %{
-            "vassal_user_id" => to_string(context.other_user.id),
-            "target_user_id" => to_string(context.third_user.id),
-            "share" => "0.5"
-          })
-
-          attempt_event(context.other_play_live, "refuse_levy", %{
-            "lord_user_id" => to_string(context.user.id)
-          })
+          refuse_a_call_to_arms(context.world, context.user, context.other_user, context.third_user)
         end
 
         {:ok, lord_live, _html} = live(context.conn, "/play/#{context.world.id}")

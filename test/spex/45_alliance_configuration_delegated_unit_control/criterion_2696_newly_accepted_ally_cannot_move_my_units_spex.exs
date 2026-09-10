@@ -1,43 +1,47 @@
 defmodule BrokenOathsSpex.Story947.Criterion2696Spex do
   @moduledoc """
-  Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2696 — accepting an alliance alone does not grant unit control.
+  Story 947 — Alliance Configuration — delegated unit control
+  Criterion 2696 — a newly accepted ally cannot move the owner's units.
   """
 
   use BrokenOathsSpex.Case
 
   import BrokenOathsSpex.SharedGivens
 
-  spex "a newly accepted ally cannot move the owner's units" do
-    scenario "an accepted ally attempts to command an owner's unit without a control grant" do
+  spex "an ally has no delegated unit-control grant by default" do
+    scenario "a newly accepted ally's attempt to move my unit is refused" do
       given_(:a_world)
       given_(:registered_player)
       given_(:second_registered_player)
 
-      given_ "the two players have accepted an alliance but no delegated-control grant", context do
-        {:ok, owner_live, _html} = live(context.conn, ~p"/play/#{context.world.id}")
-        {:ok, ally_live, _html} = live(context.other_conn, ~p"/play/#{context.world.id}")
+      given_ "we are accepted allies and I have not granted unit control", context do
+        {:ok, owner_join, _html} = live(context.conn, "/play")
 
-        {:ok, context |> Map.put(:owner_live, owner_live) |> Map.put(:ally_live, ally_live)}
+        owner_join
+        |> element("[data-test='join-world-#{context.world.id}']")
+        |> render_click()
+
+        {:ok, ally_join, _html} = live(context.other_conn, "/play")
+
+        ally_join
+        |> element("[data-test='join-world-#{context.world.id}']")
+        |> render_click()
+
+        {:ok, ally_play, _html} = live(context.other_conn, "/play/#{context.world.id}")
+
+        {:ok, Map.put(context, :ally_play, ally_play)}
       end
 
-      when_ "the ally tries to move one of the owner's units", context do
-        render_hook(context.ally_live, "steward_move", %{
-          "owner_user_id" => to_string(context.user.id),
-          "unit_id" => "1",
-          "to_tile" => "2"
+      when_ "my ally orders one of my units to move", context do
+        render_hook(context.ally_play, "delegate_move_unit", %{
+          "owner_user_id" => to_string(context.user.id)
         })
 
         {:ok, context}
       end
 
-      then_ "the owner's unit is not made available for the ally's order", context do
-        refute has_element?(context.ally_live, "[data-test='steward-order-accepted']")
-        {:ok, context}
-      end
-
-      then_ "the ally is told that delegated control has not been granted", context do
-        assert has_element?(context.ally_live, "[data-test='steward-error']", "control")
+      then_ "the ally sees that no unit-control permission has been granted", context do
+        assert has_element?(context.ally_play, "[data-test='delegate-control-error']", "not authorized")
         {:ok, context}
       end
     end

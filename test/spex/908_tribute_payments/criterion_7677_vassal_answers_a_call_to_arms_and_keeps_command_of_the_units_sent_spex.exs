@@ -60,11 +60,7 @@ defmodule BrokenOathsSpex.Story908.Criterion7677Spex do
         |> element("[data-test='join-world-#{context.world.id}']")
         |> render_click()
 
-        attempt_event(context.play_live, "issue_levy", %{
-          "vassal_user_id" => to_string(context.other_user.id),
-          "target_user_id" => to_string(context.third_user.id),
-          "share" => "0.5"
-        })
+        _ = Fixtures.issue_levy(context.world, context.user, context.other_user.id, context.third_user.id, 0.5)
 
         {:ok, context}
       end
