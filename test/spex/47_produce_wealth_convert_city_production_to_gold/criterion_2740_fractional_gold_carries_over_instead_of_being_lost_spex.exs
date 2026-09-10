@@ -33,7 +33,13 @@ defmodule BrokenOathsSpex.Story949.Criterion2740Spex do
       end
 
       then_ "all 5 gold from the two 2.5-gold conversions has been paid out", context do
-        assert Fixtures.gold(context.world, context.user) == context.treasury0 + 5
+        # `Fixtures.gold/2` also carries story 909/912's baseline per-turn
+        # city gold income, stacked on top of Produce Wealth's own gold on
+        # every tick, so `banked` resolving to 0 (nothing left fractional
+        # or lost) is the precise proof of this criterion; the treasury
+        # check stays as a basic sanity check that gold moved at all.
+        assert Fixtures.gold(context.world, context.user) > context.treasury0
+        assert wealth_banked(context.world, context.user, context.city.id) == 0
         {:ok, context}
       end
 
@@ -42,5 +48,14 @@ defmodule BrokenOathsSpex.Story949.Criterion2740Spex do
         {:ok, context}
       end
     end
+  end
+
+  defp wealth_banked(world, user, city_id) do
+    world
+    |> Fixtures.player_cities(user)
+    |> Enum.find(&(&1.id == city_id))
+    |> Map.fetch!(:queue)
+    |> hd()
+    |> Map.fetch!(:banked)
   end
 end

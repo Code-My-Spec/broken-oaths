@@ -28,13 +28,18 @@ defmodule BrokenOathsSpex.Story949.Criterion2738Spex do
 
       when_ "the city is pillaged and an economy tick passes", context do
         render_hook(context.play_live, "pillage_city", %{"city_id" => to_string(context.city.id)})
-        treasury0 = Fixtures.gold(context.world, context.user)
+        wealth_banked0 = wealth_banked(context.world, context.user, context.city.id)
         Fixtures.advance_turn(context.world)
-        {:ok, Map.put(context, :treasury0, treasury0)}
+        {:ok, Map.put(context, :wealth_banked0, wealth_banked0)}
       end
 
       then_ "the production halt prevents Produce Wealth from adding gold", context do
-        assert Fixtures.gold(context.world, context.user) == context.treasury0
+        # `Fixtures.gold/2` also carries story 909/912's baseline per-turn
+        # city gold income (`Yields.city_gold_income/2`, unrelated to and
+        # never halted by Produce Wealth's own pillage freeze), so the
+        # wealth project's own `banked` progress is the precise thing this
+        # criterion is actually about.
+        assert wealth_banked(context.world, context.user, context.city.id) == context.wealth_banked0
         {:ok, context}
       end
 
@@ -43,5 +48,14 @@ defmodule BrokenOathsSpex.Story949.Criterion2738Spex do
         {:ok, context}
       end
     end
+  end
+
+  defp wealth_banked(world, user, city_id) do
+    world
+    |> Fixtures.player_cities(user)
+    |> Enum.find(&(&1.id == city_id))
+    |> Map.fetch!(:queue)
+    |> hd()
+    |> Map.fetch!(:banked)
   end
 end
