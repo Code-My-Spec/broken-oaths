@@ -93,6 +93,7 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
       |> assign_new(:shoot_targets, fn -> [] end)
       |> assign_new(:road_enabled?, fn -> false end)
       |> assign_new(:road_mode_unit_id, fn -> nil end)
+      |> assign_new(:improvements, fn -> [] end)
       |> assign_new(:unit_id, fn -> Map.get(assigns.unit, :id) end)
       |> assign(:actions, Actions.available(assigns.unit))
       # Story 920 — same `Map.get/3` default the `:charges` readout
@@ -167,7 +168,7 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
         >
           Cancel Fortify
         </button>
-        <.order_summary order={@order} />
+        <.order_summary order={@order} unit={@unit} improvements={@improvements} />
 
         <%!-- Playtest issue 50a0c866 "all unit actions cancellable from the
              units pane" — the last real gap: a queued `:move` order had no
@@ -381,6 +382,16 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
     >
       Attack {@city.name}
     </button>
+    <button
+      type="button"
+      data-test={"raid-city-#{@city.id}"}
+      phx-click="raid_city"
+      phx-value-unit_id={@unit_id}
+      phx-value-target_city_id={@city.id}
+      class="btn btn-sm btn-warning"
+    >
+      Raid {@city.name}
+    </button>
     """
   end
 
@@ -491,6 +502,8 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
   end
 
   attr :order, :map, default: nil
+  attr :unit, :map, default: nil
+  attr :improvements, :list, default: []
 
   defp order_summary(%{order: nil} = assigns) do
     ~H"""
@@ -507,9 +520,27 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
   # `:interrupted`/catch-all clauses below so a `:move` order (never
   # `kind: :road_to`) still falls through to those unchanged.
   defp order_summary(%{order: %{kind: :road_to}} = assigns) do
+    # Issue a9e65eca - a road only gets a real `state.roads` row once the
+    # worker actually reaches a tile and a tick materializes it
+    # (`RoadBuilder`'s own moduledoc, "Pure core, impure shell"), so
+    # `road_improvement` is nil - rendered as "Not yet started" - for
+    # every tick between issuing the order and the worker's first
+    # arrival, same as any freshly-armed order.
+    road_improvement =
+      assigns.unit &&
+        Enum.find(
+          assigns.improvements,
+          &(&1.tile_id == assigns.unit.tile_id and &1.kind == :road)
+        )
+
+    assigns = assign(assigns, :road_improvement, road_improvement)
+
     ~H"""
     <p data-test="unit-order" class="text-sm">
       Building road to tile {@order.target_tile}
+    </p>
+    <p data-test="road-progress" class="text-xs text-base-content/60">
+      {road_progress_label(@road_improvement)}
     </p>
     """
   end
@@ -539,6 +570,10 @@ defmodule BrokenOathsWeb.GameLive.UnitPanel do
   # input path, `Play.apply_unit_panel/3`'s owned-stack `%Unit{}`, which
   # is always the viewer's). Everything else is a rival, shown as a
   # short "Player #<id>" — no email, matching the board rings' rule.
+  defp road_progress_label(%{status: :building, progress: progress}), do: "#{progress} banked"
+  defp road_progress_label(%{status: :complete}), do: "Complete"
+  defp road_progress_label(_), do: "Not yet started"
+
   defp owner_label(unit) do
     cond do
       is_nil(Map.get(unit, :player_id)) -> "Barbarians"

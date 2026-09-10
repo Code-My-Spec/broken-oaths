@@ -73,4 +73,50 @@ defmodule BrokenOaths.Diplomacy do
           :ok | {:error, :not_found | :not_a_party | :not_a_player | Ecto.Changeset.t()}
   def break_alliance(world, user, alliance_id),
     do: WorldServer.call(world, {:break_alliance, user, alliance_id})
+
+  @spec propose_open_borders(map(), map(), map()) :: :ok | {:error, atom() | Ecto.Changeset.t()}
+  def propose_open_borders(world, user, other_user),
+    do: WorldServer.call(world, {:propose_open_borders, user, other_user})
+
+  @spec accept_open_borders(map(), map(), map()) :: :ok | {:error, atom() | Ecto.Changeset.t()}
+  def accept_open_borders(world, user, other_user),
+    do: WorldServer.call(world, {:accept_open_borders, user, other_user})
+
+  @spec revoke_open_borders(map(), map(), map()) :: :ok | {:error, atom()}
+  def revoke_open_borders(world, user, other_user),
+    do: WorldServer.call(world, {:revoke_open_borders, user, other_user})
+
+  @spec open_borders_active?(map(), map(), map()) :: boolean()
+  def open_borders_active?(world, user, other_user),
+    do: WorldServer.call(world, {:open_borders_active?, user, other_user})
+
+  @doc "Every discovered player with an Open Borders row (proposed or accepted) with `user`."
+  @spec open_borders_partners(map(), map()) :: [map()]
+  def open_borders_partners(world, user),
+    do: WorldServer.call(world, {:open_borders_partners, user})
+
+  @doc "Declare war on another player in the world."
+  @spec declare_war(map(), map(), map()) :: :ok | {:error, atom() | Ecto.Changeset.t()}
+  def declare_war(world, user, other_user),
+    do: WorldServer.call(world, {:declare_war, user, other_user})
+
+  @doc "Offer peace to a wartime rival."
+  @spec offer_war_peace(map(), map(), map()) :: :ok | {:error, atom() | Ecto.Changeset.t()}
+  def offer_war_peace(world, user, other_user),
+    do: WorldServer.call(world, {:offer_war_peace, user, other_user})
+
+  @doc "Accept a wartime rival's pending peace offer."
+  @spec accept_war_peace(map(), map(), map()) :: :ok | {:error, atom() | Ecto.Changeset.t()}
+  def accept_war_peace(world, user, other_user),
+    do: WorldServer.call(world, {:accept_war_peace, user, other_user})
+
+  @doc "Whether an active war exists between two players."
+  @spec at_war?(map(), map(), map()) :: boolean()
+  def at_war?(world, user, other_user),
+    do: WorldServer.call(world, {:at_war?, user, other_user})
+
+  @doc "Active wars involving `user`, including any pending peace offer."
+  @spec war_relationships(map(), map()) :: [map()]
+  def war_relationships(world, user),
+    do: WorldServer.call(world, {:war_relationships, user})
 end

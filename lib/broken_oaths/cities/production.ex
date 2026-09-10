@@ -252,7 +252,7 @@ defmodule BrokenOaths.Cities.Production do
   import Ecto.Query
 
   alias BrokenOaths.Cities.Buildings
-  alias BrokenOaths.Combat.CityDefense
+  alias BrokenOaths.Combat.{CityDefense, Occupation}
   alias BrokenOaths.Cities.ProductionItem
   alias BrokenOaths.Technology.Research
   alias BrokenOaths.Cities.Yields
@@ -461,6 +461,10 @@ defmodule BrokenOaths.Cities.Production do
   @spec can_queue?(city(), buildable(), keyword()) :: :ok | {:error, can_queue_error()}
   def can_queue?(%{size: 1}, :settler, _opts), do: {:error, :size_one}
 
+  def can_queue?(_city, :produce_wealth, opts) do
+    if Keyword.get(opts, :granary_available?, false), do: :ok, else: {:error, :locked}
+  end
+
   def can_queue?(city, :granary, opts) do
     cond do
       Buildings.has?(city, :granary) -> {:error, :already_built}
@@ -561,6 +565,7 @@ defmodule BrokenOaths.Cities.Production do
   def available_items(opts \\ []) do
     @always_available
     |> maybe_offer(:granary, Keyword.get(opts, :granary_available?, false))
+    |> maybe_offer(:produce_wealth, Keyword.get(opts, :granary_available?, false))
     |> maybe_offer(:bronze_spearman, Keyword.get(opts, :bronze_age?, false))
     |> maybe_offer(:archer, Keyword.get(opts, :archery?, false))
     |> maybe_offer(:galley, Keyword.get(opts, :sailing?, false))
@@ -604,6 +609,7 @@ defmodule BrokenOaths.Cities.Production do
   def queue_production(state, user, city_id, type) do
     with {:ok, city} <- owned_city(state, user, city_id),
          {:ok, type} <- parse_item_type(type),
+         :ok <- Occupation.validate_production(city, type),
          :ok <-
            can_queue?(city, type,
              granary_available?: granary_available?(state, city),
@@ -633,8 +639,45 @@ defmodule BrokenOaths.Cities.Production do
         )
         |> Repo.insert()
 
-      new_city = %{city | queue: city.queue ++ [queue_item_map(item)]}
+      queue =
+        case city.queue do
+          [%{type: :produce_wealth, id: wealth_id} | rest] ->
+            Repo.delete_all(from(p in ProductionItem, where: p.id == ^wealth_id))
+            rest ++ [queue_item_map(item)]
+
+          queue ->
+            queue ++ [queue_item_map(item)]
+        end
+
+      new_city = %{city | queue: queue}
       {:ok, %{state | cities: Map.put(state.cities, city_id, new_city)}}
+    end
+  end
+
+  @doc "Select Produce Wealth, pausing any ordinary build at the head of the queue."
+  @spec produce_wealth(map(), map(), integer()) :: {:ok, map()} | {:error, atom()}
+  def produce_wealth(state, user, city_id) do
+    with {:ok, city} <- owned_city(state, user, city_id),
+         :ok <- can_queue?(city, :produce_wealth, granary_available?: granary_available?(state, city)),
+         :ok <- Occupation.validate_production(city, :produce_wealth) do
+      existing_wealth = Enum.find(city.queue, &(&1.type == :produce_wealth))
+
+      if existing_wealth do
+        queue = [existing_wealth | Enum.reject(city.queue, &(&1.id == existing_wealth.id))]
+        {:ok, %{state | cities: Map.put(state.cities, city_id, %{city | queue: queue})}}
+      else
+        {:ok, item} =
+          %ProductionItem{}
+          |> ProductionItem.changeset(
+            new_item(:produce_wealth)
+            |> Map.put(:city_id, city_id)
+            |> Map.put(:position, 0)
+          )
+          |> Repo.insert()
+
+        wealth = queue_item_map(item)
+        {:ok, %{state | cities: Map.put(state.cities, city_id, %{city | queue: [wealth | city.queue]})}}
+      end
     end
   end
 
@@ -1073,8 +1116,38 @@ defmodule BrokenOaths.Cities.Production do
     if CityDefense.production_halted?(city, state.turn) do
       city
     else
-      accrue(city, state.world, state.improvements, Map.get(state, :cleared_features, MapSet.new()))
+      accrue(
+        city,
+        state.world,
+        state.improvements,
+        Map.get(state, :cleared_features, MapSet.new())
+      )
     end
+  end
+
+  @doc "Settles completed four-production chunks from active Produce Wealth projects."
+  @spec settle_wealth(map()) :: map()
+  def settle_wealth(state) do
+    {cities, players} =
+      Enum.reduce(state.cities, {%{}, state.players}, fn {city_id, city}, {cities, players} ->
+        case city.queue do
+          [%{type: :produce_wealth, banked: banked} = wealth | rest] ->
+            if CityDefense.production_halted?(city, state.turn) do
+              {Map.put(cities, city_id, city), players}
+            else
+              gold = div(banked, 4)
+            remainder = rem(banked, 4)
+            player = Map.fetch!(players, city.player_id)
+            city = %{city | queue: [%{wealth | banked: remainder} | rest]}
+            {Map.put(cities, city_id, city), Map.put(players, city.player_id, %{player | gold: player.gold + gold})}
+            end
+
+          _ ->
+            {Map.put(cities, city_id, city), players}
+        end
+      end)
+
+    %{state | cities: cities, players: players}
   end
 
   # -------------------------------------------------------------------
@@ -1177,6 +1250,11 @@ defmodule BrokenOaths.Cities.Production do
         |> complete_loop(occupied, world, [event | events])
     end
   end
+
+  # Produce Wealth is a perpetual project: its banked production is settled as
+  # gold by WorldServer, never treated as a completed build.
+  defp complete_loop(%{queue: [%{type: :produce_wealth} | _]} = city, _occupied, _world, events),
+    do: {city, Enum.reverse(events)}
 
   defp complete_loop(%{queue: [current | rest]} = city, occupied, world, events) do
     if current.banked >= current.cost and spawnable?(city, current.type) do

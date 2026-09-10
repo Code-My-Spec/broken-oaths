@@ -88,8 +88,25 @@ config :broken_oaths,
 # never comes back, looping forever with nothing erroring. Framing must
 # happen from https://dev.codemyspec.com.
 if config_env() == :dev do
-  config :broken_oaths,
-    preview: ClientUtils.Harness.Preview.config(".", origin_url: "http://127.0.0.1:4050")
+  preview_config =
+    ClientUtils.Harness.Preview.config(".", origin_url: "http://127.0.0.1:4050")
+
+  config :broken_oaths, preview: preview_config
+
+  # Absolute URLs generated outside of a request (magic-link/confirmation
+  # emails via `url(~p"...")`, OAuth redirect URIs) otherwise fall back to
+  # this endpoint's static `:url` config, which is "localhost" here — a host
+  # nobody reading the email over the preview tunnel can reach. When a
+  # preview is configured, point `:url` at its real hostname so those links
+  # resolve to the address the recipient is actually looking at.
+  case Keyword.get(preview_config, :hostname) do
+    hostname when is_binary(hostname) and hostname != "" ->
+      config :broken_oaths, BrokenOathsWeb.Endpoint,
+        url: [host: hostname, scheme: "https", port: 443]
+
+    _ ->
+      :ok
+  end
 end
 
 if config_env() == :prod do

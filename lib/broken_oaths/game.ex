@@ -315,6 +315,11 @@ defmodule BrokenOaths.Game do
              | :not_hostile}
   defdelegate attack_city(world, user, unit_id, city_id), to: Combat
 
+  @doc "Raid an adjacent wartime rival city for gold without changing its ownership."
+  @spec raid_city(map(), map(), term(), term()) ::
+          {:ok, %{gold_gained: pos_integer()}} | {:error, atom()}
+  defdelegate raid_city(world, user, unit_id, city_id), to: Combat
+
   @doc "Order `unit_id` (an Archer) to shoot `target_unit_id` (QA issue 12bed1e4). See `Combat.shoot/4`."
   @spec shoot(map(), map(), term(), term()) ::
           {:ok, %{damage_dealt: pos_integer(), damage_taken: 0}}
@@ -395,6 +400,14 @@ defmodule BrokenOaths.Game do
           :ok | {:error, :not_owner | :invalid_item | :size_one}
   defdelegate queue_production(world, user, city_id, type), to: Cities
 
+  @doc "Set a city's current production to Produce Wealth. See `Cities.produce_wealth/3`."
+  @spec produce_wealth(map(), map(), term()) :: :ok | {:error, atom()}
+  defdelegate produce_wealth(world, user, city_id), to: Cities
+
+  @doc "Pillage an owned city. See `Cities.pillage_city/3`."
+  @spec pillage_city(map(), map(), term()) :: :ok | {:error, atom()}
+  defdelegate pillage_city(world, user, city_id), to: Cities
+
   @doc "Move a queued item one slot toward the head. See `Cities.reorder_production_item/4`."
   @spec reorder_production_item(map(), map(), term(), term()) ::
           :ok | {:error, :not_owner | :not_found | :invalid_item}
@@ -459,6 +472,9 @@ defmodule BrokenOaths.Game do
   @doc "All of `user`'s cities in `world`. See `Cities.player_cities/2`."
   defdelegate player_cities(world, user), to: Cities
 
+  @doc "The user whose city territory contains `tile_id`, if any."
+  defdelegate territory_owner(world, tile_id), to: Cities
+
   @doc "Whether `user`'s player currently has Copper access, PLAYER-WIDE. See `Cities.copper_access?/2`."
   @spec copper_access?(map(), map()) :: boolean()
   defdelegate copper_access?(world, user), to: Cities
@@ -509,6 +525,34 @@ defmodule BrokenOaths.Game do
              | Ecto.Changeset.t()}
   defdelegate accept_alliance(world, user, alliance_id), to: Diplomacy
   defdelegate break_alliance(world, user, alliance_id), to: Diplomacy
+
+  @doc "Propose Open Borders with another player."
+  defdelegate propose_open_borders(world, user, other_user), to: Diplomacy
+
+  @doc "Accept another player's pending Open Borders proposal."
+  defdelegate accept_open_borders(world, user, other_user), to: Diplomacy
+
+  @doc "Revoke an Open Borders agreement."
+  defdelegate revoke_open_borders(world, user, other_user), to: Diplomacy
+
+  @doc "Whether an accepted Open Borders agreement exists between two players."
+  defdelegate open_borders_active?(world, user, other_user), to: Diplomacy
+  defdelegate open_borders_partners(world, user), to: Diplomacy
+
+  @doc "Declare war on another player."
+  defdelegate declare_war(world, user, other_user), to: Diplomacy
+
+  @doc "Offer peace to a wartime rival."
+  defdelegate offer_war_peace(world, user, other_user), to: Diplomacy
+
+  @doc "Accept a wartime rival's pending peace offer."
+  defdelegate accept_war_peace(world, user, other_user), to: Diplomacy
+
+  @doc "Whether an active war exists between two players."
+  defdelegate at_war?(world, user, other_user), to: Diplomacy
+
+  @doc "Active wars involving a player, including pending peace offers."
+  defdelegate war_relationships(world, user), to: Diplomacy
 
   # -------------------------------------------------------------------
   # Vassalage / Tribute (stories 907/908) —

@@ -35,6 +35,11 @@ defmodule BrokenOathsWeb.GameLive.KnownPlayersPanel do
       (`Game.known_players/2`). `display_name` is the player-facing
       handle, never the email (playtest issue 2a9df843) — `[]` before any
       discovery has happened, which renders the panel's empty state
+    * `:open_borders_partners` - `[%{other_user_id:, status:,
+      proposed_by_me?:}]` (story 994, `Game.open_borders_partners/2`) —
+      every known player with a `:proposed` or `:accepted` Open Borders
+      row, so each row's own button can read Propose/Accept/Pending/Revoke
+      correctly without this component touching `BrokenOaths.Game` itself.
 
   `Play` hides this panel while `GameLive.ChatPanel` is open (its own
   contact list reuses the same `known-player-ID` row shape story 900's
@@ -46,6 +51,15 @@ defmodule BrokenOathsWeb.GameLive.KnownPlayersPanel do
 
   use BrokenOathsWeb, :live_component
 
+  @impl true
+  def update(assigns, socket) do
+    {:ok,
+     socket
+     |> assign(assigns)
+     |> assign_new(:open_borders_partners, fn -> [] end)}
+  end
+
+  @impl true
   def render(assigns) do
     ~H"""
     <div id={@id} data-test="known-players-panel" class="card bg-base-200 shadow-sm w-64">
@@ -60,13 +74,21 @@ defmodule BrokenOathsWeb.GameLive.KnownPlayersPanel do
           No other civilizations discovered yet.
         </p>
 
-        <.known_player :for={player <- @known_players} player={player} />
+        <.known_player
+          :for={player <- @known_players}
+          player={player}
+          open_borders={open_borders_for(player.user_id, @open_borders_partners)}
+        />
       </div>
     </div>
     """
   end
 
+  defp open_borders_for(user_id, partners),
+    do: Enum.find(partners, &(&1.other_user_id == user_id))
+
   attr :player, :map, required: true
+  attr :open_borders, :map, default: nil
 
   defp known_player(assigns) do
     ~H"""
@@ -77,6 +99,17 @@ defmodule BrokenOathsWeb.GameLive.KnownPlayersPanel do
       class="flex items-center justify-between gap-2 text-sm cursor-pointer"
     >
       <span class="truncate">{@player.display_name}</span>
+      <.open_borders_button player={@player} open_borders={@open_borders} />
+      <button
+        type="button"
+        data-test={"declare-war-#{@player.user_id}"}
+        phx-click="declare_war"
+        phx-value-neighbor_user_id={@player.user_id}
+        class="btn btn-ghost btn-xs text-error"
+        aria-label={"Declare war on #{@player.display_name}"}
+      >
+        <.icon name="hero-flag" class="w-3 h-3" />
+      </button>
       <button
         type="button"
         data-test="chat-link"
@@ -88,6 +121,68 @@ defmodule BrokenOathsWeb.GameLive.KnownPlayersPanel do
         <.icon name="hero-chat-bubble-left-right" class="w-3 h-3" />
       </button>
     </div>
+    """
+  end
+
+  attr :player, :map, required: true
+  attr :open_borders, :map, default: nil
+
+  # Story 994 (Open Borders Agreements): one button per known player,
+  # reading Propose/Pending/Accept/Revoke off `@open_borders` — the
+  # same "single button whose label/event follow the relationship's own
+  # state" shape `GameLive.AlliancePanel`'s accept/break button already
+  # has, just inline on the roster row rather than a separate panel
+  # since Open Borders has no proposal-review list of its own.
+  defp open_borders_button(%{open_borders: nil} = assigns) do
+    ~H"""
+    <button
+      type="button"
+      data-test={"propose-open-borders-#{@player.user_id}"}
+      phx-click="propose_open_borders"
+      phx-value-neighbor_user_id={@player.user_id}
+      class="btn btn-ghost btn-xs"
+      aria-label={"Propose Open Borders with #{@player.display_name}"}
+    >
+      <.icon name="hero-arrows-right-left" class="w-3 h-3" />
+    </button>
+    """
+  end
+
+  defp open_borders_button(%{open_borders: %{status: :accepted}} = assigns) do
+    ~H"""
+    <button
+      type="button"
+      data-test={"revoke-open-borders-#{@player.user_id}"}
+      phx-click="revoke_open_borders"
+      phx-value-neighbor_user_id={@player.user_id}
+      class="btn btn-ghost btn-xs text-warning"
+      aria-label={"Revoke Open Borders with #{@player.display_name}"}
+    >
+      <.icon name="hero-arrows-right-left" class="w-3 h-3" />
+    </button>
+    """
+  end
+
+  defp open_borders_button(%{open_borders: %{status: :proposed, proposed_by_me?: true}} = assigns) do
+    ~H"""
+    <span data-test={"open-borders-pending-#{@player.user_id}"} class="text-xs opacity-60">
+      Pending
+    </span>
+    """
+  end
+
+  defp open_borders_button(assigns) do
+    ~H"""
+    <button
+      type="button"
+      data-test={"accept-open-borders-#{@player.user_id}"}
+      phx-click="accept_open_borders"
+      phx-value-neighbor_user_id={@player.user_id}
+      class="btn btn-primary btn-xs"
+      aria-label={"Accept Open Borders with #{@player.display_name}"}
+    >
+      <.icon name="hero-arrows-right-left" class="w-3 h-3" />
+    </button>
     """
   end
 end

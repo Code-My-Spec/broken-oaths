@@ -74,6 +74,10 @@ defmodule BrokenOathsSpex.Story908.Criterion7679Spex do
                 [my_lord.tile_id]
               )
 
+            render_hook(vassal_context.play_live, "declare_war", %{
+              "counterparty_user_id" => to_string(other_user.id)
+            })
+
             my_lord =
               march_to(
                 vassal_context.play_live,

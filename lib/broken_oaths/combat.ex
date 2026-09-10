@@ -67,6 +67,12 @@ defmodule BrokenOaths.Combat do
   def attack_city(world, user, unit_id, city_id),
     do: WorldServer.call(world, {:attack_city, user, unit_id, city_id})
 
+  @doc "Raid an adjacent wartime rival city for gold without changing its ownership."
+  @spec raid_city(map(), map(), term(), term()) ::
+          {:ok, %{gold_gained: pos_integer()}} | {:error, atom()}
+  def raid_city(world, user, unit_id, city_id),
+    do: WorldServer.call(world, {:raid_city, user, unit_id, city_id})
+
   @doc """
   Order `unit_id` (an Archer) to shoot `target_unit_id` (QA issue
   12bed1e4): up to `BrokenOaths.Combat.Resolver.shoot_range/0` hexes
@@ -95,7 +101,8 @@ defmodule BrokenOaths.Combat do
   """
   @spec shoot_camp(map(), map(), term(), term()) ::
           {:ok, %{damage_dealt: pos_integer(), damage_taken: 0}}
-          | {:error, :not_owner | :invalid_target | :out_of_movement | :out_of_range | :not_archer}
+          | {:error,
+             :not_owner | :invalid_target | :out_of_movement | :out_of_range | :not_archer}
   def shoot_camp(world, user, unit_id, camp_id),
     do: WorldServer.call(world, {:shoot_camp, user, unit_id, camp_id})
 

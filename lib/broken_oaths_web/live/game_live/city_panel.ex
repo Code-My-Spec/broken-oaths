@@ -117,7 +117,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
 
   use BrokenOathsWeb, :live_component
 
-  alias BrokenOaths.Combat.CityDefense
+  alias BrokenOaths.Combat.{CityDefense, Occupation}
   alias BrokenOaths.Cities.Production
   alias BrokenOaths.Technology.Research
   alias BrokenOaths.Cities.Yields
@@ -141,7 +141,10 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
       assigns
       |> assign(:assignable_tiles, Map.get(assigns, :assignable_tiles, []))
       |> assign(:production_opts, production_opts)
-      |> assign(:catalog, Production.available_items(production_opts))
+      |> assign(
+        :catalog,
+        Occupation.available_items(assigns.city, Production.available_items(production_opts))
+      )
 
     ~H"""
     <div id={@id} data-test="city-panel" class="card bg-base-200 shadow-sm w-72 relative">
@@ -172,16 +175,11 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
             {@city.hp}/{CityDefense.max_hp(@city)}
           </span>
           <span class="badge badge-outline" data-test="city-defense">{@city.defense}</span>
-          <%!-- Story 906 — `@city.status` (`Siege.status/1`, computed by
-               `Game.player_cities/2`) is `:free` in the ordinary healthy
-               case, rendered as no badge at all (criterion 7664 relies
-               on that absence as its own anchor). --%>
           <span
-            :if={Map.get(@city, :status, :free) != :free}
             class="badge badge-warning badge-outline"
             data-test="city-status"
           >
-            {@city.status}
+            {Map.get(@city, :status, :free)}
           </span>
         </div>
 
@@ -209,7 +207,28 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
           building={building}
         />
 
+        <div
+          :if={not is_nil(Map.get(@city, :production_halted_until))}
+          data-test="city-production-halted"
+          class="badge badge-warning badge-outline"
+        >
+          Production halted
+        </div>
+
         <.current_production queue={@city.queue} city_id={@city.id} />
+
+        <button
+          :if={:produce_wealth in @catalog}
+          type="button"
+          data-test="production-option-produce_wealth"
+          data-disabled="false"
+          phx-click="produce_wealth"
+          phx-value-city_id={@city.id}
+          class="btn btn-sm btn-outline justify-between w-full"
+        >
+          <span>Produce Wealth</span>
+          <span>gold/turn</span>
+        </button>
 
         <div class="divider my-0 text-xs opacity-60">Build</div>
         <div class="flex flex-col gap-1">

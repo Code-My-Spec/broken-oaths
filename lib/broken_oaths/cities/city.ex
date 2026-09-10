@@ -486,6 +486,7 @@ defmodule BrokenOaths.Cities.City do
       # single source of truth for `GameLive.CityPanel`'s `city-status`
       # badge.
       status: Siege.status(city),
+      production_halted_until: Map.get(city, :production_halted_until),
       occupied_by_player_id: Map.get(city, :occupied_by_player_id)
     }
   end

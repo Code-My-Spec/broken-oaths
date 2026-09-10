@@ -77,6 +77,10 @@ defmodule BrokenOathsSpex.Story906.Criterion7652Spex do
             warrior.tile_id
           ])
 
+        render_hook(context.play_live, "declare_war", %{
+          "neighbor_user_id" => to_string(context.other_user.id)
+        })
+
         warrior = march_to(context.play_live, context.world, context.user, warrior, target)
 
         context

@@ -31,6 +31,11 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
   attr :user, :map, required: true
   attr :chat_target_user_id, :any, required: true
   attr :order_error, :any, required: true
+  attr :declare_war_required_user_id, :any, required: true
+  attr :war_hostile_user_id, :any, required: true
+  attr :hostile_border_entry_user_id, :any, required: true
+  attr :open_borders_partners, :list, required: true
+  attr :open_borders_entry_status, :any, required: true
   attr :combat_error, :any, required: true
   attr :city_error, :any, required: true
   attr :improvement_error, :any, required: true
@@ -89,6 +94,12 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
   # same "computed by `Play`, only rendered here" status
   # `road_mode_unit_id` above already has.
   attr :road_destination_city, :any, required: true
+  # Issue a9e65eca - the build-road-to progress cue's own data source:
+  # every improvement (yield-slot and road) visible to the player, same
+  # list `select_tile`'s own tile panel already reads for a standing
+  # improvement, just handed to `UnitPanel` too so it can find the road
+  # entry at the selected worker's own tile.
+  attr :improvements, :list, required: true
 
   def overlays(assigns) do
     ~H"""
@@ -136,6 +147,7 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
           module={BrokenOathsWeb.GameLive.KnownPlayersPanel}
           id="known-players-panel"
           known_players={@known_players}
+          open_borders_partners={@open_borders_partners}
         />
       </div>
 
@@ -161,6 +173,38 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
     <div class="absolute top-4 left-4 flex flex-col gap-2 items-start">
       <div :if={@order_error} class="alert alert-error w-auto shadow-lg" data-test="order-error">
         <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> {@order_error}
+      </div>
+
+      <div
+        :if={@declare_war_required_user_id}
+        class="alert alert-warning w-auto shadow-lg"
+        data-test="declare-war-required"
+      >
+        <.icon name="hero-exclamation-triangle" class="w-4 h-4" />
+        Declare war before entering this territory.
+        <button
+          type="button"
+          data-test="declare-war-required-confirm"
+          phx-click="declare_war"
+          phx-value-neighbor_user_id={@declare_war_required_user_id}
+          class="btn btn-xs btn-error"
+        >
+          Declare War
+        </button>
+      </div>
+
+      <div :if={@war_hostile_user_id} data-test={"war-hostile-#{@war_hostile_user_id}"}></div>
+      <div :if={@hostile_border_entry_user_id} data-test="hostile-border-entry"></div>
+
+      <div
+        :for={partner <- Enum.filter(@open_borders_partners, &(&1.status == :accepted))}
+        data-test={"open-borders-active-#{partner.other_user_id}"}
+      >
+      </div>
+
+      <div :if={@open_borders_entry_status == :peaceful} data-test="open-borders-peaceful-entry">
+      </div>
+      <div :if={@open_borders_entry_status == :refused} data-test="open-borders-entry-refused">
       </div>
 
       <div
@@ -358,6 +402,7 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
         shoot_targets={@shoot_targets}
         road_enabled?={@road_enabled?}
         road_mode_unit_id={@road_mode_unit_id}
+        improvements={@improvements}
       />
 
       <.live_component

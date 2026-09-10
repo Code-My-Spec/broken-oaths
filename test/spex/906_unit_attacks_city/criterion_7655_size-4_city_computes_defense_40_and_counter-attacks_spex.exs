@@ -59,6 +59,11 @@ defmodule BrokenOathsSpex.Story906.Criterion7655Spex do
           for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
 
         target = adjacent_land_tile(context.world, context.other_city.tile_id, [my_lord.tile_id])
+
+        render_hook(context.play_live, "declare_war", %{
+          "neighbor_user_id" => to_string(context.other_user.id)
+        })
+
         my_lord = march_to(context.play_live, context.world, context.user, my_lord, target)
 
         {:ok, Map.put(context, :my_lord, my_lord)}

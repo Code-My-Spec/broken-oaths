@@ -92,6 +92,10 @@ defmodule BrokenOathsSpex.Story907.Criterion7667Spex do
 
         render_hook(context.other_play_live, "found_city", %{"unit_id" => to_string(settler.id)})
 
+        render_hook(context.play_live, "declare_war", %{
+          "counterparty_user_id" => to_string(context.other_user.id)
+        })
+
         [my_lord] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :lord, do: u
 

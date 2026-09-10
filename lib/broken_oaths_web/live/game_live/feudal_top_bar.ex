@@ -32,6 +32,7 @@ defmodule BrokenOathsWeb.GameLive.FeudalTopBar do
   attr :allow_steward_production, :boolean, required: true
   attr :vassals, :list, required: true
   attr :known_players, :list, required: true
+  attr :war_relationships, :list, required: true
   attr :conspiracy_heat, :any, required: true
   attr :pact_informed, :any, required: true
   attr :rebellions_as_lord, :list, required: true
@@ -97,6 +98,31 @@ defmodule BrokenOathsWeb.GameLive.FeudalTopBar do
                real, renderable state, not an absent one). --%>
       <.steward_log_panel steward_log={@steward_log} />
     <% end %>
+
+    <%!-- Story 1001 — ordinary wars are separate from rebellion wars: both
+             sides can see an offer, and only its recipient can accept it. --%>
+    <div :for={relationship <- @war_relationships} class="flex items-center gap-1" data-test={"war-relationship-#{relationship.other_user_id}"}>
+      <span class="badge badge-error gap-1" data-test="at-war-with">
+        <.icon name="hero-fire" class="w-3 h-3" /> At war with {relationship.other_name}
+      </span>
+      <div :if={relationship.status == :peace_offered} class="flex items-center gap-1" data-test="pending-peace-offer">
+        <span class="text-xs">Peace offered by {if relationship.peace_offered_by_user_id == @user.id, do: "you", else: relationship.other_name}</span>
+        <button
+          :if={relationship.peace_offered_by_user_id != @user.id}
+          type="button"
+          phx-click="accept_peace"
+          phx-value-counterparty_user_id={relationship.other_user_id}
+          data-test="accept-peace"
+          class="btn btn-xs btn-primary"
+        >
+          Accept
+        </button>
+      </div>
+      <form :if={relationship.status == :active} phx-submit="offer_peace" class="flex items-center gap-1" data-test={"offer-peace-form-#{relationship.other_user_id}"}>
+        <input type="hidden" name="counterparty_user_id" value={relationship.other_user_id} />
+        <button type="submit" data-test="offer-peace" class="btn btn-xs btn-outline">Offer Peace</button>
+      </form>
+    </div>
 
     <%!-- Story 907: the lord's own Vassals list — only mounted while
              non-empty (criterion 7667's own "no vassals-list at all"
@@ -676,6 +702,10 @@ defmodule BrokenOathsWeb.GameLive.FeudalTopBar do
       <div class="flex items-center justify-between text-xs opacity-70">
         <span>Oath Strain <span data-test="vassal-oath-strain">{@vassal.oath_strain}</span></span>
         <span :if={@vassal.levy_status} data-test="levy-status">{@vassal.levy_status}</span>
+      </div>
+
+      <div class="text-xs opacity-70">
+        Tribute received: <span data-test="tribute-received">{@vassal.tribute_received}</span>
       </div>
 
       <%!-- Story 913 (criterion 7721): the strain gauge's own drivers
