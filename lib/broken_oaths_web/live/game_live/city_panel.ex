@@ -175,11 +175,16 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
             {@city.hp}/{CityDefense.max_hp(@city)}
           </span>
           <span class="badge badge-outline" data-test="city-defense">{@city.defense}</span>
+          <%!-- Story 906 — `@city.status` (`Siege.status/1`, computed by
+               `Game.player_cities/2`) is `:free` in the ordinary healthy
+               case, rendered as no badge at all (criterion 7664 relies
+               on that absence as its own anchor). --%>
           <span
+            :if={Map.get(@city, :status, :free) != :free}
             class="badge badge-warning badge-outline"
             data-test="city-status"
           >
-            {Map.get(@city, :status, :free)}
+            {@city.status}
           </span>
         </div>
 

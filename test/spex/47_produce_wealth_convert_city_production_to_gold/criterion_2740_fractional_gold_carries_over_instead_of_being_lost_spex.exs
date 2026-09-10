@@ -22,8 +22,18 @@ defmodule BrokenOathsSpex.Story949.Criterion2740Spex do
         render_hook(context.play_live, "select_research", %{"tech" => "pottery"})
         for _ <- 1..25, do: Fixtures.advance_turn(context.world)
 
+        # The city's own terrain-derived gold income (story 912) keeps
+        # flowing every tick regardless of what's queued — Produce
+        # Wealth converts production, not that separate income stream.
+        # Baseline it over one plain tick BEFORE switching so the
+        # `then_` step can isolate the wealth conversion's own
+        # contribution from this same city's ordinary income.
+        before_tick = Fixtures.gold(context.world, context.user)
+        Fixtures.advance_turn(context.world)
+        base_income_per_tick = Fixtures.gold(context.world, context.user) - before_tick
+
         render_hook(context.play_live, "produce_wealth", %{"city_id" => to_string(context.city.id)})
-        {:ok, context}
+        {:ok, Map.put(context, :base_income_per_tick, base_income_per_tick)}
       end
 
       when_ "two economy ticks pass", context do
@@ -32,8 +42,10 @@ defmodule BrokenOathsSpex.Story949.Criterion2740Spex do
         {:ok, Map.put(context, :treasury0, treasury0)}
       end
 
-      then_ "all 5 gold from the two 2.5-gold conversions has been paid out", context do
-        assert Fixtures.gold(context.world, context.user) == context.treasury0 + 5
+      then_ "all 5 gold from the two 2.5-gold conversions has been paid out, on top of the city's own ordinary income",
+            context do
+        expected = context.treasury0 + 2 * context.base_income_per_tick + 5
+        assert Fixtures.gold(context.world, context.user) == expected
         {:ok, context}
       end
 

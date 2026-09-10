@@ -142,7 +142,7 @@ defmodule BrokenOathsSpex.Story906.Criterion7664Spex do
           "city_id" => to_string(context.second_city.id)
         })
 
-        assert has_element?(context.other_play_live, "[data-test='city-status']", "free")
+        refute has_element?(context.other_play_live, "[data-test='city-status']")
         {:ok, context}
       end
 

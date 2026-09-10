@@ -8,21 +8,27 @@ defmodule BrokenOathsSpex.Story949.Criterion2731Spex do
 
   import BrokenOathsSpex.SharedGivens
 
+  alias BrokenOathsSpex.Fixtures
+
   spex "a player directs a city to produce wealth" do
     scenario "the city turns its production into visible gold rather than progress on a build" do
       given_(:a_world)
       given_(:registered_player)
       given_(:a_founded_city)
 
+      given_ "the player has researched Pottery, unlocking Produce Wealth", context do
+        render_hook(context.play_live, "toggle_tech_panel", %{})
+        render_hook(context.play_live, "select_research", %{"tech" => "pottery"})
+        for _ <- 1..25, do: Fixtures.advance_turn(context.world)
+        {:ok, context}
+      end
+
       when_ "I select Produce Wealth for my city and its next turn resolves", context do
         render_hook(context.play_live, "select_city", %{"city_id" => to_string(context.city.id)})
 
-        render_hook(context.play_live, "queue_production", %{
-          "city_id" => to_string(context.city.id),
-          "item" => "produce_wealth"
-        })
+        render_hook(context.play_live, "produce_wealth", %{"city_id" => to_string(context.city.id)})
 
-        BrokenOathsSpex.Fixtures.advance_turn(context.world)
+        Fixtures.advance_turn(context.world)
         {:ok, context}
       end
 

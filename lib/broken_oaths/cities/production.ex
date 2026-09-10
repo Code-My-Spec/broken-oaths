@@ -988,38 +988,19 @@ defmodule BrokenOaths.Cities.Production do
   def accrue(city, world, improvements, cleared_features \\ MapSet.new())
   def accrue(%{queue: []} = city, _world, _improvements, _cleared_features), do: city
 
-  # Story 949 — Produce Wealth: this turn's would-be production income
-  # is diverted to gold instead (`wealth_gold/4`, summed into
-  # `WorldServer`'s own `gold_income_by_player/1` off this SAME city),
-  # so nothing banks here — the item just sits as the permanent head of
-  # the queue, never reaching `resolve_completions/1`'s own "banked >=
-  # cost" check.
-  def accrue(%{queue: [%{type: :produce_wealth} | _]} = city, _world, _improvements, _cleared_features),
-    do: city
-
+  # Story 949 — Produce Wealth banks this turn's production income onto
+  # the item exactly like any other buildable, but it's never spent on
+  # progress toward `cost` (a sentinel `1`, never read as a completion
+  # gate) — `settle_wealth/1` is what drains this back down, converting
+  # every completed four-production chunk to gold at the turn boundary
+  # and leaving the sub-4 remainder banked for next tick (the
+  # fractional-carryover contract, criterion 2740). The item stays the
+  # permanent head of the queue either way, never reaching
+  # `resolve_completions/1`'s own "banked >= cost" check.
   def accrue(%{queue: [current | rest]} = city, world, improvements, cleared_features) do
     income = production_income(city, current.type, world, improvements, cleared_features)
     %{city | queue: [%{current | banked: current.banked + income} | rest]}
   end
-
-  @doc """
-  This turn's production income CONVERTED TO GOLD (story 949, Produce
-  Wealth) — `0` unless `city`'s current (head) queue item is
-  `:produce_wealth`. Same formula `accrue/4` would otherwise bank
-  (flat base + worked-tile production + Barracks'/Water Mill's own
-  bonuses — `:produce_wealth` is never a `@military_types` entry, so
-  the Barracks bonus never applies here regardless), just routed to
-  gold instead: `WorldServer.gold_income_by_player/1` sums this
-  alongside `Yields.city_gold_income/2` per city, so it flows through
-  the SAME tribute/bank pipeline every other real gold income already
-  does.
-  """
-  @spec wealth_gold(city(), World.t(), map(), MapSet.t()) :: non_neg_integer()
-  def wealth_gold(city, world, improvements, cleared_features \\ MapSet.new())
-  def wealth_gold(%{queue: [%{type: :produce_wealth} | _]} = city, world, improvements, cleared_features),
-    do: production_income(city, :produce_wealth, world, improvements, cleared_features)
-
-  def wealth_gold(_city, _world, _improvements, _cleared_features), do: 0
 
   defp production_income(city, current_type, world, improvements, cleared_features) do
     @flat_production + worked_production(city, world, improvements, cleared_features) +
