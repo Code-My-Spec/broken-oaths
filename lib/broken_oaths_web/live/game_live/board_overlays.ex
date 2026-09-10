@@ -89,17 +89,17 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
   # above already have.
   attr :road_enabled?, :boolean, required: true
   attr :road_mode_unit_id, :any, required: true
-  # Story 950 "Build road to a destination" (single-command variant) —
-  # the city last named via `"build_road_to"` with just a `city_id`,
-  # same "computed by `Play`, only rendered here" status
-  # `road_mode_unit_id` above already has.
-  attr :road_destination_city, :any, required: true
   # Issue a9e65eca - the build-road-to progress cue's own data source:
   # every improvement (yield-slot and road) visible to the player, same
   # list `select_tile`'s own tile panel already reads for a standing
   # improvement, just handed to `UnitPanel` too so it can find the road
   # entry at the selected worker's own tile.
   attr :improvements, :list, required: true
+  # Story 950 "Build road to a destination" (single-command variant) —
+  # the city last named via `"build_road_to"` with just a `city_id`,
+  # same "computed by `Play`, only rendered here" status
+  # `road_mode_unit_id` above already has.
+  attr :road_destination_city, :any, required: true
 
   def overlays(assigns) do
     ~H"""

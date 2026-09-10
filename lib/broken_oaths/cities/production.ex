@@ -344,11 +344,11 @@ defmodule BrokenOaths.Cities.Production do
     # moduledoc "Story 933").
     pyramids: 220,
     hanging_gardens: 220,
-    # Story 949 — Produce Wealth: `accrue/4` deliberately never banks
-    # ANY income onto this item (it's diverted to gold via
-    # `wealth_gold/4` instead), so `banked` permanently stays `0` and
-    # `resolve_completions/1`'s own generic "banked >= cost" check
-    # never fires regardless of `cost`'s exact value — `1` (not `0`)
+    # Story 949 — Produce Wealth: banks like any other item (`accrue/4`
+    # has no special case for it), but `complete_loop/4`'s own
+    # `:produce_wealth` clause never treats it as completed regardless
+    # of `banked`/`cost` — `settle_wealth/1` is what actually converts
+    # banked production to gold, 4:1, on economy ticks. `1` (not `0`)
     # only to satisfy `@catalog`'s own `pos_integer()` contract.
     produce_wealth: 1
   }

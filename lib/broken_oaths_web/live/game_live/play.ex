@@ -2920,8 +2920,8 @@ defmodule BrokenOathsWeb.GameLive.Play do
           wonders_claimed={@wonders_claimed}
           road_enabled?={@road_enabled?}
           road_mode_unit_id={@road_mode_unit_id}
-          road_destination_city={@road_destination_city}
           improvements={@improvements}
+          road_destination_city={@road_destination_city}
         />
       </div>
 
