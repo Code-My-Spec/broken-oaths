@@ -22,8 +22,18 @@ defmodule BrokenOathsSpex.Story949.Criterion2740Spex do
         render_hook(context.play_live, "select_research", %{"tech" => "pottery"})
         for _ <- 1..25, do: Fixtures.advance_turn(context.world)
 
+        # The city's own terrain-derived gold income (story 912) keeps
+        # flowing every tick regardless of what's queued — Produce
+        # Wealth converts production, not that separate income stream.
+        # Baseline it over one plain tick BEFORE switching so the
+        # `then_` step can isolate the wealth conversion's own
+        # contribution from this same city's ordinary income.
+        before_tick = Fixtures.gold(context.world, context.user)
+        Fixtures.advance_turn(context.world)
+        base_income_per_tick = Fixtures.gold(context.world, context.user) - before_tick
+
         render_hook(context.play_live, "produce_wealth", %{"city_id" => to_string(context.city.id)})
-        {:ok, context}
+        {:ok, Map.put(context, :base_income_per_tick, base_income_per_tick)}
       end
 
       when_ "two economy ticks pass", context do
@@ -32,14 +42,10 @@ defmodule BrokenOathsSpex.Story949.Criterion2740Spex do
         {:ok, Map.put(context, :treasury0, treasury0)}
       end
 
-      then_ "all 5 gold from the two 2.5-gold conversions has been paid out", context do
-        # `Fixtures.gold/2` also carries story 909/912's baseline per-turn
-        # city gold income, stacked on top of Produce Wealth's own gold on
-        # every tick, so `banked` resolving to 0 (nothing left fractional
-        # or lost) is the precise proof of this criterion; the treasury
-        # check stays as a basic sanity check that gold moved at all.
-        assert Fixtures.gold(context.world, context.user) > context.treasury0
-        assert wealth_banked(context.world, context.user, context.city.id) == 0
+      then_ "all 5 gold from the two 2.5-gold conversions has been paid out, on top of the city's own ordinary income",
+            context do
+        expected = context.treasury0 + 2 * context.base_income_per_tick + 5
+        assert Fixtures.gold(context.world, context.user) == expected
         {:ok, context}
       end
 
@@ -48,14 +54,5 @@ defmodule BrokenOathsSpex.Story949.Criterion2740Spex do
         {:ok, context}
       end
     end
-  end
-
-  defp wealth_banked(world, user, city_id) do
-    world
-    |> Fixtures.player_cities(user)
-    |> Enum.find(&(&1.id == city_id))
-    |> Map.fetch!(:queue)
-    |> hd()
-    |> Map.fetch!(:banked)
   end
 end

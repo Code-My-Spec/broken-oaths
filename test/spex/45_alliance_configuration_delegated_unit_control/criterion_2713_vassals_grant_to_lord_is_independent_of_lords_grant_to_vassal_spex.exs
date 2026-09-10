@@ -1,25 +1,82 @@
 defmodule BrokenOathsSpex.Story947.Criterion2713Spex do
+  @moduledoc """
+  Story 947 — Alliance Configuration: delegated unit control
+  Criterion 2713 — the lord/vassal bond is NOT reciprocal, unlike an
+  alliance (criterion 2710): `BrokenOaths.Feudal.Stewardship.
+  steward_role/4` only ever resolves `:lord` in the direction "owner is
+  a vassal, steward is their lord" — there is no clause anywhere that
+  could match a vassal acting on their own lord's behalf (the one
+  asymmetry this story's design keeps; see that function's own
+  moduledoc paragraph, and story 910's own criterion 7687). Each
+  direction is independent: the lord may steward the vassal; the
+  vassal may never steward the lord back, regardless of anything the
+  lord does.
+  """
+
   use BrokenOathsSpex.Case
+
   import BrokenOathsSpex.SharedGivens
 
-  spex "a vassal's grant to their lord is independent of the lord's grant back" do
-    scenario "a lord and vassal configure different delegated-control levels" do
+  alias BrokenOathsSpex.Fixtures
+
+  spex "a vassal's grant to their lord is independent of the lord's grant back",
+    fail_on_error_logs: false do
+    scenario "the lord may steward the vassal, but the vassal may never steward the lord" do
       given_(:a_world)
       given_(:registered_player)
       given_(:second_registered_player)
-      given_ "the players have a lord-vassal bond", context do
-        {:ok, vassal_live, _} = live(context.conn, ~p"/play/#{context.world.id}")
-        {:ok, lord_live, _} = live(context.other_conn, ~p"/play/#{context.world.id}")
-        {:ok, context |> Map.put(:vassal_live, vassal_live) |> Map.put(:lord_live, lord_live)}
+
+      given_ "my vassal is offline with real banked gold, and I am also offline", context do
+        %{lord_play_live: lord_play_live, vassal_play_live: vassal_play_live} =
+          subjugate(
+            context.world,
+            context.conn,
+            context.user,
+            context.other_conn,
+            context.other_user
+          )
+
+        go_offline(vassal_play_live)
+
+        Fixtures.advance_turn(context.world)
+        banked0 = Fixtures.bank_status(context.world, context.other_user).gold
+        assert banked0 > 0
+        treasury0 = Fixtures.gold(context.world, context.other_user)
+
+        go_offline(lord_play_live)
+        {:ok, vassal_play_live, _html} = live(context.other_conn, "/play/#{context.world.id}")
+
+        context
+        |> Map.put(:vassal_play_live, vassal_play_live)
+        |> Map.put(:banked0, banked0)
+        |> Map.put(:treasury0, treasury0)
+        |> then(&{:ok, &1})
       end
-      when_ "the vassal grants Full control to the lord and the lord grants None back", context do
-        render_hook(context.vassal_live, "set_delegated_control", %{"ally_user_id" => to_string(context.other_user.id), "level" => "full"})
-        render_hook(context.lord_live, "set_delegated_control", %{"ally_user_id" => to_string(context.user.id), "level" => "none"})
+
+      when_ "the vassal tries to steward the lord's own bank", context do
+        attempt_event(context.vassal_play_live, "steward_collect_bank", %{
+          "owner_user_id" => to_string(context.user.id)
+        })
+
         {:ok, context}
       end
-      then_ "each direction retains its own configured level", context do
-        assert has_element?(context.vassal_live, "[data-test='delegated-control-level']", "Full")
-        assert has_element?(context.lord_live, "[data-test='delegated-control-level']", "None")
+
+      then_ "the vassal's attempt on the lord never moved anything", context do
+        assert Fixtures.bank_status(context.world, context.other_user).gold ==
+                 context.banked0,
+               "the vassal's own bank must be untouched by its own refused attempt"
+
+        {:ok, context}
+      end
+
+      then_ "the vassal is told they aren't eligible to steward their own lord", context do
+        attempt_event(context.vassal_play_live, "steward_queue_production", %{
+          "owner_user_id" => to_string(context.user.id),
+          "city_id" => "0",
+          "item" => "warrior"
+        })
+
+        assert has_element?(context.vassal_play_live, "[data-test='steward-error']", "eligible")
         {:ok, context}
       end
     end

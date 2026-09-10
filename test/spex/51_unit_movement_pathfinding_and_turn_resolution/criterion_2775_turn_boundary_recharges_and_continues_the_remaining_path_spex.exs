@@ -54,8 +54,15 @@ defmodule BrokenOathsSpex.Story953.Criterion2775Spex do
         # First hop: exactly one land tile away, so the warrior's own
         # single movement point fully covers it and it arrives this same
         # request — same "queue_move resolves immediately" behavior every
-        # other criterion in this file already exercises.
-        step1 = adjacent_land_tile(context.world, warrior.tile_id)
+        # other criterion in this file already exercises. Excludes every
+        # tile one of this player's own units already stands on (the
+        # freshly spawned Lord rests right beside a size-1 city's own
+        # worked tiles) — `adjacent_land_tile/3` only ever checks terrain
+        # class, not occupancy, so a same-class stack (Lord + Warrior,
+        # both combat, no field-stacking room) would otherwise silently
+        # refuse the move as `:occupied`.
+        own_tiles = [city.tile_id | for(u <- Fixtures.player_units(context.world, context.user), do: u.tile_id)]
+        step1 = adjacent_land_tile(context.world, warrior.tile_id, own_tiles)
 
         render_hook(play_live, "queue_move", %{
           "unit_id" => to_string(warrior.id),
@@ -66,8 +73,13 @@ defmodule BrokenOathsSpex.Story953.Criterion2775Spex do
         # already at zero: `move_now/2` can't spend anything on it this
         # request, so it sits fully pending — exactly this criterion's own
         # "spent its movement with a path still queued" premise — ready to
-        # resolve on the very next turn boundary.
-        step2 = adjacent_land_tile(context.world, step1, [warrior.tile_id])
+        # resolve on the very next turn boundary. Same occupancy exclusion,
+        # re-read fresh now that the warrior itself has moved to `step1`.
+        own_tiles_now = [
+          city.tile_id | for(u <- Fixtures.player_units(context.world, context.user), do: u.tile_id)
+        ]
+
+        step2 = adjacent_land_tile(context.world, step1, own_tiles_now)
 
         render_hook(play_live, "queue_move", %{
           "unit_id" => to_string(warrior.id),

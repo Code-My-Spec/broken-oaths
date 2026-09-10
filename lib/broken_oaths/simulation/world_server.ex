@@ -2746,6 +2746,12 @@ defmodule BrokenOaths.Simulation.WorldServer do
   # `apply_tribute/1` (via `Map.get(income_by_player, id, 0)`) and
   # `apply_bank/1` (which only ever iterates entries actually present)
   # already treat a missing player the same as an explicit `0`.
+  #
+  # Story 949 — Produce Wealth's own gold does NOT flow through here:
+  # `Production.settle_wealth/1` pays it straight onto `state.players`
+  # at the turn boundary, before this ever runs (see `run_tick/1`) —
+  # this stays scoped to a city's ordinary terrain-derived income so
+  # the two never double-count the same city's own queue.
   defp gold_income_by_player(state) do
     state.cities
     |> Map.values()
@@ -2753,7 +2759,17 @@ defmodule BrokenOaths.Simulation.WorldServer do
     |> Map.new(fn {player_id, cities} ->
       income =
         cities
-        |> Enum.map(&Yields.city_gold_income(&1, state.world))
+        |> Enum.map(fn city ->
+          # Story 895 pillage freeze: a city still serving `CityDefense.
+          # production_halted?/2` earns nothing this tick at all, same
+          # "queue simply doesn't move" boundary `Production.accrue_or_skip/2`
+          # already gives its production banking.
+          if CityDefense.production_halted?(city, state.turn) do
+            0
+          else
+            Yields.city_gold_income(city, state.world)
+          end
+        end)
         |> Enum.sum()
       {player_id, income}
     end)

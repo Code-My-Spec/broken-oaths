@@ -16,7 +16,7 @@ defmodule BrokenOathsSpex.Story949.Criterion2731Spex do
       given_(:registered_player)
       given_(:a_founded_city)
 
-      given_ "the player has researched Pottery", context do
+      given_ "the player has researched Pottery, unlocking Produce Wealth", context do
         render_hook(context.play_live, "select_city", %{"city_id" => to_string(context.city.id)})
         render_hook(context.play_live, "toggle_tech_panel", %{})
         render_hook(context.play_live, "select_research", %{"tech" => "pottery"})
@@ -25,10 +25,7 @@ defmodule BrokenOathsSpex.Story949.Criterion2731Spex do
       end
 
       when_ "I select Produce Wealth for my city and its next turn resolves", context do
-        render_hook(context.play_live, "queue_production", %{
-          "city_id" => to_string(context.city.id),
-          "item" => "produce_wealth"
-        })
+        render_hook(context.play_live, "produce_wealth", %{"city_id" => to_string(context.city.id)})
 
         Fixtures.advance_turn(context.world)
         {:ok, context}
