@@ -2657,7 +2657,7 @@ defmodule BrokenOathsWeb.GameLive.Play do
         {:noreply, socket}
 
       {:error, _reason} ->
-        {:noreply, socket}
+        {:noreply, put_flash(socket, :error, "Could not declare independence.")}
     end
   end
 

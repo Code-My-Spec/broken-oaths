@@ -86,6 +86,43 @@ defmodule BrokenOathsWeb.GameLive.CityPanelTest do
     end
   end
 
+  # QA issues 99e1e113/8ebaecee/01a9333a — Produce Wealth had a duplicate
+  # data-test id (dedicated button + Build-list entry, only one of which
+  # stopped the current build) and never showed a real gold-per-turn
+  # number.
+  describe "Produce Wealth (Pottery completed)" do
+    test "renders exactly once — the dedicated button only, no duplicate Build-list entry" do
+      html = render_panel(player_research: @pottery_done, world: %{}, improvements: %{})
+
+      occurrences =
+        html
+        |> String.split(~s(data-test="production-option-produce_wealth"))
+        |> length()
+        |> Kernel.-(1)
+
+      assert occurrences == 1
+      assert html =~ ~s(phx-click="produce_wealth")
+    end
+
+    test "shows a real gold-per-turn number instead of the static placeholder" do
+      html = render_panel(player_research: @pottery_done, world: %{}, improvements: %{})
+
+      assert html =~ ~s(<span>1 gold/turn</span>)
+      refute html =~ ~s(<span>gold/turn</span>)
+    end
+
+    test "the current-production header shows gold/turn instead of a misleading banked/cost ratio" do
+      wealth_item = %{id: 1, type: :produce_wealth, banked: 0, cost: 1, position: 0}
+      city = Map.put(@city, :queue, [wealth_item])
+
+      html =
+        render_panel(city: city, player_research: @pottery_done, world: %{}, improvements: %{})
+
+      assert html =~ "Produce Wealth (1 gold/turn)"
+      refute html =~ "Produce Wealth 0/1"
+    end
+  end
+
   # QA issue 1c47edff "Granary confusion" — a built Granary had no
   # visible trace anywhere in the city UI.
   describe "the Granary indicator" do

@@ -415,6 +415,7 @@ defmodule BrokenOathsWeb.GameLive.BoardOverlays do
         copper_access?={@copper_access?}
         coastal?={@coastal?}
         wonders_claimed={@wonders_claimed}
+        world={@world}
       />
     </div>
     """

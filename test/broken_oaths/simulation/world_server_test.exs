@@ -1474,4 +1474,41 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
     complete_current_research(world, user)
     assert :the_wheel in Game.player_research(world, user).completed_techs
   end
+
+  # QA issue 01a9333a — picking a Build-list item while Produce Wealth is
+  # active used to resume whatever was previously paused instead of
+  # making the new pick the head (`queue_production/4`'s own
+  # produce_wealth-displacement branch was appending the new item
+  # behind `rest` rather than in front of it).
+  describe "queue_production/4 — displacing an active Produce Wealth head (QA issue 01a9333a)" do
+    test "picking a different item makes it the new head instead of resuming the previously-paused one" do
+      world = WorldsFixtures.world_fixture(%{seed: 33, frequency: 8})
+      user = UsersFixtures.user_fixture()
+      {:ok, _player} = Game.join_world(world, user)
+
+      [settler] = for u <- Game.player_units(world, user), u.type == :settler, do: u
+      :ok = Game.found_city(world, user, settler.id)
+      [city] = Game.player_cities(world, user)
+
+      :ok = Game.set_research(world, user, :pottery)
+      complete_current_research(world, user)
+
+      :ok = Game.queue_production(world, user, city.id, "warrior")
+      :ok = Game.advance_turn(world)
+
+      [paused_warrior] = Game.player_cities(world, user) |> hd() |> Map.fetch!(:queue)
+      assert paused_warrior.banked > 0
+
+      :ok = Game.produce_wealth(world, user, city.id)
+      :ok = Game.queue_production(world, user, city.id, "worker")
+
+      [head, second] = Game.player_cities(world, user) |> hd() |> Map.fetch!(:queue)
+
+      assert head.type == :worker
+      assert second.type == :warrior
+      assert second.banked == paused_warrior.banked
+
+      WorldServer.restart(world)
+    end
+  end
 end

@@ -145,6 +145,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
         :catalog,
         Occupation.available_items(assigns.city, Production.available_items(production_opts))
       )
+      |> assign(:wealth_gold_per_turn, wealth_gold_per_turn(assigns))
 
     ~H"""
     <div id={@id} data-test="city-panel" class="card bg-base-200 shadow-sm w-72 relative">
@@ -220,7 +221,11 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
           Production halted
         </div>
 
-        <.current_production queue={@city.queue} city_id={@city.id} />
+        <.current_production
+          queue={@city.queue}
+          city_id={@city.id}
+          wealth_gold_per_turn={@wealth_gold_per_turn}
+        />
 
         <button
           :if={:produce_wealth in @catalog}
@@ -232,13 +237,13 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
           class="btn btn-sm btn-outline justify-between w-full"
         >
           <span>Produce Wealth</span>
-          <span>gold/turn</span>
+          <span>{@wealth_gold_per_turn} gold/turn</span>
         </button>
 
         <div class="divider my-0 text-xs opacity-60">Build</div>
         <div class="flex flex-col gap-1">
           <.catalog_option
-            :for={type <- @catalog}
+            :for={type <- Enum.reject(@catalog, &(&1 == :produce_wealth))}
             type={type}
             city={@city}
             production_opts={@production_opts}
@@ -327,11 +332,38 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
 
   attr :queue, :list, required: true
   attr :city_id, :any, required: true
+  attr :wealth_gold_per_turn, :integer, default: 0
 
   defp current_production(%{queue: []} = assigns) do
     ~H"""
     <div data-test="city-production-current" class="text-sm opacity-60">
       Nothing queued
+    </div>
+    """
+  end
+
+  # Story 949 — Produce Wealth is perpetual (see `Production.complete_loop/4`'s
+  # own :produce_wealth clause): the generic banked/cost ratio below is
+  # meaningless for it (cost is a `1` sentinel, never a real target —
+  # QA issue 8ebaecee), so it gets its own gold/turn header instead.
+  defp current_production(%{queue: [%{type: :produce_wealth} = current | _]} = assigns) do
+    assigns = assign(assigns, :current, current)
+
+    ~H"""
+    <div class="flex items-center justify-between">
+      <div data-test="city-production-current" class="text-sm font-medium">
+        {Production.buildable_label(:produce_wealth)} ({@wealth_gold_per_turn} gold/turn)
+      </div>
+      <button
+        type="button"
+        data-test="cancel-current-production"
+        phx-click="cancel_production_item"
+        phx-value-city_id={@city_id}
+        phx-value-item_id={@current.id}
+        class="btn btn-ghost btn-xs text-error"
+      >
+        Abandon
+      </button>
     </div>
     """
   end
@@ -373,6 +405,15 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
   attr :type, :atom, required: true
   attr :city, :map, required: true
   attr :production_opts, :list, required: true
+
+  # Defensive against callers (tests) that don't pass a `:world` —
+  # production code always does (see `BoardOverlays.overlays/1`).
+  defp wealth_gold_per_turn(assigns) do
+    case Map.get(assigns, :world) do
+      nil -> 0
+      world -> Production.wealth_gold_per_turn(assigns.city, world, Map.get(assigns, :improvements, %{}))
+    end
+  end
 
   defp catalog_option(assigns) do
     result = Production.can_queue?(assigns.city, assigns.type, assigns.production_opts)

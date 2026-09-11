@@ -643,7 +643,7 @@ defmodule BrokenOaths.Cities.Production do
         case city.queue do
           [%{type: :produce_wealth, id: wealth_id} | rest] ->
             Repo.delete_all(from(p in ProductionItem, where: p.id == ^wealth_id))
-            rest ++ [queue_item_map(item)]
+            [queue_item_map(item) | rest]
 
           queue ->
             queue ++ [queue_item_map(item)]
@@ -1000,6 +1000,18 @@ defmodule BrokenOaths.Cities.Production do
   def accrue(%{queue: [current | rest]} = city, world, improvements, cleared_features) do
     income = production_income(city, current.type, world, improvements, cleared_features)
     %{city | queue: [%{current | banked: current.banked + income} | rest]}
+  end
+
+  @doc """
+  Estimated gold this turn's Produce Wealth banks, at this city's
+  current production rate — the same `production_income/5` figure
+  `accrue/4` would bank onto the head item, divided 4:1 exactly like
+  `settle_wealth/1` (QA issue 8ebaecee: the button previously showed no
+  number at all).
+  """
+  @spec wealth_gold_per_turn(city(), World.t(), map(), MapSet.t()) :: non_neg_integer()
+  def wealth_gold_per_turn(city, world, improvements, cleared_features \\ MapSet.new()) do
+    div(production_income(city, :produce_wealth, world, improvements, cleared_features), 4)
   end
 
   defp production_income(city, current_type, world, improvements, cleared_features) do
