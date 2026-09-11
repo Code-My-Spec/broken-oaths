@@ -31,8 +31,8 @@ defmodule BrokenOaths.Feudal.RebellionPact do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias BrokenOaths.Players.Player
   alias BrokenOaths.Feudal.RebellionPactMember
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.Worlds.World
 
   @type status :: :forming | :struck | :dissolved

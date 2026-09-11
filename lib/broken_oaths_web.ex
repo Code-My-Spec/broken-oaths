@@ -90,8 +90,8 @@ defmodule BrokenOathsWeb do
       import BrokenOathsWeb.CoreComponents
 
       # Common modules used in templates
-      alias Phoenix.LiveView.JS
       alias BrokenOathsWeb.Layouts
+      alias Phoenix.LiveView.JS
 
       # Routes generation with the ~p sigil
       unquote(verified_routes())

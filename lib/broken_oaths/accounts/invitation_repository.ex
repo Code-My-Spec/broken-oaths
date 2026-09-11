@@ -3,8 +3,8 @@ defmodule BrokenOaths.Accounts.InvitationRepository do
 
   import Ecto.Query, warn: false
 
-  alias BrokenOaths.Repo
   alias BrokenOaths.Accounts.Invitation
+  alias BrokenOaths.Repo
   alias BrokenOaths.Users.Scope
 
   def create_invitation(%Scope{} = _scope, attrs) do

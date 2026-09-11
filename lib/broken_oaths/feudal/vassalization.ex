@@ -59,11 +59,11 @@ defmodule BrokenOaths.Feudal.Vassalization do
   heir reconciliation sweep both call `maybe_revassalize/3` directly.
   """
 
-  alias BrokenOaths.Game
   alias BrokenOaths.Combat.Siege
   alias BrokenOaths.Feudal.Vassalage
-  alias BrokenOaths.Simulation.WorldServer
+  alias BrokenOaths.Game
   alias BrokenOaths.Repo
+  alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.Users
   alias BrokenOaths.Users.User
 

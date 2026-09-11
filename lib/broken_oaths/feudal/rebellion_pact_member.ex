@@ -25,8 +25,8 @@ defmodule BrokenOaths.Feudal.RebellionPactMember do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias BrokenOaths.Players.Player
   alias BrokenOaths.Feudal.RebellionPact
+  alias BrokenOaths.Players.Player
 
   @type commit_status :: :invited | :committed | :declined
 

@@ -113,9 +113,9 @@ defmodule BrokenOaths.Cities.Improvement do
   import Ecto.Changeset
 
   alias BrokenOaths.Cities.Production
+  alias BrokenOaths.Repo
   alias BrokenOaths.Technology.Research
   alias BrokenOaths.Units.Unit
-  alias BrokenOaths.Repo
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.Resources
   alias BrokenOaths.Worlds.Terrain

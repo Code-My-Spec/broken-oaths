@@ -28,9 +28,9 @@ defmodule BrokenOaths.Feudal.OathStrain.Ledger do
 
   import Ecto.Query
 
-  alias BrokenOaths.Game
   alias BrokenOaths.Feudal.OathStrain
   alias BrokenOaths.Feudal.Vassalage
+  alias BrokenOaths.Game
   alias BrokenOaths.Repo
 
   # -------------------------------------------------------------------

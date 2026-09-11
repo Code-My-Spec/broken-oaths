@@ -42,9 +42,9 @@ defmodule BrokenOaths.Feudal.Levy do
   import Ecto.Changeset
   import Ecto.Query
 
-  alias BrokenOaths.Players.Player
   alias BrokenOaths.Feudal.Tribute
   alias BrokenOaths.Feudal.Vassalage
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.Repo
   alias BrokenOaths.Worlds.World
 

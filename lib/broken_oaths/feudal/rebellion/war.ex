@@ -39,18 +39,18 @@ defmodule BrokenOaths.Feudal.Rebellion.War do
 
   import Ecto.Query
 
-  alias BrokenOaths.Game
   alias BrokenOaths.Cities.City
-  alias BrokenOaths.Combat.CityDefense
-  alias BrokenOaths.Players.Player
   alias BrokenOaths.Cities.Production
+  alias BrokenOaths.Combat.CityDefense
   alias BrokenOaths.Feudal.Rebellion
   alias BrokenOaths.Feudal.Rebellion.Resolution
-  alias BrokenOaths.Units.Unit
   alias BrokenOaths.Feudal.Vassalage
   alias BrokenOaths.Feudal.Vassalization
-  alias BrokenOaths.Simulation.WorldServer
+  alias BrokenOaths.Game
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.Repo
+  alias BrokenOaths.Simulation.WorldServer
+  alias BrokenOaths.Units.Unit
   alias BrokenOaths.Users
   alias BrokenOaths.Users.User
 

@@ -1,10 +1,10 @@
 defmodule BrokenOathsWeb.UserAuthTest do
   use BrokenOathsTest.ConnCase, async: true
 
-  alias Phoenix.LiveView
   alias BrokenOaths.Users
   alias BrokenOaths.Users.Scope
   alias BrokenOathsWeb.UserAuth
+  alias Phoenix.LiveView
 
   import BrokenOaths.UsersFixtures
 

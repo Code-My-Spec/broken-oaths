@@ -3,8 +3,8 @@ defmodule BrokenOaths.Game.PlayerStatsTest do
   # same status as `WorldServer.pause_ticks/1`'s own suite.
   use BrokenOathsTest.DataCase, async: false
 
-  alias BrokenOaths.Game
   alias BrokenOaths.Combat.BarbarianAI
+  alias BrokenOaths.Game
   alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.Worlds.Regions

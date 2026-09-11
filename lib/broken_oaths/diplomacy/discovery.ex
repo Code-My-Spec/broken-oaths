@@ -53,9 +53,9 @@ defmodule BrokenOaths.Diplomacy.Discovery do
   `known_players/2`.
   """
 
-  alias BrokenOaths.Vision.Visibility
   alias BrokenOaths.Users
   alias BrokenOaths.Users.User
+  alias BrokenOaths.Vision.Visibility
 
   @type player_id :: term()
   @type state :: %{

@@ -22,10 +22,10 @@ defmodule BrokenOaths.Game.FeudalFlagTest do
   # in this suite (`world_server_test.exs`) already carries.
   use BrokenOathsTest.DataCase, async: false
 
-  alias BrokenOaths.Game
-  alias BrokenOaths.Feudal.Bank
-  alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.Cities.Yields
+  alias BrokenOaths.Feudal.Bank
+  alias BrokenOaths.Game
+  alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.WorldsFixtures

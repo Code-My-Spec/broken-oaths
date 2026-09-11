@@ -1,9 +1,9 @@
 defmodule BrokenOaths.Feudal.RebellionPactTest do
   use BrokenOathsTest.DataCase, async: true
 
-  alias BrokenOaths.Players.Player
   alias BrokenOaths.Feudal.RebellionPact
   alias BrokenOaths.Feudal.RebellionPactMember
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.WorldsFixtures
 

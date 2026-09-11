@@ -20,8 +20,8 @@ defmodule BrokenOathsWeb.GameLive.PlayTest do
   import Phoenix.LiveViewTest
   import BrokenOaths.WorldsFixtures
 
-  alias BrokenOaths.Game
   alias BrokenOaths.Combat.Camp
+  alias BrokenOaths.Game
   alias BrokenOaths.Worlds.Regions
 
   setup :register_and_log_in_user

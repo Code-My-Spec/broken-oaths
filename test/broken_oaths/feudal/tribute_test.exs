@@ -1,9 +1,9 @@
 defmodule BrokenOaths.Feudal.TributeTest do
   use BrokenOathsTest.DataCase, async: true
 
-  alias BrokenOaths.Players.Player
   alias BrokenOaths.Feudal.Tribute
   alias BrokenOaths.Feudal.Vassalage
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.WorldsFixtures
 

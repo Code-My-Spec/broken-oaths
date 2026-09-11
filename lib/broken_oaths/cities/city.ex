@@ -50,15 +50,15 @@ defmodule BrokenOaths.Cities.City do
 
   alias BrokenOaths.Cities.Production
   alias BrokenOaths.Cities.ProductionItem
+  alias BrokenOaths.Cities.Yields
   alias BrokenOaths.Combat.Camp
   alias BrokenOaths.Combat.Camps
   alias BrokenOaths.Combat.CityDefense
   alias BrokenOaths.Combat.Siege
   alias BrokenOaths.Players.Player
+  alias BrokenOaths.Repo
   alias BrokenOaths.Technology.Research
   alias BrokenOaths.Units.Unit
-  alias BrokenOaths.Cities.Yields
-  alias BrokenOaths.Repo
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
 

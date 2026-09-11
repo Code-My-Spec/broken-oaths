@@ -13,8 +13,8 @@ defmodule BrokenOaths.Players do
   """
 
   import Ecto.Query
-  alias BrokenOaths.Repo
   alias BrokenOaths.Players.Player
+  alias BrokenOaths.Repo
   alias BrokenOaths.Simulation.WorldServer
 
   @doc """

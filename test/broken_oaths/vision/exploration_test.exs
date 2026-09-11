@@ -1,9 +1,9 @@
 defmodule BrokenOaths.Vision.ExplorationTest do
   use BrokenOathsTest.DataCase, async: true
 
-  alias BrokenOaths.Vision.Exploration
   alias BrokenOaths.Players.Player
   alias BrokenOaths.UsersFixtures
+  alias BrokenOaths.Vision.Exploration
   alias BrokenOaths.WorldsFixtures
 
   defp player_fixture do

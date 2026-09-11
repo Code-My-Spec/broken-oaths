@@ -86,14 +86,14 @@ defmodule BrokenOaths.Units.Unit do
 
   alias BrokenOaths.Combat.Camp
   alias BrokenOaths.Combat.CityDefense
+  alias BrokenOaths.Feudal.Rebellion.War
+  alias BrokenOaths.Feudal.Vassalization
+  alias BrokenOaths.Players.Player
+  alias BrokenOaths.Repo
+  alias BrokenOaths.Simulation.Turn
+  alias BrokenOaths.Technology.Research
   alias BrokenOaths.Units.Actions
   alias BrokenOaths.Units.Order
-  alias BrokenOaths.Players.Player
-  alias BrokenOaths.Feudal.Rebellion.War
-  alias BrokenOaths.Simulation.Turn
-  alias BrokenOaths.Feudal.Vassalization
-  alias BrokenOaths.Repo
-  alias BrokenOaths.Technology.Research
   alias BrokenOaths.Worlds.Globe
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.Terrain

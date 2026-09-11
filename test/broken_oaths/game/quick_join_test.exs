@@ -4,8 +4,8 @@ defmodule BrokenOaths.Game.QuickJoinTest do
 
   alias BrokenOaths.Game
   alias BrokenOaths.UsersFixtures
-  alias BrokenOaths.WorldsFixtures
   alias BrokenOaths.Worlds.World
+  alias BrokenOaths.WorldsFixtures
 
   test "places a new player into an open world and returns the WORLD (not the player)" do
     world = WorldsFixtures.world_fixture(%{frequency: 8})

@@ -129,18 +129,18 @@ defmodule BrokenOaths.Feudal.Stewardship do
 
   import Ecto.Query
 
-  alias BrokenOaths.Game
-  alias BrokenOaths.Diplomacy.Alliance
-  alias BrokenOaths.Feudal.Bank
-  alias BrokenOaths.Diplomacy.Cooperation
-  alias BrokenOaths.Players.Presence
   alias BrokenOaths.Cities.Production
   alias BrokenOaths.Cities.ProductionItem
+  alias BrokenOaths.Diplomacy.Alliance
+  alias BrokenOaths.Diplomacy.Cooperation
+  alias BrokenOaths.Feudal.Bank
   alias BrokenOaths.Feudal.StewardLog
+  alias BrokenOaths.Feudal.Vassalage
+  alias BrokenOaths.Game
+  alias BrokenOaths.Players.Presence
+  alias BrokenOaths.Repo
   alias BrokenOaths.Simulation.Turn
   alias BrokenOaths.Units.Unit
-  alias BrokenOaths.Feudal.Vassalage
-  alias BrokenOaths.Repo
   alias BrokenOaths.Users
   alias BrokenOaths.Users.User
   alias BrokenOaths.Worlds.Regions

@@ -7,8 +7,8 @@ defmodule BrokenOaths.Game.ChopTest do
 
   alias BrokenOaths.Cities.Improvement
   alias BrokenOaths.Game
-  alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.Repo
+  alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.Units.Unit
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.Worlds.Regions

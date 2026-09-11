@@ -1,8 +1,8 @@
 defmodule BrokenOaths.Feudal.StewardLogTest do
   use BrokenOathsTest.DataCase, async: true
 
-  alias BrokenOaths.Players.Player
   alias BrokenOaths.Feudal.StewardLog
+  alias BrokenOaths.Players.Player
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.WorldsFixtures
 

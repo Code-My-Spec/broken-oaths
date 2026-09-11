@@ -365,9 +365,9 @@ defmodule BrokenOaths.Feudal.Rebellion.Resolution do
   correctly on its own).
   """
 
+  alias BrokenOaths.Combat.Siege
   alias BrokenOaths.Feudal.OathStrain
   alias BrokenOaths.Feudal.Rebellion
-  alias BrokenOaths.Combat.Siege
 
   @type city :: Siege.city()
   @type player_id :: integer()

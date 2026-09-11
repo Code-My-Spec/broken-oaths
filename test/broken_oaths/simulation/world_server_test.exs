@@ -4,17 +4,17 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
 
   import Ecto.Query
 
-  alias BrokenOaths.Game
   alias BrokenOaths.Cities.Improvement
+  alias BrokenOaths.Cities.Yields
+  alias BrokenOaths.Game
+  alias BrokenOaths.Repo
+  alias BrokenOaths.Simulation.WorldServer
   alias BrokenOaths.Technology.PlayerResearch
   alias BrokenOaths.Units.Unit
-  alias BrokenOaths.Simulation.WorldServer
-  alias BrokenOaths.Repo
   alias BrokenOaths.UsersFixtures
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
   alias BrokenOaths.WorldsFixtures
-  alias BrokenOaths.Cities.Yields
 
   # Regression for issue 07ee50d1: a second WorldServer instance for the
   # same world (a second BEAM node running a mix script) used to clobber
