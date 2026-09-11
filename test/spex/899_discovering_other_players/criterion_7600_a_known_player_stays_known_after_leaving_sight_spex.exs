@@ -34,6 +34,7 @@ defmodule BrokenOathsSpex.Story899.Criterion7600Spex do
 
   import BrokenOathsSpex.SharedGivens
 
+  alias BrokenOaths.Users.User
   alias BrokenOathsSpex.Fixtures
 
   spex "a known player stays known after leaving sight" do
@@ -132,7 +133,7 @@ defmodule BrokenOathsSpex.Story899.Criterion7600Spex do
         assert has_element?(
                  context.play_live,
                  "[data-test='known-player-#{context.other_user.id}']",
-                 BrokenOaths.Users.User.display_name(context.other_user)
+                 User.display_name(context.other_user)
                )
 
         {:ok, context}

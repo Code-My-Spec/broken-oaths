@@ -37,6 +37,7 @@ defmodule BrokenOathsSpex.Story899.Criterion7603Spex do
 
   import BrokenOathsSpex.SharedGivens
 
+  alias BrokenOaths.Users.User
   alias BrokenOathsSpex.Fixtures
 
   spex "no attacking a discovered player" do
@@ -145,7 +146,7 @@ defmodule BrokenOathsSpex.Story899.Criterion7603Spex do
         assert has_element?(
                  context.play_live,
                  "[data-test='known-player-#{context.other_user.id}']",
-                 BrokenOaths.Users.User.display_name(context.other_user)
+                 User.display_name(context.other_user)
                )
 
         {:ok, context}

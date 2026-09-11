@@ -42,6 +42,7 @@ defmodule BrokenOathsSpex.Story899.Criterion7602Spex do
 
   import BrokenOathsSpex.SharedGivens
 
+  alias BrokenOaths.Users.User
   alias BrokenOathsSpex.Fixtures
 
   spex "discovered does not mean omniscient" do
@@ -126,7 +127,7 @@ defmodule BrokenOathsSpex.Story899.Criterion7602Spex do
         assert has_element?(
                  context.play_live,
                  "[data-test='known-player-#{context.other_user.id}']",
-                 BrokenOaths.Users.User.display_name(context.other_user)
+                 User.display_name(context.other_user)
                )
 
         assert_push_event(context.play_live, "game:units", %{units: units}, 500)

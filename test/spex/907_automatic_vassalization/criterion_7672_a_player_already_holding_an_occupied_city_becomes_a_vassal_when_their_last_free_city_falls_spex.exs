@@ -24,6 +24,7 @@ defmodule BrokenOathsSpex.Story907.Criterion7672Spex do
 
   import BrokenOathsSpex.SharedGivens
 
+  alias BrokenOaths.Users.User
   alias BrokenOathsSpex.Fixtures
 
   spex "a player already holding an occupied city becomes a vassal when their last free city falls" do
@@ -167,7 +168,7 @@ defmodule BrokenOathsSpex.Story907.Criterion7672Spex do
         assert has_element?(
                  context.play_live,
                  "[data-test='vassal-row-#{context.other_user.id}']",
-                 BrokenOaths.Users.User.display_name(context.other_user)
+                 User.display_name(context.other_user)
                )
 
         {:ok, context}
@@ -177,7 +178,7 @@ defmodule BrokenOathsSpex.Story907.Criterion7672Spex do
         assert has_element?(
                  context.other_play_live,
                  "[data-test='vassal-status']",
-                 BrokenOaths.Users.User.display_name(context.user)
+                 User.display_name(context.user)
                )
 
         {:ok, context}

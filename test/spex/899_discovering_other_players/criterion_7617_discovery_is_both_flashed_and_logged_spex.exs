@@ -36,6 +36,7 @@ defmodule BrokenOathsSpex.Story899.Criterion7617Spex do
 
   import BrokenOathsSpex.SharedGivens
 
+  alias BrokenOaths.Users.User
   alias BrokenOathsSpex.Fixtures
 
   spex "discovery is both flashed and logged" do
@@ -119,7 +120,7 @@ defmodule BrokenOathsSpex.Story899.Criterion7617Spex do
         assert has_element?(
                  revisited_live,
                  "[data-test='known-player-#{context.other_user.id}']",
-                 BrokenOaths.Users.User.display_name(context.other_user)
+                 User.display_name(context.other_user)
                )
 
         {:ok, context}

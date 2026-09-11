@@ -30,6 +30,7 @@ defmodule BrokenOathsSpex.Story907.Criterion7671Spex do
 
   import BrokenOathsSpex.SharedGivens
 
+  alias BrokenOaths.Users.User
   alias BrokenOathsSpex.Fixtures
 
   spex "the vassal keeps playing normally after subjugation" do
@@ -116,7 +117,7 @@ defmodule BrokenOathsSpex.Story907.Criterion7671Spex do
         assert has_element?(
                  context.other_play_live,
                  "[data-test='vassal-status']",
-                 BrokenOaths.Users.User.display_name(context.user)
+                 User.display_name(context.user)
                )
 
         {:ok, context}

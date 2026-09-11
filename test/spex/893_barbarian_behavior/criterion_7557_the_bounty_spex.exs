@@ -59,6 +59,7 @@ defmodule BrokenOathsSpex.Story893.Criterion7557Spex do
 
   import BrokenOathsSpex.SharedGivens
 
+  alias BrokenOaths.Cities.Yields
   alias BrokenOathsSpex.Fixtures
 
   spex "the bounty" do
@@ -195,7 +196,7 @@ defmodule BrokenOathsSpex.Story893.Criterion7557Spex do
               c.id == context.city.id,
               do: c
 
-        income_per_turn = BrokenOaths.Cities.Yields.city_gold_income(city, context.world)
+        income_per_turn = Yields.city_gold_income(city, context.world)
         expected_gold = context.gold_before + context.turns_elapsed * income_per_turn + 10
 
         assert has_element?(

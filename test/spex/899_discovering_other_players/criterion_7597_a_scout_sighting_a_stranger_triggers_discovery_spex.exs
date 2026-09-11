@@ -42,6 +42,7 @@ defmodule BrokenOathsSpex.Story899.Criterion7597Spex do
 
   import BrokenOathsSpex.SharedGivens
 
+  alias BrokenOaths.Users.User
   alias BrokenOathsSpex.Fixtures
 
   spex "a scout sighting a stranger triggers discovery" do
@@ -127,7 +128,7 @@ defmodule BrokenOathsSpex.Story899.Criterion7597Spex do
         assert has_element?(
                  context.play_live,
                  "[data-test='known-player-#{context.other_user.id}']",
-                 BrokenOaths.Users.User.display_name(context.other_user)
+                 User.display_name(context.other_user)
                )
 
         {:ok, context}

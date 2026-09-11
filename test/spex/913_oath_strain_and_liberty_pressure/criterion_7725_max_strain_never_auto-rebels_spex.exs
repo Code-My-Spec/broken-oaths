@@ -39,6 +39,7 @@ defmodule BrokenOathsSpex.Story913.Criterion7725Spex do
 
   import BrokenOathsSpex.SharedGivens
 
+  alias BrokenOaths.Users.User
   alias BrokenOathsSpex.Fixtures
 
   defp read_strain(conn, world) do
@@ -93,7 +94,7 @@ defmodule BrokenOathsSpex.Story913.Criterion7725Spex do
         assert has_element?(
                  vassal_live,
                  "[data-test='vassal-status']",
-                 "Sworn to #{BrokenOaths.Users.User.display_name(context.user)}"
+                 "Sworn to #{User.display_name(context.user)}"
                )
 
         {:ok, context}

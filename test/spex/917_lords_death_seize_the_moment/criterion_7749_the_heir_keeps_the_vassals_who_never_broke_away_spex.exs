@@ -28,6 +28,7 @@ defmodule BrokenOathsSpex.Story917.Criterion7749Spex do
 
   import BrokenOathsSpex.SharedGivens
 
+  alias BrokenOaths.Users.User
   alias BrokenOathsSpex.Fixtures
 
   spex "the heir keeps the vassals who never broke away", fail_on_error_logs: false do
@@ -174,7 +175,7 @@ defmodule BrokenOathsSpex.Story917.Criterion7749Spex do
           assert has_element?(
                    kept_live,
                    "[data-test='vassal-status']",
-                   "Sworn to #{BrokenOaths.Users.User.display_name(context.user)}"
+                   "Sworn to #{User.display_name(context.user)}"
                  ),
                  "#{kept_user.email} should still read sworn to the (now-heir) lord"
         end
