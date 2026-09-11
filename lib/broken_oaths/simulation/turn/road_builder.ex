@@ -101,6 +101,8 @@ defmodule BrokenOaths.Simulation.Turn.RoadBuilder do
   call site.
   """
 
+  alias BrokenOaths.Units.Unit
+
   @type event :: {:road_start_needed, non_neg_integer(), term()}
 
   @doc """
@@ -223,7 +225,7 @@ defmodule BrokenOaths.Simulation.Turn.RoadBuilder do
 
   defp move_to(state, unit, next_tile) do
     cost =
-      BrokenOaths.Units.Unit.entry_cost(
+      Unit.entry_cost(
         state.world,
         Map.get(state, :roads, %{}),
         next_tile,

@@ -138,6 +138,8 @@ defmodule BrokenOaths.Technology.Research do
   names still ships in a later story.
   """
 
+  alias BrokenOaths.Cities.Buildings
+
   @type tech ::
           :pottery
           | :animal_husbandry
@@ -327,7 +329,7 @@ defmodule BrokenOaths.Technology.Research do
   end
 
   defp library_bonus(city) do
-    if BrokenOaths.Cities.Buildings.has?(city, :library), do: @library_science_bonus, else: 0
+    if Buildings.has?(city, :library), do: @library_science_bonus, else: 0
   end
 
   # -------------------------------------------------------------------
