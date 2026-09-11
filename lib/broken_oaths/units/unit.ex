@@ -294,39 +294,61 @@ defmodule BrokenOaths.Units.Unit do
     player = find_player(state, user.id)
     unit = Map.get(state.units, unit_id)
 
-    cond do
-      is_nil(player) or is_nil(unit) or unit.player_id != player.id ->
-        {:error, :not_owner}
+    with :ok <- validate_move_owner(player, unit),
+         :ok <- validate_move_tile(state, to_tile),
+         :ok <- validate_move_passable(state, unit, to_tile),
+         :ok <- validate_move_unoccupied(state, to_tile, player, unit) do
+      resolve_move(state, unit, unit_id, to_tile)
+    end
+  end
 
-      not is_integer(to_tile) or to_tile < 0 or
-          to_tile >= Globe.tile_count(state.world.frequency) ->
-        {:error, :invalid_tile}
+  defp validate_move_owner(player, unit) do
+    if is_nil(player) or is_nil(unit) or unit.player_id != player.id do
+      {:error, :not_owner}
+    else
+      :ok
+    end
+  end
 
-      not passable_tile?(unit.type, Regions.tile_class(state.world, to_tile)) ->
-        {:error, :impassable}
+  defp validate_move_tile(state, to_tile) do
+    if not is_integer(to_tile) or to_tile < 0 or
+         to_tile >= Globe.tile_count(state.world.frequency) do
+      {:error, :invalid_tile}
+    else
+      :ok
+    end
+  end
 
-      occupied_by_own?(state, to_tile, player.id, unit) ->
-        {:error, :occupied}
+  defp validate_move_passable(state, unit, to_tile) do
+    if passable_tile?(unit.type, Regions.tile_class(state.world, to_tile)) do
+      :ok
+    else
+      {:error, :impassable}
+    end
+  end
 
-      true ->
-        case bfs_path(state, unit.tile_id, to_tile, unit.type) do
-          [] ->
-            {:error, :unreachable}
+  defp validate_move_unoccupied(state, to_tile, player, unit) do
+    if occupied_by_own?(state, to_tile, player.id, unit) do
+      {:error, :occupied}
+    else
+      :ok
+    end
+  end
 
-          nil ->
-            {:error, :unreachable}
+  defp resolve_move(state, unit, unit_id, to_tile) do
+    case bfs_path(state, unit.tile_id, to_tile, unit.type) do
+      path when path in [[], nil] ->
+        {:error, :unreachable}
 
-          path ->
-            persist_order!(unit_id, path)
+      path ->
+        persist_order!(unit_id, path)
 
-            new_state = %{
-              state
-              | orders:
-                  Map.put(state.orders, unit_id, %{kind: :move, path: path, status: :pending})
-            }
+        new_state = %{
+          state
+          | orders: Map.put(state.orders, unit_id, %{kind: :move, path: path, status: :pending})
+        }
 
-            {:ok, path, new_state}
-        end
+        {:ok, path, new_state}
     end
   end
 
@@ -483,22 +505,35 @@ defmodule BrokenOaths.Units.Unit do
     player = find_player(state, user.id)
     unit = Map.get(state.units, unit_id)
 
+    with :ok <- validate_road_owner(player, unit),
+         :ok <- validate_road_tech(state, player),
+         :ok <- validate_road_destination_tile(state, destination) do
+      resolve_road_destination(state, player, unit, unit_id, destination)
+    end
+  end
+
+  defp validate_road_owner(player, unit) do
     cond do
-      is_nil(player) or is_nil(unit) or unit.player_id != player.id ->
-        {:error, :not_owner}
+      is_nil(player) or is_nil(unit) or unit.player_id != player.id -> {:error, :not_owner}
+      unit.type != :worker -> {:error, :not_worker}
+      true -> :ok
+    end
+  end
 
-      unit.type != :worker ->
-        {:error, :not_worker}
+  defp validate_road_tech(state, player) do
+    if Research.road_enabled?(player_research_for(state, player.id)) do
+      :ok
+    else
+      {:error, :tech_locked}
+    end
+  end
 
-      not Research.road_enabled?(player_research_for(state, player.id)) ->
-        {:error, :tech_locked}
-
-      not is_integer(destination) or destination < 0 or
-          destination >= Globe.tile_count(state.world.frequency) ->
-        {:error, :invalid_tile}
-
-      true ->
-        resolve_road_destination(state, player, unit, unit_id, destination)
+  defp validate_road_destination_tile(state, destination) do
+    if not is_integer(destination) or destination < 0 or
+         destination >= Globe.tile_count(state.world.frequency) do
+      {:error, :invalid_tile}
+    else
+      :ok
     end
   end
 
@@ -595,91 +630,69 @@ defmodule BrokenOaths.Units.Unit do
     roads = Map.get(state, :roads, %{})
     cleared_features = Map.get(state, :cleared_features, MapSet.new())
 
-    dijkstra(
-      state.world,
-      roads,
-      cleared_features,
-      occupied,
-      allowed_tiles,
-      :gb_sets.singleton({0, from}),
-      %{from => 0},
-      %{},
-      to,
-      unit_type
-    )
+    ctx = %{
+      world: state.world,
+      roads: roads,
+      cleared_features: cleared_features,
+      occupied: occupied,
+      allowed_tiles: allowed_tiles,
+      to: to,
+      unit_type: unit_type
+    }
+
+    dijkstra(ctx, :gb_sets.singleton({0, from}), %{from => 0}, %{})
   end
 
-  defp dijkstra(
-         world,
-         roads,
-         cleared_features,
-         occupied,
-         allowed_tiles,
-         frontier,
-         dist,
-         prev,
-         to,
-         unit_type
-       ) do
+  defp dijkstra(ctx, frontier, dist, prev) do
     if :gb_sets.is_empty(frontier) do
       nil
     else
       {{cost, tile}, frontier} = :gb_sets.take_smallest(frontier)
+      dijkstra_step(ctx, cost, tile, frontier, dist, prev)
+    end
+  end
 
-      cond do
-        tile == to ->
-          reconstruct_path(prev, to, [])
+  defp dijkstra_step(ctx, cost, tile, frontier, dist, prev) do
+    cond do
+      tile == ctx.to ->
+        reconstruct_path(prev, ctx.to, [])
 
-        # A stale duplicate: a cheaper route to `tile` was already found
-        # and popped (and expanded) earlier — nothing new to explore.
-        cost > Map.get(dist, tile) ->
-          dijkstra(
-            world,
-            roads,
-            cleared_features,
-            occupied,
-            allowed_tiles,
-            frontier,
-            dist,
-            prev,
-            to,
-            unit_type
-          )
+      # A stale duplicate: a cheaper route to `tile` was already found
+      # and popped (and expanded) earlier — nothing new to explore.
+      cost > Map.get(dist, tile) ->
+        dijkstra(ctx, frontier, dist, prev)
 
-        true ->
-          neighbors =
-            world
-            |> Regions.adjacent_tiles(tile)
-            |> Enum.filter(
-              &(passable_tile?(unit_type, Regions.tile_class(world, &1)) and
-                  (&1 == to or not MapSet.member?(occupied, &1)) and
-                  (is_nil(allowed_tiles) or MapSet.member?(allowed_tiles, &1)))
-            )
+      true ->
+        {frontier, dist, prev} = expand_neighbors(ctx, cost, tile, frontier, dist, prev)
+        dijkstra(ctx, frontier, dist, prev)
+    end
+  end
 
-          {frontier, dist, prev} =
-            Enum.reduce(neighbors, {frontier, dist, prev}, fn n, {f, d, p} ->
-              new_cost = cost + entry_cost(world, roads, n, cleared_features, unit_type)
+  defp expand_neighbors(ctx, cost, tile, frontier, dist, prev) do
+    ctx
+    |> passable_neighbors(tile)
+    |> Enum.reduce({frontier, dist, prev}, fn n, {f, d, p} ->
+      relax_edge(ctx, cost, tile, n, {f, d, p})
+    end)
+  end
 
-              if new_cost < Map.get(d, n, :infinity) do
-                {:gb_sets.add({new_cost, n}, f), Map.put(d, n, new_cost), Map.put(p, n, tile)}
-              else
-                {f, d, p}
-              end
-            end)
+  defp passable_neighbors(ctx, tile) do
+    ctx.world
+    |> Regions.adjacent_tiles(tile)
+    |> Enum.filter(
+      &(passable_tile?(ctx.unit_type, Regions.tile_class(ctx.world, &1)) and
+          (&1 == ctx.to or not MapSet.member?(ctx.occupied, &1)) and
+          (is_nil(ctx.allowed_tiles) or MapSet.member?(ctx.allowed_tiles, &1)))
+    )
+  end
 
-          dijkstra(
-            world,
-            roads,
-            cleared_features,
-            occupied,
-            allowed_tiles,
-            frontier,
-            dist,
-            prev,
-            to,
-            unit_type
-          )
-      end
+  defp relax_edge(ctx, cost, tile, n, {f, d, p}) do
+    new_cost = cost + entry_cost(ctx.world, ctx.roads, n, ctx.cleared_features, ctx.unit_type)
+
+    if new_cost < Map.get(d, n, :infinity) do
+      {:gb_sets.add({new_cost, n}, f), Map.put(d, n, new_cost), Map.put(p, n, tile)}
+    else
+      {f, d, p}
     end
   end
 
