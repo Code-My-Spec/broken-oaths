@@ -5,6 +5,7 @@ defmodule BrokenOaths.Cities.ImprovementTest do
   alias BrokenOaths.Players.Player
   alias BrokenOaths.Units.Unit
   alias BrokenOaths.UsersFixtures
+  alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.Terrain
   alias BrokenOaths.WorldsFixtures
 
@@ -128,7 +129,7 @@ defmodule BrokenOaths.Cities.ImprovementTest do
   # seed landing on water/mountain.
   describe "ensure_building/3 (story 929)" do
     defp land_tile(world) do
-      Enum.find(0..641, &(BrokenOaths.Worlds.Regions.tile_class(world, &1) == :land))
+      Enum.find(0..641, &(Regions.tile_class(world, &1) == :land))
     end
 
     defp road_state(world, player_id, opts \\ []) do

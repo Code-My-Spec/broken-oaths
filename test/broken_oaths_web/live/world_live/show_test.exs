@@ -230,7 +230,7 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
       assert Enum.all?(levels, fn {_id, l} -> l in 1..3 end)
 
       assert length(palette) >= 5 and length(palette) <= 256
-      tile_count = BrokenOaths.Worlds.Globe.tile_count(@frequency)
+      tile_count = Globe.tile_count(@frequency)
       assert tiles != []
       assert length(tiles) <= tile_count
 

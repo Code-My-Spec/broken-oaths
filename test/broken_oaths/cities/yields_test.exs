@@ -2,6 +2,7 @@ defmodule BrokenOaths.Cities.YieldsTest do
   use ExUnit.Case, async: true
 
   alias BrokenOaths.Cities.Yields
+  alias BrokenOaths.Worlds.Globe
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.Terrain
   alias BrokenOaths.Worlds.World
@@ -393,7 +394,7 @@ defmodule BrokenOaths.Cities.YieldsTest do
 
     test "a worked Coast tile adds its own +1 gold on top of the base (criterion 7715)" do
       coast_tile =
-        Enum.find(0..(BrokenOaths.Worlds.Globe.tile_count(@frequency) - 1), fn t ->
+        Enum.find(0..(Globe.tile_count(@frequency) - 1), fn t ->
           Regions.terrain(world(), t).base == :coast
         end)
 

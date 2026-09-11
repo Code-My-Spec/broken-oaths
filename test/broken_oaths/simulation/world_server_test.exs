@@ -1401,10 +1401,10 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
   end
 
   defp hills_tile(world) do
-    land? = fn t -> BrokenOaths.Worlds.Regions.tile_class(world, t) == :land end
+    land? = fn t -> Regions.tile_class(world, t) == :land end
 
     Enum.find(0..641, fn t ->
-      land?.(t) and BrokenOaths.Worlds.Regions.terrain(world, t).relief == :hills
+      land?.(t) and Regions.terrain(world, t).relief == :hills
     end)
   end
 
@@ -1412,11 +1412,11 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
   # Farm ground (`Improvement.allowed?/2`) — for scenarios that need to
   # walk a worker between more than one build site.
   defp farmable_tiles(world, count) do
-    land? = fn t -> BrokenOaths.Worlds.Regions.tile_class(world, t) == :land end
+    land? = fn t -> Regions.tile_class(world, t) == :land end
 
     0..641
     |> Enum.filter(fn t ->
-      land?.(t) and Improvement.allowed?(:farm, BrokenOaths.Worlds.Regions.terrain(world, t))
+      land?.(t) and Improvement.allowed?(:farm, Regions.terrain(world, t))
     end)
     |> Enum.take(count)
   end

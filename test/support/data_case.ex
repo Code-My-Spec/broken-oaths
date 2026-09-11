@@ -16,6 +16,8 @@ defmodule BrokenOathsTest.DataCase do
 
   use ExUnit.CaseTemplate
 
+  alias Ecto.Adapters.SQL.Sandbox
+
   using do
     quote do
       alias BrokenOaths.Repo
@@ -53,10 +55,10 @@ defmodule BrokenOathsTest.DataCase do
     # every cross-process read came back `nil`, no crash, no hint why.
     # Idempotent and already a no-op under `mix test` (already
     # `:manual` by the time this runs), so safe to call unconditionally.
-    Ecto.Adapters.SQL.Sandbox.mode(BrokenOaths.Repo, :manual)
+    Sandbox.mode(BrokenOaths.Repo, :manual)
 
-    pid = Ecto.Adapters.SQL.Sandbox.start_owner!(BrokenOaths.Repo, shared: not tags[:async])
-    on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(pid) end)
+    pid = Sandbox.start_owner!(BrokenOaths.Repo, shared: not tags[:async])
+    on_exit(fn -> Sandbox.stop_owner(pid) end)
   end
 
   @doc """

@@ -4,6 +4,7 @@ defmodule BrokenOaths.Units.UnitTest do
   alias BrokenOaths.Players.Player
   alias BrokenOaths.Units.Unit
   alias BrokenOaths.UsersFixtures
+  alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
   alias BrokenOaths.WorldsFixtures
 
@@ -272,9 +273,9 @@ defmodule BrokenOaths.Units.UnitTest do
 
       feature_tile =
         Enum.find(0..641, fn t ->
-          BrokenOaths.Worlds.Regions.tile_class(world, t) == :land and
-            BrokenOaths.Worlds.Regions.terrain(world, t).relief == :flat and
-            BrokenOaths.Worlds.Regions.terrain(world, t).feature in [:woods, :rainforest, :marsh]
+          Regions.tile_class(world, t) == :land and
+            Regions.terrain(world, t).relief == :flat and
+            Regions.terrain(world, t).feature in [:woods, :rainforest, :marsh]
         end)
 
       assert Unit.entry_cost(world, %{}, feature_tile) == 2
