@@ -170,22 +170,23 @@ defmodule BrokenOathsSpex.Story903.Criterion7637Spex do
 
       render_hook(live_view, "queue_move", %{"unit_id" => lord.id, "to_tile" => safe_tile})
 
-      _ =
-        Enum.reduce_while(1..10, :ok, fn _, :ok ->
-          [l] = for u <- Fixtures.player_units(world, user), u.id == lord.id, do: u
-
-          if l.tile_id == safe_tile do
-            {:halt, :ok}
-          else
-            Fixtures.advance_turn(world)
-            {:cont, :ok}
-          end
-        end)
+      _ = Enum.reduce_while(1..10, :ok, fn _, :ok -> poll_until_safe(world, user, lord, safe_tile) end)
 
       [l] = for u <- Fixtures.player_units(world, user), u.id == lord.id, do: u
       l
     else
       lord
+    end
+  end
+
+  defp poll_until_safe(world, user, lord, safe_tile) do
+    [l] = for u <- Fixtures.player_units(world, user), u.id == lord.id, do: u
+
+    if l.tile_id == safe_tile do
+      {:halt, :ok}
+    else
+      Fixtures.advance_turn(world)
+      {:cont, :ok}
     end
   end
 end

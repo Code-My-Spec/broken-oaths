@@ -1335,19 +1335,21 @@ defmodule BrokenOaths.Simulation.WorldServerTest do
   # rather than reimplementing the spacing math, so a `{:error,
   # :too_close}` just means "try the next candidate."
   defp found_far_city(world, user, player_id) do
-    Enum.find_value(0..641, fn tile ->
-      if Regions.tile_class(world, tile) == :land do
-        settler = Game.spawn_unit_for_test(world, player_id, :settler, tile)
+    Enum.find_value(0..641, &try_found_far_city(world, user, player_id, &1))
+  end
 
-        case Game.found_city(world, user, settler.id) do
-          :ok ->
-            Game.player_cities(world, user) |> Enum.find(&(&1.tile_id == tile)) |> Map.fetch!(:id)
+  defp try_found_far_city(world, user, player_id, tile) do
+    if Regions.tile_class(world, tile) == :land do
+      settler = Game.spawn_unit_for_test(world, player_id, :settler, tile)
 
-          {:error, _} ->
-            nil
-        end
+      case Game.found_city(world, user, settler.id) do
+        :ok ->
+          Game.player_cities(world, user) |> Enum.find(&(&1.tile_id == tile)) |> Map.fetch!(:id)
+
+        {:error, _} ->
+          nil
       end
-    end)
+    end
   end
 
   # Masonry's own two-step prerequisite chain (Mining first), the same

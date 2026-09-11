@@ -47,19 +47,21 @@ defmodule BrokenOaths.Game.ChopTest do
   # feature instead of pure spacing. Returns `%{city_id:, tile:}` (the
   # tile is the CHOPPABLE one, a neighbor of the city center) or `nil`.
   defp found_city_near_feature(world, user, player_id, feature) do
-    Enum.find_value(0..641, fn tile ->
-      if Regions.tile_class(world, tile) == :land do
-        chop_tile =
-          world
-          |> Regions.adjacent_tiles(tile)
-          |> Enum.find(fn n ->
-            Regions.tile_class(world, n) == :land and
-              Regions.terrain(world, n).feature == feature
-          end)
+    Enum.find_value(0..641, &try_land_and_chop(world, user, player_id, feature, &1))
+  end
 
-        if chop_tile, do: try_found(world, user, player_id, tile, chop_tile)
-      end
-    end)
+  defp try_land_and_chop(world, user, player_id, feature, tile) do
+    if Regions.tile_class(world, tile) == :land do
+      chop_tile =
+        world
+        |> Regions.adjacent_tiles(tile)
+        |> Enum.find(fn n ->
+          Regions.tile_class(world, n) == :land and
+            Regions.terrain(world, n).feature == feature
+        end)
+
+      if chop_tile, do: try_found(world, user, player_id, tile, chop_tile)
+    end
   end
 
   # Same as `found_city_near_feature/4`, but the chop tile must ALSO be
@@ -67,21 +69,23 @@ defmodule BrokenOaths.Game.ChopTest do
   # ...)` needs once cleared — for the "chopped grassland becomes
   # Farm-allowed" scenario.
   defp found_city_near_farmable_woods(world, user, player_id) do
-    Enum.find_value(0..641, fn tile ->
-      if Regions.tile_class(world, tile) == :land do
-        chop_tile =
-          world
-          |> Regions.adjacent_tiles(tile)
-          |> Enum.find(fn n ->
-            t = Regions.terrain(world, n)
+    Enum.find_value(0..641, &try_land_and_chop_farmable(world, user, player_id, &1))
+  end
 
-            Regions.tile_class(world, n) == :land and t.feature == :woods and
-              t.relief == :flat and t.base in [:grassland, :plains]
-          end)
+  defp try_land_and_chop_farmable(world, user, player_id, tile) do
+    if Regions.tile_class(world, tile) == :land do
+      chop_tile =
+        world
+        |> Regions.adjacent_tiles(tile)
+        |> Enum.find(fn n ->
+          t = Regions.terrain(world, n)
 
-        if chop_tile, do: try_found(world, user, player_id, tile, chop_tile)
-      end
-    end)
+          Regions.tile_class(world, n) == :land and t.feature == :woods and
+            t.relief == :flat and t.base in [:grassland, :plains]
+        end)
+
+      if chop_tile, do: try_found(world, user, player_id, tile, chop_tile)
+    end
   end
 
   defp try_found(world, user, player_id, tile, chop_tile) do
@@ -102,22 +106,24 @@ defmodule BrokenOaths.Game.ChopTest do
   # two chops on the same city, each paying the full lump, needs two
   # DIFFERENT tiles (once chopped, a tile has nothing left to chop).
   defp found_city_near_two_feature_tiles(world, user, player_id, feature) do
-    Enum.find_value(0..641, fn tile ->
-      if Regions.tile_class(world, tile) == :land do
-        candidates =
-          world
-          |> Regions.adjacent_tiles(tile)
-          |> Enum.filter(fn n ->
-            Regions.tile_class(world, n) == :land and
-              Regions.terrain(world, n).feature == feature
-          end)
+    Enum.find_value(0..641, &try_land_and_two_chops(world, user, player_id, feature, &1))
+  end
 
-        case candidates do
-          [tile_a, tile_b | _] -> try_found_two(world, user, player_id, tile, tile_a, tile_b)
-          _short -> nil
-        end
+  defp try_land_and_two_chops(world, user, player_id, feature, tile) do
+    if Regions.tile_class(world, tile) == :land do
+      candidates =
+        world
+        |> Regions.adjacent_tiles(tile)
+        |> Enum.filter(fn n ->
+          Regions.tile_class(world, n) == :land and
+            Regions.terrain(world, n).feature == feature
+        end)
+
+      case candidates do
+        [tile_a, tile_b | _] -> try_found_two(world, user, player_id, tile, tile_a, tile_b)
+        _short -> nil
       end
-    end)
+    end
   end
 
   defp try_found_two(world, user, player_id, tile, tile_a, tile_b) do

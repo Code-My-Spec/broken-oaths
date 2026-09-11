@@ -106,21 +106,25 @@ defmodule BrokenOathsWeb.GameLive.FeudalCaptureUITest do
   # (or after `max_attacks` swings).
   defp grind_via_attack_button(conn, world, attacker, defender_user, city, max_attacks \\ 40) do
     Enum.reduce_while(1..max_attacks, city, fn _, current ->
-      if current.hp <= 0 do
-        {:halt, current}
-      else
-        {:ok, play_live, _html} = live(conn, ~p"/play/#{world.id}")
-        render_hook(play_live, "select_unit", %{"unit_id" => to_string(attacker.id)})
-
-        play_live
-        |> element("[data-test='attack-city-#{current.id}']")
-        |> render_click()
-
-        Game.advance_turn(world)
-        [refreshed] = for c <- Game.player_cities(world, defender_user), c.id == current.id, do: c
-        {:cont, refreshed}
-      end
+      attack_round(conn, world, attacker, defender_user, current)
     end)
+  end
+
+  defp attack_round(conn, world, attacker, defender_user, current) do
+    if current.hp <= 0 do
+      {:halt, current}
+    else
+      {:ok, play_live, _html} = live(conn, ~p"/play/#{world.id}")
+      render_hook(play_live, "select_unit", %{"unit_id" => to_string(attacker.id)})
+
+      play_live
+      |> element("[data-test='attack-city-#{current.id}']")
+      |> render_click()
+
+      Game.advance_turn(world)
+      [refreshed] = for c <- Game.player_cities(world, defender_user), c.id == current.id, do: c
+      {:cont, refreshed}
+    end
   end
 
   describe "game:cities (QA issue 56ee521a)" do

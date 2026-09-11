@@ -54,19 +54,21 @@ defmodule BrokenOaths.Feudal.StewardProductionGateTest do
   # proving the empire-wide grant covers a city founded AFTER
   # subjugation too, not just the one the lord captured.
   defp found_second_city(world, user, player_id) do
-    Enum.find_value(0..641, fn tile ->
-      if Regions.tile_class(world, tile) == :land do
-        settler = Game.spawn_unit_for_test(world, player_id, :settler, tile)
+    Enum.find_value(0..641, &try_found_second_city(world, user, player_id, &1))
+  end
 
-        case Game.found_city(world, user, settler.id) do
-          :ok ->
-            Game.player_cities(world, user) |> Enum.find(&(&1.tile_id == tile)) |> Map.fetch!(:id)
+  defp try_found_second_city(world, user, player_id, tile) do
+    if Regions.tile_class(world, tile) == :land do
+      settler = Game.spawn_unit_for_test(world, player_id, :settler, tile)
 
-          {:error, _} ->
-            nil
-        end
+      case Game.found_city(world, user, settler.id) do
+        :ok ->
+          Game.player_cities(world, user) |> Enum.find(&(&1.tile_id == tile)) |> Map.fetch!(:id)
+
+        {:error, _} ->
+          nil
       end
-    end)
+    end
   end
 
   describe "queue_production/5's own new gate, with the grant OFF (default)" do

@@ -35,14 +35,7 @@ defmodule BrokenOaths.Game.GarrisonFateIntegrationTest do
   defp siege_and_capture(world, attacker_user, attacker, defender_user, city) do
     broken_city =
       Enum.reduce_while(1..40, city, fn _, current ->
-        if current.hp <= 0 do
-          {:halt, current}
-        else
-          Game.attack_city(world, attacker_user, attacker.id, current.id)
-          Game.advance_turn(world)
-          [refreshed] = for c <- Game.player_cities(world, defender_user), c.id == current.id, do: c
-          {:cont, refreshed}
-        end
+        siege_round(world, attacker_user, attacker, defender_user, current)
       end)
 
     assert broken_city.hp == 0
@@ -54,6 +47,17 @@ defmodule BrokenOaths.Game.GarrisonFateIntegrationTest do
     assert moved_attacker.tile_id == city.tile_id
 
     moved_attacker
+  end
+
+  defp siege_round(world, attacker_user, attacker, defender_user, current) do
+    if current.hp <= 0 do
+      {:halt, current}
+    else
+      Game.attack_city(world, attacker_user, attacker.id, current.id)
+      Game.advance_turn(world)
+      [refreshed] = for c <- Game.player_cities(world, defender_user), c.id == current.id, do: c
+      {:cont, refreshed}
+    end
   end
 
   defp adjacent_land_tile(world, target_tile_id) do

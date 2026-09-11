@@ -386,14 +386,7 @@ defmodule BrokenOathsSpex.SharedGivens do
     # candidate rather than crashing (same shape as story 952's
     # `relocate_to_first_free/3`). A successful try both confirms AND
     # performs the relocation in one step.
-    try_candidate = fn tile ->
-      if candidate_ok?.(tile) do
-        case Fixtures.relocate_unit(context.world, settler.id, tile) do
-          :ok -> tile
-          {:error, _reason} -> nil
-        end
-      end
-    end
+    try_candidate = &try_relocate_candidate(context.world, settler, candidate_ok?, &1)
 
     target = search_rings(context.world, settler.tile_id, max_rings, try_candidate)
 
@@ -414,6 +407,15 @@ defmodule BrokenOathsSpex.SharedGivens do
   # longer expand, or the raw `{frontier, seen}` accumulator if
   # `max_rings` is exhausted without either — callers normalize that
   # last case as they see fit.
+  defp try_relocate_candidate(world, settler, candidate_ok?, tile) do
+    if candidate_ok?.(tile) do
+      case Fixtures.relocate_unit(world, settler.id, tile) do
+        :ok -> tile
+        {:error, _reason} -> nil
+      end
+    end
+  end
+
   defp search_rings(world, start_tile, max_rings, try_candidate) do
     Enum.reduce_while(
       1..max_rings,
@@ -485,14 +487,7 @@ defmodule BrokenOathsSpex.SharedGivens do
         |> Enum.any?(water?)
     end
 
-    try_candidate = fn tile ->
-      if candidate_ok?.(tile) do
-        case Fixtures.relocate_unit(context.world, settler.id, tile) do
-          :ok -> tile
-          {:error, _reason} -> nil
-        end
-      end
-    end
+    try_candidate = &try_relocate_candidate(context.world, settler, candidate_ok?, &1)
 
     search_result = search_rings(context.world, settler.tile_id, max_rings, try_candidate)
 
