@@ -19,14 +19,18 @@ defmodule BrokenOaths.Accounts.MembersRepository do
         {:error, :not_found}
 
       member ->
-        case member.role do
-          :owner ->
-            owner_count = count_owners(account_id)
-            if owner_count > 1, do: Repo.delete(member), else: {:error, :last_owner}
+        remove_member(member, account_id)
+    end
+  end
 
-          _ ->
-            Repo.delete(member)
-        end
+  defp remove_member(member, account_id) do
+    case member.role do
+      :owner ->
+        owner_count = count_owners(account_id)
+        if owner_count > 1, do: Repo.delete(member), else: {:error, :last_owner}
+
+      _ ->
+        Repo.delete(member)
     end
   end
 

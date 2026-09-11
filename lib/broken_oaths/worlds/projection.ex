@@ -72,23 +72,30 @@ defmodule BrokenOaths.Worlds.Projection do
     min_z = max(0.03, 1.5 / (scale * tile_arc))
     margin = scale * tile_arc
 
+    ctx = %{scale: scale, cx: cx, cy: cy, min_z: min_z, margin: margin, w: w, h: h}
+
     mesh.tiles
     |> Map.values()
     |> Enum.reduce([], fn tile, acc ->
-      {_, _, vz} = rotated_center = rotate(tile.center, yaw, pitch)
+      visible_tile_or_acc(tile, terrain_map, yaw, pitch, ctx, acc)
+    end)
+  end
 
-      if vz > min_z do
-        {sx, sy} = project(rotated_center, scale, cx, cy)
+  defp visible_tile_or_acc(tile, terrain_map, yaw, pitch, ctx, acc) do
+    %{scale: scale, cx: cx, cy: cy, min_z: min_z, margin: margin, w: w, h: h} = ctx
+    {_, _, vz} = rotated_center = rotate(tile.center, yaw, pitch)
 
-        if sx >= -margin and sx <= w + margin and sy >= -margin and sy <= h + margin do
-          [render_tile(tile, terrain_map, yaw, pitch, scale, cx, cy) | acc]
-        else
-          acc
-        end
+    if vz > min_z do
+      {sx, sy} = project(rotated_center, scale, cx, cy)
+
+      if sx >= -margin and sx <= w + margin and sy >= -margin and sy <= h + margin do
+        [render_tile(tile, terrain_map, yaw, pitch, scale, cx, cy) | acc]
       else
         acc
       end
-    end)
+    else
+      acc
+    end
   end
 
   defp render_tile(tile, terrain_map, yaw, pitch, scale, cx, cy) do

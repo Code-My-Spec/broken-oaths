@@ -47,17 +47,19 @@ defmodule BrokenOaths.Feudal.OathStrain.Ledger do
   @spec apply_oath_strain_drift(map()) :: map()
   def apply_oath_strain_drift(state) do
     if Game.feudal_enabled?() do
-      for vassalage <- active_vassalages(state.world.id) do
-        new_strain = OathStrain.tribute_drift(vassalage.oath_strain, vassalage.tribute_rate)
-
-        if new_strain != vassalage.oath_strain do
-          Vassalage.changeset(vassalage, %{oath_strain: new_strain}) |> Repo.update!()
-        end
-      end
+      for vassalage <- active_vassalages(state.world.id), do: drift_vassalage(vassalage)
 
       state
     else
       state
+    end
+  end
+
+  defp drift_vassalage(vassalage) do
+    new_strain = OathStrain.tribute_drift(vassalage.oath_strain, vassalage.tribute_rate)
+
+    if new_strain != vassalage.oath_strain do
+      Vassalage.changeset(vassalage, %{oath_strain: new_strain}) |> Repo.update!()
     end
   end
 

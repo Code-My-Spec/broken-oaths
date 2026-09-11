@@ -236,18 +236,18 @@ defmodule BrokenOaths.Worlds.Texture do
         dot = clat * clon * cx + clat * slon * cy + slat * cz
         score = trunc(dot * 1_000_000_000)
 
-        if score > 0 do
-          i = row_base + px + 1
-
-          if score > :atomics.get(dots, i) do
-            :atomics.put(dots, i, score)
-            :atomics.put(ids, i, tile_id)
-          end
-        end
+        maybe_paint_pixel(dots, ids, tile_id, row_base + px + 1, score)
       end
     end
 
     :ok
+  end
+
+  defp maybe_paint_pixel(dots, ids, tile_id, i, score) do
+    if score > 0 and score > :atomics.get(dots, i) do
+      :atomics.put(dots, i, score)
+      :atomics.put(ids, i, tile_id)
+    end
   end
 
   # -------------------------------------------------------------------

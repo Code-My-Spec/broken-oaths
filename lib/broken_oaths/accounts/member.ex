@@ -50,26 +50,30 @@ defmodule BrokenOaths.Accounts.Member do
         account_id = get_field(changeset, :account_id)
 
         if user_id && account_id do
-          case repo.get_by(__MODULE__, user_id: user_id, account_id: account_id) do
-            %{role: :owner} ->
-              owner_count =
-                repo.aggregate(
-                  from(m in __MODULE__, where: m.account_id == ^account_id and m.role == :owner),
-                  :count
-                )
-
-              if owner_count <= 1 do
-                add_error(changeset, :role, "account must have at least one owner")
-              else
-                changeset
-              end
-
-            _ ->
-              changeset
-          end
+          check_replaces_last_owner(changeset, repo, user_id, account_id)
         else
           changeset
         end
+    end
+  end
+
+  defp check_replaces_last_owner(changeset, repo, user_id, account_id) do
+    case repo.get_by(__MODULE__, user_id: user_id, account_id: account_id) do
+      %{role: :owner} ->
+        owner_count =
+          repo.aggregate(
+            from(m in __MODULE__, where: m.account_id == ^account_id and m.role == :owner),
+            :count
+          )
+
+        if owner_count <= 1 do
+          add_error(changeset, :role, "account must have at least one owner")
+        else
+          changeset
+        end
+
+      _ ->
+        changeset
     end
   end
 
