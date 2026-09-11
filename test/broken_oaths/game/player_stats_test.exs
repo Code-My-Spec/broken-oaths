@@ -163,9 +163,10 @@ defmodule BrokenOaths.Game.PlayerStatsTest do
         |> Regions.adjacent_tiles(tile_id)
         |> Enum.filter(&(Regions.tile_class(world, &1) == :land and &1 != tile_id))
 
-      Enum.find_value(parking, fn t ->
-        Game.relocate_unit_for_test(world, occupant.id, t) == :ok
-      end)
+      _relocated =
+        Enum.find_value(parking, fn t ->
+          Game.relocate_unit_for_test(world, occupant.id, t) == :ok
+        end)
     end
 
     :ok

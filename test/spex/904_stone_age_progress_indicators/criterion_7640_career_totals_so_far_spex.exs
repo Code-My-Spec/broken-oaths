@@ -161,7 +161,8 @@ defmodule BrokenOathsSpex.Story904.Criterion7640Spex do
         |> Fixtures.adjacent_tiles(tile_id)
         |> Enum.filter(&(Fixtures.tile_class(world, &1) == :land and &1 != tile_id))
 
-      Enum.find_value(parking, fn t -> Fixtures.relocate_unit(world, occupant.id, t) == :ok end)
+      _relocated =
+        Enum.find_value(parking, fn t -> Fixtures.relocate_unit(world, occupant.id, t) == :ok end)
     end
 
     :ok
