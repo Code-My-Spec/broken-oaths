@@ -900,10 +900,21 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
     case border_entry_status(world, user, to_tile) do
       {:declare_war_required, rival_user_id} ->
-        {:noreply, assign(socket, declare_war_required_user_id: rival_user_id)}
+        socket =
+          assign(socket,
+            declare_war_required_user_id: rival_user_id,
+            open_borders_entry_status: :refused
+          )
 
-      {:allowed, hostile_user_id} ->
-        socket = assign(socket, hostile_border_entry_user_id: hostile_user_id)
+        {:noreply, socket}
+
+      {:allowed, hostile_user_id, open_borders_partner_id} ->
+        socket =
+          assign(socket,
+            hostile_border_entry_user_id: hostile_user_id,
+            open_borders_entry_status: if(open_borders_partner_id, do: :peaceful, else: nil)
+          )
+
         queue_move(socket, world, user, unit_id, to_tile)
     end
   end
@@ -2195,23 +2206,23 @@ defmodule BrokenOathsWeb.GameLive.Play do
 
     cond do
       broken_enemy_city? ->
-        {:allowed, nil}
+        {:allowed, nil, nil}
 
       true ->
         case Game.territory_owner(world, to_tile) do
           nil ->
-            {:allowed, nil}
+            {:allowed, nil, nil}
 
           owner_user_id when owner_user_id == user.id ->
-            {:allowed, nil}
+            {:allowed, nil, nil}
 
           owner_user_id ->
             cond do
               Game.at_war?(world, user, %{id: owner_user_id}) ->
-                {:allowed, owner_user_id}
+                {:allowed, owner_user_id, nil}
 
               Game.open_borders_active?(world, user, %{id: owner_user_id}) ->
-                {:allowed, nil}
+                {:allowed, nil, owner_user_id}
 
               true ->
                 {:declare_war_required, owner_user_id}
