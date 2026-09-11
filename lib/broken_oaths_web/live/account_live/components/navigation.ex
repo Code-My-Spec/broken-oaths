@@ -1,4 +1,5 @@
 defmodule BrokenOathsWeb.AccountLive.Components.Navigation do
+  @moduledoc false
   use BrokenOathsWeb, :live_component
 
   alias BrokenOaths.Authorization

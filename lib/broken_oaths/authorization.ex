@@ -1,4 +1,6 @@
 defmodule BrokenOaths.Authorization do
+  @moduledoc "Authorization checks for account-scoped actions."
+
   alias BrokenOaths.Accounts.MembersRepository
   alias BrokenOaths.Users.Scope
 

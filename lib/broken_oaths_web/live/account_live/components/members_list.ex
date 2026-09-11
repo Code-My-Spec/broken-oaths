@@ -1,4 +1,5 @@
 defmodule BrokenOathsWeb.AccountLive.Components.MembersList do
+  @moduledoc false
   use BrokenOathsWeb, :live_component
   import BrokenOathsWeb.CoreComponents
 

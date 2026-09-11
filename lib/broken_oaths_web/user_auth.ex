@@ -1,4 +1,6 @@
 defmodule BrokenOathsWeb.UserAuth do
+  @moduledoc "Session and authentication plugs for user login state."
+
   use BrokenOathsWeb, :verified_routes
 
   import Plug.Conn

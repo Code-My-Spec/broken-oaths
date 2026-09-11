@@ -1,4 +1,6 @@
 defmodule BrokenOaths.Integrations do
+  @moduledoc "Third-party integration accounts and OAuth flows."
+
   require Logger
 
   alias BrokenOaths.Integrations.IntegrationRepository

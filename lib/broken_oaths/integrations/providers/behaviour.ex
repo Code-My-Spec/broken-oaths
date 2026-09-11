@@ -1,4 +1,6 @@
 defmodule BrokenOaths.Integrations.Providers.Behaviour do
+  @moduledoc false
+
   @callback config() :: Keyword.t()
   @callback strategy() :: module()
   @callback normalize_user(user_data :: map()) :: {:ok, map()} | {:error, term()}

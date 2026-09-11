@@ -1,4 +1,6 @@
 defmodule BrokenOaths.Accounts.MembersRepository do
+  @moduledoc false
+
   import Ecto.Query, warn: false
 
   alias BrokenOaths.Repo

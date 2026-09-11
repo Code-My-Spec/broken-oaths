@@ -1,4 +1,6 @@
 defmodule BrokenOaths.Users.UserNotifier do
+  @moduledoc false
+
   import Swoosh.Email
 
   alias BrokenOaths.Mailer

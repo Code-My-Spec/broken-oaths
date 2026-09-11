@@ -1,4 +1,6 @@
 defmodule BrokenOaths.Integrations.IntegrationRepository do
+  @moduledoc false
+
   import Ecto.Query
 
   alias BrokenOaths.Integrations.Integration

@@ -1,4 +1,5 @@
 defmodule BrokenOathsWeb.InvitationsLive.Components.PendingInvitations do
+  @moduledoc false
   use BrokenOathsWeb, :live_component
   import BrokenOathsWeb.CoreComponents
 

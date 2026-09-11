@@ -1,4 +1,5 @@
 defmodule BrokenOaths.Integrations.OAuthStateStore do
+  @moduledoc false
   use GenServer
 
   @table :oauth_state_store

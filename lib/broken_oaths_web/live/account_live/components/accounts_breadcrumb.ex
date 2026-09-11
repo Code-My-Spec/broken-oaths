@@ -1,4 +1,5 @@
 defmodule BrokenOathsWeb.AccountLive.Components.AccountsBreadcrumb do
+  @moduledoc false
   use BrokenOathsWeb, :html
 
   @doc """
