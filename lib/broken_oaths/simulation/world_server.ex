@@ -2757,22 +2757,21 @@ defmodule BrokenOaths.Simulation.WorldServer do
     |> Map.values()
     |> Enum.group_by(& &1.player_id)
     |> Map.new(fn {player_id, cities} ->
-      income =
-        cities
-        |> Enum.map(fn city ->
-          # Story 895 pillage freeze: a city still serving `CityDefense.
-          # production_halted?/2` earns nothing this tick at all, same
-          # "queue simply doesn't move" boundary `Production.accrue_or_skip/2`
-          # already gives its production banking.
-          if CityDefense.production_halted?(city, state.turn) do
-            0
-          else
-            Yields.city_gold_income(city, state.world)
-          end
-        end)
-        |> Enum.sum()
+      income = cities |> Enum.map(&city_gold_income(&1, state)) |> Enum.sum()
       {player_id, income}
     end)
+  end
+
+  # Story 895 pillage freeze: a city still serving `CityDefense.
+  # production_halted?/2` earns nothing this tick at all, same
+  # "queue simply doesn't move" boundary `Production.accrue_or_skip/2`
+  # already gives its production banking.
+  defp city_gold_income(city, state) do
+    if CityDefense.production_halted?(city, state.turn) do
+      0
+    else
+      Yields.city_gold_income(city, state.world)
+    end
   end
 
   defp persist_gold_logs([]), do: :ok

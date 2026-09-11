@@ -382,22 +382,20 @@ defmodule BrokenOaths.Simulation.Turn.Movement do
   defp apply_positions(units, movers, positions) do
     Map.new(units, fn {id, unit} ->
       case Map.fetch(movers, id) do
-        {:ok, mover} ->
-          new_tile_id = Map.fetch!(positions, id)
-
-          fortified_turns =
-            if new_tile_id == unit.tile_id, do: Map.get(unit, :fortified_turns, 0), else: 0
-
-          {id,
-           unit
-           |> Map.put(:tile_id, new_tile_id)
-           |> Map.put(:movement, mover.movement_left)
-           |> Map.put(:fortified_turns, fortified_turns)}
-
-        :error ->
-          {id, unit}
+        {:ok, mover} -> {id, moved_unit(unit, mover, Map.fetch!(positions, id))}
+        :error -> {id, unit}
       end
     end)
+  end
+
+  defp moved_unit(unit, mover, new_tile_id) do
+    fortified_turns =
+      if new_tile_id == unit.tile_id, do: Map.get(unit, :fortified_turns, 0), else: 0
+
+    unit
+    |> Map.put(:tile_id, new_tile_id)
+    |> Map.put(:movement, mover.movement_left)
+    |> Map.put(:fortified_turns, fortified_turns)
   end
 
   # Orders whose path emptied this tick (arrival) are dropped entirely.

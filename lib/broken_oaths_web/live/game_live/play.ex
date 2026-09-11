@@ -2204,30 +2204,27 @@ defmodule BrokenOathsWeb.GameLive.Play do
         city.tile_id == to_tile and city.hp == 0
       end)
 
+    if broken_enemy_city? do
+      {:allowed, nil, nil}
+    else
+      case Game.territory_owner(world, to_tile) do
+        nil -> {:allowed, nil, nil}
+        owner_user_id when owner_user_id == user.id -> {:allowed, nil, nil}
+        owner_user_id -> foreign_territory_entry_status(world, user, owner_user_id)
+      end
+    end
+  end
+
+  defp foreign_territory_entry_status(world, user, owner_user_id) do
     cond do
-      broken_enemy_city? ->
-        {:allowed, nil, nil}
+      Game.at_war?(world, user, %{id: owner_user_id}) ->
+        {:allowed, owner_user_id, nil}
+
+      Game.open_borders_active?(world, user, %{id: owner_user_id}) ->
+        {:allowed, nil, owner_user_id}
 
       true ->
-        case Game.territory_owner(world, to_tile) do
-          nil ->
-            {:allowed, nil, nil}
-
-          owner_user_id when owner_user_id == user.id ->
-            {:allowed, nil, nil}
-
-          owner_user_id ->
-            cond do
-              Game.at_war?(world, user, %{id: owner_user_id}) ->
-                {:allowed, owner_user_id, nil}
-
-              Game.open_borders_active?(world, user, %{id: owner_user_id}) ->
-                {:allowed, nil, owner_user_id}
-
-              true ->
-                {:declare_war_required, owner_user_id}
-            end
-        end
+        {:declare_war_required, owner_user_id}
     end
   end
 

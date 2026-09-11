@@ -102,11 +102,11 @@ defmodule BrokenOaths.Combat.Siege do
   `handle_call` clauses are thin delegations into this section.
   """
 
-  alias BrokenOaths.Game
   alias BrokenOaths.Combat.BarbarianAI
   alias BrokenOaths.Combat.CityDefense
   alias BrokenOaths.Combat.Resolver
   alias BrokenOaths.Feudal.ProtectionPact
+  alias BrokenOaths.Game
   alias BrokenOaths.Worlds.Regions
 
   @type tile_id :: CityDefense.tile_id()
@@ -213,24 +213,28 @@ defmodule BrokenOaths.Combat.Siege do
             {Map.put(acc_cities, id, %{city | occupied_by_player_id: nil}), acc_events}
 
           false ->
-            case captor(city, unit_list) do
-              nil ->
-                {acc_cities, acc_events}
-
-              captor_player_id ->
-                event = %{
-                  city_id: id,
-                  captor_player_id: captor_player_id,
-                  defeated_player_id: city.player_id
-                }
-
-                {Map.put(acc_cities, id, %{city | occupied_by_player_id: captor_player_id}),
-                 [event | acc_events]}
-            end
+            apply_capture(acc_cities, acc_events, id, city, unit_list)
         end
       end)
 
     {new_cities, Enum.reverse(events)}
+  end
+
+  defp apply_capture(acc_cities, acc_events, id, city, unit_list) do
+    case captor(city, unit_list) do
+      nil ->
+        {acc_cities, acc_events}
+
+      captor_player_id ->
+        event = %{
+          city_id: id,
+          captor_player_id: captor_player_id,
+          defeated_player_id: city.player_id
+        }
+
+        {Map.put(acc_cities, id, %{city | occupied_by_player_id: captor_player_id}),
+         [event | acc_events]}
+    end
   end
 
   defp captor(city, units) do

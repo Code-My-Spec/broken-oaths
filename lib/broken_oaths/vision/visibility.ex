@@ -29,9 +29,9 @@ defmodule BrokenOaths.Vision.Visibility do
   `:captured_cities_visible_to` are thin delegations into this module.
   """
 
-  alias BrokenOaths.Game
   alias BrokenOaths.Combat.Resolver
   alias BrokenOaths.Combat.Siege
+  alias BrokenOaths.Game
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.World
 

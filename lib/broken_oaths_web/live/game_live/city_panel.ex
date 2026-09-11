@@ -117,10 +117,10 @@ defmodule BrokenOathsWeb.GameLive.CityPanel do
 
   use BrokenOathsWeb, :live_component
 
-  alias BrokenOaths.Combat.{CityDefense, Occupation}
   alias BrokenOaths.Cities.Production
-  alias BrokenOaths.Technology.Research
   alias BrokenOaths.Cities.Yields
+  alias BrokenOaths.Combat.{CityDefense, Occupation}
+  alias BrokenOaths.Technology.Research
 
   def render(%{city: nil} = assigns) do
     ~H"""

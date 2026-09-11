@@ -395,30 +395,7 @@ defmodule BrokenOathsSpex.SharedGivens do
       end
     end
 
-    target =
-      Enum.reduce_while(
-        1..max_rings,
-        {[settler.tile_id], MapSet.new([settler.tile_id])},
-        fn _, {frontier, seen} ->
-          case Enum.find_value(frontier, try_candidate) do
-            nil ->
-              next =
-                frontier
-                |> Enum.flat_map(&Fixtures.adjacent_tiles(context.world, &1))
-                |> Enum.uniq()
-                |> Enum.reject(&MapSet.member?(seen, &1))
-
-              if next == [] do
-                {:halt, nil}
-              else
-                {:cont, {next, MapSet.union(seen, MapSet.new(next))}}
-              end
-
-            found ->
-              {:halt, found}
-          end
-        end
-      )
+    target = search_rings(context.world, settler.tile_id, max_rings, try_candidate)
 
     assert target,
            "expected a founding location within #{max_rings} rings whose own territory has >= #{min_count} matching tiles and is free to stand on"
@@ -427,6 +404,43 @@ defmodule BrokenOathsSpex.SharedGivens do
     [city] = Fixtures.player_cities(context.world, context.user)
 
     context |> Map.put(:play_live, play_live) |> Map.put(:city, city)
+  end
+
+  # Shared ring-expanding BFS behind `found_city_with_enough_feature/4`
+  # and `found_city_with_water_in_ring/2`: grows the frontier outward
+  # one hop at a time, trying every tile in the current frontier via
+  # `try_candidate` before expanding further. Returns the first
+  # candidate `try_candidate` accepts, `nil` once the frontier can no
+  # longer expand, or the raw `{frontier, seen}` accumulator if
+  # `max_rings` is exhausted without either — callers normalize that
+  # last case as they see fit.
+  defp search_rings(world, start_tile, max_rings, try_candidate) do
+    Enum.reduce_while(
+      1..max_rings,
+      {[start_tile], MapSet.new([start_tile])},
+      fn _, {frontier, seen} -> expand_ring_or_halt(world, frontier, seen, try_candidate) end
+    )
+  end
+
+  defp expand_ring_or_halt(world, frontier, seen, try_candidate) do
+    case Enum.find_value(frontier, try_candidate) do
+      nil -> expand_frontier(world, frontier, seen)
+      found -> {:halt, found}
+    end
+  end
+
+  defp expand_frontier(world, frontier, seen) do
+    next =
+      frontier
+      |> Enum.flat_map(&Fixtures.adjacent_tiles(world, &1))
+      |> Enum.uniq()
+      |> Enum.reject(&MapSet.member?(seen, &1))
+
+    if next == [] do
+      {:halt, nil}
+    else
+      {:cont, {next, MapSet.union(seen, MapSet.new(next))}}
+    end
   end
 
   @doc """
@@ -480,30 +494,7 @@ defmodule BrokenOathsSpex.SharedGivens do
       end
     end
 
-    search_result =
-      Enum.reduce_while(
-        1..max_rings,
-        {[settler.tile_id], MapSet.new([settler.tile_id])},
-        fn _, {frontier, seen} ->
-          case Enum.find_value(frontier, try_candidate) do
-            nil ->
-              next =
-                frontier
-                |> Enum.flat_map(&Fixtures.adjacent_tiles(context.world, &1))
-                |> Enum.uniq()
-                |> Enum.reject(&MapSet.member?(seen, &1))
-
-              if next == [] do
-                {:halt, nil}
-              else
-                {:cont, {next, MapSet.union(seen, MapSet.new(next))}}
-              end
-
-            found ->
-              {:halt, found}
-          end
-        end
-      )
+    search_result = search_rings(context.world, settler.tile_id, max_rings, try_candidate)
 
     # Ring expansion exhausting `max_rings` without ever hitting `:halt`
     # leaves `reduce_while` returning its last `{frontier, seen}`
@@ -575,16 +566,17 @@ defmodule BrokenOathsSpex.SharedGivens do
   def march_to(_play_live, world, user, unit, to_tile, max_turns \\ 40) do
     _ = Fixtures.queue_move(world, user, unit.id, to_tile)
 
-    Enum.reduce_while(1..max_turns, :ok, fn _, :ok ->
-      [u] = for x <- Fixtures.player_units(world, user), x.id == unit.id, do: x
+    _ =
+      Enum.reduce_while(1..max_turns, :ok, fn _, :ok ->
+        [u] = for x <- Fixtures.player_units(world, user), x.id == unit.id, do: x
 
-      if u.tile_id == to_tile do
-        {:halt, :ok}
-      else
-        Fixtures.advance_turn(world)
-        {:cont, :ok}
-      end
-    end)
+        if u.tile_id == to_tile do
+          {:halt, :ok}
+        else
+          Fixtures.advance_turn(world)
+          {:cont, :ok}
+        end
+      end)
 
     :ok = Fixtures.recharge_unit(world, unit.id)
     [refreshed] = for x <- Fixtures.player_units(world, user), x.id == unit.id, do: x
@@ -644,19 +636,23 @@ defmodule BrokenOathsSpex.SharedGivens do
   """
   def grind_city(user, world, attacker, defender_user, city, max_attacks \\ 40) do
     Enum.reduce_while(1..max_attacks, city, fn _, current_city ->
-      if current_city.hp <= 0 do
-        {:halt, current_city}
-      else
-        _ = Fixtures.attack_city(world, user, attacker.id, current_city.id)
-
-        Fixtures.advance_turn(world)
-
-        [refreshed] =
-          for c <- Fixtures.player_cities(world, defender_user), c.id == current_city.id, do: c
-
-        {:cont, refreshed}
-      end
+      attack_round(user, world, attacker, defender_user, current_city)
     end)
+  end
+
+  defp attack_round(user, world, attacker, defender_user, current_city) do
+    if current_city.hp <= 0 do
+      {:halt, current_city}
+    else
+      _ = Fixtures.attack_city(world, user, attacker.id, current_city.id)
+      Fixtures.advance_turn(world)
+      {:cont, refreshed_city(world, defender_user, current_city.id)}
+    end
+  end
+
+  defp refreshed_city(world, defender_user, city_id) do
+    [refreshed] = for c <- Fixtures.player_cities(world, defender_user), c.id == city_id, do: c
+    refreshed
   end
 
   @doc """

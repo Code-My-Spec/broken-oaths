@@ -48,14 +48,14 @@ defmodule BrokenOaths.Cities.City do
   import Ecto.Changeset
   import Ecto.Query
 
+  alias BrokenOaths.Cities.Production
+  alias BrokenOaths.Cities.ProductionItem
   alias BrokenOaths.Combat.Camp
   alias BrokenOaths.Combat.Camps
   alias BrokenOaths.Combat.CityDefense
-  alias BrokenOaths.Players.Player
-  alias BrokenOaths.Cities.Production
-  alias BrokenOaths.Cities.ProductionItem
-  alias BrokenOaths.Technology.Research
   alias BrokenOaths.Combat.Siege
+  alias BrokenOaths.Players.Player
+  alias BrokenOaths.Technology.Research
   alias BrokenOaths.Units.Unit
   alias BrokenOaths.Cities.Yields
   alias BrokenOaths.Repo
@@ -221,30 +221,30 @@ defmodule BrokenOaths.Cities.City do
 
       true ->
         case Production.validate_founding(state.world, Map.values(state.cities), unit.tile_id) do
-          {:error, reason} ->
-            {:error, reason}
-
-          :ok ->
-            first_founding? =
-              not Enum.any?(state.cities, fn {_id, c} -> c.player_id == player.id end)
-
-            {:ok, city} = persist_found_city!(state, player, unit)
-
-            new_state = %{
-              state
-              | cities: Map.put(state.cities, city.id, city),
-                units: Map.delete(state.units, unit_id),
-                orders: Map.delete(state.orders, unit_id)
-            }
-
-            new_state =
-              if first_founding?,
-                do: spawn_wilderness_camps(new_state, player, unit.tile_id),
-                else: new_state
-
-            {:ok, new_state}
+          {:error, reason} -> {:error, reason}
+          :ok -> complete_founding(state, player, unit, unit_id)
         end
     end
+  end
+
+  defp complete_founding(state, player, unit, unit_id) do
+    first_founding? = not Enum.any?(state.cities, fn {_id, c} -> c.player_id == player.id end)
+
+    {:ok, city} = persist_found_city!(state, player, unit)
+
+    new_state = %{
+      state
+      | cities: Map.put(state.cities, city.id, city),
+        units: Map.delete(state.units, unit_id),
+        orders: Map.delete(state.orders, unit_id)
+    }
+
+    new_state =
+      if first_founding?,
+        do: spawn_wilderness_camps(new_state, player, unit.tile_id),
+        else: new_state
+
+    {:ok, new_state}
   end
 
   # Story 892: a player's FIRST city (never a second, third, ...) seeds

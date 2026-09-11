@@ -252,11 +252,11 @@ defmodule BrokenOaths.Cities.Production do
   import Ecto.Query
 
   alias BrokenOaths.Cities.Buildings
-  alias BrokenOaths.Combat.{CityDefense, Occupation}
   alias BrokenOaths.Cities.ProductionItem
-  alias BrokenOaths.Technology.Research
   alias BrokenOaths.Cities.Yields
+  alias BrokenOaths.Combat.{CityDefense, Occupation}
   alias BrokenOaths.Repo
+  alias BrokenOaths.Technology.Research
   alias BrokenOaths.Worlds.Globe
   alias BrokenOaths.Worlds.Regions
   alias BrokenOaths.Worlds.Resources
@@ -1111,24 +1111,34 @@ defmodule BrokenOaths.Cities.Production do
   def settle_wealth(state) do
     {cities, players} =
       Enum.reduce(state.cities, {%{}, state.players}, fn {city_id, city}, {cities, players} ->
-        case city.queue do
-          [%{type: :produce_wealth, banked: banked} = wealth | rest] ->
-            if CityDefense.production_halted?(city, state.turn) do
-              {Map.put(cities, city_id, city), players}
-            else
-              gold = div(banked, 4)
-            remainder = rem(banked, 4)
-            player = Map.fetch!(players, city.player_id)
-            city = %{city | queue: [%{wealth | banked: remainder} | rest]}
-            {Map.put(cities, city_id, city), Map.put(players, city.player_id, %{player | gold: player.gold + gold})}
-            end
-
-          _ ->
-            {Map.put(cities, city_id, city), players}
-        end
+        settle_city_wealth(cities, players, city_id, city, state.turn)
       end)
 
     %{state | cities: cities, players: players}
+  end
+
+  defp settle_city_wealth(cities, players, city_id, city, turn) do
+    case city.queue do
+      [%{type: :produce_wealth, banked: banked} = wealth | rest] ->
+        settle_wealth_item(cities, players, city_id, city, wealth, banked, rest, turn)
+
+      _ ->
+        {Map.put(cities, city_id, city), players}
+    end
+  end
+
+  defp settle_wealth_item(cities, players, city_id, city, wealth, banked, rest, turn) do
+    if CityDefense.production_halted?(city, turn) do
+      {Map.put(cities, city_id, city), players}
+    else
+      gold = div(banked, 4)
+      remainder = rem(banked, 4)
+      player = Map.fetch!(players, city.player_id)
+      updated_city = %{city | queue: [%{wealth | banked: remainder} | rest]}
+      updated_player = %{player | gold: player.gold + gold}
+
+      {Map.put(cities, city_id, updated_city), Map.put(players, city.player_id, updated_player)}
+    end
   end
 
   # -------------------------------------------------------------------
