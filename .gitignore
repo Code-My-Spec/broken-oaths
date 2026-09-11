@@ -61,5 +61,8 @@ npm-debug.log
 # SexySpex runtime artifact.
 /spex_failures.jsonl
 
+# Machine-local Mix env config for CLI/harness-driven operations (MIX_ENV=dev_cli).
+/config/dev_cli.exs
+
 # Local symlink to a sibling test-repos checkout, machine-specific.
 /code_my_spec_test_repos
