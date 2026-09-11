@@ -2,8 +2,8 @@ defmodule BrokenOaths.Accounts.AccountsRepository do
   @moduledoc false
 
   import Ecto.Query, warn: false
-  alias BrokenOaths.Repo
   alias BrokenOaths.Accounts.{Account, Member}
+  alias BrokenOaths.Repo
 
   def create_account(attrs) do
     %Account{}

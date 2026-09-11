@@ -5,8 +5,8 @@ defmodule BrokenOathsWeb.AccountLive.Invitations do
   alias BrokenOaths.Accounts.Invitation
   alias BrokenOaths.Authorization
   alias BrokenOathsWeb.AccountLive.Components.Navigation
-  alias BrokenOathsWeb.InvitationsLive.Form, as: InviteForm
   alias BrokenOathsWeb.InvitationsLive.Components.PendingInvitations
+  alias BrokenOathsWeb.InvitationsLive.Form, as: InviteForm
 
   @impl true
   def render(assigns) do

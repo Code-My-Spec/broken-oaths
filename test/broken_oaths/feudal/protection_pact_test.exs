@@ -128,8 +128,10 @@ defmodule BrokenOaths.Feudal.ProtectionPactTest do
       call = ProtectionPact.raise_call(:mira, :wes, 0)
       {resolved, _strain, _honor} = ProtectionPact.score_honored(call, 45, 100)
 
-      # credo:disable-for-next-line Credo.Check.Refactor.Apply
       assert_raise FunctionClauseError, fn ->
+        # apply/3 is deliberate here: calling with the wrong arity must
+        # raise at runtime (FunctionClauseError), not fail to compile.
+        # credo:disable-for-next-line Credo.Check.Refactor.Apply
         apply(ProtectionPact, :score_honored, [resolved, 45, 100])
       end
     end
@@ -196,8 +198,10 @@ defmodule BrokenOaths.Feudal.ProtectionPactTest do
       call = ProtectionPact.raise_call(:mira, :wes, 0)
       {resolved, _strain, _honor} = ProtectionPact.score_broken(call, 45, 100)
 
-      # credo:disable-for-next-line Credo.Check.Refactor.Apply
       assert_raise FunctionClauseError, fn ->
+        # apply/3 is deliberate here: calling with the wrong arity must
+        # raise at runtime (FunctionClauseError), not fail to compile.
+        # credo:disable-for-next-line Credo.Check.Refactor.Apply
         apply(ProtectionPact, :score_broken, [resolved, 45, 100])
       end
     end

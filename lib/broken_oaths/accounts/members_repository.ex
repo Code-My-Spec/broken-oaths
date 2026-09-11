@@ -3,8 +3,8 @@ defmodule BrokenOaths.Accounts.MembersRepository do
 
   import Ecto.Query, warn: false
 
-  alias BrokenOaths.Repo
   alias BrokenOaths.Accounts.{Account, Member}
+  alias BrokenOaths.Repo
   alias BrokenOaths.Users.User
 
   def add_user_to_account(user_id, account_id, role \\ :member) do

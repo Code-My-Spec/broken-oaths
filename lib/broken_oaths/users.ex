@@ -6,7 +6,7 @@ defmodule BrokenOaths.Users do
   import Ecto.Query, warn: false
   alias BrokenOaths.Repo
 
-  alias BrokenOaths.Users.{User, UserToken, UserNotifier}
+  alias BrokenOaths.Users.{User, UserNotifier, UserToken}
 
   ## Database getters
 

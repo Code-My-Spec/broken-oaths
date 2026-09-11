@@ -2,7 +2,7 @@ defmodule BrokenOaths.Accounts do
   @moduledoc "Account and membership management."
 
   alias BrokenOaths.Accounts.{Account, AccountsRepository, MembersRepository}
-  alias BrokenOaths.Accounts.{InvitationRepository, InvitationNotifier}
+  alias BrokenOaths.Accounts.{InvitationNotifier, InvitationRepository}
   alias BrokenOaths.Authorization
   alias BrokenOaths.Users
   alias BrokenOaths.Users.Scope
