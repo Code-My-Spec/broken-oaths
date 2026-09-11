@@ -98,9 +98,7 @@ defmodule BrokenOathsSpex.Story891.Criterion7534Spex do
           |> Enum.flat_map(&Fixtures.adjacent_tiles(context.world, &1))
           |> Enum.uniq()
           |> Enum.filter(land?)
-          |> Enum.reject(&(&1 in depth1))
-          |> Enum.reject(&(&1 == warrior.tile_id))
-          |> Enum.reject(&(&1 in my_occupied))
+          |> Enum.reject(&(&1 in depth1 or &1 == warrior.tile_id or &1 in my_occupied))
 
         [target | _] = depth2
 

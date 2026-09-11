@@ -163,16 +163,13 @@ defmodule BrokenOathsSpex.Story893.Criterion7556Spex do
         mid_tile =
           Fixtures.adjacent_tiles(context.world, farm_tile)
           |> Enum.filter(land?)
-          |> Enum.reject(&(&1 == context.camp_tile))
-          |> Enum.reject(&(&1 in camp_neighbors))
+          |> Enum.reject(&(&1 == context.camp_tile or &1 in camp_neighbors))
           |> List.first()
 
         lord_target =
           Fixtures.adjacent_tiles(context.world, mid_tile)
           |> Enum.filter(land?)
-          |> Enum.reject(&(&1 == farm_tile))
-          |> Enum.reject(&(&1 == context.camp_tile))
-          |> Enum.reject(&(&1 in camp_neighbors))
+          |> Enum.reject(&(&1 == farm_tile or &1 == context.camp_tile or &1 in camp_neighbors))
           |> List.first()
 
         # Produce a worker — still needed for real later, to repair the

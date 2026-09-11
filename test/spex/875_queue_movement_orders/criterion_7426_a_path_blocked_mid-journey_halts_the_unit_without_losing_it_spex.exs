@@ -96,8 +96,7 @@ defmodule BrokenOathsSpex.Story875.Criterion7426Spex do
                 common =
                   context.world
                   |> Fixtures.adjacent_tiles(candidate_dest)
-                  |> Enum.filter(&(&1 in settler_adj))
-                  |> Enum.filter(passable)
+                  |> Enum.filter(&(&1 in settler_adj and passable.(&1)))
 
                 common == [n3]
               end)

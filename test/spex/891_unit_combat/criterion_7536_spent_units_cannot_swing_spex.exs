@@ -64,9 +64,7 @@ defmodule BrokenOathsSpex.Story891.Criterion7536Spex do
           |> Enum.flat_map(&Fixtures.adjacent_tiles(context.world, &1))
           |> Enum.uniq()
           |> Enum.filter(land?)
-          |> Enum.reject(&(&1 in depth1))
-          |> Enum.reject(&(&1 == warrior.tile_id))
-          |> Enum.reject(&(&1 in my_occupied))
+          |> Enum.reject(&(&1 in depth1 or &1 == warrior.tile_id or &1 in my_occupied))
 
         # For each depth-2 candidate, the hex that bridges my warrior's
         # tile and it — the one hex my warrior itself will walk to

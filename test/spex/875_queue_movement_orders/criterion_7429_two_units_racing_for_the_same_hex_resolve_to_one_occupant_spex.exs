@@ -67,8 +67,10 @@ defmodule BrokenOathsSpex.Story875.Criterion7429Spex do
         shared =
           context.world
           |> Fixtures.adjacent_tiles(context.settler.tile_id)
-          |> Enum.filter(land?)
-          |> Enum.filter(&(&1 in Fixtures.adjacent_tiles(context.world, context.second_settler.tile_id)))
+          |> Enum.filter(
+            &(land?.(&1) and
+                &1 in Fixtures.adjacent_tiles(context.world, context.second_settler.tile_id))
+          )
           |> List.first()
 
         render_hook(context.play_live, "queue_move", %{
