@@ -7,7 +7,17 @@ defmodule BrokenOaths.Combat.SiegeTest do
   # a sandboxed connection and a non-nil `world.id`, the same reason
   # `ResolverTest` (this same combat/ test directory) already uses
   # `DataCase` for its own `shoot/4` tests.
-  use BrokenOathsTest.DataCase, async: true
+  #
+  # async: false — this file toggles `Application.put_env(:broken_oaths,
+  # :feudal_enabled, ...)`, a single global flag six other test files
+  # also mutate. Every one of those runs async: false specifically so
+  # they're serialized against each other in ExUnit's sync phase; this
+  # file being async: true let it race the others for the same global,
+  # producing an intermittent, hard-to-reproduce ownership check failure
+  # in an unrelated test (feudal_flag_test.exs) that happened to read
+  # the flag mid-flip. No test here depends on running concurrently with
+  # anything else, so there's no cost to matching the other six.
+  use BrokenOathsTest.DataCase, async: false
 
   alias BrokenOaths.Combat.CityDefense
   alias BrokenOaths.Combat.Resolver
