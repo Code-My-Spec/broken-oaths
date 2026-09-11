@@ -31,6 +31,7 @@ defmodule BrokenOathsWeb.GameLive.CityBoardLabelsTest do
 
   alias BrokenOaths.Game
   alias BrokenOaths.UsersFixtures
+  alias BrokenOaths.Worlds.Regions
 
   setup :register_and_log_in_user
 
@@ -154,8 +155,8 @@ defmodule BrokenOathsWeb.GameLive.CityBoardLabelsTest do
 
       warrior_tile =
         world
-        |> BrokenOaths.Worlds.Regions.adjacent_tiles(rival_city.tile_id)
-        |> Enum.filter(&(BrokenOaths.Worlds.Regions.tile_class(world, &1) == :land))
+        |> Regions.adjacent_tiles(rival_city.tile_id)
+        |> Enum.filter(&(Regions.tile_class(world, &1) == :land))
         |> hd()
 
       Game.spawn_unit_for_test(world, other_player.id, :warrior, warrior_tile)

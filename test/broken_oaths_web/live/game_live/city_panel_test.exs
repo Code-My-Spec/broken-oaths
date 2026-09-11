@@ -3,6 +3,9 @@ defmodule BrokenOathsWeb.GameLive.CityPanelTest do
 
   import Phoenix.LiveViewTest
 
+  alias BrokenOaths.Cities.Yields
+  alias BrokenOaths.Combat.CityDefense
+  alias BrokenOaths.Technology.Research
   alias BrokenOathsWeb.GameLive.CityPanel
 
   @city %{
@@ -92,7 +95,7 @@ defmodule BrokenOathsWeb.GameLive.CityPanelTest do
 
       assert html =~ ~s(data-test="city-granary")
       assert html =~ "Granary"
-      assert html =~ "+#{BrokenOaths.Cities.Yields.granary_food_bonus()} food"
+      assert html =~ "+#{Yields.granary_food_bonus()} food"
     end
 
     test "is absent when the city has no granary" do
@@ -243,10 +246,10 @@ defmodule BrokenOathsWeb.GameLive.CityPanelTest do
       html = render_panel(city: city, player_research: @writing_done)
 
       assert html =~ ~s(data-test="city-building-library")
-      assert html =~ "+#{BrokenOaths.Technology.Research.library_science_bonus()} science"
+      assert html =~ "+#{Research.library_science_bonus()} science"
 
       assert html =~ ~s(data-test="city-building-ancient_walls")
-      assert html =~ "+#{BrokenOaths.Combat.CityDefense.wall_hp_bonus()} HP"
+      assert html =~ "+#{CityDefense.wall_hp_bonus()} HP"
 
       assert html =~ ~s(data-test="city-building-barracks")
       assert html =~ ~s(data-test="city-building-water_mill")

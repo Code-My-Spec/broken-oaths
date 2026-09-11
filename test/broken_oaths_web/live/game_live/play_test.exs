@@ -22,7 +22,10 @@ defmodule BrokenOathsWeb.GameLive.PlayTest do
 
   alias BrokenOaths.Combat.Camp
   alias BrokenOaths.Game
+  alias BrokenOaths.Vision.Visibility
+  alias BrokenOaths.Worlds.Globe
   alias BrokenOaths.Worlds.Regions
+  alias BrokenOathsWeb.GameLive.PlayView
 
   setup :register_and_log_in_user
 
@@ -536,10 +539,10 @@ defmodule BrokenOathsWeb.GameLive.PlayTest do
 
       render_hook(play_live, "center_on_player", %{"user_id" => to_string(other_user.id)})
 
-      mesh = BrokenOaths.Worlds.Globe.get(world.frequency)
+      mesh = Globe.get(world.frequency)
 
       {expected_yaw, expected_pitch} =
-        BrokenOathsWeb.GameLive.PlayView.camera_on([%{tile_id: target}], mesh)
+        PlayView.camera_on([%{tile_id: target}], mesh)
 
       assert_push_event(play_live, "globe3d:center", %{yaw: ^expected_yaw, pitch: ^expected_pitch})
     end
@@ -581,11 +584,11 @@ defmodule BrokenOathsWeb.GameLive.PlayTest do
       # permanent, story 899) and advance again so the fog updates.
       # `my_lord`'s own vision radius is 3 (`Visibility.vision_radius/1`)
       # — pick a tile entirely outside that ball, not merely non-adjacent.
-      my_ball = BrokenOaths.Vision.Visibility.visible_tiles(world, [my_lord])
+      my_ball = Visibility.visible_tiles(world, [my_lord])
 
       far_tile =
         Enum.find(
-          0..(BrokenOaths.Worlds.Globe.tile_count(world.frequency) - 1),
+          0..(Globe.tile_count(world.frequency) - 1),
           &(&1 not in my_ball)
         )
 
