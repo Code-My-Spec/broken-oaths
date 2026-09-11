@@ -643,7 +643,7 @@ defmodule BrokenOaths.Cities.Production do
         case city.queue do
           [%{type: :produce_wealth, id: wealth_id} | rest] ->
             Repo.delete_all(from(p in ProductionItem, where: p.id == ^wealth_id))
-            [queue_item_map(item) | rest]
+            resume_paused_or_use_new(rest, item)
 
           queue ->
             queue ++ [queue_item_map(item)]
@@ -964,6 +964,21 @@ defmodule BrokenOaths.Cities.Production do
 
   defp player_research_for(state, player_id),
     do: Map.get(state.player_research, player_id, Research.new())
+
+  # Re-selecting a Build-list item that's already paused behind Produce
+  # Wealth (QA/spex criterion 2741) must resume THAT item's own banked
+  # progress, not create a second, fresh item of the same type at
+  # banked: 0 while the original sits orphaned further back in `rest`.
+  defp resume_paused_or_use_new(rest, %ProductionItem{} = item) do
+    case Enum.find(rest, &(&1.type == item.type)) do
+      nil ->
+        [queue_item_map(item) | rest]
+
+      existing ->
+        Repo.delete(item)
+        [existing | List.delete(rest, existing)]
+    end
+  end
 
   defp queue_item_map(%ProductionItem{} = item),
     do: %{
