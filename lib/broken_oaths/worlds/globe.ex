@@ -181,25 +181,26 @@ defmodule BrokenOaths.Worlds.Globe do
 
         {key_to_id, positions, next_id, grid} =
           Enum.reduce(lattice(f), {key_to_id, positions, next_id, %{}}, fn {i, j}, acc2 ->
-            {k2i, pos, nid, grid} = acc2
-            key = point_key(face_idx, {a, b, c}, i, j, f)
-
-            case Map.fetch(k2i, key) do
-              {:ok, id} ->
-                {k2i, pos, nid, Map.put(grid, {i, j}, id)}
-
-              :error ->
-                p = lattice_point(pa, pb, pc, i, j, f)
-
-                {Map.put(k2i, key, nid), Map.put(pos, nid, p), nid + 1,
-                 Map.put(grid, {i, j}, nid)}
-            end
+            lattice_step(acc2, face_idx, {a, b, c}, {pa, pb, pc}, i, j, f)
           end)
 
         {key_to_id, positions, next_id, [grid | grids]}
       end)
 
     {positions, Enum.reverse(grids_rev)}
+  end
+
+  defp lattice_step({k2i, pos, nid, grid}, face_idx, corners, {pa, pb, pc}, i, j, f) do
+    key = point_key(face_idx, corners, i, j, f)
+
+    case Map.fetch(k2i, key) do
+      {:ok, id} ->
+        {k2i, pos, nid, Map.put(grid, {i, j}, id)}
+
+      :error ->
+        p = lattice_point(pa, pb, pc, i, j, f)
+        {Map.put(k2i, key, nid), Map.put(pos, nid, p), nid + 1, Map.put(grid, {i, j}, nid)}
+    end
   end
 
   defp lattice(f), do: for(i <- 0..f, j <- 0..(f - i), do: {i, j})
@@ -242,21 +243,23 @@ defmodule BrokenOaths.Worlds.Globe do
   defp build_triangles(face_grids, f) do
     Enum.flat_map(face_grids, fn grid ->
       for i <- 0..(f - 1), j <- 0..(f - 1 - i), reduce: [] do
-        acc ->
-          up =
-            {Map.fetch!(grid, {i, j}), Map.fetch!(grid, {i + 1, j}), Map.fetch!(grid, {i, j + 1})}
-
-          if i + j <= f - 2 do
-            down =
-              {Map.fetch!(grid, {i + 1, j}), Map.fetch!(grid, {i + 1, j + 1}),
-               Map.fetch!(grid, {i, j + 1})}
-
-            [down, up | acc]
-          else
-            [up | acc]
-          end
+        acc -> add_face_triangles(grid, f, i, j, acc)
       end
     end)
+  end
+
+  defp add_face_triangles(grid, f, i, j, acc) do
+    up = {Map.fetch!(grid, {i, j}), Map.fetch!(grid, {i + 1, j}), Map.fetch!(grid, {i, j + 1})}
+
+    if i + j <= f - 2 do
+      down =
+        {Map.fetch!(grid, {i + 1, j}), Map.fetch!(grid, {i + 1, j + 1}),
+         Map.fetch!(grid, {i, j + 1})}
+
+      [down, up | acc]
+    else
+      [up | acc]
+    end
   end
 
   defp triangle_centroids(triangles, positions) do

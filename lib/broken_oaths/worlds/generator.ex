@@ -82,32 +82,37 @@ defmodule BrokenOaths.Worlds.Generator do
   end
 
   defp classify(elevation, warmth, moisture, pentagon?) do
-    relief =
-      cond do
-        pentagon? -> :mountains
-        elevation >= 0.88 -> :mountains
-        # Hills band widened 0.74 -> 0.60 (QA issue 9ccba1be): 6-octave fBm
-        # concentrates near 0.5, so the original [0.74, 0.88) band produced
-        # hills at ~0% of land, starving Sheep/Stone resources. 0.60 yields
-        # ~8-13% of land as hills across seeds, keeping mountains untouched.
-        elevation >= 0.60 -> :hills
-        true -> :flat
-      end
-
-    base =
-      cond do
-        warmth < 0.12 -> :snow
-        warmth < 0.26 -> :tundra
-        moisture < 0.32 and warmth > 0.55 -> :desert
-        moisture < 0.45 or warmth > 0.66 -> :plains
-        true -> :grassland
-      end
+    relief = classify_relief(elevation, pentagon?)
+    base = classify_base(warmth, moisture)
 
     %Terrain{
       base: base,
       relief: relief,
       feature: feature(base, relief, elevation, warmth, moisture)
     }
+  end
+
+  # Hills band widened 0.74 -> 0.60 (QA issue 9ccba1be): 6-octave fBm
+  # concentrates near 0.5, so the original [0.74, 0.88) band produced
+  # hills at ~0% of land, starving Sheep/Stone resources. 0.60 yields
+  # ~8-13% of land as hills across seeds, keeping mountains untouched.
+  defp classify_relief(elevation, pentagon?) do
+    cond do
+      pentagon? -> :mountains
+      elevation >= 0.88 -> :mountains
+      elevation >= 0.60 -> :hills
+      true -> :flat
+    end
+  end
+
+  defp classify_base(warmth, moisture) do
+    cond do
+      warmth < 0.12 -> :snow
+      warmth < 0.26 -> :tundra
+      moisture < 0.32 and warmth > 0.55 -> :desert
+      moisture < 0.45 or warmth > 0.66 -> :plains
+      true -> :grassland
+    end
   end
 
   # Post-pass: reclassify ocean tiles that touch land into coast. Reads
@@ -138,25 +143,26 @@ defmodule BrokenOaths.Worlds.Generator do
 
   defp feature(base, relief, elevation, warmth, moisture) do
     cond do
-      relief == :mountains ->
-        nil
-
-      base in [:snow, :desert] ->
-        nil
-
-      base == :grassland and relief == :flat and elevation < 0.47 and moisture > 0.68 and
-          warmth > 0.45 ->
-        :marsh
-
-      base in [:grassland, :plains] and warmth > 0.70 and moisture > 0.58 ->
-        :rainforest
-
-      base in [:grassland, :plains, :tundra] and moisture > 0.55 and warmth > 0.20 ->
-        :woods
-
-      true ->
-        nil
+      relief == :mountains -> nil
+      base in [:snow, :desert] -> nil
+      marsh?(base, relief, elevation, warmth, moisture) -> :marsh
+      rainforest?(base, warmth, moisture) -> :rainforest
+      woods?(base, warmth, moisture) -> :woods
+      true -> nil
     end
+  end
+
+  defp marsh?(base, relief, elevation, warmth, moisture) do
+    base == :grassland and relief == :flat and elevation < 0.47 and moisture > 0.68 and
+      warmth > 0.45
+  end
+
+  defp rainforest?(base, warmth, moisture) do
+    base in [:grassland, :plains] and warmth > 0.70 and moisture > 0.58
+  end
+
+  defp woods?(base, warmth, moisture) do
+    base in [:grassland, :plains, :tundra] and moisture > 0.55 and warmth > 0.20
   end
 
   @doc "Compute terrain statistics from a terrain map, keyed by terrain."

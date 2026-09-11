@@ -99,24 +99,22 @@ defmodule BrokenOaths.Worlds.Noise do
   defp lerp(a, b, t), do: a + t * (b - a)
 
   # 3D gradient: Perlin's 12 edge-vector gradients (indices 12-15 repeat 4 of them)
-  defp grad3d(hash, x, y, z) do
-    case hash &&& 15 do
-      0 -> x + y
-      1 -> -x + y
-      2 -> x - y
-      3 -> -x - y
-      4 -> x + z
-      5 -> -x + z
-      6 -> x - z
-      7 -> -x - z
-      8 -> y + z
-      9 -> -y + z
-      10 -> y - z
-      11 -> -y - z
-      12 -> y + x
-      13 -> -y + z
-      14 -> y - x
-      15 -> -y - z
-    end
-  end
+  defp grad3d(hash, x, y, z), do: grad3d_component(hash &&& 15, x, y, z)
+
+  defp grad3d_component(0, x, y, _z), do: x + y
+  defp grad3d_component(1, x, y, _z), do: -x + y
+  defp grad3d_component(2, x, y, _z), do: x - y
+  defp grad3d_component(3, x, y, _z), do: -x - y
+  defp grad3d_component(4, x, _y, z), do: x + z
+  defp grad3d_component(5, x, _y, z), do: -x + z
+  defp grad3d_component(6, x, _y, z), do: x - z
+  defp grad3d_component(7, x, _y, z), do: -x - z
+  defp grad3d_component(8, _x, y, z), do: y + z
+  defp grad3d_component(9, _x, y, z), do: -y + z
+  defp grad3d_component(10, _x, y, z), do: y - z
+  defp grad3d_component(11, _x, y, z), do: -y - z
+  defp grad3d_component(12, x, y, _z), do: y + x
+  defp grad3d_component(13, _x, y, z), do: -y + z
+  defp grad3d_component(14, x, y, _z), do: y - x
+  defp grad3d_component(15, _x, y, z), do: -y - z
 end
