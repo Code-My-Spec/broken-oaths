@@ -500,28 +500,26 @@ defmodule BrokenOaths.Units.Unit do
       true ->
         territory = player_territory_tiles(state, player.id)
 
-        cond do
-          not MapSet.member?(territory, destination) ->
-            {:error, :not_territory}
+        if not MapSet.member?(territory, destination) do
+          {:error, :not_territory}
+        else
+          case bfs_path(state, unit.tile_id, destination, unit.type, territory) do
+            route when route in [[], nil] ->
+              {:error, :unreachable}
 
-          true ->
-            case bfs_path(state, unit.tile_id, destination, unit.type, territory) do
-              route when route in [[], nil] ->
-                {:error, :unreachable}
+            route ->
+              persist_road_order!(unit_id, route, unit.hp)
 
-              route ->
-                persist_road_order!(unit_id, route, unit.hp)
+              new_orders =
+                Map.put(state.orders, unit_id, %{
+                  kind: :road_to,
+                  path: route,
+                  status: :pending,
+                  hp_at_issue: unit.hp
+                })
 
-                new_orders =
-                  Map.put(state.orders, unit_id, %{
-                    kind: :road_to,
-                    path: route,
-                    status: :pending,
-                    hp_at_issue: unit.hp
-                  })
-
-                {:ok, %{route: route}, %{state | orders: new_orders}}
-            end
+              {:ok, %{route: route}, %{state | orders: new_orders}}
+          end
         end
     end
   end

@@ -4,7 +4,7 @@ defmodule BrokenOaths.Worlds.TextureTest do
   alias BrokenOaths.Worlds.{Globe, Texture}
 
   @frequency 8
-  @seed 12345
+  @seed 12_345
 
   test "dims come from test config" do
     assert Texture.dims() == {128, 64}

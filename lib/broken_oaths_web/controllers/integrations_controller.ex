@@ -20,9 +20,7 @@ defmodule BrokenOathsWeb.IntegrationsController do
   def login(conn, %{"provider" => provider_str}) do
     provider = String.to_existing_atom(provider_str)
 
-    if provider not in @login_providers do
-      conn |> put_flash(:error, "Unsupported sign-in method") |> redirect(to: "/users/log-in")
-    else
+    if provider in @login_providers do
       case Integrations.authorize_url(provider) do
         {:ok, %{url: url, session_params: session_params}} ->
           store_state(session_params)
@@ -39,6 +37,8 @@ defmodule BrokenOathsWeb.IntegrationsController do
           |> put_flash(:error, "Unable to reach #{format_provider(provider)}. Please try again.")
           |> redirect(to: "/users/log-in")
       end
+    else
+      conn |> put_flash(:error, "Unsupported sign-in method") |> redirect(to: "/users/log-in")
     end
   end
 

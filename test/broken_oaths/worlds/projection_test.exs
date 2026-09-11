@@ -82,7 +82,7 @@ defmodule BrokenOaths.Worlds.ProjectionTest do
       rendered_ids = MapSet.new(rendered, & &1.id)
 
       # Roughly half the tiles visible; never more than a hemisphere + margin
-      assert length(rendered) > 0
+      assert rendered != []
       assert length(rendered) < map_size(mesh.tiles)
 
       for tile <- Map.values(mesh.tiles) do

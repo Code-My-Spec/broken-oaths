@@ -267,7 +267,7 @@ defmodule BrokenOaths.Worlds.GeneratorTest do
       stats = Generator.terrain_stats(terrain_map)
 
       assert is_list(stats)
-      assert length(stats) > 0
+      assert stats != []
 
       for {terrain, count, pct} <- stats do
         assert %Terrain{} = terrain

@@ -37,7 +37,7 @@ defmodule BrokenOaths.Worlds.Generator do
   """
   def generate_maps(seed, mesh) do
     elevation_perm = Noise.init(seed)
-    moisture_perm = Noise.init(seed + 12345)
+    moisture_perm = Noise.init(seed + 12_345)
 
     {terrain, elevation} =
       Enum.reduce(mesh.tiles, {%{}, %{}}, fn {id, tile}, {t_acc, e_acc} ->

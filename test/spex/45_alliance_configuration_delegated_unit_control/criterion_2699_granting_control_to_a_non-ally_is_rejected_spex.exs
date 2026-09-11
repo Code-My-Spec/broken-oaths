@@ -10,7 +10,6 @@ defmodule BrokenOathsSpex.Story947.Criterion2699Spex do
 
   import BrokenOathsSpex.SharedGivens
 
-
   spex "granting control to a non-ally is rejected", fail_on_error_logs: false do
     scenario "an unrelated player's steward attempt is refused" do
       given_(:a_world)

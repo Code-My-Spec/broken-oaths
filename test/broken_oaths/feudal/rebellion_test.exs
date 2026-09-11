@@ -326,7 +326,8 @@ defmodule BrokenOaths.Feudal.RebellionTest do
     end
 
     test "city_rises?/4 agrees with the tyranny_score/city_resistance comparison directly" do
-      assert Resolution.city_rises?(0, 1.0, 42, 5) == (Resolution.tyranny_score(0, 1.0) >= Resolution.city_resistance(42, 5))
+      assert Resolution.city_rises?(0, 1.0, 42, 5) ==
+               (Resolution.tyranny_score(0, 1.0) >= Resolution.city_resistance(42, 5))
     end
   end
 

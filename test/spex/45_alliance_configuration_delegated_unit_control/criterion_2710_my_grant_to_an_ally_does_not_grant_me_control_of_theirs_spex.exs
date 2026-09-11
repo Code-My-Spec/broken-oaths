@@ -15,7 +15,6 @@ defmodule BrokenOathsSpex.Story947.Criterion2710Spex do
 
   import BrokenOathsSpex.SharedGivens
 
-
   spex "a grant to an ally does not grant reciprocal control", fail_on_error_logs: false do
     scenario "I cannot steward my ally's units while they are still online" do
       given_(:a_world)

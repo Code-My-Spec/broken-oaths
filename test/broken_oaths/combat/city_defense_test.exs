@@ -181,7 +181,7 @@ defmodule BrokenOaths.Combat.CityDefenseTest do
       c = city(1, size: 1, tile: 10)
       warrior = unit(1, type: :warrior, tile: 10)
       lord = unit(2, type: :lord, tile: 10)
-      assert CityDefense.defensive_strength(c, [warrior, lord]) == 20 + 5 * 1 + 10 + 12
+      assert CityDefense.defensive_strength(c, [warrior, lord]) == 20 + 5 + 10 + 12
     end
 
     test "a civilian garrisoned alongside adds nothing" do

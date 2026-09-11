@@ -232,9 +232,10 @@ defmodule BrokenOaths.Combat.Camps do
     candidates =
       world
       |> ring_band(city_tile_id, @ring_min, @ring_max)
-      |> Enum.reject(&MapSet.member?(home_region_tiles, &1))
-      |> Enum.reject(&MapSet.member?(explored_tiles, &1))
-      |> Enum.reject(&MapSet.member?(occupied_tiles, &1))
+      |> Enum.reject(fn tile ->
+        MapSet.member?(home_region_tiles, tile) or MapSet.member?(explored_tiles, tile) or
+          MapSet.member?(occupied_tiles, tile)
+      end)
       |> Enum.sort()
 
     count = seeded_int({seed, :far_count}, @far_count)

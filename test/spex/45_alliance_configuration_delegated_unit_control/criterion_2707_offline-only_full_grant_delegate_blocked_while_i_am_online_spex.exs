@@ -13,7 +13,6 @@ defmodule BrokenOathsSpex.Story947.Criterion2707Spex do
 
   import BrokenOathsSpex.SharedGivens
 
-
   spex "an offline-only Full grant blocks the delegate while the owner is online",
     fail_on_error_logs: false do
     scenario "an otherwise-eligible ally's steward attempt is refused while the owner is online" do

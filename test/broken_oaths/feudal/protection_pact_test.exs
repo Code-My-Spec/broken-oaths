@@ -67,6 +67,7 @@ defmodule BrokenOaths.Feudal.ProtectionPactTest do
       # call's own `:honored` status is a genuinely invalid `tick/1`
       # argument, which the compiler's own type checker would otherwise
       # (correctly) flag as statically unreachable code.
+      # credo:disable-for-next-line Credo.Check.Refactor.Apply
       assert_raise FunctionClauseError, fn -> apply(ProtectionPact, :tick, [resolved]) end
     end
   end
@@ -127,6 +128,7 @@ defmodule BrokenOaths.Feudal.ProtectionPactTest do
       call = ProtectionPact.raise_call(:mira, :wes, 0)
       {resolved, _strain, _honor} = ProtectionPact.score_honored(call, 45, 100)
 
+      # credo:disable-for-next-line Credo.Check.Refactor.Apply
       assert_raise FunctionClauseError, fn ->
         apply(ProtectionPact, :score_honored, [resolved, 45, 100])
       end
@@ -194,6 +196,7 @@ defmodule BrokenOaths.Feudal.ProtectionPactTest do
       call = ProtectionPact.raise_call(:mira, :wes, 0)
       {resolved, _strain, _honor} = ProtectionPact.score_broken(call, 45, 100)
 
+      # credo:disable-for-next-line Credo.Check.Refactor.Apply
       assert_raise FunctionClauseError, fn ->
         apply(ProtectionPact, :score_broken, [resolved, 45, 100])
       end

@@ -11,7 +11,7 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
 
   describe "Show" do
     setup do
-      %{world: world_fixture(%{name: "Emerald Shores", seed: 12345})}
+      %{world: world_fixture(%{name: "Emerald Shores", seed: 12_345})}
     end
 
     test "renders world with globe tiles", %{conn: conn, world: world} do
@@ -231,7 +231,7 @@ defmodule BrokenOathsWeb.WorldLive.ShowTest do
 
       assert length(palette) >= 5 and length(palette) <= 256
       tile_count = BrokenOaths.Worlds.Globe.tile_count(@frequency)
-      assert length(tiles) > 0
+      assert tiles != []
       assert length(tiles) <= tile_count
 
       # Each row: [id, palette_index, decor, tex, cx, cy, cz, elevation | corners]

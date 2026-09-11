@@ -191,8 +191,9 @@ defmodule BrokenOaths.Combat.BarbarianAI do
       candidates =
         world
         |> Regions.adjacent_tiles(barbarian.tile_id)
-        |> Enum.filter(&(Regions.tile_class(world, &1) == :land))
-        |> Enum.filter(&Map.has_key?(distances_from_camp, &1))
+        |> Enum.filter(
+          &(Regions.tile_class(world, &1) == :land and Map.has_key?(distances_from_camp, &1))
+        )
         |> Enum.reject(&MapSet.member?(occupied, &1))
         |> Enum.uniq()
         |> Enum.sort()

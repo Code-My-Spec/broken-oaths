@@ -60,10 +60,10 @@ defmodule BrokenOaths.WorldsTest do
 
   describe "create_world/1" do
     test "creates a world with valid attrs" do
-      attrs = %{name: "My World", seed: 12345}
+      attrs = %{name: "My World", seed: 12_345}
       assert {:ok, %World{} = world} = Worlds.create_world(attrs)
       assert world.name == "My World"
-      assert world.seed == 12345
+      assert world.seed == 12_345
       assert world.frequency == 54
       assert world.status == "active"
     end
