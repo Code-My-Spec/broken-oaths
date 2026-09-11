@@ -60,3 +60,6 @@ npm-debug.log
 
 # SexySpex runtime artifact.
 /spex_failures.jsonl
+
+# Local symlink to a sibling test-repos checkout, machine-specific.
+/code_my_spec_test_repos
