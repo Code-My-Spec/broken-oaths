@@ -1,36 +1,27 @@
-# Qa Story Brief
+# QA Brief: Story 1001 - Mutual Peace Without Settlements
 
 ## Tool
 
-web
+web (vibium CLI, via curl-login + cookie transplant workaround for issue b35b3040)
 
 ## Auth
 
-Run `mix run priv/repo/qa_seeds_multiplayer.exs` (see Seeds below). Log in via `/users/log-in` using the `#login_form_password` form.
+- Player A: qa-901-a@broken-oaths.test / qa-password-123! (player_id 11)
+- Player B: qa-901-b@broken-oaths.test / qa-password-123! (player_id 12)
 
-Use the `vibium` CLI per `.code_my_spec/qa/plan.md`'s Tools Registry (MCP `browser_*` tools were non-functional this session, see issue 5be3616e).
+Login via curl (real Set-Cookie handling), then `vibium cookies "_broken_oaths_key" "<value>"` to transplant into the browser. See .code_my_spec/qa/plan.md's System Issues section for the exact recipe.
 
 ## Seeds
 
-    mix run priv/repo/qa_seeds_multiplayer.exs
-
-Two confirmed QA players, joined and founded, mutual discovery pre-seeded.
+World 3 ("QA World (Multiplayer)", paused) already has an active war between players 11 and 12 (game_wars id=2, declarer=11). City 8 (player 11's, occupied_by_player_id=12) is a pre-existing wartime conquest to check criterion 3126 against.
 
 ## What To Test
 
-Unlike stories 995-1000, this story's OWN mechanic appears fully wired to real UI: `feudal_top_bar.ex` renders, per `war_relationships`, an "Offer Peace" form (`phx-submit="offer_peace"`) and an "Accept" button (`phx-click="accept_peace"`, `data-test="accept-peace"`) for the recipient of a pending offer — both correctly scoped to ordinary (non-rebellion) wars per the code's own "Story 1001" comment. The ONLY blocker is the shared precondition: reaching an active war at all requires `declare_war`, which has no UI trigger anywhere (issue 8fb548d0, filed against story 996 this session).
-
-- **Criterion 3123 (a player offers peace to a wartime rival):** Requires an active war first. Expect: blocked at the declare-war step, not at the offer-peace step (that part is wired).
-- **Criterion 3124 (both players agree to peace):** Same precondition block.
-- **Criterion 3125 (accepted peace ends the war):** Same precondition block.
-- **Criterion 3126 (peace preserves wartime conquests):** Same precondition block, plus depends on the occupation mechanic (story 997) which is itself blocked the same way.
-
-If issue 8fb548d0 is fixed before this QA session runs, this story likely passes outright since its own UI is already complete — prioritize re-testing this one first.
+- **Criterion 3123:** As player 11, submit the `[data-test='offer-peace-form-12']` form (button `[data-test='offer-peace']`). Confirm `game_wars.peace_offered_by_player_id` becomes 11.
+- **Criterion 3124:** As player 12, confirm `[data-test='pending-peace-offer']` shows "Peace offered by" the rival, and `[data-test='accept-peace']` is present (only rendered when `peace_offered_by_user_id != current user`). Click it.
+- **Criterion 3125:** Confirm `game_wars.status` becomes something other than 'active' (e.g. 'peace'/'ended') after acceptance, and both players' UI no longer shows `[data-test='at-war-with']` for each other.
+- **Criterion 3126:** Confirm city 8's `occupied_by_player_id` is still 12 after peace (unchanged) -- the occupation/conquest is preserved, not reverted by the peace settlement.
 
 ## Result Path
 
-No result.md — findings go through `create_issue`, and the run closes with `mcp__plugin_codemyspec_local__submit_qa_result`.
-
-## Setup Notes
-
-Do not refile the missing-declare-war-button issue — reuse 8fb548d0-1c2c-418a-9807-daa7b7c3904c. Do not file a separate issue for offer/accept-peace UI — it is not missing, only unreachable.
+DB-backed QA attempt via `submit_qa_result` (task_id ad6fb849-aea2-4cbc-8645-3e3e522f4533).

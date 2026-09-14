@@ -462,6 +462,47 @@ vibium commands with the sandbox disabled for this session (bash tool
 `dangerouslyDisableSandbox: true`) rather than retrying in-sandbox.
 Status: open (environmental, not an app bug).
 
+### vibium CLI: password login POST succeeds server-side but the session never sticks client-side
+
+Reproduced repeatedly (story 999 QA, 2026-09-11): `vibium fill` both
+`#login_form_password` fields, then submit via `vibium click
+"#login_form_password button[name='user[remember_me]']"` or `vibium
+press Enter` on the password field — `vibium url` stays on
+`/users/log-in` (polled over several seconds), no flash/inline error
+shown, yet `psql`'s `users_tokens` table gets a fresh `context =
+'session'` row for that user on every single attempt. Session tokens
+are only inserted by `UserSessionController.create/2` on a real
+successful native POST, so the login genuinely succeeds server-side
+every time — the browser under vibium just never ends up carrying the
+resulting session cookie forward, and any subsequent navigation (e.g.
+`/play/:id`) bounces straight back to log-in as logged-out. Account
+confirmation/password were verified fine in the DB; only one matching
+form/button exists (no duplicate-render explanation). Underlying
+defect looks like vibium's automation not honoring/persisting
+Set-Cookie on a same-tab hard navigation triggered via a JS
+`requestSubmit()` rather than a real user click. Blocks ALL
+password-login-based QA on LiveView routes until fixed — tracked as
+issue `b35b3040-c174-4b08-8ad8-36a6995e319c`. Status: open, **but see workaround below**.
+
+**Workaround confirmed working (2026-09-11):** log in via `curl` instead of vibium, then transplant the resulting session cookie into vibium's cookie jar:
+
+    curl -c /tmp/cj.txt -s http://localhost:4050/users/log-in -o /tmp/login.html
+    # extract the _csrf_token hidden input value from /tmp/login.html
+    curl -b /tmp/cj.txt -c /tmp/cj.txt -s -i -X POST http://localhost:4050/users/log-in \
+      --data-urlencode "_csrf_token=<token>" \
+      --data-urlencode "user[email]=<email>" \
+      --data-urlencode "user[password]=<password>" \
+      --data-urlencode "user[remember_me]=true"
+    # copy the Set-Cookie value for _broken_oaths_key from the response headers
+    vibium cookies "_broken_oaths_key" "<that value>"
+    vibium go "http://localhost:4050/play/:id"   # now authenticated
+
+This fully unblocks LiveView QA that needs a real login. `cd` is restricted in this sandbox -- use absolute `/tmp/...` paths with curl's `-c`/`-o` rather than `cd`-ing first.
+
+### Classic mode (`?mode=classic`) does NOT have per-tile DOM -- this doc's earlier claim was wrong
+
+Correction (2026-09-11): grepped the entire `lib/broken_oaths_web/live/game_live/` tree for `phx-value-id` -- zero matches in any file, in either mode. `play.ex`'s own moduledoc confirms the board is canvas-only regardless of `?mode=classic`; that query param does something else (a rendering mode toggle unrelated to tile DOM). Do not rely on `[phx-value-id='<tile_id>']` selectors -- use `board_click.sh`/`board_state.sh` for all tile interaction instead. See issue `cb1d6953-eebe-4bae-b7e9-d09d808304b9` for a related gap: `board_click.sh` can fail to select a tile that's geometrically far from the camera's current facing direction (projection succeeds numerically but the hook's own raycast hit-test misses) -- no documented way yet to recenter the camera (yaw/pitch) on an arbitrary known tile_id before clicking it.
+
 ## Notes
 
 The canvas globe cannot be asserted pixel-by-pixel; the truth surfaces
