@@ -38,27 +38,39 @@ defmodule BrokenOathsTest.DataCase do
   Sets up the sandbox based on the test tags.
   """
   def setup_sandbox(tags) do
-    # `mix test` gets this for free from `test/test_helper.exs`, but
-    # `mix spex` (the `sexy_spex` dep's own Mix task) never requires
-    # that file — it boots ExUnit itself and calls straight into
-    # `ExUnit.run/0`. Without it, `BrokenOaths.Repo`'s sandbox pool
-    # sits in `Ecto.Adapters.SQL.Sandbox`'s OWN default, `:auto`, mode
-    # forever. That was invisible as long as every spex test used
-    # `shared: true` below (private `async: true` specs are new) —
-    # `start_owner!/2`'s `shared` branch force-sets `{:shared, self()}`
-    # explicitly regardless of the mode coming in, masking the gap.
-    # Its `else` (private/`allow`-based) branch has no such override:
-    # `allow/3` only does anything useful once the pool is actually in
-    # `:manual` mode, so a private-mode spex test silently got each
-    # process (test, LiveView, `WorldServer`) its OWN independent
-    # auto-checkout instead of sharing the test's one transaction —
-    # every cross-process read came back `nil`, no crash, no hint why.
-    # Idempotent and already a no-op under `mix test` (already
-    # `:manual` by the time this runs), so safe to call unconditionally.
-    Sandbox.mode(BrokenOaths.Repo, :manual)
+    ensure_manual_mode_once()
 
     pid = Sandbox.start_owner!(BrokenOaths.Repo, shared: not tags[:async])
     on_exit(fn -> Sandbox.stop_owner(pid) end)
+  end
+
+  # `mix test` gets `Sandbox.mode(Repo, :manual)` for free from
+  # `test/test_helper.exs`, but `mix spex` (the `sexy_spex` dep's own Mix
+  # task) never requires that file — it boots ExUnit itself and calls
+  # straight into `ExUnit.run/0`. Without setting it somewhere, the pool
+  # sits in Sandbox's own `:auto` default forever.
+  #
+  # This USED to call `Sandbox.mode/2` unconditionally on every test's
+  # setup, on the theory that it's already `:manual` under `mix test` so
+  # the call is a harmless no-op. That's only true in isolation —
+  # `Sandbox.mode/2` sets the pool's mode GLOBALLY, and `async: false`
+  # tests rely on `:shared` mode staying in effect for their ENTIRE test
+  # (their own `start_owner!(shared: true)` call below sets it). An
+  # `async: true` test running concurrently anywhere in the suite that
+  # also called this unconditionally would flip the pool back to
+  # `:manual` mid-flight — breaking any process spawned by the
+  # `async: false` test (a `WorldServer`, a LiveView) that relies on
+  # `:shared` mode rather than an explicit `allow/3`, exactly the
+  # DBConnection.OwnershipError `world_server_test.exs` hit. Setting this
+  # once per BEAM boot, guarded by `:persistent_term`, keeps the
+  # `mix spex` fix (the pool needs to be `:manual` at least once before
+  # anything checks a connection out) without touching the mode again
+  # once a real test run is underway.
+  defp ensure_manual_mode_once do
+    unless :persistent_term.get({__MODULE__, :manual_mode_set}, false) do
+      Sandbox.mode(BrokenOaths.Repo, :manual)
+      :persistent_term.put({__MODULE__, :manual_mode_set}, true)
+    end
   end
 
   @doc """
