@@ -54,9 +54,30 @@ defmodule BrokenOathsWeb.GameLive.FeudalCaptureUITest do
     Application.put_env(:broken_oaths, :feudal_enabled, true)
     on_exit(fn -> Application.put_env(:broken_oaths, :feudal_enabled, original) end)
 
+    world = world_fixture(%{seed: 424_242, frequency: 8})
+
+    # QA issue (test-isolation flake): several tests here mount multiple
+    # real GameLive.Play LiveViews (never explicitly closed by
+    # Phoenix.LiveViewTest) sharing one WorldServer. A LiveView can still
+    # be reacting to this test's own last broadcast right as teardown
+    # starts, and the WorldServer's own DB read for that late call can
+    # land after this test's sandbox connection has already been checked
+    # back in, crashing with DBConnection.ConnectionError/Ecto.NoResultsError.
+    # Same fix and same on_exit-ordering rationale as
+    # BrokenOathsSpex.Case's stop_world_servers/0: registering this AFTER
+    # setup_sandbox/1's on_exit (via BrokenOathsTest.ConnCase) guarantees,
+    # per on_exit's LIFO order, that the world server is stopped first,
+    # closing that window before the sandbox connection goes away.
+    on_exit(fn ->
+      case Registry.lookup(BrokenOaths.GameRegistry, world.id) do
+        [{pid, _}] -> GenServer.stop(pid)
+        [] -> :ok
+      end
+    end)
+
     {:ok,
      conn: conn,
-     world: world_fixture(%{seed: 424_242, frequency: 8}),
+     world: world,
      other_user: other_user,
      other_conn: other_conn}
   end
@@ -383,6 +404,17 @@ defmodule BrokenOathsWeb.GameLive.FeudalCaptureUITest do
     # spawnable regions (`world_full?` refuses a 3rd join against it).
     setup %{conn: conn, other_conn: other_conn, other_user: other_user, user: user} do
       world = world_fixture(%{seed: 1, frequency: 9})
+
+      # Same WorldServer-outlives-the-sandbox-connection cleanup as the
+      # outer setup above — this describe block creates its OWN,
+      # separate world and must register its own teardown for it.
+      on_exit(fn ->
+        case Registry.lookup(BrokenOaths.GameRegistry, world.id) do
+          [{pid, _}] -> GenServer.stop(pid)
+          [] -> :ok
+        end
+      end)
+
       third_user = UsersFixtures.user_fixture()
       third_conn = log_in_user(build_conn(), third_user)
 
