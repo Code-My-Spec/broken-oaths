@@ -68,6 +68,11 @@ defmodule BrokenOathsWeb.Router do
     # without anything real being broken. Unauthenticated: a monitor will
     # not carry a credential, and a constant reveals nothing.
     get "/verify/always-failing", VerifyController, :always_failing
+
+    # Mints the token the preview pane's own frame redeems to sign in,
+    # bypassing Google/GitHub's own refusal to render their sign-in pages
+    # inside any iframe — see PreviewLoginController's moduledoc.
+    post "/preview_login", PreviewLoginController, :create
   end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
