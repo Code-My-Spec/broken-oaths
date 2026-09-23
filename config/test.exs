@@ -14,14 +14,81 @@ config :broken_oaths, :weather_enabled, true
 
 # Configure your database
 #
-# The MIX_TEST_PARTITION environment variable can be used
-# to provide built-in test partitioning in CI environment.
-# Run `mix help test` for more information.
+# MIX_TEST_PARTITION gives built-in test partitioning in CI — run
+# `mix help test` for more.
+#
+# A linked git worktree shares this machine's database server. Running the
+# suite in one migrates the database every other checkout is using, from
+# whatever branch that one happens to be on. The symptoms never name the
+# cause: undefined modules first, then NOT NULL violations on columns the
+# code has never heard of, as the schema shifts under successive runs.
+#
+# These databases are disposable and nothing sweeps them: `mix ecto.drop`
+# in a worktree you are finished with.
+#
+# The recorded name wins over everything except the analyzer's own
+# sub-partition. `mix cms.harness.onboard` writes it into
+# `.claude/settings.local.json`, and that file is the answer — read here
+# rather than taken from the environment, because the variable only
+# reaches a process Claude Code exported it into. Anything else that runs
+# the suite (an analyzer, a script, a shell you opened yourself) got a
+# different database from the same checkout, and the two disagreed about
+# the schema without either of them being wrong.
+#
+# Read as text rather than through a library: config runs before deps are
+# loaded, so there is nothing to call yet.
+recorded_partition =
+  with {:ok, contents} <-
+         File.read(Path.join(File.cwd!(), ".claude/settings.local.json")),
+       [_, value] <-
+         Regex.run(~r/"MIX_TEST_PARTITION"\s*:\s*"([^"]+)"/, contents) do
+    value
+  else
+    _ -> nil
+  end
+
+requested_partition = System.get_env("MIX_TEST_PARTITION")
+
+# The one environment value allowed to win over the recorded one. A
+# harness analyzer gives its exunit and spex sweeps their own database by
+# appending a letter to this copy's own recorded partition (an "a" for
+# exunit, an "s" for spex), and MIX_TEST_PARTITION is the only channel it
+# has to say so. Recorded-first, full stop, silently drops that suffix and
+# collapses both sweeps and an interactive mix test onto one database — a
+# sweep truncating under the suite still using it.
+#
+# Narrow on purpose: not "an environment value" but "the recorded value
+# plus one suffix" — a name that can only describe *this* working copy. A
+# value inherited from another worktree cannot match, and still loses.
+own_sub_partition? =
+  is_binary(recorded_partition) and is_binary(requested_partition) and
+    requested_partition in [recorded_partition <> "a", recorded_partition <> "s"]
+
+# In a linked worktree `.git` is a file pointing at the real git dir rather
+# than a directory. The primary checkout keeps the bare name.
+partition =
+  cond do
+    own_sub_partition? ->
+      requested_partition
+
+    recorded_partition ->
+      recorded_partition
+
+    requested_partition ->
+      requested_partition
+
+    File.regular?(Path.join(File.cwd!(), ".git")) ->
+      "_" <> Path.basename(File.cwd!())
+
+    true ->
+      ""
+  end
+
 config :broken_oaths, BrokenOaths.Repo,
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
-  database: "broken_oaths_test#{System.get_env("MIX_TEST_PARTITION")}",
+  database: "broken_oaths_test#{partition}",
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 
