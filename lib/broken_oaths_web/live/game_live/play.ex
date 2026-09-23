@@ -1651,12 +1651,14 @@ defmodule BrokenOathsWeb.GameLive.Play do
   end
 
   # Story 947 (Alliance Configuration — delegated unit control),
-  # criterion 2696: no grant mechanism exists yet for an ally to gain
-  # unit-control over another player's units — a FUTURE criterion adds
-  # the actual grant/revoke surface (an alliance-scoped setting,
-  # presumably alongside `AlliancePanel`) and a real `unit_id`/
-  # `to_tile` payload once an authorized delegate can actually queue a
-  # move; until then, `Game.delegate_move_unit/3` always refuses, and
+  # criterion 3139: general "move any unit anywhere" is never granted
+  # to a delegate at any level, including Full — the real grant/revoke
+  # surface is `GameLive.AlliancePanel`'s own grant-control form
+  # (`"set_delegated_control"` below), and the real delegated unit
+  # ACTION it unlocks is the level-gated `"steward_defend"` one-hex
+  # reposition (`Stewardship.defend/5`), never a blank check on
+  # movement (see criterion 3144/3152 for the same discipline applied
+  # to attack/disband). `Game.delegate_move_unit/3` always refuses —
   # this establishes that absence explicitly rather than leaving the
   # event unhandled.
   def handle_event("delegate_move_unit", %{"owner_user_id" => owner_user_id}, socket) do
@@ -1695,15 +1697,25 @@ defmodule BrokenOathsWeb.GameLive.Play do
       ) do
     %{world: world, user: user} = socket.assigns
 
-    Game.set_delegated_control(
-      world,
-      user,
-      PlayView.parse_id(delegate_user_id),
-      String.to_existing_atom(level),
-      String.to_existing_atom(mode)
-    )
+    case Game.set_delegated_control(
+           world,
+           user,
+           PlayView.parse_id(delegate_user_id),
+           String.to_existing_atom(level),
+           String.to_existing_atom(mode)
+         ) do
+      :ok ->
+        # No `:control_grants_changed` broadcast exists (unlike
+        # `:alliances_changed`) since a grant is invisible to anyone but
+        # its own owner — refresh straight from THIS handler, the same
+        # direct `send_update` `refresh_after_steward_action/1` already
+        # uses for the same component.
+        send_update(BrokenOathsWeb.GameLive.AlliancePanel, id: "alliance-panel", refresh: true)
+        {:noreply, refresh_board(socket)}
 
-    {:noreply, refresh_board(socket)}
+      {:error, _reason} ->
+        {:noreply, refresh_board(socket)}
+    end
   end
 
   # "No cancel-griefing" — always refused, whitelist enforced by

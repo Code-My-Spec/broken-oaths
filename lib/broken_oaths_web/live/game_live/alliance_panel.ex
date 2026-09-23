@@ -301,6 +301,49 @@ defmodule BrokenOathsWeb.GameLive.AlliancePanel do
         </button>
       </div>
 
+      <%!-- Story 947: the owner's own outgoing grant to this accepted
+           ally — real UI surface for `Stewardship.
+           set_delegated_control/5`. Deliberately NO `phx-target`: this
+           form bubbles straight to `Play`'s own `"set_delegated_control"`
+           handler, the same status the Collect Bank/Set Production
+           buttons below already have (neither of those is answerable
+           from inside this component either — both mutate `Play`'s
+           OTHER assigns, not this component's own state). Rendered
+           regardless of `@alliance.online?` — unlike the steward
+           AFFORDANCES below (only meaningful once the OTHER party is
+           offline), granting control is something the owner sets ahead
+           of time, independent of anyone's current connection. --%>
+      <form
+        :if={@alliance.status == :accepted and Game.feudal_enabled?()}
+        phx-submit="set_delegated_control"
+        data-test={"grant-control-#{@alliance.other_user_id}"}
+        class="flex items-center gap-1"
+      >
+        <input type="hidden" name="delegate_user_id" value={@alliance.other_user_id} />
+        <select name="level" class="select select-xs select-bordered">
+          <option value="none" selected={@alliance.my_grant.level == :none}>No control</option>
+          <option value="defensive" selected={@alliance.my_grant.level == :defensive}>
+            Defensive
+          </option>
+          <option value="full" selected={@alliance.my_grant.level == :full}>Full</option>
+        </select>
+        <select name="mode" class="select select-xs select-bordered">
+          <option value="offline_only" selected={@alliance.my_grant.mode == :offline_only}>
+            Offline only
+          </option>
+          <option value="always_on" selected={@alliance.my_grant.mode == :always_on}>
+            Always on
+          </option>
+        </select>
+        <button
+          type="submit"
+          data-test="set-delegated-control"
+          class="btn btn-xs btn-outline"
+        >
+          Set Control
+        </button>
+      </form>
+
       <%!-- Story 910: alliance stewardship is SYMMETRIC — either accepted
            party may steward the other while they're offline. Deliberately
            NO `phx-target`: this button bubbles straight to `Play`'s own

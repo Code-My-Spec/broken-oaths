@@ -792,9 +792,24 @@ defmodule BrokenOaths.Feudal.Stewardship do
       # Story 910: same "offer Steward only while offline" status
       # `WorldServer.format_vassal/2` already carries.
       online?: online?,
-      steward: if(stewardable?, do: steward_view(state, other_player), else: nil)
+      steward: if(stewardable?, do: steward_view(state, other_player), else: nil),
+      # Story 947: MY OWN outgoing grant to this accepted ally — what
+      # `GameLive.AlliancePanel`'s own grant-control form pre-selects
+      # and lets me change via `set_delegated_control/5`. `nil` (no
+      # `ControlGrant` row) renders identically to an explicit `:none`
+      # grant here — the owner-facing UI has no reason to distinguish
+      # "never granted" from "granted, then set back to none", unlike
+      # `fetch_context/4`'s own load-bearing `nil` vs `:none` split.
+      my_grant:
+        if(alliance.status == :accepted,
+          do: format_my_grant(resolve_control_grant(state.world.id, my_player_id, other_player.id)),
+          else: nil
+        )
     }
   end
+
+  defp format_my_grant(nil), do: %{level: :none, mode: :offline_only}
+  defp format_my_grant(%ControlGrant{level: level, mode: mode}), do: %{level: level, mode: mode}
 
   # -------------------------------------------------------------------
   # Shared, trivial lookups — duplicated rather than reaching back into

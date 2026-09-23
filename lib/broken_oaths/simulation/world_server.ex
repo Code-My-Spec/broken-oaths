@@ -303,10 +303,12 @@ defmodule BrokenOaths.Simulation.WorldServer do
   end
 
   # Story 947 (Alliance Configuration — delegated unit control),
-  # criterion 2696: no grant mechanism exists yet for `delegate_user`
-  # to gain unit-control over `owner_user_id`'s units, so this always
-  # refuses — a future criterion adds the real grant/revoke check
-  # (presumably against an alliance-scoped setting) once one exists.
+  # criterion 3139: always refuses — general "move any unit anywhere"
+  # is never granted at any level. The real grant surface is
+  # `Stewardship.set_delegated_control/5` (`"set_delegated_control"`
+  # below); the real delegated unit ACTION it unlocks is the
+  # level-gated `"steward_defend"` one-hex reposition
+  # (`Stewardship.defend/5`), never a blank movement check.
   def handle_call({:delegate_move_unit, _delegate_user, _owner_user_id}, _from, state) do
     {:reply, {:error, :not_authorized}, state}
   end

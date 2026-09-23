@@ -28,11 +28,12 @@ defmodule BrokenOaths.Units do
 
   @doc """
   An ally (`delegate_user`) attempts to move one of `owner_user_id`'s
-  units under a delegated unit-control grant (story 947, criterion
-  2696). No grant mechanism exists yet — a future criterion adds the
-  actual grant/revoke surface and a real `unit_id`/`to_tile` payload
-  once an authorized delegate can queue a real move — so this always
-  refuses.
+  units without a real move payload (story 947, criterion 3139).
+  Always refuses: general "move any unit anywhere" is never granted at
+  any level, including Full — real delegated unit control is the
+  level-gated `Stewardship.defend/5` one-hex reposition, granted via
+  `Stewardship.set_delegated_control/5` (`GameLive.AlliancePanel`'s own
+  grant-control form), never a blank movement check.
   """
   @spec delegate_move_unit(map(), map(), term()) :: {:error, :not_authorized}
   def delegate_move_unit(world, delegate_user, owner_user_id),
