@@ -72,6 +72,15 @@ defmodule BrokenOaths.Players.Player do
     # `changeset/2` below — it's an owner-supplied preference, not a
     # system-incremented counter.
     field :allow_steward_production, :boolean, default: false
+    # Story 947 -- consecutive real ticks this player has been observed
+    # offline (`BrokenOaths.Simulation.Turn.tick/1`, unconditional every
+    # tick), reset to 0 the moment they're seen online. Virtual: never
+    # persisted, same "ephemeral, correctly forgotten on restart" status
+    # `BrokenOaths.Players.Presence` itself already has -- this is just
+    # that same ephemeral fact given a duration instead of a boolean, for
+    # the offline-only Full grant's 5-minute grace window
+    # (`BrokenOaths.Feudal.Stewardship.full_grant_active?/3`).
+    field :offline_streak_turns, :integer, default: 0, virtual: true
 
     belongs_to :world, World
     belongs_to :user, User

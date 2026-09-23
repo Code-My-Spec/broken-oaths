@@ -1415,6 +1415,19 @@ defmodule BrokenOaths.Simulation.WorldServer do
     {:reply, state |> find_player(user.id) |> allow_steward_production_of(), state}
   end
 
+  # Story 947 -- the OWNER's own explicit per-delegate control grant.
+  # Persisted straight to `Repo` by `Stewardship.set_delegated_control/5`
+  # itself, not part of `state.players`/`state.cities`, so there is
+  # nothing for `persist_tick/2` to diff here -- the reply carries the
+  # unchanged `state` back untouched, same "not tick-state" status
+  # `queue_production/5`'s own `ProductionItem` insert already has.
+  def handle_call({:set_delegated_control, owner_user, delegate_user_id, level, mode}, _from, state) do
+    case Stewardship.set_delegated_control(state, owner_user, delegate_user_id, level, mode) do
+      {:ok, ^state} -> {:reply, :ok, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
   # Playtest issue 340c1ad4 — the OWNER flips their own empire-wide
   # grant (never anyone else's: `user` sets only their OWN player, no
   # `owner_user_id` param exists here at all). Persisted immediately via

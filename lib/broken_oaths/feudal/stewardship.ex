@@ -134,6 +134,7 @@ defmodule BrokenOaths.Feudal.Stewardship do
   alias BrokenOaths.Diplomacy.Alliance
   alias BrokenOaths.Diplomacy.Cooperation
   alias BrokenOaths.Feudal.Bank
+  alias BrokenOaths.Feudal.ControlGrant
   alias BrokenOaths.Feudal.StewardLog
   alias BrokenOaths.Feudal.Vassalage
   alias BrokenOaths.Game
@@ -196,11 +197,17 @@ defmodule BrokenOaths.Feudal.Stewardship do
          {:ok, owner_player} <- fetch_player(state, owner_user_id) do
       role = resolve_role(state, steward_player.id, owner_player.id)
       owner_online? = Presence.online?(state.world, %{id: owner_player.user_id})
+      grant = resolve_control_grant(state.world.id, owner_player.id, steward_player.id)
 
       cond do
         not Game.feudal_enabled?() -> {:error, :feudal_disabled}
         not eligible?(role) -> {:error, :not_eligible}
+        grant.level == :full and grant.mode == :always_on -> {:ok, steward_player, owner_player}
         owner_online? -> {:error, :owner_online}
+        grant.level == :full and grant.mode == :offline_only and
+            not grace_window_elapsed?(state, owner_player) ->
+          {:error, :grace_window_active}
+
         true -> {:ok, steward_player, owner_player}
       end
 
@@ -260,6 +267,51 @@ defmodule BrokenOaths.Feudal.Stewardship do
     with {:ok, player} <- fetch_player(state, user.id) do
       updated = %{player | allow_steward_production: allowed?}
       {:ok, %{state | players: Map.put(state.players, player.id, updated)}}
+    end
+  end
+
+  @doc """
+  Story 947 -- the owner's own explicit, per-delegate control grant:
+  `level` (`:none | :defensive | :full`) and, meaningful only at
+  `:full`, `mode` (`:offline_only | :always_on`). Owner-only (mirrors
+  `set_allow_steward_production/3` above), and only onto an eligible
+  party -- the SAME `steward_role/4` relationship (ally, lord,
+  fellow-vassal) every real steward mutation already requires;
+  granting to a stranger is refused with `:not_eligible` the same way
+  any other steward action against them would be (criterion 3142).
+  Persisted immediately via `Repo`, same "not tick-state" status
+  `queue_production/5`'s own `ProductionItem` insert already has --
+  `fetch_context/3` reads the grant fresh on every real steward call.
+  """
+  @spec set_delegated_control(map(), map(), term(), ControlGrant.level(), ControlGrant.mode()) ::
+          {:ok, map()} | {:error, atom() | Ecto.Changeset.t()}
+  def set_delegated_control(state, owner_user, delegate_user_id, level, mode) do
+    with {:ok, owner_player} <- fetch_player(state, owner_user.id),
+         {:ok, delegate_player} <- fetch_player(state, delegate_user_id) do
+      role = resolve_role(state, delegate_player.id, owner_player.id)
+
+      if eligible?(role) do
+        attrs = %{
+          world_id: state.world.id,
+          owner_player_id: owner_player.id,
+          delegate_player_id: delegate_player.id,
+          level: level,
+          mode: mode
+        }
+
+        %ControlGrant{}
+        |> ControlGrant.changeset(attrs)
+        |> Repo.insert(
+          on_conflict: {:replace, [:level, :mode, :updated_at]},
+          conflict_target: [:world_id, :owner_player_id, :delegate_player_id]
+        )
+        |> case do
+          {:ok, _grant} -> {:ok, state}
+          {:error, changeset} -> {:error, changeset}
+        end
+      else
+        {:error, :not_eligible}
+      end
     end
   end
 
@@ -730,5 +782,29 @@ defmodule BrokenOaths.Feudal.Stewardship do
       nil -> {:error, :not_a_player}
       player -> {:ok, player}
     end
+  end
+
+  # Story 947 -- the DECIDED offline-only Full grant activation window:
+  # 5 continuous real minutes disconnected. Read in turns, not seconds,
+  # against `world.turn_seconds` (story 897) so a QA-fast world's own
+  # faster tick still means 5 real minutes, not 5 real ticks -- same
+  # defensive-default idiom `economy_turns`/`recharge_turns` already use.
+  @grace_window_seconds 300
+
+  defp resolve_control_grant(world_id, owner_player_id, delegate_player_id) do
+    Repo.get_by(ControlGrant,
+      world_id: world_id,
+      owner_player_id: owner_player_id,
+      delegate_player_id: delegate_player_id
+    ) || %ControlGrant{level: :none, mode: :offline_only}
+  end
+
+  defp grace_window_elapsed?(state, owner_player) do
+    Map.get(owner_player, :offline_streak_turns, 0) >= grace_turns(state.world)
+  end
+
+  defp grace_turns(world) do
+    turn_seconds = Map.get(world, :turn_seconds, 60) || 60
+    ceil(@grace_window_seconds / turn_seconds)
   end
 end

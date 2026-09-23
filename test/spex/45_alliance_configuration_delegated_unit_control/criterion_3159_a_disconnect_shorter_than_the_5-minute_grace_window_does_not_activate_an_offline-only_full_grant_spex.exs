@@ -41,6 +41,13 @@ defmodule BrokenOathsSpex.Story947.Criterion3159Spex do
         [my_city] = Fixtures.player_cities(context.world, context.user)
 
         render_hook(owner_live, "set_allow_steward_production", %{"allowed" => "true"})
+
+        render_hook(owner_live, "set_delegated_control", %{
+          "delegate_user_id" => to_string(context.other_user.id),
+          "level" => "full",
+          "mode" => "offline_only"
+        })
+
         go_offline(owner_live)
 
         context

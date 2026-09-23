@@ -678,6 +678,10 @@ defmodule BrokenOathsWeb.GameLive.PlayView do
 
   def steward_error_message(:unreachable), do: "That tile isn't reachable."
   def steward_error_message(:feudal_disabled), do: "Stewardship isn't available right now."
+
+  def steward_error_message(:grace_window_active),
+    do: "They just disconnected -- stewardship activates a few minutes after they go offline."
+
   def steward_error_message(_other), do: "That steward action was refused."
 
   # Story 947 (Alliance Configuration — delegated unit control),

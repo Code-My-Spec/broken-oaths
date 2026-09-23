@@ -1683,6 +1683,29 @@ defmodule BrokenOathsWeb.GameLive.Play do
     {:noreply, refresh_board(socket)}
   end
 
+  # Story 947 -- the owner's own explicit, per-delegate control grant.
+  # `level`/`mode` arrive as strings from the client the same way every
+  # other event param does; `String.to_existing_atom/1` is safe here
+  # since both sets are already compiled into `ControlGrant`'s own
+  # `Ecto.Enum` values.
+  def handle_event(
+        "set_delegated_control",
+        %{"delegate_user_id" => delegate_user_id, "level" => level, "mode" => mode},
+        socket
+      ) do
+    %{world: world, user: user} = socket.assigns
+
+    Game.set_delegated_control(
+      world,
+      user,
+      PlayView.parse_id(delegate_user_id),
+      String.to_existing_atom(level),
+      String.to_existing_atom(mode)
+    )
+
+    {:noreply, refresh_board(socket)}
+  end
+
   # "No cancel-griefing" — always refused, whitelist enforced by
   # structural absence (`BrokenOaths.Feudal.Stewardship`'s own moduledoc).
   def handle_event(

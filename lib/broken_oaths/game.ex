@@ -762,6 +762,11 @@ defmodule BrokenOaths.Game do
   @spec set_allow_steward_production(map(), map(), boolean()) :: :ok | {:error, :not_a_player}
   defdelegate set_allow_steward_production(world, user, allowed?), to: Feudal
 
+  @doc "`owner_user`'s own per-delegate control grant onto `delegate_user_id`. See `Feudal.set_delegated_control/5`."
+  @spec set_delegated_control(map(), map(), term(), atom(), atom()) ::
+          :ok | {:error, :not_a_player | :not_eligible}
+  defdelegate set_delegated_control(world, owner_user, delegate_user_id, level, mode), to: Feudal
+
   @doc "`steward_user` sweeps `owner_user_id`'s own offline Gold Bank into the OWNER's treasury. See `Feudal.steward_collect_bank/3`."
   @spec steward_collect_bank(map(), map(), term()) ::
           :ok | {:error, :not_a_player | :not_eligible | :owner_online | :feudal_disabled}

@@ -405,6 +405,23 @@ defmodule BrokenOaths.Feudal do
     do: WorldServer.call(world, {:set_allow_steward_production, user, allowed?})
 
   @doc """
+  `owner_user`'s own explicit, per-delegate control grant onto
+  `delegate_user_id` -- `level` (`:none | :defensive | :full`) and,
+  only meaningful at `:full`, `mode` (`:offline_only | :always_on`).
+  Refused with `:not_eligible` unless `delegate_user_id` is already an
+  eligible steward (accepted ally, lord, or fellow vassal). See
+  `Stewardship.set_delegated_control/5`.
+  """
+  @spec set_delegated_control(map(), map(), term(), atom(), atom()) ::
+          :ok | {:error, :not_a_player | :not_eligible}
+  def set_delegated_control(world, owner_user, delegate_user_id, level, mode),
+    do:
+      WorldServer.call(
+        world,
+        {:set_delegated_control, owner_user, delegate_user_id, level, mode}
+      )
+
+  @doc """
   `steward_user` sweeps `owner_user_id`'s own offline Gold Bank
   entirely into the OWNER's treasury — pure stewardship, the steward's
   own treasury never moves. Refused unless `steward_user` is the

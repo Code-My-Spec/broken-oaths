@@ -249,6 +249,7 @@ defmodule BrokenOaths.Simulation.Turn do
   alias BrokenOaths.Cities.Yields
   alias BrokenOaths.Combat.Camps
   alias BrokenOaths.Combat.CityDefense
+  alias BrokenOaths.Players.Presence
   alias BrokenOaths.Simulation.Turn.BarbarianPhase
   alias BrokenOaths.Simulation.Turn.HeirSuccession
   alias BrokenOaths.Simulation.Turn.Movement
@@ -353,6 +354,7 @@ defmodule BrokenOaths.Simulation.Turn do
       |> Movement.reset_movement()
       |> Movement.resolve_orders()
       |> Movement.advance_fortify()
+      |> track_offline_streaks()
 
     state =
       if economy?, do: state |> Improvement.advance() |> Production.accrue_cities(), else: state
@@ -410,6 +412,30 @@ defmodule BrokenOaths.Simulation.Turn do
   # with a fallback) so an in-memory world built before the column existed
   # still gets the default cadence rather than crashing.
   defp economy_tick?(state, new_turn), do: rem(new_turn, economy_turns(state)) == 0
+
+  # Story 947 -- every real tick (never economy-gated, same "the fast
+  # layer" status `RoadBuilder.resolve/1` already has), each player's own
+  # `Player.offline_streak_turns` is bumped while `Presence.online?/2`
+  # reads false, and reset to 0 the instant it reads true. This is the
+  # ONLY place that field is written; the offline-only Full grant's
+  # 5-minute grace window (`BrokenOaths.Feudal.Stewardship.
+  # full_grant_active?/3`) reads it and nothing else does.
+  defp track_offline_streaks(state) do
+    players =
+      Map.new(state.players, fn {id, player} ->
+        {id, bump_offline_streak(player, state.world)}
+      end)
+
+    %{state | players: players}
+  end
+
+  defp bump_offline_streak(player, world) do
+    if Presence.online?(world, %{id: player.user_id}) do
+      Map.put(player, :offline_streak_turns, 0)
+    else
+      Map.put(player, :offline_streak_turns, Map.get(player, :offline_streak_turns, 0) + 1)
+    end
+  end
 
   defp economy_turns(state), do: Map.get(state.world, :economy_turns, 10) || 10
 
