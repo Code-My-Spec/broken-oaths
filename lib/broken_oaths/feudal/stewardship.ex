@@ -207,29 +207,39 @@ defmodule BrokenOaths.Feudal.Stewardship do
   def fetch_context(state, steward_user, owner_user_id, required_level \\ :defensive) do
     with {:ok, steward_player} <- fetch_player(state, steward_user.id),
          {:ok, owner_player} <- fetch_player(state, owner_user_id) do
-      role = resolve_role(state, steward_player.id, owner_player.id)
-      owner_online? = Presence.online?(state.world, %{id: owner_player.user_id})
-      grant = resolve_control_grant(state.world.id, owner_player.id, steward_player.id)
-
-      cond do
-        not Game.feudal_enabled?() -> {:error, :feudal_disabled}
-        not eligible?(role) -> {:error, :not_eligible}
-        is_nil(grant) -> fetch_context_no_grant_result(owner_online?, steward_player, owner_player)
-        not level_satisfies?(grant.level, required_level) -> {:error, :level_restricted}
-        grant.level == :full and grant.mode == :always_on -> {:ok, steward_player, owner_player}
-        owner_online? -> {:error, :owner_online}
-        grant.level == :full and grant.mode == :offline_only and
-            not grace_window_elapsed?(state, owner_player) ->
-          {:error, :grace_window_active}
-
-        true -> {:ok, steward_player, owner_player}
+      # `:not_a_player` (from the `with` above) must still win over
+      # `:feudal_disabled`, which is why this runs after both players
+      # are resolved rather than as a plain function-head guard.
+      if Game.feudal_enabled?() do
+        resolve_steward_access(state, steward_player, owner_player, required_level)
+      else
+        {:error, :feudal_disabled}
       end
+    end
+  end
 
-      # NOTE: kept as its own literal `Game.feudal_enabled?()` check
-      # (rather than a shared `ensure_feudal_enabled/0` helper) since
-      # this branch sits inside a `cond`, not a `with`, and needs to
-      # run AFTER both players are already resolved (`:not_a_player`
-      # must still win over `:feudal_disabled` for an invalid user_id).
+  defp resolve_steward_access(state, steward_player, owner_player, required_level) do
+    role = resolve_role(state, steward_player.id, owner_player.id)
+    owner_online? = Presence.online?(state.world, %{id: owner_player.user_id})
+    grant = resolve_control_grant(state.world.id, owner_player.id, steward_player.id)
+
+    cond do
+      not eligible?(role) -> {:error, :not_eligible}
+      is_nil(grant) -> fetch_context_no_grant_result(owner_online?, steward_player, owner_player)
+      true -> resolve_grant_access(state, grant, required_level, owner_online?, steward_player, owner_player)
+    end
+  end
+
+  defp resolve_grant_access(state, grant, required_level, owner_online?, steward_player, owner_player) do
+    cond do
+      not level_satisfies?(grant.level, required_level) -> {:error, :level_restricted}
+      grant.level == :full and grant.mode == :always_on -> {:ok, steward_player, owner_player}
+      owner_online? -> {:error, :owner_online}
+      grant.level == :full and grant.mode == :offline_only and
+          not grace_window_elapsed?(state, owner_player) ->
+        {:error, :grace_window_active}
+
+      true -> {:ok, steward_player, owner_player}
     end
   end
 
@@ -316,31 +326,37 @@ defmodule BrokenOaths.Feudal.Stewardship do
           {:ok, map()} | {:error, atom() | Ecto.Changeset.t()}
   def set_delegated_control(state, owner_user, delegate_user_id, level, mode) do
     with {:ok, owner_player} <- fetch_player(state, owner_user.id),
-         {:ok, delegate_player} <- fetch_player(state, delegate_user_id) do
-      role = resolve_role(state, delegate_player.id, owner_player.id)
+         {:ok, delegate_player} <- fetch_player(state, delegate_user_id),
+         role = resolve_role(state, delegate_player.id, owner_player.id),
+         :ok <- ensure_eligible(role) do
+      persist_control_grant(state, owner_player, delegate_player, level, mode)
+    end
+  end
 
-      if eligible?(role) do
-        attrs = %{
-          world_id: state.world.id,
-          owner_player_id: owner_player.id,
-          delegate_player_id: delegate_player.id,
-          level: level,
-          mode: mode
-        }
+  defp ensure_eligible(role) do
+    if eligible?(role), do: :ok, else: {:error, :not_eligible}
+  end
 
-        %ControlGrant{}
-        |> ControlGrant.changeset(attrs)
-        |> Repo.insert(
-          on_conflict: {:replace, [:level, :mode, :updated_at]},
-          conflict_target: [:world_id, :owner_player_id, :delegate_player_id]
-        )
-        |> case do
-          {:ok, _grant} -> {:ok, state}
-          {:error, changeset} -> {:error, changeset}
-        end
-      else
-        {:error, :not_eligible}
-      end
+  defp persist_control_grant(state, owner_player, delegate_player, level, mode) do
+    attrs = %{
+      world_id: state.world.id,
+      owner_player_id: owner_player.id,
+      delegate_player_id: delegate_player.id,
+      level: level,
+      mode: mode
+    }
+
+    insert_result =
+      %ControlGrant{}
+      |> ControlGrant.changeset(attrs)
+      |> Repo.insert(
+        on_conflict: {:replace, [:level, :mode, :updated_at]},
+        conflict_target: [:world_id, :owner_player_id, :delegate_player_id]
+      )
+
+    case insert_result do
+      {:ok, _grant} -> {:ok, state}
+      {:error, changeset} -> {:error, changeset}
     end
   end
 
