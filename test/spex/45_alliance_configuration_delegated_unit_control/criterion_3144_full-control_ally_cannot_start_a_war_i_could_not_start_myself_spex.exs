@@ -1,7 +1,7 @@
-defmodule BrokenOathsSpex.Story947.Criterion2701Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3144Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2701 — no steward relationship, however trusted, ever
+  Criterion 3144 — no steward relationship, however trusted, ever
   grants war/attack authority: `WorldServer`'s own `:steward_attack`
   handler always refuses with `:not_allowed`, unconditionally,
   regardless of eligibility — "never to launch aggression" is enforced

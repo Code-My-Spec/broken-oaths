@@ -1,7 +1,7 @@
-defmodule BrokenOathsSpex.Story947.Criterion2699Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3142Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2699 — a player with no accepted alliance is `:none`
+  Criterion 3142 — a player with no accepted alliance is `:none`
   (`BrokenOaths.Feudal.Stewardship.steward_role/4`) — never eligible
   to steward, regardless of anything the owner does.
   """

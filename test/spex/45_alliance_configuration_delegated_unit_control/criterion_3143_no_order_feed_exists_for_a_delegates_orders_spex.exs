@@ -1,7 +1,7 @@
-defmodule BrokenOathsSpex.Story947.Criterion2700Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3143Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2700 — a steward's real actions never spawn a dedicated
+  Criterion 3143 — a steward's real actions never spawn a dedicated
   "delegated order feed" UI — audit lives in `BrokenOaths.Feudal.
   StewardLog`'s own click-through log (criterion 7695), not a live
   feed component, and the board itself stays exactly as it always is.

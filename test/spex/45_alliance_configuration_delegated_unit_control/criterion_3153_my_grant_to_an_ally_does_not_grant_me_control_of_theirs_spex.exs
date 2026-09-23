@@ -1,7 +1,7 @@
-defmodule BrokenOathsSpex.Story947.Criterion2710Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3153Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2710 — an accepted alliance is not a one-way "grant";
+  Criterion 3153 — an accepted alliance is not a one-way "grant";
   `BrokenOaths.Feudal.Stewardship.steward_role/4`'s own `:ally` clause
   is already symmetric either direction can steward the other. What
   it does NOT do is bypass the offline requirement in either

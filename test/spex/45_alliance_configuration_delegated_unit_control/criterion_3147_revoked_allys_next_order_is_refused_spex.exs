@@ -1,7 +1,7 @@
-defmodule BrokenOathsSpex.Story947.Criterion2704Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3147Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2704 — there is no separate "revoke control" action;
+  Criterion 3147 — there is no separate "revoke control" action;
   breaking the alliance itself (`GameLive.AlliancePanel`'s real
   `"break_alliance"` event, `BrokenOaths.Diplomacy.break_alliance/3`)
   is what ends steward eligibility — `BrokenOaths.Feudal.Stewardship.

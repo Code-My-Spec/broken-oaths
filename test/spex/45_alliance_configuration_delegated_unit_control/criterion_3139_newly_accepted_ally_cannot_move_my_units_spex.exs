@@ -1,7 +1,7 @@
-defmodule BrokenOathsSpex.Story947.Criterion2696Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3139Spex do
   @moduledoc """
   Story 947 — Alliance Configuration — delegated unit control
-  Criterion 2696 — a newly accepted ally cannot move the owner's units.
+  Criterion 3139 — a newly accepted ally cannot move the owner's units.
   """
 
   use BrokenOathsSpex.Case

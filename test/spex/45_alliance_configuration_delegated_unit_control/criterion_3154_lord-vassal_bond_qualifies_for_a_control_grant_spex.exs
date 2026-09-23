@@ -1,7 +1,7 @@
-defmodule BrokenOathsSpex.Story947.Criterion2711Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3154Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2711 — a lord-vassal bond is one of the three household
+  Criterion 3154 — a lord-vassal bond is one of the three household
   relationships `BrokenOaths.Feudal.Stewardship.steward_role/4`
   resolves as eligible (`:lord`, alongside `:fellow_vassal` and
   `:ally`) — no separate alliance is needed at all once vassalage

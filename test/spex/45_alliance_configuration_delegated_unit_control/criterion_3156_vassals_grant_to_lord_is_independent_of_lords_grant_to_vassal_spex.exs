@@ -1,7 +1,7 @@
-defmodule BrokenOathsSpex.Story947.Criterion2713Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3156Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2713 — the lord/vassal bond is NOT reciprocal, unlike an
+  Criterion 3156 — the lord/vassal bond is NOT reciprocal, unlike an
   alliance (criterion 2710): `BrokenOaths.Feudal.Stewardship.
   steward_role/4` only ever resolves `:lord` in the direction "owner is
   a vassal, steward is their lord" — there is no clause anywhere that

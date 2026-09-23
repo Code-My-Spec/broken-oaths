@@ -1,7 +1,7 @@
-defmodule BrokenOathsSpex.Story947.Criterion2715Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3158Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2715 — the converse of criterion 2714: without the owner's
+  Criterion 3158 — the converse of criterion 2714: without the owner's
   own empire-wide `allow_steward_production` grant (default `false`,
   playtest issue 340c1ad4), an otherwise-eligible steward's production
   order is refused — `:steward_production_disabled`, checked before

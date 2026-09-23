@@ -1,7 +1,7 @@
-defmodule BrokenOathsSpex.Story947.Criterion2702Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3145Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2702 — an accepted ally's ONE real steward-initiated unit
+  Criterion 3145 — an accepted ally's ONE real steward-initiated unit
   action, `"steward_defend"` (`BrokenOaths.Feudal.Stewardship.defend/5`),
   actually repositions the offline owner's threatened unit to safety
   once `under_attack?/1` is true — proven the same way criterion

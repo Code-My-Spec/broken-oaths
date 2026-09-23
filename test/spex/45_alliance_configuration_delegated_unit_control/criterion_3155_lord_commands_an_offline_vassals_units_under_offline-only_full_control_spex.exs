@@ -1,7 +1,7 @@
-defmodule BrokenOathsSpex.Story947.Criterion2712Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3155Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2712 — the lord's real unit-command surface over an
+  Criterion 3155 — the lord's real unit-command surface over an
   offline vassal is `"steward_defend"` (emergency, adjacent-only
   reposition) — the SAME mechanism criterion 2702/2705 exercise for an
   ally, exercised here for the lord/vassal relationship. There is no

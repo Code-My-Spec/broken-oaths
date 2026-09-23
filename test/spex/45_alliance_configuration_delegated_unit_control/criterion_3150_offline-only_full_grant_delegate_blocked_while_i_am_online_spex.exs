@@ -1,7 +1,7 @@
-defmodule BrokenOathsSpex.Story947.Criterion2707Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3150Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2707 — the same unconditional offline gate criterion 2706
+  Criterion 3150 — the same unconditional offline gate criterion 2706
   proves (`BrokenOaths.Feudal.Stewardship.fetch_context/3` +
   `BrokenOaths.Players.Presence.online?/2`) blocks an otherwise-eligible
   ally the instant the owner is back online — `:owner_online`,

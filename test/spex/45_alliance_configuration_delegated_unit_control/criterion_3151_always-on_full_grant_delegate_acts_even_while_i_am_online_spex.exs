@@ -1,7 +1,7 @@
-defmodule BrokenOathsSpex.Story947.Criterion2708Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3151Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2708 — there is no "always-on" tier that lets a delegate
+  Criterion 3151 — there is no "always-on" tier that lets a delegate
   act while the owner is online (criterion 2707 proves the owner-online
   gate is unconditional for everyone) — what an accepted alliance
   actually gives is a DURABLE relationship, not a one-time or

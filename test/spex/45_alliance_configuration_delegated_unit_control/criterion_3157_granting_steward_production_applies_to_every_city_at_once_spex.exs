@@ -1,7 +1,7 @@
-defmodule BrokenOathsSpex.Story947.Criterion2714Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3157Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2714 — `"set_allow_steward_production"` (playtest issue
+  Criterion 3157 — `"set_allow_steward_production"` (playtest issue
   340c1ad4) is an EMPIRE-WIDE flag on the owner's own `Player` row,
   never scoped by `city_id`
   (`BrokenOaths.Feudal.Stewardship.queue_production/5`'s own

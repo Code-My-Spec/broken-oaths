@@ -1,7 +1,7 @@
-defmodule BrokenOathsSpex.Story947.Criterion2705Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3148Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2705 — the same real `"steward_defend"` mechanism
+  Criterion 3148 — the same real `"steward_defend"` mechanism
   (criterion 2702) covers a raider freshly inside the owner's own
   borders: `BrokenOaths.Feudal.Stewardship.under_attack?/1` is a
   literal "took damage this instant" signal, not a border check, so

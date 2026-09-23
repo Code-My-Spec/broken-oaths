@@ -1,7 +1,7 @@
-defmodule BrokenOathsSpex.Story947.Criterion2703Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3146Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2703 — even mid-emergency, `"steward_defend"` is not a
+  Criterion 3146 — even mid-emergency, `"steward_defend"` is not a
   blank check: `BrokenOaths.Feudal.Stewardship.defend_target_allowed?/3`
   refuses any destination beyond one hex from the unit's own current
   tile — a far-off target (well outside the owner's own immediate

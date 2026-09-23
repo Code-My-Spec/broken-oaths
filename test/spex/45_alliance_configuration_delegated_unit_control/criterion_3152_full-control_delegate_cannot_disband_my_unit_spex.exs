@@ -1,7 +1,7 @@
-defmodule BrokenOathsSpex.Story947.Criterion2709Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3152Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2709 — no steward relationship, however trusted, may ever
+  Criterion 3152 — no steward relationship, however trusted, may ever
   disband a unit: `WorldServer`'s own `:steward_disband_unit` handler
   always refuses with `:not_constructive`, unconditionally — "no
   disbanding" is enforced structurally, the same absence-of-a-real-path

@@ -1,13 +1,12 @@
-defmodule BrokenOathsSpex.Story947.Criterion2706Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3141Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2706 — every real steward eligibility check
-  (`BrokenOaths.Feudal.Stewardship.fetch_context/3`) is unconditionally
-  gated on the owner being genuinely offline
-  (`BrokenOaths.Players.Presence.online?/2`) — there is no separate
-  "offline-only" vs "always-on" toggle to configure; ALL stewardship
-  is offline-only, by construction. This half proves the accepted
-  case: an eligible ally acts while the owner is disconnected.
+  Criterion 3141 — an owner "grants" control to an accepted ally
+  simply by the alliance itself becoming `:accepted`
+  (`BrokenOaths.Feudal.Stewardship.steward_role/4`'s own `:ally`
+  clause) — there is no separate manual grant step. Proven here via
+  the real, working steward surface: once accepted, the ally may sweep
+  my offline bank.
   """
 
   use BrokenOathsSpex.Case
@@ -16,14 +15,13 @@ defmodule BrokenOathsSpex.Story947.Criterion2706Spex do
 
   alias BrokenOathsSpex.Fixtures
 
-  spex "an offline-only Full grant lets the delegate act while the owner is disconnected",
-    fail_on_error_logs: false do
-    scenario "an accepted ally sweeps my bank while I'm disconnected" do
+  spex "granting control to an accepted ally succeeds", fail_on_error_logs: false do
+    scenario "the owner's accepted ally is a real, working steward" do
       given_(:a_world)
       given_(:registered_player)
       given_(:second_registered_player)
 
-      given_ "the owner has an accepted ally and real banked gold while disconnected", context do
+      given_ "the players have accepted an alliance and I have real banked gold offline", context do
         %{play_live_a: owner_live, play_live_b: ally_live} =
           establish_accepted_alliance(
             context.world,
@@ -52,7 +50,7 @@ defmodule BrokenOathsSpex.Story947.Criterion2706Spex do
         |> then(&{:ok, &1})
       end
 
-      when_ "the ally sweeps my offline bank", context do
+      when_ "the accepted ally stewards my offline bank", context do
         attempt_event(context.ally_live, "steward_collect_bank", %{
           "owner_user_id" => to_string(context.user.id)
         })
@@ -60,10 +58,11 @@ defmodule BrokenOathsSpex.Story947.Criterion2706Spex do
         {:ok, context}
       end
 
-      then_ "the delegated action actually moved my gold while I was disconnected", context do
+      then_ "the accepted ally's stewardship actually moved my gold", context do
         assert Fixtures.gold(context.world, context.user) ==
                  context.treasury0 + context.banked0
 
+        assert Fixtures.bank_status(context.world, context.user).gold == 0
         {:ok, context}
       end
     end

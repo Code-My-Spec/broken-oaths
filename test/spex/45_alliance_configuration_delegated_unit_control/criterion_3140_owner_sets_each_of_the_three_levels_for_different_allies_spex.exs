@@ -1,7 +1,7 @@
-defmodule BrokenOathsSpex.Story947.Criterion2697Spex do
+defmodule BrokenOathsSpex.Story947.Criterion3140Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 2697 — steward eligibility differs per relationship, not
+  Criterion 3140 — steward eligibility differs per relationship, not
   per a manually-configured "level": `BrokenOaths.Feudal.Stewardship.
   steward_role/4` resolves an ACCEPTED ally as automatically eligible
   to steward (the real surface — emergency defense, bank sweep,
