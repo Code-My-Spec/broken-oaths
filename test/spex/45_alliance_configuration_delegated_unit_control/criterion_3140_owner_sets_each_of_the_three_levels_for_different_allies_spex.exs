@@ -1,17 +1,13 @@
 defmodule BrokenOathsSpex.Story947.Criterion3140Spex do
   @moduledoc """
   Story 947 — Alliance Configuration: delegated unit control
-  Criterion 3140 — steward eligibility differs per relationship, not
-  per a manually-configured "level": `BrokenOaths.Feudal.Stewardship.
-  steward_role/4` resolves an ACCEPTED ally as automatically eligible
-  to steward (the real surface — emergency defense, bank sweep,
-  opted-in production; see criterion 2701/2709's own moduledoc for why
-  unrestricted "Full" control never exists for anyone), while a player
-  with no accepted alliance is `:none` — not eligible for anything.
-  There is no separate `set_delegated_control`/level to configure; the
-  relationship itself is the grant. This criterion proves the SAME
-  owner has both an eligible accepted ally and an ineligible stranger
-  side by side.
+  Criterion 3140 — a control LEVEL is a real, owner-set thing,
+  distinct from the accepted-alliance relationship itself
+  (`BrokenOaths.Feudal.Stewardship.set_delegated_control/5` +
+  `BrokenOaths.Feudal.ControlGrant`): the SAME owner may grant `:full`
+  to one accepted ally and `:none` to another, and the two allies get
+  genuinely different access despite being equally "accepted" — the
+  level is what decides, not the bond alone.
   """
 
   use BrokenOathsSpex.Case
@@ -20,9 +16,9 @@ defmodule BrokenOathsSpex.Story947.Criterion3140Spex do
 
   alias BrokenOathsSpex.Fixtures
 
-  spex "an owner's steward eligibility differs for an accepted ally vs. an unrelated player",
+  spex "an owner sets different control levels for different accepted allies",
     fail_on_error_logs: false do
-    scenario "the accepted ally may steward me; the unrelated player may not" do
+    scenario "a :full-granted ally may steward me; a :none-granted ally, though equally accepted, may not" do
       given_ "a world with room for three players", context do
         {:ok, Map.put(context, :world, Fixtures.world_fixture(%{seed: 1, frequency: 9}))}
       end
@@ -31,8 +27,8 @@ defmodule BrokenOathsSpex.Story947.Criterion3140Spex do
       given_(:second_registered_player)
       given_(:third_registered_player)
 
-      given_ "I am accepted allies with one player and have no relationship with another", context do
-        %{play_live_a: owner_live, play_live_b: ally_live} =
+      given_ "I am accepted allies with two different players", context do
+        %{play_live_a: first_owner_live, play_live_b: full_ally_live} =
           establish_accepted_alliance(
             context.world,
             context.conn,
@@ -41,56 +37,85 @@ defmodule BrokenOathsSpex.Story947.Criterion3140Spex do
             context.other_user
           )
 
+        # `establish_accepted_alliance/5` leaves the owner's connection
+        # ONLINE when it returns — calling it a second time for the
+        # same owner would otherwise leave THIS first connection
+        # dangling (Presence's `:duplicate` registry counts any live
+        # connection as online), so the owner would never look fully
+        # offline no matter how many turns pass.
+        go_offline(first_owner_live)
+
+        %{play_live_a: owner_live, play_live_b: none_ally_live} =
+          establish_accepted_alliance(
+            context.world,
+            context.conn,
+            context.user,
+            context.third_conn,
+            context.third_user
+          )
+
+        context
+        |> Map.put(:owner_live, owner_live)
+        |> Map.put(:full_ally_live, full_ally_live)
+        |> Map.put(:none_ally_live, none_ally_live)
+        |> then(&{:ok, &1})
+      end
+
+      given_ "I grant one ally Full, always-on control and the other an explicit None", context do
         [my_settler | _] =
           for u <- Fixtures.player_units(context.world, context.user), u.type == :settler, do: u
 
-        render_hook(owner_live, "found_city", %{"unit_id" => to_string(my_settler.id)})
+        render_hook(context.owner_live, "found_city", %{"unit_id" => to_string(my_settler.id)})
 
-        go_offline(owner_live)
+        render_hook(context.owner_live, "set_delegated_control", %{
+          "delegate_user_id" => to_string(context.other_user.id),
+          "level" => "full",
+          "mode" => "always_on"
+        })
 
-        {:ok, stranger_join, _html} = live(context.third_conn, "/play")
+        render_hook(context.owner_live, "set_delegated_control", %{
+          "delegate_user_id" => to_string(context.third_user.id),
+          "level" => "none",
+          "mode" => "offline_only"
+        })
 
-        stranger_join
-        |> element("[data-test='join-world-#{context.world.id}']")
-        |> render_click()
+        go_offline(context.owner_live)
 
-        {:ok, stranger_live, _html} = live(context.third_conn, "/play/#{context.world.id}")
+        banked0 =
+          Enum.reduce_while(1..10, 0, fn _, _ ->
+            Fixtures.advance_turn(context.world)
+            gold = Fixtures.bank_status(context.world, context.user).gold
+            if gold > 0, do: {:halt, gold}, else: {:cont, gold}
+          end)
 
-        Fixtures.advance_turn(context.world)
-        banked0 = Fixtures.bank_status(context.world, context.user).gold
         assert banked0 > 0
         treasury0 = Fixtures.gold(context.world, context.user)
 
         context
-        |> Map.put(:ally_live, ally_live)
-        |> Map.put(:stranger_live, stranger_live)
         |> Map.put(:banked0, banked0)
         |> Map.put(:treasury0, treasury0)
         |> then(&{:ok, &1})
       end
 
-      when_ "the accepted ally stewards my bank, and the unrelated player tries to steward my production",
-            context do
-        # `steward_collect_bank`'s own handler never surfaces a
-        # `steward_error` toast either way (it ignores the result) —
-        # `steward_queue_production` is used for the stranger's refusal
-        # instead, since ITS handler does check and display the reason.
-        # Eligibility is checked first, before the city/item even
-        # exist, so the placeholder ids below never matter.
-        attempt_event(context.stranger_live, "steward_queue_production", %{
+      when_ "the None-granted ally tries to steward me, then the Full-granted ally does", context do
+        attempt_event(context.none_ally_live, "steward_collect_bank", %{
+          "owner_user_id" => to_string(context.user.id)
+        })
+
+        attempt_event(context.none_ally_live, "steward_queue_production", %{
           "owner_user_id" => to_string(context.user.id),
           "city_id" => "0",
           "item" => "warrior"
         })
 
-        attempt_event(context.ally_live, "steward_collect_bank", %{
+        attempt_event(context.full_ally_live, "steward_collect_bank", %{
           "owner_user_id" => to_string(context.user.id)
         })
 
         {:ok, context}
       end
 
-      then_ "only the accepted ally's stewardship actually moved my gold", context do
+      then_ "only the Full-granted ally's stewardship actually moved my gold", context do
         assert Fixtures.gold(context.world, context.user) ==
                  context.treasury0 + context.banked0
 
@@ -98,8 +123,8 @@ defmodule BrokenOathsSpex.Story947.Criterion3140Spex do
         {:ok, context}
       end
 
-      then_ "the unrelated player is told they aren't eligible", context do
-        assert has_element?(context.stranger_live, "[data-test='steward-error']", "eligible")
+      then_ "the None-granted ally is told they haven't been granted that level of control", context do
+        assert has_element?(context.none_ally_live, "[data-test='steward-error']", "level")
         {:ok, context}
       end
     end

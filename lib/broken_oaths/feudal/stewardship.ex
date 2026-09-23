@@ -189,10 +189,22 @@ defmodule BrokenOaths.Feudal.Stewardship do
   the resolved `steward_role/4`, and the owner genuinely offline
   (`Presence.online?/2`) — `{:ok, steward_player, owner_player}` once
   every check clears.
+
+  Story 947 -- when the owner has never called `set_delegated_control/5`
+  for this delegate, the gate is UNCHANGED from story 910: eligible +
+  offline is enough, regardless of `required_level` (every story 910
+  spec that never creates a `ControlGrant` row stays exactly as it was
+  -- this is what keeps the shared gate untouched). Once an explicit
+  grant EXISTS, `required_level` starts mattering for real:
+  `queue_production/5`/`collect_bank/3` require `:full` (economy access
+  is the Full tier's own privilege); `defend/5` only ever requires
+  `:defensive` (repositioning is the floor every grant above `:none`
+  carries). An explicit `:none` grant refuses everything, the same as
+  ineligibility.
   """
-  @spec fetch_context(map(), term(), term()) ::
+  @spec fetch_context(map(), term(), term(), ControlGrant.level()) ::
           {:ok, map(), map()} | {:error, atom()}
-  def fetch_context(state, steward_user, owner_user_id) do
+  def fetch_context(state, steward_user, owner_user_id, required_level \\ :defensive) do
     with {:ok, steward_player} <- fetch_player(state, steward_user.id),
          {:ok, owner_player} <- fetch_player(state, owner_user_id) do
       role = resolve_role(state, steward_player.id, owner_player.id)
@@ -202,6 +214,8 @@ defmodule BrokenOaths.Feudal.Stewardship do
       cond do
         not Game.feudal_enabled?() -> {:error, :feudal_disabled}
         not eligible?(role) -> {:error, :not_eligible}
+        is_nil(grant) -> fetch_context_no_grant_result(owner_online?, steward_player, owner_player)
+        not level_satisfies?(grant.level, required_level) -> {:error, :level_restricted}
         grant.level == :full and grant.mode == :always_on -> {:ok, steward_player, owner_player}
         owner_online? -> {:error, :owner_online}
         grant.level == :full and grant.mode == :offline_only and
@@ -218,6 +232,21 @@ defmodule BrokenOaths.Feudal.Stewardship do
       # must still win over `:feudal_disabled` for an invalid user_id).
     end
   end
+
+  # Story 910's own untouched shape: no grant row exists, so the only
+  # thing that ever mattered was whether the owner is offline right now.
+  defp fetch_context_no_grant_result(true = _owner_online?, _steward_player, _owner_player),
+    do: {:error, :owner_online}
+
+  defp fetch_context_no_grant_result(false, steward_player, owner_player),
+    do: {:ok, steward_player, owner_player}
+
+  # Story 947 -- `:full` satisfies any requirement, `:defensive` only
+  # satisfies its own floor, an explicit `:none` satisfies nothing.
+  defp level_satisfies?(:full, _required), do: true
+  defp level_satisfies?(:defensive, :defensive), do: true
+  defp level_satisfies?(:defensive, :full), do: false
+  defp level_satisfies?(:none, _required), do: false
 
   defp resolve_role(state, steward_player_id, owner_player_id) do
     owner_lord_id = state |> active_vassalage_for_vassal(owner_player_id) |> lord_id_of()
@@ -329,7 +358,8 @@ defmodule BrokenOaths.Feudal.Stewardship do
   @spec queue_production(map(), term(), term(), term(), atom() | String.t()) ::
           {:ok, map()} | {:error, atom()}
   def queue_production(state, steward_user, owner_user_id, city_id, type) do
-    with {:ok, steward_player, owner_player} <- fetch_context(state, steward_user, owner_user_id),
+    with {:ok, steward_player, owner_player} <-
+           fetch_context(state, steward_user, owner_user_id, :full),
          :ok <- ensure_production_allowed(owner_player),
          {:ok, city} <- fetch_owned_city(state, owner_player, city_id),
          {:ok, type} <- Production.parse_item_type(type),
@@ -412,7 +442,8 @@ defmodule BrokenOaths.Feudal.Stewardship do
   """
   @spec collect_bank(map(), term(), term()) :: {:ok, map()} | {:error, atom()}
   def collect_bank(state, steward_user, owner_user_id) do
-    with {:ok, steward_player, owner_player} <- fetch_context(state, steward_user, owner_user_id) do
+    with {:ok, steward_player, owner_player} <-
+           fetch_context(state, steward_user, owner_user_id, :full) do
       {new_owner, swept} = Bank.steward_collect(owner_player)
 
       log_action!(
@@ -791,12 +822,16 @@ defmodule BrokenOaths.Feudal.Stewardship do
   # defensive-default idiom `economy_turns`/`recharge_turns` already use.
   @grace_window_seconds 300
 
+  # Story 947 -- `nil` (not a fallback struct) is the load-bearing part:
+  # `fetch_context/3` uses "no row at all" to mean "story 910's shared
+  # gate, untouched" and only turns real level-gating on once a row
+  # genuinely exists.
   defp resolve_control_grant(world_id, owner_player_id, delegate_player_id) do
     Repo.get_by(ControlGrant,
       world_id: world_id,
       owner_player_id: owner_player_id,
       delegate_player_id: delegate_player_id
-    ) || %ControlGrant{level: :none, mode: :offline_only}
+    )
   end
 
   defp grace_window_elapsed?(state, owner_player) do
