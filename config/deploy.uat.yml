@@ -10,7 +10,7 @@ image: broken-oaths
 servers:
   web:
     hosts:
-      - uat.broken-oaths.com
+      - <%= ENV["CMS_DEPLOY_HOST_IP"] || "uat.broken-oaths.com" %>
     options:
       network: db_net           # pre-attach so app can reach infra-postgres-1 at start
     proxy:                      # role-level override
@@ -21,7 +21,7 @@ servers:
         path: /up
 
 registry:
-  server: 10.1.0.2:5000
+  server: <%= ENV["CMS_REGISTRY_SERVER"] || "10.2.0.2:5000" %>
   username:
     - KAMAL_REGISTRY_USERNAME
   password:
